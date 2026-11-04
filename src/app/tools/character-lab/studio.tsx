@@ -8,6 +8,7 @@ import { ImageUsageProjectSelect } from '@/components/ImageUsageProjectSelect';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 import { RelativeTime } from '@/components/RelativeTime';
 import { ImageFeishuStatus } from '@/components/image-studio/ImageFeishuStatus';
+import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useProductDialog } from '@/components/useProductDialog';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
@@ -22,10 +23,21 @@ import { characterLabMediaUrl, type CharacterLabBootstrap, type CharacterLabConf
 import styles from './studio.module.css';
 
 const stages: Array<{ id: CharacterLabStage; label: string }> = [{ id: 'faces', label: '人脸生成' }, { id: 'selection', label: '方案选择' }, { id: 'result', label: '成品预览' }];
-const promptFields: Array<[keyof CharacterLabPromptFields, string, string]> = [
-  ['basePrompt', '基础提示词', '真人候选的通用生成规则'], ['characterContext', '角色上下文要求', '从原图理解角色时需要保留的身份与特征'],
-  ['faceVariables', '面部变量', '脸型、骨相和五官比例的差异规则'], ['styleConstraints', '风格约束', '摄影质感、光线和统一画面要求'], ['resultPrompt', '成品生成规则', '面部一致性、服装与四格构图要求'],
-];
+type PromptTarget = CharacterLabPlan['kind'];
+const promptTitles = { faces: '人脸候选提示词', result: '角色参考图提示词' };
+const sharedStyleField = ['styleConstraints', '共用风格约束', '摄影质感、光线和统一画面要求'] as const;
+const promptFields = {
+  faces: [
+    ['basePrompt', '基础提示词', '真人候选的通用生成规则'],
+    ['characterContext', '角色上下文要求', '从原图理解角色时需要保留的身份与特征'],
+    ['faceVariables', '面部变量', '脸型、骨相和五官比例的差异规则'],
+    sharedStyleField,
+  ],
+  result: [
+    ['resultPrompt', '成品生成规则', '面部一致性、服装与四格构图要求'],
+    sharedStyleField,
+  ],
+} as const;
 const sameFace = (a: CharacterLabFace | null, b: CharacterLabFace) => a?.planId === b.planId && a.cell === b.cell;
 const taskState: Record<string, string> = { queued: '排队中', running: '生成中', succeeded: '已生成', failed: '生成失败', canceled: '已取消', uncertain: '结果待核对', billing_pending: '费用待核对' };
 function readableError(error: unknown) { return error instanceof Error ? error.message : '操作尚未完成，请重试'; }
@@ -61,8 +73,10 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
   const [exportMode, setExportMode] = useState<'sheet' | 'cells' | 'all'>('all');
   const [preferencesReady, setPreferencesReady] = useState(false);
   const [preview, setPreview] = useState<{ src: string; alt: string } | null>(null);
-  const [promptView, setPromptView] = useState(Boolean(initialPrompts && isAdmin));
-  const [configDraft, setConfigDraft] = useState<CharacterLabPromptFields | null>(null), [configVersion, setConfigVersion] = useState<number | null>(null);
+  const [promptTarget, setPromptTarget] = useState<PromptTarget | 'current' | null>(initialPrompts && isAdmin ? 'current' : null);
+  const [configDraft, setConfigDraft] = useState<CharacterLabPromptFields | null>(null);
+  const [configError, setConfigError] = useState('');
+  const promptDialog = useRef<HTMLDialogElement>(null);
   const initialized = useRef(false);
   const workspaceRef = useRef(workspace), draftRef = useRef(draft), alive = useRef(true), busyRef = useRef(false), scope = useRef(0), loadSequence = useRef(0), savePromise = useRef<Promise<void> | null>(null), savedSignature = useRef(''), pendingRef = useRef<string | null>(null);
   workspaceRef.current = workspace; draftRef.current = draft; pendingRef.current = pendingPlanId;
@@ -71,8 +85,29 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
   const positionKey = `sd2:character-lab:position:v1:${ownerId}`;
   const pendingKey = (id: string) => `sd2:character-lab:submission:v1:${ownerId}:${id}`;
   const dirty = Boolean(workspace && draft && savedSignature.current !== JSON.stringify([workspace.name, draft]));
+  const activePromptTarget = promptTarget === 'current' ? (draft?.stage === 'result' ? 'result' : 'faces') : promptTarget;
+  const activePromptFields = activePromptTarget ? promptFields[activePromptTarget] : [];
+  const promptOpen = Boolean(isAdmin && sessionReady && !loading && activePromptTarget && bootstrap && configDraft);
   const configDirty = Boolean(configDraft && bootstrap && JSON.stringify(configDraft) !== JSON.stringify(fieldsOf(bootstrap.config)));
-  usePageExitRisk({ unsaved: dirty && saveState !== 'saved' ? ['角色工作现场尚未保存'] : promptView && configDirty ? ['管理员提示词尚未保存'] : [], busy: busy === 'submit' || uploading ? ['角色任务提交或素材上传尚未确认'] : [], revision: JSON.stringify([workspace?.id, draft, promptView && configDraft]) });
+  const scopedConfigDirty = activePromptFields.some(([field]) => configDraft?.[field] !== bootstrap?.config[field]);
+  usePageExitRisk({
+    unsaved: [
+      ...(dirty && saveState !== 'saved' ? ['角色工作现场尚未保存'] : []),
+      ...(configDirty ? ['管理员提示词尚未保存'] : []),
+    ],
+    busy: busy === 'config' ? ['提示词保存尚未确认'] : busy === 'submit' || uploading ? ['角色任务提交或素材上传尚未确认'] : [],
+    revision: JSON.stringify([workspace?.id, draft, configDirty && configDraft]),
+  });
+  useDialogDismiss({
+    open: promptOpen, dialogRef: promptDialog, nativeDialog: true,
+    dismissOnOutside: busy !== 'config', dismissOnEscape: busy !== 'config', onDismiss: closePrompts,
+  });
+  useEffect(() => {
+    if (!promptOpen) return;
+    const dialog = promptDialog.current;
+    dialog?.showModal();
+    return () => dialog?.close();
+  }, [promptOpen]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; scope.current++; }; }, []);
   function assertActive() { if (!active.current || isClientSessionBlocked()) throw new Error('请先确认当前账号，工作现场已保留'); }
   function updateDraft(patch: Partial<CharacterLabDraft>) {
@@ -114,7 +149,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
       try {
         const value = await labApi<CharacterLabBootstrap>();
         if (!alive.current || !active.current || sequence !== loadSequence.current) return;
-        setBootstrap(value); setConfigDraft(fieldsOf(value.config)); setConfigVersion(value.config.revision);
+        setBootstrap(value); if (isAdmin) setConfigDraft(fieldsOf(value.config));
         let saved = '';
         try { saved = localStorage.getItem(positionKey) || ''; } catch { /* The project selector remains usable. */ }
         const requested = initialWorkspaceId || saved;
@@ -127,7 +162,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
       } catch (cause) { if (alive.current && sequence === loadSequence.current) setError(readableError(cause)); }
       finally { if (alive.current && sequence === loadSequence.current) setLoading(false); }
     })();
-  }, [ownerId, sessionReady, initialWorkspaceId, positionKey, acceptWorkspace]); // Read-only recovery never submits a task.
+  }, [ownerId, isAdmin, sessionReady, initialWorkspaceId, positionKey, acceptWorkspace]); // Read-only recovery never submits a task.
   useEffect(() => {
     if (!sessionReady) return;
     try {
@@ -319,13 +354,40 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
       setNotice('已交给浏览器下载。');
     });
   }
-  function closePrompts() { setPromptView(false); const address = new URL(window.location.href); address.searchParams.delete('view'); window.history.replaceState(window.history.state, '', address); }
-  function showPrompts() { if (!bootstrap || !isAdmin) return; if (!configDraft) { setConfigDraft(fieldsOf(bootstrap.config)); setConfigVersion(bootstrap.config.revision); } setPromptView(true); const address = new URL(window.location.href); address.searchParams.set('view', 'prompts'); window.history.replaceState(window.history.state, '', address); }
+  function closePrompts() {
+    setPromptTarget(null);
+    if (promptTarget === 'current') {
+      const address = new URL(window.location.href);
+      address.searchParams.delete('view');
+      window.history.replaceState(window.history.state, '', address);
+    }
+  }
+  function applyPromptVersion(version: CharacterLabConfig) {
+    setConfigDraft(previous => {
+      if (!previous) return previous;
+      const next = { ...previous };
+      for (const [field] of activePromptFields) next[field] = version[field];
+      return next;
+    });
+  }
   async function saveConfig() {
+    if (!bootstrap || !configDraft || !scopedConfigDirty) return;
+    const fields = fieldsOf(bootstrap.config);
+    for (const [field] of activePromptFields) fields[field] = configDraft[field];
+    setConfigError('');
     await run('config', async () => {
-      if (!bootstrap || !configDraft) return;
-      const result = await labApi<{ config: CharacterLabConfig; configVersions: CharacterLabConfig[] }>({ action: 'save-config', revision: bootstrap.config.revision, fields: configDraft });
-      setBootstrap(current => current ? { ...current, ...result } : current); setConfigDraft(fieldsOf(result.config)); setConfigVersion(result.config.revision); closePrompts(); setNotice('提示词新版本已保存，将用于之后的新生成。');
+      try {
+        const result = await labApi<{ config: CharacterLabConfig; configVersions: CharacterLabConfig[] }>({
+          action: 'save-config', revision: bootstrap.config.revision, fields,
+        });
+        if (!alive.current || !active.current) return;
+        setBootstrap(current => current ? { ...current, ...result } : current);
+        applyPromptVersion(result.config);
+        closePrompts();
+        setNotice('提示词新版本已保存，将用于之后的新生成。');
+      } catch (cause) {
+        if (alive.current && active.current) setConfigError(readableError(cause));
+      }
     });
   }
   const locked = Boolean(busy) || uploading || loading || !sessionReady;
@@ -341,11 +403,10 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
   return <main className={styles.root} aria-busy={loading}>
     <header className={styles.header}>
       <div className={styles.brand}><UserRound size={21} /><strong>CHARACTER LAB</strong><span>角色参考图工作台</span></div>
-      <nav className={styles.steps} aria-label="角色制作阶段">{stages.map((stage, index) => <button type="button" key={stage.id} aria-current={draft?.stage === stage.id ? 'step' : undefined} disabled={!draft || locked} onClick={() => { closePrompts(); updateDraft({ stage: stage.id }); }}><b>{draft && stages.findIndex(item => item.id === draft.stage) > index ? <Check size={15} /> : index + 1}</b><span>{stage.label}</span></button>)}</nav>
+      <nav className={styles.steps} aria-label="角色制作阶段">{stages.map((stage, index) => <button type="button" key={stage.id} aria-current={draft?.stage === stage.id ? 'step' : undefined} disabled={!draft || locked} onClick={() => updateDraft({ stage: stage.id })}><b>{draft && stages.findIndex(item => item.id === draft.stage) > index ? <Check size={15} /> : index + 1}</b><span>{stage.label}</span></button>)}</nav>
       <div className={styles.headerActions}>
         <label className={styles.workspaceLabel}><span className={styles.srOnly}>角色工作区</span><select value={workspace?.id || ''} disabled={locked || !bootstrap} onChange={event => void switchWorkspace(event.target.value)}><option value="" disabled>选择角色</option>{bootstrap?.workspaces.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         <button type="button" className={styles.iconButton} disabled={locked || !bootstrap} onClick={() => void createWorkspace()} title="新建角色" aria-label="新建角色"><Plus size={18} /></button>
-        {isAdmin && <button type="button" disabled={locked || !bootstrap} onClick={showPrompts}><Settings2 size={16} /><span>提示词管理</span></button>}
         <button type="button" aria-expanded={historyOpen} disabled={!workspace || locked} onClick={() => setHistoryOpen(value => !value)}><History size={16} /><span>历史记录</span></button>
       </div>
     </header>
@@ -357,10 +418,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
       {saveState === 'failed' && <><button type="button" disabled={locked || saveConflict} onClick={() => void run('save', saveDraft)}>重试保存</button>{saveConflict && <button type="button" disabled={locked} onClick={() => void run('reload', async () => { if (workspace && await confirm('当前工作现场尚未保存。重新读取会采用服务器的最新版本，当前未保存的修改将丢失。', { title: '重新读取工作区', confirmLabel: '读取最新版本' })) await openWorkspace(workspace.id); })}>读取最新版本</button>}</>}
       {unresolved && <span className={styles.pending}>原提交结果待确认 <button type="button" disabled={locked} onClick={() => void run('query', refreshTasks)}>核对原请求</button></span>}
     </div>
-    {!sessionReady ? <div className={styles.welcome}><UserRound size={36} /><p>正在核对当前账号，工作现场已保留。</p></div> : loading && !workspace ? <div className={styles.loading}><div /><div /><div /><span>正在恢复角色工作区…</span></div> : promptView && bootstrap && configDraft ? <section className={styles.promptView}>
-      <aside className={styles.promptAside}><button type="button" onClick={closePrompts}><ArrowLeft size={16} />返回工作台</button><h2>提示词版本</h2>{[bootstrap.config, ...bootstrap.configVersions.filter(version => version.revision !== bootstrap.config.revision)].map(version => <div className={styles.promptVersion} key={version.revision}><button type="button" aria-pressed={configVersion === version.revision} onClick={() => { setConfigDraft(fieldsOf(version)); setConfigVersion(version.revision); }}><strong>v{version.revision}{version.revision === bootstrap.config.revision ? ' · 当前' : ''}</strong></button>{version.updatedAt && <RelativeTime value={version.updatedAt} />}</div>)}</aside>
-      <div className={styles.promptEditor}><header><h1>生成上下文与提示词</h1><span>管理员 · {configVersion ? `基于v${configVersion}` : '默认规则'}</span></header><p>通用规则用于之后的新生成。每个角色的个人补充在工作台中填写。</p>{promptFields.map(([field, title, placeholder]) => <label className={styles.field} key={field}><span>{title}</span><textarea rows={field === 'resultPrompt' ? 6 : 4} maxLength={3000} value={configDraft[field]} placeholder={placeholder} disabled={Boolean(busy)} onChange={event => setConfigDraft(previous => previous ? { ...previous, [field]: event.target.value } : previous)} /></label>)}<footer><span>历史结果和已受理任务保留原规则。</span><button type="button" disabled={Boolean(busy)} onClick={closePrompts}>取消</button><button type="button" className={styles.primary} disabled={Boolean(busy) || !configDirty} onClick={() => void saveConfig()}><Save size={16} />保存新版本</button></footer></div>
-    </section> : !workspace || !draft ? <section className={styles.welcome}><ImagePlus size={44} /><h1>从一张角色原图开始</h1><p>探索不同的真人面孔，再制作完整的角色参考图。</p><button type="button" className={styles.primary} disabled={locked || !bootstrap} onClick={() => void createWorkspace()}><Plus size={17} />新建角色</button>{error && <button type="button" onClick={() => window.location.reload()}>重新读取</button>}</section> : <>
+    {!sessionReady ? <div className={styles.welcome}><UserRound size={36} /><p>正在核对当前账号，工作现场已保留。</p></div> : loading && !workspace ? <div className={styles.loading}><div /><div /><div /><span>正在恢复角色工作区…</span></div> : !workspace || !draft ? <section className={styles.welcome}><ImagePlus size={44} /><h1>从一张角色原图开始</h1><p>探索不同的真人面孔，再制作完整的角色参考图。</p><button type="button" className={styles.primary} disabled={locked || !bootstrap} onClick={() => void createWorkspace()}><Plus size={17} />新建角色</button>{error && <button type="button" onClick={() => window.location.reload()}>重新读取</button>}</section> : <>
       {historyOpen && <section className={styles.historyPanel} aria-label="角色生成历史"><header><h2>历史记录</h2><button type="button" className={styles.iconButton} onClick={() => setHistoryOpen(false)} aria-label="关闭历史记录"><X size={17} /></button></header>{!plans.length && <p>尚未生成候选或成品。</p>}<div className={styles.historyRows}>{plans.map(plan => <article className={styles.historyItem} key={plan.id}><button type="button" disabled={locked} onClick={() => { updateDraft(plan.kind === 'faces' ? { facePlanId: plan.id, stage: 'selection' } : { resultPlanId: plan.id, stage: 'result' }); setHistoryOpen(false); }}>{tasks[plan.id]?.asset ? <ReturnedImage src={characterLabMediaUrl(plan.id)} alt={plan.kind === 'faces' ? '历史人脸候选' : '历史角色参考图'} /> : <span className={styles.historyPlaceholder}><Grid2X2 size={22} /></span>}<span><strong>{plan.kind === 'faces' ? `${plan.count}宫格候选` : '角色参考图'} · {taskState[tasks[plan.id]?.status || ''] || '尚未提交或待核对'}</strong></span></button><small><RelativeTime value={plan.createdAt} /> · 面部差异 {plan.diversity}%</small></article>)}</div></section>}
       <div className={styles.workbench}>
         <aside className={styles.materialRail}><section className={styles.materialSection}><h2>原始素材</h2>{sourceUrl ? <><button type="button" className={styles.sourceImage} onClick={() => setPreview({ src: sourceUrl, alt: '原始角色素材' })}><ReturnedImage src={sourceUrl} alt="原始角色素材" /></button><div className={styles.fileRow}><span title={sourceLabel}>{sourceLabel}</span></div></> : <button type="button" className={styles.uploadEmpty} disabled={locked} onClick={() => setPickerOpen(true)}><ImagePlus size={32} /><strong>添加原始素材</strong><span>上传或从素材库选择一张图片</span></button>}<button type="button" className={styles.outline} disabled={locked || unresolved} onClick={() => setPickerOpen(true)}><ImagePlus size={15} />{draft.sourceAssetId ? '更换原图' : '选择原图'}</button></section>
@@ -369,8 +427,13 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
         </aside>
         <section className={styles.canvasColumn} aria-label={draft.stage === 'result' ? '角色成品预览' : '人脸候选'}>
           <div className={styles.canvasHeading}><h2>{draft.stage === 'result' ? '角色参考图' : draft.stage === 'selection' ? '选择喜欢的面部方案' : '生成结果'}{draft.stage !== 'result' && shownFacePlan && <span> · {shownFacePlan.count}个候选</span>}</h2><div className={styles.canvasActions}>{displayedOutputTask?.asset && <ImageFeishuStatus key={`${ownerId}:${displayedOutputTask.id}`} owner={ownerId} taskId={displayedOutputTask.id} presentationLabel={sendPresentationLabel} />}<button type="button" className={styles.iconButton} disabled={locked} onClick={() => void run('query', refreshTasks)} aria-label="查询生成状态" title="查询生成状态"><RefreshCw size={16} /></button></div></div>
-          {currentPlan && !currentTask && <div className={styles.taskStatus}>此计划尚未提交或提交结果待核对。下方已有结果保留。</div>}
-          {currentTask && <div className={styles.taskStatus} role="status">{['queued', 'running'].includes(currentTask.status) && <Loader2 className={styles.spinner} size={15} />}<span>{taskState[currentTask.status] || '状态待确认'}{currentTask.error ? ` · ${currentTask.error}` : ''}</span>{currentTask.resultDisposition && <span>图片已返回，请核对实际规格。</span>}</div>}
+          {currentPlan && !currentTask && <div className={styles.taskStatus}>{currentPlan.kind === 'faces' && <span>本次{currentPlan.count}宫格 · </span>}此计划尚未提交或提交结果待核对。下方已有结果保留。</div>}
+          {currentTask && <div className={styles.taskStatus} role="status">
+            {['queued', 'running'].includes(currentTask.status) && <Loader2 className={styles.spinner} size={15} />}
+            <span>{currentPlan?.kind === 'faces' && <>本次{currentPlan.count}宫格 · </>}{taskState[currentTask.status] || '状态待确认'}{currentTask.error && <> · {currentTask.error}</>}</span>
+            {currentPlan?.kind === 'faces' && shownFacePlan && currentPlan.id !== shownFacePlan.id && <span>下方显示已有{shownFacePlan.count}宫格</span>}
+            {currentTask.resultDisposition && <span>图片已返回，请核对实际规格。</span>}
+          </div>}
           {draft.stage === 'result' ? shownResultPlan && resultTask?.asset ? <><div className={styles.resultArea}><button type="button" className={styles.resultImage} onClick={() => setPreview({ src: characterLabMediaUrl(shownResultPlan.id), alt: '角色四格参考图' })}><ReturnedImage src={characterLabMediaUrl(shownResultPlan.id)} alt="角色四格参考图：正面特写、侧面特写、正面全身、背面全身" /></button></div><div className={styles.canvasTools}><span>成图比例 2:3{resultTask.asset.width && resultTask.asset.height ? ` · 实际 ${resultTask.asset.width}×${resultTask.asset.height}` : ''}</span><button type="button" onClick={() => setPreview({ src: characterLabMediaUrl(shownResultPlan.id), alt: '角色参考图' })}><Maximize2 size={15} />放大</button></div></> : <div className={styles.canvasEmpty}><Grid2X2 size={42} /><h3>{currentTask && ['queued', 'running'].includes(currentTask.status) ? '正在制作角色参考图' : '在这里预览角色参考图'}</h3><p>选定面部后，结合原图生成正面特写、侧面特写和正背全身。</p>{draft.mainFace && <button type="button" className={styles.primary} disabled={locked || unresolved} onClick={() => void generate('result')}>生成角色参考图<ArrowRight size={16} /></button>}</div> : shownFacePlan ? <div className={styles.candidateGrid} style={{ gridTemplateColumns: `repeat(${shownFacePlan.count === 9 ? 3 : 2}, minmax(0, 1fr))` }}>{Array.from({ length: shownFacePlan.count }, (_, cell) => {
             const face = { planId: shownFacePlan.id, cell }, main = sameFace(draft.mainFace, face), auxiliary = draft.auxiliaryFaces.some(item => sameFace(item, face));
             return <article key={cell} className={styles.candidate} data-main={main} data-auxiliary={auxiliary}><button type="button" className={styles.candidateImage} disabled={locked} aria-pressed={main} aria-label={`选择候选${cell + 1}作为主面部`} onClick={() => selectFace(face)}><ReturnedImage src={characterLabMediaUrl(shownFacePlan.id, cell)} alt={`真人面部候选${cell + 1}`} /><span className={styles.cellNumber}>{String(cell + 1).padStart(2, '0')}</span>{main && <span className={styles.mainBadge}><Check size={12} />主面部</span>}{auxiliary && <span className={styles.auxBadge}>辅助参考</span>}</button><div className={styles.cellActions}><button type="button" disabled={locked} onClick={() => setPreview({ src: characterLabMediaUrl(shownFacePlan.id, cell), alt: `候选${cell + 1}` })}><Maximize2 size={13} />放大</button><button type="button" disabled={locked || main} aria-pressed={auxiliary} onClick={() => toggleAuxiliary(face)}>{auxiliary ? '移除辅助' : '作为辅助'}</button></div></article>;
@@ -378,9 +441,9 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
           {draft.stage === 'result' && resultPlans.length > 0 && <div className={styles.versionStrip}><span>历史版本</span>{resultPlans.map((plan, index) => <button type="button" key={plan.id} aria-pressed={shownResultPlan?.id === plan.id} disabled={locked} onClick={() => updateDraft({ resultPlanId: plan.id })}>{tasks[plan.id]?.asset ? <ReturnedImage src={characterLabMediaUrl(plan.id)} alt={`角色参考图v${resultPlans.length - index}`} /> : <Grid2X2 size={18} />}<span>v{resultPlans.length - index}</span></button>)}</div>}
         </section>
         <aside className={styles.controls}>
-          {draft.stage === 'result' ? <><section className={styles.resultState}><strong>当前成品 {shownResultPlan ? `v${resultPlans.length - resultPlans.findIndex(item => item.id === shownResultPlan.id)}` : ''}</strong><span>{selectedResult ? '已保存' : resultTask?.asset ? '已生成' : '待生成'}</span></section><section><h2>保存与导出</h2><label className={styles.field}><span>作品名称</span><input value={workName} placeholder={selectedResult?.name || workspace.name} maxLength={80} onChange={event => updateDraft({ resultName: event.target.value })} /></label><div className={styles.field}><span>导出内容</span><div className={styles.segmented}>{([['sheet', '整图'], ['cells', '单张'], ['all', '全部']] as const).map(([mode, label]) => <button type="button" key={mode} aria-pressed={exportMode === mode} onClick={() => setExportMode(mode)}>{label}</button>)}</div></div><div className={styles.exportDetails}><span>文件格式 <b>PNG{exportMode !== 'sheet' ? ' / ZIP' : ''}</b></span><span>图片尺寸 <b>原始尺寸</b></span></div><div className={styles.actionPair}><button type="button" className={styles.primary} disabled={locked || !shownResultPlan || !resultTask?.asset} onClick={() => void saveResult()}><Save size={16} />保存成品</button><button type="button" className={styles.outline} disabled={locked || !shownResultPlan || !resultTask?.asset} onClick={() => void exportResult()}><Download size={16} />导出图片</button></div><p className={styles.hint}>直接保存当前结果，无需重新生成。</p></section><details className={styles.adjustments}><summary><SlidersHorizontal size={16} />调整成品<ChevronDown size={15} /></summary><label className={styles.field}><span>调整要求</span><textarea rows={4} value={draft.adjustment} maxLength={3000} onChange={event => updateDraft({ adjustment: event.target.value })} placeholder="例如：侧面保持平视，露出完整发型" /></label><label className={styles.field}><span>调整位置</span><select value={draft.adjustmentCell ?? 'all'} onChange={event => updateDraft({ adjustmentCell: event.target.value === 'all' ? null : Number(event.target.value) })}><option value="all">全部四格</option>{['正面特写', '侧面特写', '正面全身', '背面全身'].map((label, index) => <option key={index} value={index}>{label}</option>)}</select></label>{renderGenerationSettings()}<button type="button" className={styles.outline} disabled={locked || unresolved || !draft.mainFace || faceSourceMismatch} onClick={() => void generate('result')}><RefreshCw size={15} />生成新版本</button></details><button type="button" disabled={locked} onClick={() => updateDraft({ stage: 'selection' })}><ArrowLeft size={15} />返回选择</button></> : <>
-            {draft.stage === 'selection' && <section className={styles.selectedSection}><h2>已选 {selectedFaces.length} 个方案</h2>{faceSourceMismatch && <div className={styles.sourceMismatch}><p>这组候选来自另一张原图。</p><button type="button" disabled={locked} onClick={() => updateDraft({ sourceAssetId: shownFacePlan!.sourceAssetId })}>使用本组原图</button></div>}{selectedFaces.length > 0 ? <div className={styles.selectedFaces}>{selectedFaces.map((face, index) => <div key={`${face.planId}:${face.cell}`} data-main={index === 0 && Boolean(draft.mainFace)}><button type="button" onClick={() => setPreview({ src: characterLabMediaUrl(face.planId, face.cell), alt: index === 0 && draft.mainFace ? '主面部' : '辅助参考' })}><ReturnedImage src={characterLabMediaUrl(face.planId, face.cell)} alt={index === 0 && draft.mainFace ? '主面部' : '辅助参考'} /></button><span>{index === 0 && draft.mainFace ? '主面部' : '辅助参考'} {String(face.cell + 1).padStart(2, '0')}</span>{index > 0 && <button type="button" className={styles.removeAux} aria-label={`移除辅助参考${face.cell + 1}`} onClick={() => toggleAuxiliary(face)}><X size={13} /></button>}</div>)}</div> : <p className={styles.hint}>点击候选确定主面部，可另外添加辅助参考。</p>}<label className={styles.field}><span>辅助特征</span><textarea rows={3} maxLength={1000} value={draft.auxiliaryFeatures} onChange={event => updateDraft({ auxiliaryFeatures: event.target.value })} placeholder="例如：参考辅助方案的鼻梁与眼部气质" /></label><p className={styles.hint}>主面部确定身份，辅助参考提供特征方向。</p></section>}
-            <section><h2>{draft.stage === 'faces' ? '生成设置' : '探索更多面孔'}</h2>{draft.stage === 'faces' && <div className={styles.segmented}>{([4, 9] as const).map(count => <button type="button" key={count} disabled={locked} aria-pressed={draft.count === count} onClick={() => updateDraft({ count })}><Grid2X2 size={16} />{count}宫格</button>)}</div>}<label className={styles.sliderLabel}><span>面部差异<b>{draft.diversity}%</b></span><input type="range" min="0" max="100" step="1" value={draft.diversity} aria-valuetext={`${draft.diversity}%，${draft.diversity < 34 ? '小幅变化' : draft.diversity < 67 ? '中等变化' : '较大变化'}`} disabled={locked} onChange={event => updateDraft({ diversity: Number(event.target.value) })} /><small><span>小</span><span>大</span></small></label><p className={styles.hint}>改变脸型、骨相与五官比例。调整后用于下一次生成。</p>{draft.stage === 'faces' && <label className={styles.field}><span>角色补充要求</span><textarea rows={4} maxLength={3000} value={draft.context} disabled={locked} onChange={event => updateDraft({ context: event.target.value })} placeholder="例如：黑发、细框眼镜，沉静气质" /></label>}{isAdmin && <button type="button" className={styles.outline} disabled={locked} onClick={showPrompts}><Settings2 size={16} />提示词管理</button>}{renderGenerationSettings()}</section>
+          {draft.stage === 'result' ? <><section className={styles.resultState}><strong>当前成品 {shownResultPlan ? `v${resultPlans.length - resultPlans.findIndex(item => item.id === shownResultPlan.id)}` : ''}</strong><span>{selectedResult ? '已保存' : resultTask?.asset ? '已生成' : '待生成'}</span></section><section><h2>保存与导出</h2><label className={styles.field}><span>作品名称</span><input value={workName} placeholder={selectedResult?.name || workspace.name} maxLength={80} onChange={event => updateDraft({ resultName: event.target.value })} /></label><div className={styles.field}><span>导出内容</span><div className={styles.segmented}>{([['sheet', '整图'], ['cells', '单张'], ['all', '全部']] as const).map(([mode, label]) => <button type="button" key={mode} aria-pressed={exportMode === mode} onClick={() => setExportMode(mode)}>{label}</button>)}</div></div><div className={styles.exportDetails}><span>文件格式 <b>PNG{exportMode !== 'sheet' ? ' / ZIP' : ''}</b></span><span>图片尺寸 <b>原始尺寸</b></span></div><div className={styles.actionPair}><button type="button" className={styles.primary} disabled={locked || !shownResultPlan || !resultTask?.asset} onClick={() => void saveResult()}><Save size={16} />保存成品</button><button type="button" className={styles.outline} disabled={locked || !shownResultPlan || !resultTask?.asset} onClick={() => void exportResult()}><Download size={16} />导出图片</button></div><p className={styles.hint}>直接保存当前结果，无需重新生成。</p></section><details className={styles.adjustments}><summary><SlidersHorizontal size={16} />调整成品<ChevronDown size={15} /></summary><label className={styles.field}><span>调整要求</span><textarea rows={4} value={draft.adjustment} maxLength={3000} onChange={event => updateDraft({ adjustment: event.target.value })} placeholder="例如：侧面保持平视，露出完整发型" /></label><label className={styles.field}><span>调整位置</span><select value={draft.adjustmentCell ?? 'all'} onChange={event => updateDraft({ adjustmentCell: event.target.value === 'all' ? null : Number(event.target.value) })}><option value="all">全部四格</option>{['正面特写', '侧面特写', '正面全身', '背面全身'].map((label, index) => <option key={index} value={index}>{label}</option>)}</select></label>{renderPromptButton('result')}{renderGenerationSettings()}<button type="button" className={styles.outline} disabled={locked || unresolved || !draft.mainFace || faceSourceMismatch} onClick={() => void generate('result')}><RefreshCw size={15} />生成新版本</button></details><button type="button" disabled={locked} onClick={() => updateDraft({ stage: 'selection' })}><ArrowLeft size={15} />返回选择</button></> : <>
+            {draft.stage === 'selection' && <section className={styles.selectedSection}><div className={styles.settingsHeading}><h2>已选 {selectedFaces.length} 个方案</h2>{renderPromptButton('result')}</div>{faceSourceMismatch && <div className={styles.sourceMismatch}><p>这组候选来自另一张原图。</p><button type="button" disabled={locked} onClick={() => updateDraft({ sourceAssetId: shownFacePlan!.sourceAssetId })}>使用本组原图</button></div>}{selectedFaces.length > 0 ? <div className={styles.selectedFaces}>{selectedFaces.map((face, index) => <div key={`${face.planId}:${face.cell}`} data-main={index === 0 && Boolean(draft.mainFace)}><button type="button" onClick={() => setPreview({ src: characterLabMediaUrl(face.planId, face.cell), alt: index === 0 && draft.mainFace ? '主面部' : '辅助参考' })}><ReturnedImage src={characterLabMediaUrl(face.planId, face.cell)} alt={index === 0 && draft.mainFace ? '主面部' : '辅助参考'} /></button><span>{index === 0 && draft.mainFace ? '主面部' : '辅助参考'} {String(face.cell + 1).padStart(2, '0')}</span>{index > 0 && <button type="button" className={styles.removeAux} aria-label={`移除辅助参考${face.cell + 1}`} onClick={() => toggleAuxiliary(face)}><X size={13} /></button>}</div>)}</div> : <p className={styles.hint}>点击候选确定主面部，可另外添加辅助参考。</p>}<label className={styles.field}><span>辅助特征</span><textarea rows={3} maxLength={1000} value={draft.auxiliaryFeatures} onChange={event => updateDraft({ auxiliaryFeatures: event.target.value })} placeholder="例如：参考辅助方案的鼻梁与眼部气质" /></label><p className={styles.hint}>主面部确定身份，辅助参考提供特征方向。</p></section>}
+            <section><div className={styles.settingsHeading}><h2>{draft.stage === 'faces' ? '生成设置' : '探索更多面孔'}</h2>{renderPromptButton('faces')}</div>{draft.stage === 'faces' && <div className={styles.segmented}>{([4, 9] as const).map(count => <button type="button" key={count} disabled={locked} aria-pressed={draft.count === count} onClick={() => updateDraft({ count })}><Grid2X2 size={16} />{count}宫格</button>)}</div>}<label className={styles.sliderLabel}><span>面部差异<b>{draft.diversity}%</b></span><input type="range" min="0" max="100" step="1" value={draft.diversity} aria-valuetext={`${draft.diversity}%，${draft.diversity < 34 ? '小幅变化' : draft.diversity < 67 ? '中等变化' : '较大变化'}`} disabled={locked} onChange={event => updateDraft({ diversity: Number(event.target.value) })} /><small><span>小</span><span>大</span></small></label><p className={styles.hint}>改变脸型、骨相与五官比例。调整后用于下一次生成。</p>{draft.stage === 'faces' && <label className={styles.field}><span>角色补充要求</span><textarea rows={4} maxLength={3000} value={draft.context} disabled={locked} onChange={event => updateDraft({ context: event.target.value })} placeholder="例如：黑发、细框眼镜，沉静气质" /></label>}{renderGenerationSettings()}</section>
             <div className={styles.mainActions}>{draft.stage === 'faces' ? <><button type="button" className={shownFacePlan ? styles.outline : styles.primary} disabled={locked || unresolved || !draft.sourceAssetId} onClick={() => void generate('faces')}><RefreshCw size={15} />{shownFacePlan ? '重新生成' : '生成人脸候选'}</button><button type="button" className={shownFacePlan ? styles.primary : ''} disabled={locked || !shownFacePlan} onClick={() => updateDraft({ stage: 'selection' })}>选择方案<ArrowRight size={16} /></button></> : <><button type="button" className={styles.outline} disabled={locked || unresolved || !draft.sourceAssetId} onClick={() => void generate('faces')}><RefreshCw size={15} />生成另一组</button><button type="button" className={styles.primary} disabled={locked || unresolved || !draft.mainFace || faceSourceMismatch} onClick={() => void generate('result')}>生成角色参考图<ArrowRight size={16} /></button><button type="button" disabled={locked} onClick={() => updateDraft({ stage: 'faces' })}><ArrowLeft size={15} />返回生成</button></>}</div>
           </>}
         </aside>
@@ -388,8 +451,62 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
     </>}
     <ResourceLibraryPicker open={pickerOpen} imageOnly target="image-studio" purpose="character-lab-source" contextKey={`${ownerId}:character-lab:${workspace?.id || 'draft'}`} title="选择角色原始素材" confirmLabel="使用这张原图" maxSelection={1} currentCount={0} currentAssetIds={[]} onClose={() => setPickerOpen(false)} onUploadFile={async (file: File, onProgress?: UploadProgressHandler) => { assertActive(); const capturedScope = scope.current; setUploading(true); try { const asset = await uploadFileAsAsset(file, { onProgress, ownerId }); if (capturedScope !== scope.current || !active.current) throw new Error('当前角色或账号已变化，图片没有替换到当前工作区'); return asset; } finally { if (alive.current) setUploading(false); } }} onConfirm={async (ids, assets) => { assertActive(); if (!draftRef.current || !ids[0] || busyRef.current) return false; const asset = assets?.find(item => item.id === ids[0]); setSource({ id: ids[0], url: asset?.originalUrl || `/api/image-studio/assets/${encodeURIComponent(ids[0])}`, thumbnailUrl: asset?.thumbnailUrl || '', fileName: asset?.fileName || '角色原始素材' }); updateDraft({ sourceAssetId: ids[0], facePlanId: null, resultPlanId: null, mainFace: null, auxiliaryFaces: [], stage: 'faces' }); return true; }} />
     {preview && sessionReady && <ZoomableImagePreview src={preview.src} alt={preview.alt} fileName="character-reference.png" imageSharing={false} onClose={() => setPreview(null)} />}
+    {promptOpen && activePromptTarget && bootstrap && configDraft && (
+      <dialog ref={promptDialog} className={styles.promptDialog} aria-labelledby="character-lab-prompt-title">
+        <header className={styles.promptHeader}>
+          <h2 id="character-lab-prompt-title">{promptTitles[activePromptTarget]}</h2>
+          <button type="button" className={styles.iconButton} aria-label="关闭提示词" disabled={Boolean(busy)} onClick={closePrompts}><X size={18} /></button>
+        </header>
+        <div className={styles.promptBody}>
+          <label className={styles.promptRevision}>
+            <span>提示词版本</span>
+            <select value="" disabled={Boolean(busy)} onChange={event => {
+              if (!event.target.value) return;
+              const revision = Number(event.target.value);
+              const version = revision === bootstrap.config.revision
+                ? bootstrap.config : bootstrap.configVersions.find(item => item.revision === revision);
+              if (version) {
+                setConfigError('');
+                applyPromptVersion(version);
+              }
+            }}>
+              <option value="">选择要载入的版本</option>
+              <option value={bootstrap.config.revision}>v{bootstrap.config.revision} · 当前</option>
+              {bootstrap.configVersions.filter(version => version.revision !== bootstrap.config.revision).map(version => (
+                <option key={version.revision} value={version.revision}>v{version.revision}{version.updatedAt ? ' · ' + new Date(version.updatedAt).toLocaleDateString() : ''}</option>
+              ))}
+            </select>
+          </label>
+          {activePromptFields.map(([field, title, placeholder]) => (
+            <label className={styles.field} key={field}>
+              <span>{title}</span>
+              <textarea rows={field === 'resultPrompt' ? 6 : 4} maxLength={3000} value={configDraft[field]} placeholder={placeholder} disabled={Boolean(busy)} onChange={event => {
+                const value = event.target.value;
+                setConfigDraft(previous => previous ? { ...previous, [field]: value } : previous);
+              }} />
+              {field === 'styleConstraints' && <small>人脸候选和角色参考图共用这条规则。</small>}
+            </label>
+          ))}
+        </div>
+        <footer className={styles.promptFooter}>
+          {configError && <p role="alert">{configError}</p>}
+          <small>保存后用于新生成。</small>
+          <button type="button" disabled={Boolean(busy)} onClick={closePrompts}>关闭</button>
+          <button type="button" className={styles.primary} disabled={Boolean(busy) || !scopedConfigDirty} onClick={() => void saveConfig()}>
+            <Save size={16} />{busy === 'config' ? '正在保存…' : '保存新版本'}
+          </button>
+        </footer>
+      </dialog>
+    )}
     {productDialog}
   </main>;
+
+  function renderPromptButton(target: PromptTarget) {
+    if (!isAdmin) return null;
+    return <button type="button" className={styles.promptTrigger} aria-haspopup="dialog" aria-label={promptTitles[target]} disabled={locked || !configDraft} onClick={() => { setConfigError(''); setPromptTarget(target); }}>
+      <Settings2 size={15} />提示词
+    </button>;
+  }
 
   function renderGenerationSettings() {
     if (!draft) return null;
