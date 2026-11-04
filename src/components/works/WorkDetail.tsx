@@ -42,8 +42,8 @@ function RelatedGroup({ group, viewerId, workId, medium, playback, loading, erro
   </section>;
 }
 
-export function WorkDetail({ id, viewerId, preparation, revision, playback, onClose, onList, onOpen, onWork, onFilter, onClassify, busy, operate }: {
-  id: string; viewerId: string; revision: number; playback: AssetPlaybackCoordinator; onClose: () => void; onList: () => void; onOpen: (work: WorkCard) => void;
+export function WorkDetail({ id, viewerId, preparation, revision, likesRevision, playback, onClose, onList, onOpen, onWork, onFilter, onClassify, busy, operate }: {
+  id: string; viewerId: string; revision: number; likesRevision: number; playback: AssetPlaybackCoordinator; onClose: () => void; onList: () => void; onOpen: (work: WorkCard) => void;
   preparation?: PreparedWorkImage;
   onWork: (work: WorkCard) => void; onFilter: (key: 'author' | 'project', id: string) => void;
   onClassify: (work: WorkCard) => void; busy: boolean; operate: WorkOperate;
@@ -91,7 +91,7 @@ export function WorkDetail({ id, viewerId, preparation, revision, playback, onCl
       else setError(cause instanceof Error ? cause.message : '作品读取未完成');
     }).finally(() => { if (!controller.signal.aborted) setReading(false); });
     return () => controller.abort();
-  }, [id, viewerId, preparation, revision, retry, playback]);
+  }, [id, viewerId, preparation, revision, likesRevision, retry, playback]);
   useEffect(() => {
     if (!mediaVersion || error || replacement) return;
     const controller = new AbortController(); contextGeneration.current++; setContextError('');
