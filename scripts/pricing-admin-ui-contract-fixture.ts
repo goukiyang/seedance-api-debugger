@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { PricingAdminAction, PricingAdminChanges, PricingAdminRow, PricingAdminSaveInput } from '../src/lib/pricing/admin-contract';
+import { showPricingImageRow } from '../src/lib/pricing/admin-display';
 import {
   consumePricingAdminDraft, defaultPricingAdminView, filterPricingAdminRows,
   parsePricingAdminPending, parsePricingAdminWorkspace, patchPricingAdminRow,
@@ -33,6 +34,15 @@ export function runPricingAdminUiContractFixture() {
   assert.equal(filterPricingAdminRows(rows, { difference: 'unconfirmed' }).length, 61);
   assert.equal(rows[0].baseCny, null, 'No fictional base on first read');
   assert.equal(defaultPricingAdminView.referenceId, '', 'No automatic reference');
+  const saved = row('saved-default', { isDefault: true, mode: 'custom', baseCny: '0.06', currentUnitCredits: '6', currentPointsPerCny: '100' });
+  const unknownBase = row('ready-default-needs-base', { isDefault: true });
+  const unavailable = row('unavailable-default', { isDefault: true, availability: 'unconfigured' });
+  const alternate = row('alternate');
+  const actual = row('actual', { isDefault: true, identity: { ...saved.identity, billingMode: 'actual' } });
+  const catalog = [saved, unknownBase, unavailable, alternate, actual];
+  assert.deepEqual(catalog.filter(item => showPricingImageRow(item, '100', false)).map(item => item.id), [saved.id, unknownBase.id]);
+  assert.deepEqual(catalog.filter(item => showPricingImageRow(item, '100', true)).map(item => item.id), [saved.id, unknownBase.id, alternate.id]);
+  assert.equal(showPricingImageRow(saved, null, false), true, 'An existing price remains editable without a global rate');
 
   for (const value of ['0.1', '1', '15.5', '10000.0']) assert.equal(validPricingAdminRate(value), true, value);
   for (const value of ['', '0', '-1', '+1', '1e1', '0.01', '1.01', '10000.1', 'Infinity', 'NaN', '1,000', ' 1 ', '01']) assert.equal(validPricingAdminRate(value), false, value);
