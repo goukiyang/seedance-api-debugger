@@ -13,7 +13,8 @@ function httpsOrigin(value) {
 
 // An undefined result delegates to the existing application route. Disable
 // generic response caching for both the pilot route and this passthrough.
-export function createHdEdgePilot({ siteOrigin, appOrigin, objectOrigin, entries }, fetchImpl = fetch) {
+export function createHdEdgePilot({ siteOrigin, appOrigin, objectOrigin, entries, headerBudgetMs = 500 }, fetchImpl = fetch) {
+  if (!Number.isSafeInteger(headerBudgetMs) || headerBudgetMs < 1 || headerBudgetMs > 1000) throw new Error('invalid pilot header budget');
   const site = httpsOrigin(siteOrigin);
   const app = httpsOrigin(appOrigin);
   const objects = httpsOrigin(objectOrigin);
@@ -65,50 +66,70 @@ export function createHdEdgePilot({ siteOrigin, appOrigin, objectOrigin, entries
     const authHeaders = new Headers({ Cookie: cookie, 'Cache-Control': 'no-store, no-cache' });
     const expectedUser = request.headers.get('x-app-session-user');
     if (entry.route === 'works' && expectedUser) authHeaders.set('X-App-Session-User', expectedUser);
-    const authStarted = Date.now();
-    let permission;
+    if (request.signal.aborted) return denial(499);
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    request.signal.addEventListener('abort', abort, { once: true });
+    const deadline = setTimeout(abort, headerBudgetMs);
+    let streaming = false;
     try {
-      permission = await fetchImpl(origin, { method: 'HEAD', redirect: 'manual', signal: request.signal, headers: authHeaders });
-    } catch {
-      return denial(503);
-    }
-    const authMs = Math.max(0, Date.now() - authStarted);
-    if ([401, 403, 404].includes(permission.status)) return denial(permission.status);
-    // The existing combined GET handles a pending representation or a changed account.
-    if (permission.status === 409) return;
-    if (permission.status !== 200) return denial(503);
-    const allowed = permission.headers;
-    if (!allowed.get('cache-control')?.split(',').some(value => value.trim().toLowerCase() === 'no-store')) return denial(503);
-    if (allowed.get('x-image-source-version') !== entry.sourceVersion
-      || allowed.get('x-image-representation-version') !== entry.representationVersion
-      || allowed.get('content-type') !== entry.mime || allowed.get('content-length') !== String(entry.bytes)
-      || !allowed.get('etag')) return;
+      const authStarted = Date.now();
+      let permission;
+      try {
+        permission = await fetchImpl(origin, { method: 'HEAD', redirect: 'manual', signal: controller.signal, headers: authHeaders });
+      } catch {
+        if (request.signal.aborted) return denial(499);
+        // A deadline miss delegates to the normal application GET, which reauthorizes.
+        if (controller.signal.aborted) return;
+        return denial(503);
+      }
+      const authMs = Math.max(0, Date.now() - authStarted);
+      if ([401, 403, 404].includes(permission.status)) return denial(permission.status);
+      if (request.signal.aborted) return denial(499);
+      // The existing combined GET handles a pending representation or a changed account.
+      if (controller.signal.aborted || permission.status === 409) return;
+      if (permission.status !== 200) return denial(503);
+      const allowed = permission.headers;
+      if (!allowed.get('cache-control')?.split(',').some(value => value.trim().toLowerCase() === 'no-store')) return denial(503);
+      if (allowed.get('x-image-source-version') !== entry.sourceVersion
+        || allowed.get('x-image-representation-version') !== entry.representationVersion
+        || allowed.get('content-type') !== entry.mime || allowed.get('content-length') !== String(entry.bytes)
+        || !allowed.get('etag')) return;
 
-    const objectStarted = Date.now();
-    let bytes;
-    try {
-      bytes = await fetchImpl(entry.object, { redirect: 'manual', signal: request.signal,
-        headers: { 'If-Match': entry.objectEtag, 'Accept-Encoding': 'identity' } });
-    } catch {
-      return;
+      const objectStarted = Date.now();
+      let bytes;
+      try {
+        bytes = await fetchImpl(entry.object, { redirect: 'manual', signal: controller.signal,
+          headers: { 'If-Match': entry.objectEtag, 'Accept-Encoding': 'identity' } });
+      } catch {
+        if (request.signal.aborted) return denial(499);
+        return;
+      }
+      const objectHeadersMs = Math.max(0, Date.now() - objectStarted);
+      const objectHeaders = bytes.headers;
+      if (controller.signal.aborted || bytes.status !== 200 || !bytes.body || objectHeaders.has('content-range')
+        || (objectHeaders.has('content-encoding') && objectHeaders.get('content-encoding') !== 'identity')
+        || objectHeaders.get('content-length') !== String(entry.bytes) || objectHeaders.get('content-type') !== entry.mime
+        || objectHeaders.get('etag') !== entry.objectEtag || objectHeaders.get('x-cos-meta-sha256') !== entry.sha256) {
+        void bytes.body?.cancel().catch(() => {});
+        if (request.signal.aborted) return denial(499);
+        return;
+      }
+      // Forward only the fixed numeric phases from the same permission HEAD.
+      const originTiming = /^access;dur=(\d+(?:\.\d+)?),\s*media;dur=(\d+(?:\.\d+)?)$/.exec(allowed.get('server-timing') || '');
+      const timing = [`hd_edge_auth;dur=${authMs}`, `hd_edge_object_headers;dur=${objectHeadersMs}`];
+      if (originTiming) timing.push(`hd_origin_access;dur=${originTiming[1]}`, `hd_origin_media;dur=${originTiming[2]}`);
+      const response = new Response(bytes.body, { headers: { ...privateHeaders,
+        'Content-Type': entry.mime, 'Content-Length': String(entry.bytes), 'Content-Disposition': 'inline',
+        ETag: allowed.get('etag'), 'X-Image-Source-Version': entry.sourceVersion,
+        'Server-Timing': timing.join(', '),
+        'X-Image-Representation-Version': entry.representationVersion, 'X-Image-HD-Description': entry.description } });
+      streaming = true;
+      return response;
+    } finally {
+      // The header budget must not abort a valid body that has already started streaming.
+      clearTimeout(deadline);
+      if (!streaming) request.signal.removeEventListener('abort', abort);
     }
-    const objectHeadersMs = Math.max(0, Date.now() - objectStarted);
-    const objectHeaders = bytes.headers;
-    if (bytes.status !== 200 || !bytes.body || objectHeaders.has('content-range')
-      || (objectHeaders.has('content-encoding') && objectHeaders.get('content-encoding') !== 'identity')
-      || objectHeaders.get('content-length') !== String(entry.bytes) || objectHeaders.get('content-type') !== entry.mime
-      || objectHeaders.get('etag') !== entry.objectEtag || objectHeaders.get('x-cos-meta-sha256') !== entry.sha256) {
-      void bytes.body?.cancel().catch(() => {});
-      return;
-    }
-    // Forward only the fixed numeric phases from the same permission HEAD.
-    const originTiming = /^access;dur=(\d+(?:\.\d+)?),\s*media;dur=(\d+(?:\.\d+)?)$/.exec(allowed.get('server-timing') || '');
-    const timing = [`hd_edge_auth;dur=${authMs}`, `hd_edge_object_headers;dur=${objectHeadersMs}`];
-    if (originTiming) timing.push(`hd_origin_access;dur=${originTiming[1]}`, `hd_origin_media;dur=${originTiming[2]}`);
-    return new Response(bytes.body, { headers: { ...privateHeaders,
-      'Content-Type': entry.mime, 'Content-Length': String(entry.bytes), 'Content-Disposition': 'inline',
-      ETag: allowed.get('etag'), 'X-Image-Source-Version': entry.sourceVersion,
-      'Server-Timing': timing.join(', '),
-      'X-Image-Representation-Version': entry.representationVersion, 'X-Image-HD-Description': entry.description } });
   };
 }

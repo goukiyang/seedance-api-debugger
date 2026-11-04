@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { test } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import sharp from 'sharp';
 import { createHdEdgePilot } from './sd2-hd-edge-pilot.mjs';
 
@@ -28,6 +29,7 @@ test('HD edge pilot preserves the current combined GET and fails closed', { time
     format: 'avif', objectEtag, objectUrl: objectOrigin + objectPath + '?signature=synthetic-only' })) };
   const seen = [];
   let revoked = false, originStatus = 200, objectStatus = 200, holdTail, releaseTail;
+  let stallHeaders;
   const originHeaders = { 'content-type': 'image/avif', 'content-length': String(bytes), 'cache-control': 'private, no-store',
     'x-image-source-version': sourceVersion, 'x-image-representation-version': representationVersion, etag: originEtag,
     'server-timing': 'access;dur=19.2,media;dur=6.4' };
@@ -36,6 +38,10 @@ test('HD edge pilot preserves the current combined GET and fails closed', { time
   const server = createServer((req, res) => {
     const call = { method: req.method, url: req.url, headers: req.headers };
     seen.push(call);
+    if (stallHeaders?.method === req.method) {
+      stallHeaders.onRequest?.();
+      return;
+    }
     if (req.url.startsWith('/app/')) {
       if (req.headers.cookie !== 'session=owner' || revoked) return res.writeHead(403).end();
       const expectedUser = req.headers['x-app-session-user'];
@@ -61,7 +67,7 @@ test('HD edge pilot preserves the current combined GET and fails closed', { time
     return fetch(loopback + (url.origin === appOrigin ? '/app' : '/object') + url.pathname + url.search, options);
   };
   const pilot = createHdEdgePilot(config, call);
-  const open = (path, options = {}) => pilot(new Request(siteOrigin + path, { method: options.method || 'GET',
+  const open = (path, options = {}) => (options.pilot || pilot)(new Request(siteOrigin + path, { method: options.method || 'GET', signal: options.signal,
     headers: { 'X-Image-Accept': 'hd-open-v1', ...(options.anonymous ? {} : { Cookie: 'session=owner' }), ...options.headers } }));
 
   await t.test('one browser GET yields a streamed full-size AVIF with existing descriptor on both routes', async () => {
@@ -93,6 +99,8 @@ test('HD edge pilot preserves the current combined GET and fails closed', { time
         policy: 'hd-f-v1', status: 'ready', sourceVersion, representationVersion, width, height, bytes,
         format: 'avif', mime: 'image/avif', original: false,
       });
+      // Keep the tail pending past the header budget after handing off the response.
+      if (path === templateOpen) await delay(550);
       releaseTail();
       holdTail = null;
       const received = Buffer.from(await response.arrayBuffer());
@@ -183,8 +191,38 @@ test('HD edge pilot preserves the current combined GET and fails closed', { time
     assert.equal(seen.length, 0);
   });
 
+  await t.test('stalled auth or object headers delegate once without returning any pilot bytes', async () => {
+    const budgetedPilot = createHdEdgePilot({ ...config, headerBudgetMs: 120 }, call);
+    try {
+      for (const method of ['HEAD', 'GET']) {
+        seen.length = 0;
+        stallHeaders = { method };
+        assert.equal(await open(templateOpen, { pilot: budgetedPilot }), undefined);
+        assert.deepEqual(seen.map(row => row.method), method === 'HEAD' ? ['HEAD'] : ['HEAD', 'GET']);
+      }
+    } finally {
+      stallHeaders = undefined;
+    }
+  });
+
+  await t.test('closing while object headers are stalled aborts without delegating another read', async () => {
+    seen.length = 0;
+    const controller = new AbortController();
+    const pendingObject = new Promise(resolve => { stallHeaders = { method: 'GET', onRequest: resolve }; });
+    try {
+      const read = open(templateOpen, { signal: controller.signal });
+      await pendingObject;
+      controller.abort();
+      assert.equal((await read).status, 499);
+      assert.deepEqual(seen.map(row => row.method), ['HEAD', 'GET']);
+    } finally {
+      stallHeaders = undefined;
+    }
+  });
+
   await t.test('startup rejects recursive authorization and untrusted object hosts', () => {
     assert.throws(() => createHdEdgePilot({ ...config, appOrigin: siteOrigin }, call), /distinct/);
+    assert.throws(() => createHdEdgePilot({ ...config, headerBudgetMs: 0 }, call), /invalid pilot header budget/);
     const entries = [{ ...config.entries[0], objectUrl: config.entries[0].objectUrl.replace(objectOrigin, 'https://other.example') }];
     assert.throws(() => createHdEdgePilot({ ...config, entries }, call), /invalid pilot entry/);
   });
