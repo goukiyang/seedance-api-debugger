@@ -1843,7 +1843,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   useEffect(() => {
     if (!sessionChanged && !isClientSessionBlocked() && templateWorkbench && !hidden && active && viewedResults?.scope === taskReadScope && viewedResults.token === viewToken && readAttemptToken.current !== viewedResults.sequence) {
       readAttemptToken.current = viewedResults.sequence;
-      for (const [resultModuleId, observed] of viewedResults.byModule) {
+      for (const [resultModuleId, observed] of Array.from(viewedResults.byModule)) {
         const versions = Array.from(observed);
         for (let offset = 0; offset < versions.length; offset += 24) {
           if (isClientSessionBlocked()) return;
@@ -1860,7 +1860,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     setViewedResults(previous => {
       const byModule = new Map(previous?.scope === taskReadScope && previous.token === token
         && readAttemptToken.current !== previous.sequence ? previous.byModule : undefined);
-      byModule.set(sourceId, new Set([...(byModule.get(sourceId) || []), version]));
+      const versions = new Set(byModule.get(sourceId));
+      versions.add(version);
+      byModule.set(sourceId, versions);
       return { scope: taskReadScope, token, sequence, byModule };
     });
   }
