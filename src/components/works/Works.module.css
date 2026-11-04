@@ -44,8 +44,11 @@
 .media img { object-fit: contain; }
 .duration { display: flex; align-items: center; gap: 4px; position: absolute; bottom: 8px; right: 8px; padding: 4px 7px; border-radius: 5px; color: var(--text-primary); background: var(--bg-primary); font-size: 11px; pointer-events: none; }
 .placeholder { display: flex !important; flex-direction: column; align-items: center; justify-content: center; gap: 8px; height: 100%; color: var(--text-secondary); font-size: 12px; }
-.cardInfo { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 44px; padding-top: 4px; }
-.cardIdentity { display: flex; align-items: center; justify-content: flex-end; min-width: 0; max-width: 46%; flex: 0 1 auto; text-align: right; }
+.cardInfo { display: flex; align-items: center; justify-content: space-between; gap: 5px; height: 44px; padding-top: 4px; }
+.cardActivity { display: flex; flex: 0 0 auto; gap: 5px; color: var(--text-secondary); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cardActivity span { display: inline-flex; align-items: center; gap: 3px; }
+.cardActivity svg { flex: none; }
+.cardIdentity { display: flex; align-items: center; justify-content: flex-end; min-width: 26px; max-width: 36%; flex: 0 1 auto; text-align: right; }
 .page .cardIdentity .authorIdentity { justify-content: flex-end; gap: 4px; font-size: 11px; }
 .cardIdentity .authorAvatar { width: 20px; height: 20px; flex-basis: 20px; }
 .authorIdentity { display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; font-size: 12px; color: var(--text-secondary); }

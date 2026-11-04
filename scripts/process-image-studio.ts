@@ -67,7 +67,16 @@ async function main() {
   }, 5000);
   const runWorks = () => {
     if (stopping || isImageStudioDraining() || worksWork) return;
-    worksWork = import('../src/lib/works/ingestion').then(module => module.processWorksRegistrationPass({ shouldStop: () => stopping || isImageStudioDraining() }))
+    const shouldStop = () => stopping || isImageStudioDraining();
+    worksWork = import('../src/lib/works/ingestion').then(module => module.processWorksRegistrationPass({ shouldStop }))
+      .then(async () => {
+        if (!shouldStop() && process.env.WORKS_PREVIEW_USER_ID?.trim()) {
+          const { processWorkRecommendationTrial } = await import('../src/lib/works/recommendation-trial');
+          await processWorkRecommendationTrial(shouldStop).catch(() => {
+            console.warn('[works] recommendation trial pass deferred');
+          });
+        }
+      })
       .catch(() => console.warn('[works] directory pass deferred; original tasks and billing retained')).finally(() => { worksWork = null; });
   };
   const worksTimer = setInterval(runWorks, 15_000);

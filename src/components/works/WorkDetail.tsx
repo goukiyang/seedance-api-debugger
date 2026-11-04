@@ -6,7 +6,7 @@ import { ArrowLeft, ChevronDown, ChevronUp, Plus, Download, Maximize2 } from 'lu
 import { RelativeTime } from '@/components/RelativeTime';
 import { WorkActions, reuseWorkTemplate, type WorkOperate } from './WorkActions';
 import { worksRead, WorksClientError, workWorkspaceTabId } from '@/lib/works/client';
-import { workAudienceLabels, type WorkCard } from '@/lib/works/types';
+import { workAudienceLabels, type WorkActivity, type WorkCard } from '@/lib/works/types';
 import { AssetPlaybackCoordinator, releaseAssetMediaSource } from '@/lib/media/asset-playback';
 import { WorkMedia } from './WorkMedia';
 import { WorkPreviewImage } from './WorkPreviewImage';
@@ -42,10 +42,11 @@ function RelatedGroup({ group, viewerId, workId, medium, playback, loading, erro
   </section>;
 }
 
-export function WorkDetail({ id, viewerId, preparation, revision, likesRevision, playback, onClose, onList, onOpen, onWork, onFilter, onClassify, busy, operate }: {
+export function WorkDetail({ id, viewerId, preparation, revision, likesRevision, playback, onClose, onList, onOpen, onWork, onActivity, onFilter, onClassify, busy, operate }: {
   id: string; viewerId: string; revision: number; likesRevision: number; playback: AssetPlaybackCoordinator; onClose: () => void; onList: () => void; onOpen: (work: WorkCard) => void;
   preparation?: PreparedWorkImage;
   onWork: (work: WorkCard) => void; onFilter: (key: 'author' | 'project', id: string) => void;
+  onActivity: (id: string, mediaVersion: string, activity: WorkActivity) => void;
   onClassify: (work: WorkCard) => void; busy: boolean; operate: WorkOperate;
 }) {
   const [work, setWork] = useState<WorkCard | null>(null), [replacement, setReplacement] = useState<WorkCard | null>(null), [error, setError] = useState(''), [notice, setNotice] = useState(''), [retry, setRetry] = useState(0), [reading, setReading] = useState(false), [mediaFailed, setMediaFailed] = useState(false), [mediaAttempt, setMediaAttempt] = useState(0);
@@ -56,6 +57,21 @@ export function WorkDetail({ id, viewerId, preparation, revision, likesRevision,
   const video = useRef<HTMLVideoElement>(null), heading = useRef<HTMLHeadingElement>(null), compareArea = useRef<HTMLDivElement>(null), alive = useRef(true), methodBusy = useRef(false), groupBusy = useRef(false), contextGeneration = useRef(0), seekTarget = useRef<number | null>(null);
   const onWorkRef = useRef(onWork); onWorkRef.current = onWork;
   const mediaVersion = work?.mediaVersion;
+  const viewed = useRef<string | null>(null);
+  const countView = Boolean(work?.activity && work.discoverable && work.detailPreviewUrl && !error && !replacement);
+  useEffect(() => {
+    if (!mediaVersion || !countView || viewed.current === mediaVersion) return;
+    viewed.current = mediaVersion;
+    void fetch(`/api/works/${encodeURIComponent(id)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-app-session-user': viewerId },
+      body: JSON.stringify({ viewerId, mediaVersion }),
+    }).then(async response => {
+      if (!response.ok) return;
+      const data = await response.json() as { viewerId: string; activity: WorkActivity };
+      if (alive.current && data.viewerId === viewerId) onActivity(id, mediaVersion, data.activity);
+    }).catch(() => {});
+  }, [countView, id, mediaVersion, onActivity, viewerId]);
   const onCompareActive = useCallback((active: boolean) => {
     if (active) { if (video.current) releaseAssetMediaSource(video.current); playback.stopAll('selection'); }
     setComparing(active);

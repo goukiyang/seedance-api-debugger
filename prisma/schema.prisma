@@ -2714,6 +2714,25 @@ model WorkOperation {
 }
 
 // Indexed safe provenance; prompts, private references and billing remain in their source.
+model WorkView {
+  work_id        String
+  viewer_id      String
+  count          Int
+  last_viewed_ms BigInt
+  @@id([work_id, viewer_id])
+}
+
+model WorkRecommendationTrial {
+  viewer_id                 String
+  work_id                   String
+  media_version_id          String
+  evidence_work_id          String
+  evidence_media_version_id String
+  rule_version              Int
+  score                     Int
+  @@id([viewer_id, work_id])
+}
+
 model WorkContext {
   work_id          String @id
   media_version_id String

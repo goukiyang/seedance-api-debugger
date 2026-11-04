@@ -81,6 +81,15 @@ assert indexes <= {r[0] for r in db.execute("SELECT name FROM sqlite_master WHER
 assert db.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
 print(json.dumps({'newTables':sorted(expected),'oldTablesPreserved':len(before),'oldRowsPreserved':sum(map(len,rows.values())),'newIndexes':len({r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='index'")}-indexes)}))
 `, databasePath, path.join(root, 'prisma/migrations/20261103_works_learning/migration.sql')], { env, encoding: 'utf8', timeout: 30000 }));
+  execFileSync('python3', ['-c', `
+import sqlite3, sys
+with sqlite3.connect(sys.argv[1]) as db:
+    db.executescript(open(sys.argv[2]).read())
+    plan = list(db.execute("""EXPLAIN QUERY PLAN SELECT count(*) FROM WorkOperation
+        WHERE (CASE WHEN json_valid(result_json) THEN json_extract(result_json,'$.kind') END) IN ('image-template','video-template')
+        AND (CASE WHEN json_valid(result_json) THEN json_extract(result_json,'$.workId') END) IN (?)""", ('synthetic',)))
+    assert any('SEARCH WorkOperation USING INDEX WorkOperation_successful_method_work_idx' in row[3] for row in plan), plan
+`, databasePath, path.join(root, 'prisma/migrations/20261104_works_activity_trial/migration.sql')], { env, timeout: 30000 });
   for (const key of Object.keys(process.env)) if (!(key in env)) delete process.env[key];
   Object.assign(process.env, env);
   const { PrismaClient } = await import('@prisma/client');
@@ -98,6 +107,7 @@ print(json.dumps({'newTables':sorted(expected),'oldTablesPreserved':len(before),
     const { resolveContent } = await import('../src/lib/content-reactions/content');
     const { readWorkFilters } = await import('../src/lib/works/filters');
     const { readWorkPage, readWorkDetail } = await import('../src/lib/works/query');
+    const { recordWorkView, readWorkActivity } = await import('../src/lib/works/activity');
     const { workMediaResponse } = await import('../src/lib/works/media');
     const { mutateWorkLifecycle, addWorkReference, publishUploadedWork } = await import('../src/lib/works/lifecycle');
     const { assertCanViewTask } = await import('../src/lib/projects/permissions');
@@ -166,6 +176,13 @@ print(json.dumps({'newTables':sorted(expected),'oldTablesPreserved':len(before),
     assert.ok((await getWorkAccess(owner, current.work.id))?.canDownload);
     const first = await readWorkPage(colleague, new URLSearchParams());
     assert.equal(first.items.length, 1); assert.equal(first.items[0].author.name, '同事');
+    const view = { viewerId: colleague.id, mediaVersion: current.media.id };
+    assert.deepEqual(first.items[0].activity, { views: 0, reuses: 0 });
+    assert.deepEqual(await recordWorkView(colleague, current.work.id, view), { views: 1, reuses: 0 });
+    assert.deepEqual(await recordWorkView(colleague, current.work.id, view), { views: 1, reuses: 0 });
+    await assert.rejects(recordWorkView(external, current.work.id, { ...view, viewerId: external.id }), error => (error as { status?: number }).status === 404);
+    await assert.rejects(recordWorkView(colleague, current.work.id, { ...view, mediaVersion: 'old-media-version' }), error => (error as { status?: number }).status === 404);
+    assert.deepEqual((await readWorkPage(colleague, new URLSearchParams())).items[0].activity, { views: 1, reuses: 0 });
     assert.equal(first.items[0].project, null); assert.equal(first.items[0].downloadUrl, null); assert.equal(first.items[0].reuse, null);
     assert.ok(!JSON.stringify(first).includes('PRIVATE_')); assert.ok(!JSON.stringify(first).includes('example.invalid'));
     assert.equal(await resolveContent(colleague, `asset:${current.asset.id}`), null, 'A Work-preview grant must not open the legacy Asset reader');
@@ -523,6 +540,7 @@ print(json.dumps({'newTables':sorted(expected),'oldTablesPreserved':len(before),
       expectedTemplateVersion: originalDefinition.definition.sourceRevision };
     const methodReceipt = await prepareWorkMethod(owner, methodImage.work.id, methodInput);
     assert.deepEqual(await prepareWorkMethod(owner, methodImage.work.id, methodInput), methodReceipt);
+    assert.deepEqual((await readWorkActivity(database, [methodImage.work.id])).get(methodImage.work.id), { views: 0, reuses: 1 });
     assert.equal(await database.imageStudioModule.count(), moduleCountBefore + 1);
     assert.deepEqual(await getSharedStudioPersonalOverrides(owner.id, String(methodReceipt.result.moduleId), database),
       { model: 'gpt-image-2', quality: 'medium', resolution: '2K', aspectRatio: '16:9' });
@@ -545,11 +563,36 @@ print(json.dumps({'newTables':sorted(expected),'oldTablesPreserved':len(before),
     const videoMethodInput = { viewerId: owner.id, requestId: 'prepare-exact-video-method', expectedMediaVersion: methodVideoMedia.id, expectedTemplateVersion: 'studio:1' };
     const videoMethodReceipt = await prepareWorkMethod(owner, methodVideoWork.id, videoMethodInput);
     assert.deepEqual(await prepareWorkMethod(owner, methodVideoWork.id, videoMethodInput), videoMethodReceipt);
+    assert.deepEqual((await readWorkActivity(database, [methodVideoWork.id])).get(methodVideoWork.id), { views: 0, reuses: 1 });
     const actualDraft = await database.videoStudioDraft.findUniqueOrThrow({ where: { id: String(videoMethodReceipt.result.draftId) } });
     assert.deepEqual(JSON.parse(actualDraft.parameters_json), { provider: 'seedance', model: 'dreamina-seedance-2-0-260128', generationMode: 'all_in_one_reference',
       ratio: '16:9', duration: 6, resolution: '720p', seed: 123, generateAudio: true, returnLastFrame: false, watermark: false, draft: false });
     metrics.methodSettings = { publicSourceLinksChecked: true, privateAndArchivedSourceLabelsAbsent: true, crossVersionSameTemplateBrowsing: true, imageActualOverridesPreserved: true, videoActualParametersPreserved: true, defaultsNotInherited: true, originalRequestIdempotent: true };
     checks.push(WORKS_CHECKS[9]);
+    const { processWorkRecommendationTrial, WORKS_RECOMMENDATION_TRIAL_SETTING } = await import('../src/lib/works/recommendation-trial');
+    const trialSource = await createImage('recommendation-source'), trialTarget = await createImage('recommendation-target');
+    await database.imageStudioTask.update({ where: { id: trialTarget.task.id }, data: {
+      reference_ids: JSON.stringify([trialSource.asset.id]),
+      snapshot_json: JSON.stringify({ referencePolicy: { primaryIds: [trialSource.asset.id] }, primaryReferenceImages: [{ id: trialSource.asset.id }] }),
+    } });
+    await database.$transaction(tx => indexWorkContext(tx, trialTarget.work, trialTarget.media.id));
+    process.env.WORKS_PREVIEW_USER_ID = owner.id;
+    assert.equal(await processWorkRecommendationTrial(() => false), undefined);
+    await database.platformSetting.create({ data: { key: WORKS_RECOMMENDATION_TRIAL_SETTING, value_json: 'true' } });
+    const runTrial = async () => {
+      for (let i = 0; i < 10; i++) if ((await processWorkRecommendationTrial(() => false))?.complete) return;
+      assert.fail('Trial checkpoint did not finish the fixture pass');
+    };
+    const trialScore = () => database.$queryRaw<Array<{ score: number }>>`SELECT score FROM WorkRecommendationTrial WHERE viewer_id = ${owner.id} AND work_id = ${trialSource.work.id}`;
+    await runTrial();
+    assert.deepEqual((await trialScore()).map(row => Number(row.score)), [8]);
+    await runTrial();
+    assert.deepEqual((await trialScore()).map(row => Number(row.score)), [8]);
+    await database.work.update({ where: { id: trialTarget.work.id }, data: { withdrawn_at: new Date() } });
+    await runTrial();
+    assert.deepEqual(await trialScore(), []);
+    delete process.env.WORKS_PREVIEW_USER_ID;
+    checks.push(WORKS_CHECKS[10]);
     assert.deepEqual(checks, WORKS_CHECKS); assert.equal(forbiddenCalls, 0); completed = true;
   } finally {
     await database.$disconnect(); mock.restoreAll();

@@ -6,6 +6,7 @@ import type { SessionUser } from '@/lib/auth/session';
 import { workAccessSql, type WorkPermissionRow } from './access';
 import { WORKS_PROTOCOL, WorkError, type WorkAudience, type WorkCard, type WorkPage, type WorkQuery } from './types';
 import { projectWorkProvenance } from './provenance';
+import { readWorkActivity } from './activity';
 
 type PageKey = WorkPermissionRow & { completed_at: Date; project_visible: number | bigint };
 type Position = { time: string; id: string };
@@ -50,13 +51,14 @@ export function workMediaUrl(id: string, version: string, variant: string) {
 export async function projectWorkCards(user: SessionUser, keys: PageKey[], db: Prisma.TransactionClient = prisma): Promise<WorkCard[]> {
   if (!keys.length) return [];
   const ids = keys.map(key => key.id);
-  const [works, versions, states, memberships, likes] = await Promise.all([
+  const [works, versions, states, memberships, likes, activity] = await Promise.all([
     db.work.findMany({ where: { id: { in: ids } } }),
     db.workMediaVersion.findMany({ where: { id: { in: keys.map(key => key.media_id) } } }),
     db.workPersonalState.findMany({ where: { owner_id: user.id, work_id: { in: ids } } }),
     db.workCollectionItem.findMany({ where: { work_id: { in: ids }, collection: { owner_id: user.id, removed_at: null } }, select: { work_id: true, collection_id: true } }),
     db.$queryRaw<Array<{ work_id: string; amount: bigint | number }>>(Prisma.sql`SELECT work_id, count(*) AS amount FROM WorkPersonalState
       WHERE work_id IN (${Prisma.join(ids)}) AND liked = 1 GROUP BY work_id`),
+    readWorkActivity(db, keys.filter(key => key.can_preview).map(key => key.id)),
   ]);
   const [authors, projects, provenance] = await Promise.all([
     db.user.findMany({ where: { id: { in: Array.from(new Set(works.map(work => work.author_id))) } }, select: { id: true, name: true, avatar_url: true } }),
@@ -93,6 +95,7 @@ export async function projectWorkCards(user: SessionUser, keys: PageKey[], db: P
       audience: work.audience as WorkAudience, canManage: owned, discoverable: work.discoverable, withdrawn: Boolean(work.withdrawn_at),
       personal: { liked: state?.liked || false, favorited: state?.favorited || false, hidden: state?.hidden || false, version: state?.version || 0 },
       likeCount: countById.get(work.id) || 0, collectionIds: memberships.filter(item => item.work_id === work.id).map(item => item.collection_id),
+      activity: canPreview ? activity.get(work.id) || { views: 0, reuses: 0 } : undefined,
     } satisfies WorkCard];
   });
 }

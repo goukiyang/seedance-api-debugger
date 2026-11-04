@@ -134,6 +134,12 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
   function close() { navigationEpoch.current++; if (detailOpenedHere.current) { router.back(); return; } const params = new URLSearchParams(searchParams); params.delete('work'); if (!params.size) params.set('scope', 'all'); router.replace(`/works?${params}`, { scroll: false }); }
   function returnToList() { navigationEpoch.current++; remember(); const params = new URLSearchParams(searchParams); params.delete('work'); if (!params.size) params.set('scope', 'all'); router.push(`/works?${params}`, { scroll: false }); }
   const updateWork = useCallback((work: WorkCard) => { setPages(old => old.map(page => ({ ...page, items: page.items.map(item => item.id === work.id ? work : item) }))); setClassify(old => old?.id === work.id ? work : old); }, []);
+  const updateActivity = useCallback((id: string, mediaVersion: string, activity: NonNullable<WorkCard['activity']>) => {
+    setPages(old => old.map(page => ({ ...page, items: page.items.map(work => {
+      if (work.id !== id || work.mediaVersion !== mediaVersion) return work;
+      return { ...work, activity: { views: Math.max(work.activity?.views ?? 0, activity.views), reuses: Math.max(work.activity?.reuses ?? 0, activity.reuses) } };
+    }) })));
+  }, []);
   const applyResult = useCallback(async (result: Record<string, unknown>, key: string) => {
     if (!alive.current) return;
     if (key.startsWith('method:') && typeof result.href === 'string' && result.href.startsWith('/') && !result.href.startsWith('//')) setMethodHref(result.href);
@@ -244,7 +250,7 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
         {last?.nextCursor && <div className={styles.pageControl}><button type="button" disabled={loading} onClick={() => void load('after')}>{loading ? '正在读取…' : '更多作品'}</button></div>}{loading && items.length > 0 && <p className={styles.muted} role="status">正在读取作品…</p>}
       </section>
     </div>}
-    {workId && <WorkDetail key={workId} id={workId} viewerId={viewerId} preparation={imagePreparation.current} revision={detailRevision} likesRevision={detailLikesRevision} playback={playback} onClose={close} onList={returnToList} onOpen={open} onWork={updateWork} onFilter={(key, id) => chooseFilter(key, id)} onClassify={setClassify} busy={busyKeys.includes(`work:${workId}`) || busyKeys.includes(`method:${workId}`) || busyKeys.some(key => key.startsWith(`preview:${workId}:`))} operate={operate} />}
+    {workId && <WorkDetail key={workId} id={workId} viewerId={viewerId} preparation={imagePreparation.current} revision={detailRevision} likesRevision={detailLikesRevision} playback={playback} onClose={close} onList={returnToList} onOpen={open} onWork={updateWork} onActivity={updateActivity} onFilter={(key, id) => chooseFilter(key, id)} onClassify={setClassify} busy={busyKeys.includes(`work:${workId}`) || busyKeys.includes(`method:${workId}`) || busyKeys.some(key => key.startsWith(`preview:${workId}:`))} operate={operate} />}
     {classify && <ClassifyWork work={classify} directory={directory} operate={operate} busy={busyKeys.includes(`work:${classify.id}`) || busyKeys.includes('collection:create')} onClose={() => setClassify(null)} />}
     {adding && <AddWorkPicker viewerId={viewerId} operate={operate} onClose={() => setAdding(false)} />}
   </div>;

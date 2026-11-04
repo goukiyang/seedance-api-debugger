@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MutableRefObject } from 'react';
-import { ArrowUpRight } from 'lucide-react';
+import { ArrowUpRight, Eye, Repeat2 } from 'lucide-react';
 import { defaultRangeExtractor, useWindowVirtualizer } from '@tanstack/react-virtual';
 import type { WorkCard } from '@/lib/works/types';
 import type { WorkAnchor, WorkRestore } from '@/lib/works/view-state';
@@ -10,6 +10,8 @@ import { WorkMedia } from './WorkMedia';
 import { WorkActions, reuseWorkTemplate, type WorkOperate } from './WorkActions';
 import { WorkAuthor } from './WorkAuthor';
 import styles from './Works.module.css';
+
+const compactCount = new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 1 });
 
 export function visibleWorkAnchor(): WorkAnchor | null {
   const card = Array.from(document.querySelectorAll<HTMLElement>('[data-work-card]')).filter(card => card.getBoundingClientRect().bottom > 100).sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)[0];
@@ -129,6 +131,10 @@ export function WorksMasonry({ items, playback, contextKey, detailOpen, busyKeys
       <div className={styles.cardSource} data-work-action="source">{work.provenance
         ? <a href={(work.provenance.template || work.provenance.tool).href} title={`${work.provenance.tool.label} · ${work.provenance.template?.label || work.provenance.tool.label}`}>{(work.provenance.template || work.provenance.tool).label}</a>
         : <span>来源未记录</span>}</div>
+      {work.activity && <div className={styles.cardActivity}>
+        <span role="img" title={`查看 ${work.activity.views} 次`} aria-label={`查看 ${work.activity.views} 次`}><Eye size={13} aria-hidden="true" />{compactCount.format(work.activity.views)}</span>
+        <span role="img" title={`复用 ${work.activity.reuses} 次`} aria-label={`复用 ${work.activity.reuses} 次`}><Repeat2 size={13} aria-hidden="true" />{compactCount.format(work.activity.reuses)}</span>
+      </div>}
       <div className={styles.cardIdentity} data-work-action="author"><WorkAuthor author={work.author} onClick={() => onFilter('author', work.author.id)} /></div>
     </div>
   </article>; })}</div>;

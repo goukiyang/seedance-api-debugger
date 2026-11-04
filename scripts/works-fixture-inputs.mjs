@@ -9,8 +9,12 @@ export const WORKS_CHECKS = [
   'provenance_learning_receipts_versions_and_authority',
   'source_discovery_fault_does_not_starve_ready_video_jobs',
   'method_drafts_preserve_actual_settings_and_original_receipt',
+  'activity_projection_and_checkpointed_recommendation_trial',
 ];
 export const WORKS_SOURCES = [
+  'prisma/migrations/20261104_works_activity_trial/migration.sql',
+  'src/lib/works/activity.ts', 'src/lib/works/recommendation-trial.ts',
+  'src/lib/works/recommendation-shadow.ts', 'src/lib/works/recommendation-score.ts',
   'scripts/works-method-pin-engineering.ts',
   'src/lib/image-studio/shared-contract.ts', 'src/lib/template-studio/drafts.ts',
   'scripts/works-engineering.ts', 'scripts/works-consumer-scheduler.ts',
