@@ -27,7 +27,7 @@ export async function quotePricingCharge(identity: PricingAdminIdentity, quantit
     pointsPerCny: row.currentPointsPerCny, exchangeRate: row.exchangeRate,
     legacyUnitCredits: row.currentUnitCredits, legacyRounding: row.legacyRounding,
     quantity: normalizedQuantity, issuedAt: new Date().toISOString(),
-    rounding: row.mode === 'legacy_fixed' || row.mode === 'legacy_actual' ? 'legacy' : 'half_up_tenth',
+    rounding: row.mode === 'legacy_fixed' || row.mode === 'legacy_actual' ? 'legacy' : row.rounding ?? 'half_up_tenth',
   };
   const computed = identity.billingMode === 'actual' && row.mode !== 'free' ? null : frozenPricingCredits(charge);
   return { charge, ...computed, credits: computed?.credits ?? null };

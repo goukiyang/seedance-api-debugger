@@ -10,7 +10,7 @@ const emptySource: PricingAdminSourceInput = { type: 'admin_defined', reference:
 const sourceNames: Record<PricingAdminSourceInput['type'], string> = {
   admin_defined: '管理员制定', document: '参考文档', supplier_statement: '供应商账单', existing_contract: '已有合同',
 };
-const roundingNames: Record<string, string> = { half_up_tenth: '任务扣点四舍五入至1位小数', ceil_task: '沿原合同，任务点数向上取整', fixed_unit: '沿原固定单位点价', half_up_cent: '沿原合同，保留2位小数', legacy: '沿原合同取整' };
+const roundingNames: Record<string, string> = { half_up_integer: '整单四舍五入到整数点', half_up_tenth: '任务扣点四舍五入至1位小数', ceil_task: '沿原合同，任务点数向上取整', fixed_unit: '沿原固定单位点价', half_up_cent: '沿原合同，保留2位小数', legacy: '沿原合同取整' };
 
 export default function PricingSourceEditor({ row, rows, change, onChange, onAdoptGpt, exampleAmount, onExampleAmount, scenario }: {
   row: PricingAdminRow; rows: PricingAdminRow[]; change?: PricingAdminRowChange; onChange(patch: Omit<PricingAdminRowChange, 'id'>): void;

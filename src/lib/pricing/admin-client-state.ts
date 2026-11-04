@@ -3,6 +3,7 @@ import type {
   PricingAdminPreview, PricingAdminPreviewInput, PricingAdminRow, PricingAdminRowChange, PricingAdminSaveInput, PricingAdminSimulation,
 } from './admin-contract';
 import type { PricingEnhanceGroup } from './pricing-authoring-contract';
+import { RMB_INTEGER_ROUNDING } from './admin-contract';
 import { compareDecimal, divideDecimal, multiplyDecimal, normalizeDecimal } from './math';
 import { pricingDisplayName } from './admin-display';
 
@@ -199,6 +200,10 @@ export function parsePricingAdminWorkspace(raw: string | null, actorId: string):
         clean.mode = row.mode;
       }
       if (row.customPointsPerCny !== undefined) { if (!text(row.customPointsPerCny, 32)) return null; clean.customPointsPerCny = row.customPointsPerCny; }
+      if (row.rounding !== undefined) {
+        if (row.rounding !== RMB_INTEGER_ROUNDING) return null;
+        clean.rounding = row.rounding;
+      }
       if (row.basisKind !== undefined) { if (!['site_base_cny', 'supplier_cost_cny'].includes(row.basisKind)) return null; clean.basisKind = row.basisKind; }
       if (row.base !== undefined) {
         if (!text(row.base.amount, 32) || row.base.currency !== 'CNY' || !['image', 'second'].includes(row.base.unit) || !source(row.base.source)) return null;
