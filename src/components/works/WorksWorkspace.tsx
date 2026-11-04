@@ -31,7 +31,7 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
   const router = useRouter(), searchParams = useSearchParams(), paramsKey = searchParams.toString();
   const query = useMemo(() => parseWorksQuery(new URLSearchParams(paramsKey)), [paramsKey]), queryKey = worksQueryString(query).toString(), workId = searchParams.get('work') || '';
   const [ready, setReady] = useState(false), [pages, setPages] = useState<WorkPage[]>([]), [loading, setLoading] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState(''), [methodHref, setMethodHref] = useState(''), [failedDirection, setFailedDirection] = useState<'initial' | 'before' | 'after'>('initial');
-  const [refresh, setRefresh] = useState(0), [detailRevision, setDetailRevision] = useState(0), [collectionRevision, setCollectionRevision] = useState(0), [classify, setClassify] = useState<WorkCard | null>(null), [adding, setAdding] = useState(false), [search, setSearch] = useState(query.q || ''), [busy, setBusy] = useState<string[]>([]), [pending, setPending] = useState<PendingWorkOperation[]>([]), [restore, setRestore] = useState<WorkRestore | null>(null), [filtersOpen, setFiltersOpen] = useState(false), [filterNames, setFilterNames] = useState<Record<string, string>>({});
+  const [refresh, setRefresh] = useState(0), [detailRevision, setDetailRevision] = useState(0), [detailLikesRevision, setDetailLikesRevision] = useState(0), [collectionRevision, setCollectionRevision] = useState(0), [classify, setClassify] = useState<WorkCard | null>(null), [adding, setAdding] = useState(false), [search, setSearch] = useState(query.q || ''), [busy, setBusy] = useState<string[]>([]), [pending, setPending] = useState<PendingWorkOperation[]>([]), [restore, setRestore] = useState<WorkRestore | null>(null), [filtersOpen, setFiltersOpen] = useState(false), [filterNames, setFilterNames] = useState<Record<string, string>>({});
   const epoch = useRef(0), alive = useRef(true), loadBusy = useRef(false), pagesRef = useRef(pages), queryRef = useRef(queryKey), loadedQueryRef = useRef(queryKey), resetWindow = useRef(false), restoringList = useRef(false), operationLocks = useRef(new Set<string>()), detailOpenedHere = useRef(false), pendingDetailBack = useRef(false), navigationEpoch = useRef(0), restoreGeneration = useRef(0), workIdRef = useRef(workId), previousWorkId = useRef<string | null>(null), sentinel = useRef<HTMLDivElement>(null), autoAttempt = useRef(''), autoMore = useRef<() => void>(() => {});
   pagesRef.current = pages; queryRef.current = queryKey; workIdRef.current = workId;
   const playback = useMemo(() => new AssetPlaybackCoordinator(), []), directory = useWorkCollections(viewerId, collectionRevision);
@@ -153,19 +153,29 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
       const params = new URLSearchParams(queryRef.current);
       if (params.get('collection') === result.collectionId) { params.delete('collection'); resetWindow.current = true; router.replace(`/works?${params}`, { scroll: false }); }
     }
-    setCollectionRevision(value => value + 1); setDetailRevision(value => value + 1);
+    if (result.kind === 'work-state' && result.action === 'like') {
+      if (workIdRef.current === idForPatch) {
+        setDetailLikesRevision(value => value + 1);
+        return;
+      }
+    } else {
+      setCollectionRevision(value => value + 1);
+      setDetailRevision(value => value + 1);
+    }
     const id = typeof result.workId === 'string' ? result.workId : key.startsWith('work:') ? key.slice(5) : '';
     if (id) { try { const data = await worksRead<{ viewerId: string; work: WorkCard }>(`/api/works/${encodeURIComponent(id)}`, viewerId); if (alive.current) updateWork(data.work); } catch { if (alive.current) setNotice('操作已保存，作品信息暂未更新，可重新读取。'); } }
   }, [viewerId, updateWork, router]);
   const operate: WorkOperate = useCallback(async (key, url, body, method = 'POST') => {
-    if (operationLocks.current.has(key)) return null; operationLocks.current.add(key); setBusy(old => [...old, key]); setNotice(''); setMethodHref('');
-    try { const result = await worksMutate(viewerId, key, url, body, method); if (!alive.current) return null; await applyResult(result, key); setNotice(url.endsWith('/publish') ? '已加入我的作品，点击刷新查看新作品。' : url.endsWith('/reference') ? '已加入生成工作区' : '已保存'); return result; }
+    if (operationLocks.current.has(key)) return null; operationLocks.current.add(key); setBusy(old => [...old, key]);
+    const isLike = url.endsWith('/state') && body.action === 'like';
+    if (!isLike) { setNotice(''); setMethodHref(''); }
+    try { const result = await worksMutate(viewerId, key, url, body, method); if (!alive.current) return null; await applyResult(result, key); if (!isLike) setNotice(url.endsWith('/publish') ? '已加入我的作品，点击刷新查看新作品。' : url.endsWith('/reference') ? '已加入生成工作区' : '已保存'); return result; }
     catch (cause) { if (alive.current) { setNotice(cause instanceof Error ? cause.message : '操作未完成'); if (cause instanceof WorksClientError && cause.status === 409 && (key.startsWith('work:') || key.startsWith('method:'))) { setDetailRevision(value => value + 1); void worksRead<{ viewerId: string; work: WorkCard }>(`/api/works/${encodeURIComponent(key.slice(key.indexOf(':') + 1))}`, viewerId).then(data => { if (alive.current) updateWork(data.work); }).catch(() => {}); } } return null; }
     finally { operationLocks.current.delete(key); if (alive.current) { setBusy(old => old.filter(item => item !== key)); setPending(pendingWorkOperations(viewerId)); } }
   }, [viewerId, applyResult, updateWork]);
   async function reconcile(operation: PendingWorkOperation) {
     if (operationLocks.current.has(operation.key)) return; operationLocks.current.add(operation.key); setBusy(old => [...old, operation.key]);
-    try { const result = await queryWorkOperation(viewerId, operation); if (alive.current) { await applyResult(result, operation.key); setNotice('原操作已确认保存'); } }
+    try { const result = await queryWorkOperation(viewerId, operation); if (alive.current) { await applyResult(result, operation.key); if (result.kind !== 'work-state' || result.action !== 'like') setNotice('原操作已确认保存'); } }
     catch (cause) { if (alive.current) setNotice(cause instanceof Error ? cause.message : '原操作尚未确认'); }
     finally { operationLocks.current.delete(operation.key); if (alive.current) { setBusy(old => old.filter(item => item !== operation.key)); setPending(pendingWorkOperations(viewerId)); } }
   }
@@ -216,6 +226,7 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
             {(['author', 'project'] as const).map(key => query[key] && <button key={key} type="button" title={filterLabel(key)} onClick={() => updateQuery({ [key]: undefined })}><span>{filterLabel(key) ? `${key === 'author' ? '作者' : '项目'}：${filterLabel(key)}` : key === 'author' ? '已选作者' : '已选项目'}</span><X size={14} /></button>)}
             {query.collection && <button type="button" onClick={() => updateQuery({ collection: undefined })}><span>{directory.collections.find(item => item.id === query.collection)?.name || '已选集合'}</span><X size={14} /></button>}
           </div>}
+          {query.scope === 'favorites' && <CollectionManager directory={directory} selected={query.collection} onSelect={collection => updateQuery({ collection })} operate={operate} busy={busy.length > 0 || pending.some(item => item.key.startsWith('collection:'))} />}
           <div className={styles.filterFooter}>{hasFilters && <button type="button" onClick={() => updateQuery({ medium: 'all', q: undefined, author: undefined, project: undefined, collection: undefined })}>清除筛选</button>}<button type="button" disabled={loading} onClick={() => { navigationEpoch.current++; remember(); resetWindow.current = true; window.scrollTo({ top: 0 }); setRefresh(value => value + 1); setFiltersOpen(false); }}><RefreshCw size={16} />刷新作品</button></div>
         </Popper.Content>, document.body)}
       </Popper.Root>
@@ -224,7 +235,7 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
     </>}
     {notice && <div className={styles.notice} role="status"><span>{notice}{methodHref && <a href={methodHref} className={styles.textAction}>打开本人模板草稿</a>}</span><button type="button" aria-label="关闭提示" onClick={() => { setNotice(''); setMethodHref(''); }}><X size={15} /></button></div>}
     {pending.length > 0 && <div className={styles.pending} role="status"><p>有 {pending.length} 项提交结果待确认，原操作编号已保留。</p>{pending.map(operation => <button key={operation.requestId} type="button" title={operation.requestId} disabled={busy.includes(operation.key)} onClick={() => void reconcile(operation)}>核对原操作 {operation.requestId.slice(0, 8)}</button>)}</div>}
-    {!workId && <div className={styles.workspace}>{query.scope === 'favorites' && <CollectionManager directory={directory} selected={query.collection} onSelect={collection => updateQuery({ collection })} operate={operate} busy={busy.length > 0 || pending.some(item => item.key.startsWith('collection:'))} />}
+    {!workId && <div>
       <section className={styles.feed} aria-label="作品内容">{first?.previousCursor && <div className={styles.pageControl}><button type="button" disabled={loading} onClick={() => void load('before')}>读取前面的作品</button></div>}
         {error && failedDirection !== 'after' && <div className={styles.readError} role="status"><p>{error}</p><button type="button" disabled={loading} onClick={() => void load(failedDirection)}>重试读取</button></div>}
         {items.length > 0 ? <WorksMasonry items={items} playback={playback} contextKey={`${viewerId}:${queryKey}`} detailOpen={Boolean(workId || classify || adding)} busyKeys={busyKeys} operate={operate} onClassify={setClassify} onOpen={open} onFilter={(key, id) => chooseFilter(key, id)} restore={restore} navigationEpoch={navigationEpoch} onRestored={onRestored} /> : loading ? <div className={styles.skeletonGrid} role="status" aria-label="正在读取作品">{Array.from({ length: 6 }, (_, i) => <div key={i} className={styles.skeleton} />)}</div> : !error && <div className={styles.empty}><h2>{hasFilters ? '没有匹配的作品' : query.scope === 'favorites' ? '先收藏喜欢的作品' : query.scope === 'hidden' ? '没有对你隐藏的作品' : query.scope === 'managed' ? '没有可管理的作品分享' : '这里还没有作品'}</h2><p>{hasFilters ? '试试清除筛选，或换一个标题关键词。' : query.scope === 'favorites' ? '先收藏到全部收藏，之后可按需归类。' : query.scope === 'hidden' ? '隐藏的作品可在这里恢复显示。' : '已有成品会按原有权限显示，也可以明确加入本人上传的作品。'}</p><div>{hasFilters ? <button type="button" onClick={() => updateQuery({ medium: 'all', q: undefined, author: undefined, project: undefined, collection: undefined })}>清除筛选</button> : <><button type="button" onClick={() => updateQuery({ scope: 'mine' })}>我的作品</button><button type="button" className={styles.primary} onClick={() => setAdding(true)}>添加作品</button></>}</div></div>}
@@ -233,7 +244,7 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
         {last?.nextCursor && <div className={styles.pageControl}><button type="button" disabled={loading} onClick={() => void load('after')}>{loading ? '正在读取…' : '更多作品'}</button></div>}{loading && items.length > 0 && <p className={styles.muted} role="status">正在读取作品…</p>}
       </section>
     </div>}
-    {workId && <WorkDetail key={workId} id={workId} viewerId={viewerId} preparation={imagePreparation.current} revision={detailRevision} playback={playback} onClose={close} onList={returnToList} onOpen={open} onWork={updateWork} onFilter={(key, id) => chooseFilter(key, id)} onClassify={setClassify} busy={busyKeys.includes(`work:${workId}`) || busyKeys.includes(`method:${workId}`) || busyKeys.some(key => key.startsWith(`preview:${workId}:`))} operate={operate} />}
+    {workId && <WorkDetail key={workId} id={workId} viewerId={viewerId} preparation={imagePreparation.current} revision={detailRevision} likesRevision={detailLikesRevision} playback={playback} onClose={close} onList={returnToList} onOpen={open} onWork={updateWork} onFilter={(key, id) => chooseFilter(key, id)} onClassify={setClassify} busy={busyKeys.includes(`work:${workId}`) || busyKeys.includes(`method:${workId}`) || busyKeys.some(key => key.startsWith(`preview:${workId}:`))} operate={operate} />}
     {classify && <ClassifyWork work={classify} directory={directory} operate={operate} busy={busyKeys.includes(`work:${classify.id}`) || busyKeys.includes('collection:create')} onClose={() => setClassify(null)} />}
     {adding && <AddWorkPicker viewerId={viewerId} operate={operate} onClose={() => setAdding(false)} />}
   </div>;

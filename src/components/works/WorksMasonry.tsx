@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MutableRefObject } from 'react';
+import { ArrowUpRight } from 'lucide-react';
 import { defaultRangeExtractor, useWindowVirtualizer } from '@tanstack/react-virtual';
 import type { WorkCard } from '@/lib/works/types';
 import type { WorkAnchor, WorkRestore } from '@/lib/works/view-state';
@@ -46,10 +47,10 @@ export function WorksMasonry({ items, playback, contextKey, detailOpen, busyKeys
   }, [navigationEpoch]);
   useLayoutEffect(() => { const element = container.current; if (element) setMargin(element.getBoundingClientRect().top + window.scrollY); }, [items, busyKeys, detailOpen]);
   const lanes = width >= 1450 ? 5 : width >= 1100 ? 4 : width >= 760 ? 3 : 2, gap = width < 600 ? 10 : 18, columnWidth = Math.max(0, (width - gap * (lanes - 1)) / lanes);
-  const focusedIndex = items.findIndex(work => work.id === (restore?.focusId || focused)), geometry = `${width}:${margin}:${items.map(work => `${work.id}:${work.width}:${work.height}`).join(',')}`;
+  const focusedIndex = items.findIndex(work => work.id === (restore?.focusId || focused)), geometry = `${width}:${margin}:${items.map(work => `${work.id}:${work.width}:${work.height}:${Boolean(work.provenance?.template?.reuseVersion)}`).join(',')}`;
   const getItemKey = useCallback((index: number) => itemsRef.current[index].id, []);
   const virtual = useWindowVirtualizer({ count: width ? items.length : 0, lanes, gap, scrollMargin: margin, overscan: 2, getItemKey,
-    estimateSize: index => { const work = itemsRef.current[index]; return Math.max(40, columnWidth * (work.width && work.height ? work.height / work.width : 1)) + 44; },
+    estimateSize: index => { const work = itemsRef.current[index]; return Math.max(40, columnWidth * (work.width && work.height ? work.height / work.width : 1)) + 44 + (work.provenance?.template?.reuseVersion ? 40 : 0); },
     rangeExtractor: range => { const visible = defaultRangeExtractor(range); return focusedIndex < 0 || visible.includes(focusedIndex) ? visible : [...visible, focusedIndex].sort((a, b) => a - b); },
   });
   useLayoutEffect(() => {
@@ -114,11 +115,15 @@ export function WorksMasonry({ items, playback, contextKey, detailOpen, busyKeys
     const action = target.closest<HTMLElement>('[data-work-action]')?.dataset.workAction;
     if (action) { focus.current = { workId, action, navigationEpoch: navigationEpoch.current }; setFocused(workId); }
   }
-  return <div ref={container} className={styles.masonry} style={{ height: virtual.getTotalSize() }} aria-label="作品列表">{virtual.getVirtualItems().map(item => { const work = items[item.index]; return <article key={work.id} className={styles.workCard} data-work-card={work.id} style={{ width: columnWidth, position: 'absolute', top: 0, left: item.lane * (columnWidth + gap), transform: `translateY(${item.start - margin}px)` }}
+  return <div ref={container} className={styles.masonry} style={{ height: virtual.getTotalSize() }} aria-label="作品列表">{virtual.getVirtualItems().map(item => { const work = items[item.index];
+    const canReuse = Boolean(work.provenance?.template?.reuseVersion);
+    const busy = busyKeys.includes(`work:${work.id}`) || busyKeys.includes(`method:${work.id}`);
+    return <article key={work.id} className={styles.workCard} data-work-card={work.id} style={{ width: columnWidth, position: 'absolute', top: 0, left: item.lane * (columnWidth + gap), transform: `translateY(${item.start - margin}px)` }}
     onFocusCapture={event => rememberFocus(work.id, event.target)} onKeyDownCapture={event => rememberFocus(work.id, event.target)} onPointerDownCapture={event => { if (event.currentTarget.contains(document.activeElement)) rememberFocus(work.id, document.activeElement); }}>
-    <div className={styles.cardVisual}>
+    <div className={styles.cardVisual} data-reusable={canReuse || undefined}>
       <div className={styles.mediaButton} data-work-action="preview" role="button" tabIndex={0} aria-label={`查看作品：${work.title}`} onClick={() => onOpen(work)} onKeyDown={event => { if (event.target === event.currentTarget && ['Enter', ' '].includes(event.key)) { event.preventDefault(); onOpen(work); } }}><WorkMedia key={`${work.id}:${work.mediaVersion}`} work={work} playback={playback} contextKey={contextKey} detailOpen={detailOpen} /></div>
-      <div className={styles.cardOverlay}><WorkActions work={work} onReuse={() => void reuse(work)} busy={busyKeys.includes(`work:${work.id}`) || busyKeys.includes(`method:${work.id}`)} operate={operate} onClassify={onClassify} /></div>
+      <div className={styles.cardOverlay}><WorkActions work={work} cover busy={busy} operate={operate} onClassify={onClassify} /></div>
+      {canReuse && <button type="button" className={styles.reuseButton} data-work-action="reuse" disabled={busy} onClick={() => void reuse(work)}><span>一键复用</span><ArrowUpRight size={15} /></button>}
     </div>
     <div className={styles.cardInfo}>
       <div className={styles.cardSource} data-work-action="source">{work.provenance
