@@ -255,8 +255,13 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
     if (old.length !== pending.length || old.some(id => !pending.includes(id))) {
       try { writePending(pending, id); }
       catch { pendingRef.current = pending; setPendingPlanIds(pending); }
-      const accepted = old.some(planId => result.taskByRequestId[planId]);
+      const accepted = result.plans.find(plan => old.includes(plan.id) && result.taskByRequestId[plan.id]);
       if (accepted) {
+        const draft = draftRef.current;
+        if (draft && !accepted.operation && accepted.sourceAssetId === draft.sourceAssetId) {
+          const next = { ...draft, ...(accepted.kind === 'faces' ? { facePlanId: accepted.id } : { resultPlanId: accepted.id }) };
+          draftRef.current = next; setDraft(next); setSaveState('dirty');
+        }
         setNotice('已核对到原任务，可在本次结果或历史中查看。');
         void session.refreshCredits();
       }
