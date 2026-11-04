@@ -1416,13 +1416,13 @@ export async function cancelQueuedChannelTask(ownerId: string, id: string, clien
   return client ? cancel(client) : prisma.$transaction(cancel, { timeout: 15000 });
 }
 
-export async function listStudioTasks(ownerId: string, cursor?: string, moduleId?: string, isAdmin = false, taskId?: string, requestId?: string, likedOnly = false) {
+export async function listStudioTasks(ownerId: string, cursor?: string, moduleId?: string, isAdmin = false, taskId?: string, requestId?: string, likedOnly = false, historyModuleId?: string) {
   if (moduleId && !validStudioModuleId(moduleId, ownerId)) throw new StudioError('模块编号无效');
   if (taskId !== undefined && (typeof taskId !== 'string' || !taskId || taskId.length > 120)) throw new StudioError('历史生成记录无效');
   if (requestId !== undefined && !/^[a-zA-Z0-9-]{16,80}$/.test(requestId)) throw new StudioError('提交编号无效');
   // Explicit original-task/request lookup remains owner-scoped; only template catalogs exclude tool results.
   const excludedToolBatches = taskId !== undefined || requestId ? [] : await characterLabTaskBatchIds(ownerId);
-  const where: Prisma.ImageStudioTaskWhereInput = { ...studioTemplateTaskWhere(ownerId, moduleId, taskId !== undefined || Boolean(requestId), excludedToolBatches),
+  const where: Prisma.ImageStudioTaskWhereInput = { ...studioTemplateTaskWhere(ownerId, moduleId, taskId !== undefined || Boolean(requestId), excludedToolBatches, requestId ? undefined : historyModuleId),
     ...(requestId ? { batch_id: createHash('sha256').update(`${ownerId}:${requestId}`).digest('hex') } : {}) };
   if (likedOnly) {
     if (!moduleId || taskId || requestId) throw new StudioError('请选择当前模板的喜欢结果');
@@ -1466,7 +1466,7 @@ export async function studioTaskDTOs(ownerId: string, isAdmin: boolean, items: I
     const snapshot = publicStudioSnapshot(task, assetById, isAdmin, ownerId);
     const mismatch = studioDimensionMismatch(task);
     const readableIds = new Set(assetById.keys());
-    return { id: task.id, batchId: task.batch_id, ordinal: task.ordinal,
+    return { id: task.id, batchId: task.batch_id, moduleId: task.module_id, ordinal: task.ordinal,
       owner: publicOwner,
       delivery: deliveries.get(task.id),
       safeRetry: retries.get(task.id),

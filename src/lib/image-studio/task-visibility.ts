@@ -7,6 +7,7 @@ export function studioTemplateTaskWhere(
   moduleId?: string,
   historical = false,
   excludedToolBatches: string[] = [],
+  historyModuleId?: string,
 ): Prisma.ImageStudioTaskWhereInput {
   return { owner_id: viewerId, deleted_at: null,
     ...(excludedToolBatches.length ? { batch_id: { notIn: excludedToolBatches } } : {}),
@@ -14,6 +15,7 @@ export function studioTemplateTaskWhere(
       { snapshot_json: null },
       { AND: [{ NOT: { snapshot_json: { contains: '"avatar":' } } }, { NOT: { snapshot_json: { contains: '"avatarLayout":' } } }] },
     ] }] } : {}),
-    ...(moduleId ? moduleId === defaultStudioModuleId(viewerId) ? { OR: [{ module_id: null }, { module_id: moduleId }] } : { module_id: moduleId } : {}),
+    ...(moduleId ? moduleId === defaultStudioModuleId(viewerId) ? { OR: [{ module_id: null }, { module_id: moduleId }] }
+      : { module_id: historyModuleId ? { in: [moduleId, historyModuleId] } : moduleId } : {}),
   };
 }
