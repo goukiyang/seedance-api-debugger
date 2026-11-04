@@ -5,6 +5,7 @@ export const PRICING_POLICY_KEY = 'pricing_policy_v1';
 export const PRICING_REVISION_PREFIX = 'pricing_policy_revision_v1:';
 export const PRICING_OPERATION_PREFIX = 'pricing_policy_operation_v1:';
 export const PRICING_UNCONFIGURED_REVISION = 'unconfigured';
+export const RMB_INTEGER_ROUNDING = 'half_up_integer' as const;
 
 export type PricingAdminKind = 'video' | 'image' | 'enhance' | 'h3';
 export type PricingAdminBasis = 'site_base_cny' | 'supplier_cost_cny';
@@ -50,6 +51,7 @@ export type PricingAdminExchange = PricingAdminExchangeInput & {
 };
 
 export type PricingAdminRow = {
+  rounding?: typeof RMB_INTEGER_ROUNDING;
   authoringRateMode?: PricingAuthoringRateMode;
   authoringEntry?: PricingAuthoringEntry | null;
   id: string;
@@ -104,6 +106,7 @@ export type PricingAdminSnapshot = {
 };
 
 export type PricingAdminRowChange = {
+  rounding?: typeof RMB_INTEGER_ROUNDING;
   specifications?: Record<string, string>;
   authoringRateMode?: 'follow_global' | 'custom';
   baseRelation?: { parentId: string; factor: '1.5' } | null;
@@ -140,7 +143,7 @@ export type PricingAdminPreviewInput = {
 };
 export type PricingAdminPriceView = Pick<PricingAdminRow, 'mode' | 'baseCny' | 'basisKind'
   | 'currentPointsPerCny' | 'currentUnitCredits' | 'relativeMultiplier' | 'differencePercent'
-  | 'confirmation' | 'hasDifference' | 'exchangeRate' | 'authoringRateMode' | 'authoringEntry'>;
+  | 'confirmation' | 'hasDifference' | 'exchangeRate' | 'authoringRateMode' | 'authoringEntry' | 'rounding'>;
 export type PricingAdminSimulation = {
   sourceRowId: string;
   specifications: Record<string, string>;

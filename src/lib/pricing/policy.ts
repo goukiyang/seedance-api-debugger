@@ -5,12 +5,12 @@ import { AuthError } from '@/lib/auth/session';
 import { PricingItemUnavailableError } from './item-unavailable';
 import { isSeedanceVideoDuration } from '@/lib/provider/seedance-models';
 import { assertPricingImageConsumerReady, pricingImageConsumerState } from './runtime';
-import { normalizeDecimal, multiplyDecimal, subtractDecimal, roundDecimal, compareDecimal, divideDecimal, PricingNumberError } from './math';
+import { normalizeDecimal, multiplyDecimal, subtractDecimal, roundDecimal, roundFixedPricingCredits, compareDecimal, divideDecimal, PricingNumberError } from './math';
 import { selectPricingRule, assertNoRuleAmbiguity, PricingRuleConflict } from './resolve';
 import { getPricingCatalog, appendPricingCatalogScopes, pricingCatalogRowId, assertPricingCatalogIdentity, pricingCanonical, pricingFingerprint, type PricingCatalog,
   type PricingCatalogBinding, type PricingClient } from './catalog';
 import { PRICING_ADMIN_SCHEMA, PRICING_POLICY_KEY, PRICING_REVISION_PREFIX, PRICING_OPERATION_PREFIX,
-  PRICING_UNCONFIGURED_REVISION, PRICING_ADMIN_LIMITS,
+  PRICING_UNCONFIGURED_REVISION, PRICING_ADMIN_LIMITS, RMB_INTEGER_ROUNDING,
   type PricingAdminActor, type PricingAdminBasis, type PricingAdminRow, type PricingAdminIdentity,
   type PricingAdminAction, type PricingAdminPreviewInput, type PricingAdminPreview, type PricingAdminSaveInput,
   type PricingAdminOperation, type PricingAdminSnapshot, type PricingAdminHistory, type PricingAdminHistoryEntry,
@@ -26,6 +26,7 @@ import { emptyPricingAuthoring, parsePricingAuthoring, pricingAuthoringContent, 
 type Actor = Pick<PricingAdminActor, 'id'>;
 type Standards = Record<PricingAdminBasis, string | null>;
 type StoredRule = {
+  rounding?: typeof RMB_INTEGER_ROUNDING;
   id: string; identity: PricingAdminIdentity; mode: PricingAdminRow['mode']; basisKind: PricingAdminBasis;
   baseCny: string | null; source: PricingAdminSource | null; exchangeRate: PricingAdminExchange | null;
   customPointsPerCny: string | null; binding: PricingCatalogBinding;
@@ -94,8 +95,12 @@ function exchangeInput(value: unknown): PricingAdminExchangeInput {
     rate: normalized, effectiveFrom: new Date(time).toISOString(), source: sourceInput(value.source) };
 }
 function rowChange(value: unknown): PricingAdminRowChange {
-  keys(value, ['id', 'mode', 'customPointsPerCny', 'basisKind', 'base', 'exchangeRate', 'specifications', 'authoringRateMode', 'baseRelation', 'evidence']);
+  keys(value, ['id', 'mode', 'customPointsPerCny', 'basisKind', 'base', 'exchangeRate', 'specifications', 'authoringRateMode', 'baseRelation', 'evidence', 'rounding']);
   const result: PricingAdminRowChange = { id: textValue(value.id, 160) };
+  if (value.rounding !== undefined) {
+    if (value.rounding !== RMB_INTEGER_ROUNDING) fail('扣点取整规则无效');
+    result.rounding = value.rounding;
+  }
   if (value.specifications !== undefined) {
     keys(value.specifications, ['quality', 'resolution', 'ratio', 'referenceVideo', 'pricingPurpose']);
     result.specifications = Object.fromEntries(Object.entries(value.specifications).map(([key, item]) => [key, textValue(item, 64)]));
@@ -221,13 +226,15 @@ function parsePolicy(raw: string): Policy {
         || !['follow', 'custom', 'free', 'legacy_fixed', 'legacy_actual'].includes(String(rule.mode))
         || !record(rule.binding) || ['configRevision', 'billingPrincipalId', 'credentialVersion', 'configFingerprint'].some(name => typeof (rule.binding as Record<string, unknown>)[name] !== 'string')) corrupt();
       keys(rule, ['id', 'identity', 'mode', 'basisKind', 'baseCny', 'source', 'exchangeRate', 'customPointsPerCny', 'binding',
-        'legacyUnitCredits', 'legacyRounding', 'legacyPointsPerUsd', 'updatedAt']);
+        'legacyUnitCredits', 'legacyRounding', 'legacyPointsPerUsd', 'updatedAt', 'rounding']);
       keys(rule.identity, ['kind', 'channelId', 'modelId', 'billingMode', 'unit', 'specifications']);
       keys(rule.binding, ['configRevision', 'billingPrincipalId', 'credentialVersion', 'configFingerprint']);
       if (!Number.isFinite(Date.parse(String(rule.updatedAt))) || rule.identity.unit !== (rule.identity.kind === 'image' ? 'image' : 'second')
         || rule.identity.billingMode === 'actual' && rule.identity.kind !== 'image'
         || rule.basisKind !== (rule.identity.billingMode === 'actual' ? 'supplier_cost_cny' : 'site_base_cny')) corrupt();
       if (rule.customPointsPerCny !== null) rate(rule.customPointsPerCny);
+      if (rule.rounding !== undefined && (rule.rounding !== RMB_INTEGER_ROUNDING || rule.identity.billingMode !== 'fixed'
+        || !['follow', 'custom'].includes(String(rule.mode)))) corrupt();
       if (rule.baseCny !== null) baseAmount(rule.baseCny);
       if (rule.source !== null) {
         if (!record(rule.source) || !record(rule.source.confirmedBy) || !Number.isFinite(Date.parse(String(rule.source.confirmedAt)))) corrupt();
@@ -268,6 +275,7 @@ function effectiveRow(original: PricingAdminRow, policy: Policy, binding: Pricin
   if (rule) {
     Object.assign(result, { mode: rule.mode, basisKind: rule.basisKind, baseCny: rule.baseCny, source: rule.source,
       exchangeRate: rule.exchangeRate, updatedAt: rule.updatedAt });
+    if (rule.rounding) result.rounding = rule.rounding;
     if (!sameBinding(rule.binding, binding)) return { ...result, availability: 'needs_review', confirmation: 'needs_review',
       currentPointsPerCny: null, currentUnitCredits: null, canAdopt: false,
       adoptionReason: '供应商主体、凭据或适用配置已变，请重新确认依据', unavailableReason: '原价格依据与当前配置失配，新请求不能退回旧价' };
@@ -283,7 +291,7 @@ function effectiveRow(original: PricingAdminRow, policy: Policy, binding: Pricin
         : !!rule.baseCny && !!rule.source;
       result.confirmation = sourceReady ? 'confirmed' : 'unconfirmed';
       result.currentUnitCredits = sourceReady && result.currentPointsPerCny && rule.baseCny && original.identity.billingMode === 'fixed'
-        ? roundDecimal(multiplyDecimal([rule.baseCny, result.currentPointsPerCny]), 1, 'half_up') : null;
+        ? roundFixedPricingCredits(multiplyDecimal([rule.baseCny, result.currentPointsPerCny]), result.rounding) : null;
     }
   }
   if (result.mode !== 'free' && result.currentPointsPerCny && policy.standards[result.basisKind]) {
@@ -359,15 +367,15 @@ export async function getAdminPricingSnapshot(actor: Actor, client: PricingClien
 }
 function view(value: PricingAdminRow): PricingAdminPriceView {
   const { mode, baseCny, basisKind, currentPointsPerCny, currentUnitCredits, relativeMultiplier, differencePercent,
-    confirmation, hasDifference, exchangeRate, authoringRateMode, authoringEntry } = value;
+    confirmation, hasDifference, exchangeRate, authoringRateMode, authoringEntry, rounding } = value;
   return { mode, baseCny, basisKind, currentPointsPerCny, currentUnitCredits, relativeMultiplier,
-    differencePercent, confirmation, hasDifference, exchangeRate, authoringRateMode, authoringEntry };
+    differencePercent, confirmation, hasDifference, exchangeRate, authoringRateMode, authoringEntry, ...(rounding ? { rounding } : {}) };
 }
 function toRule(row: PricingAdminRow, binding: PricingCatalogBinding, now: string): StoredRule {
   return { id: row.id, identity: row.identity, mode: row.mode, basisKind: row.basisKind, baseCny: row.baseCny,
     source: row.source, exchangeRate: row.exchangeRate, customPointsPerCny: row.mode === 'custom' ? row.currentPointsPerCny : null,
     binding, legacyUnitCredits: row.currentUnitCredits, legacyRounding: row.legacyRounding,
-    legacyPointsPerUsd: row.legacyPointsPerUsd, updatedAt: now };
+    legacyPointsPerUsd: row.legacyPointsPerUsd, updatedAt: now, ...(row.rounding ? { rounding: row.rounding } : {}) };
 }
 function confirmSource(input: PricingAdminSourceInput, actor: PricingAdminActor, now: string): PricingAdminSource {
   return { ...input, confirmedBy: actor, confirmedAt: now };
@@ -401,9 +409,9 @@ function simulationPrice(row: PricingAdminRow, quantity: string, example?: strin
     : row.baseCny && row.currentPointsPerCny ? multiplyDecimal([row.baseCny, row.currentPointsPerCny, measured]) : null;
   if (exact === null) return null;
   const credits = row.identity.kind === 'image'
-    ? multiplyDecimal([row.mode === 'legacy_fixed' ? row.currentUnitCredits! : roundDecimal(multiplyDecimal([row.baseCny!, row.currentPointsPerCny!]), 1, 'half_up'), measured])
-    : roundDecimal(exact, row.mode === 'legacy_fixed' && row.legacyRounding === 'ceil_task' ? 0 : 1,
-      row.mode === 'legacy_fixed' && row.legacyRounding === 'ceil_task' ? 'ceil' : 'half_up');
+    ? multiplyDecimal([row.mode === 'legacy_fixed' ? row.currentUnitCredits! : roundFixedPricingCredits(multiplyDecimal([row.baseCny!, row.currentPointsPerCny!]), row.rounding), measured])
+    : row.mode === 'legacy_fixed' && row.legacyRounding === 'ceil_task' ? roundDecimal(exact, 0, 'ceil')
+    : roundFixedPricingCredits(exact, row.rounding);
   if (compareDecimal(credits, row.identity.kind === 'image' ? PRICING_ADMIN_LIMITS.maxImageCredits : PRICING_ADMIN_LIMITS.maxTaskCredits) > 0) fail('试算超过原业务金额上限');
   return { exact, credits };
 }
@@ -421,7 +429,7 @@ function simulate(input: PricingAdminPreviewInput['simulation'], before: Pricing
   const percent = old && next && compareDecimal(old.credits, '0') > 0
     ? signedDifferenceFromHundred(divideDecimal(multiplyDecimal([next.credits, '100']), old.credits, 8)) : null;
   return { rowId: a.id, sourceRowId: input.rowId, specifications: { ...b.identity.specifications }, quantity: input.quantity, unit: a.identity.unit, currentCredits: old?.credits || null,
-    deltaCredits: delta, differencePercent: percent, rounding: b.mode === 'legacy_fixed' || b.mode === 'legacy_actual' ? b.legacyRounding || 'legacy' : 'half_up_tenth',
+    deltaCredits: delta, differencePercent: percent, rounding: b.mode === 'legacy_fixed' || b.mode === 'legacy_actual' ? b.legacyRounding || 'legacy' : b.rounding ?? 'half_up_tenth',
     adjustedCredits: next?.credits || null, authorizedMaximumCredits: null, isExample: a.identity.billingMode === 'actual',
     roundedToZero: !!next && compareDecimal(next.exact, '0') > 0 && compareDecimal(next.credits, '0') === 0,
     exactCredits: next?.exact || null, reason: next ? a.identity.billingMode === 'actual' ? '仅为示例，实际费用须匹配真实账单；本试算不建立授权上限' : null : '依据、价格或实际示例金额尚未就绪' };
@@ -492,6 +500,11 @@ async function prepare(actor: PricingAdminActor, input: PricingAdminPreviewInput
           confirmedAt: now, confirmedBy: actor };
       }
       if (change.mode) candidate.mode = change.mode;
+      if (candidate.mode === 'free') delete candidate.rounding;
+      if (change.rounding) {
+        if (current.identity.billingMode !== 'fixed' || candidate.mode === 'free') fail('仅确认的人民币固定费用可按整点计费');
+        candidate.rounding = change.rounding;
+      }
       if (change.customPointsPerCny !== undefined) {
         if (change.mode && change.mode !== 'custom') fail('手填费率须为单独设置');
         candidate.mode = 'custom'; candidate.customPointsPerCny = change.customPointsPerCny;
@@ -631,6 +644,7 @@ async function prepare(actor: PricingAdminActor, input: PricingAdminPreviewInput
     } else if (Array.from(requested).some(id => state.rows.find(row => row.id === id)?.identity.kind === 'enhance')) delete authoring.enhanceGroup;
   }
   assertNoRuleAmbiguity(next.rules);
+  if (next.rules.some(rule => rule.rounding && !['follow', 'custom'].includes(rule.mode))) fail('整点计费需要已生效的人民币基价规则');
   const rows = state.catalog.rows.map(row => projectPricingAuthoring(effectiveRow(row, next, state.catalog.bindings[row.id]), authoring));
   for (const id of Array.from(requested)) {
     if (metadataOnly.has(id)) continue;

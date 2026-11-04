@@ -7,6 +7,7 @@ import { RelativeTime } from '@/components/RelativeTime';
 import { useProductDialog } from '@/components/useProductDialog';
 import { useUnsavedNavigation } from '@/lib/hooks/use-unsaved-navigation';
 import type { PricingAdminAction, PricingAdminBasis, PricingAdminChanges, PricingAdminError, PricingAdminFilter, PricingAdminOperation, PricingAdminPreview, PricingAdminPreviewInput, PricingAdminRow, PricingAdminRowChange, PricingAdminSnapshot } from '@/lib/pricing/admin-contract';
+import { RMB_INTEGER_ROUNDING } from '@/lib/pricing/admin-contract';
 import { consumePricingAdminDraft, defaultPricingAdminView, filterPricingAdminRows, hasPricingAdminChanges, parsePricingAdminPending, parsePricingAdminWorkspace, patchPricingAdminRow, pricingAdminEnhanceGroup, pricingAdminPreviewForSource, pricingAdminPreviewKey, pricingAdminScenarioDifference, pricingAdminStorageKey, stagePricingAdminMemberExit, stagePricingAdminUnify, submittedPricingAdminDraft, validPricingAdminRate, validPricingEnhanceGroup, type PricingAdminDraft, type PricingAdminPending, type PricingAdminView } from '@/lib/pricing/admin-client-state';
 import { RECOMMENDED_POINTS_PER_CNY, stageGptImageReference, stageVideoPricingReferences, videoPricingReferenceStatus } from '@/lib/pricing/presets';
 import { allPricingFilters, pricingActiveFilters, pricingDisplayName, pricingDisplayRounding, pricingDisplayScope } from '@/lib/pricing/admin-display';
@@ -176,7 +177,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
   const moneyRows = new Map(draft.changes.rows.map(row => [row.id, row]));
   const complexDraft = Boolean(Object.keys(draft.changes.standards || {}).length || Object.keys(draft.changes.authoring || {}).length
     || draft.changes.rows.some(row => !row.base || row.base.source.type !== 'admin_defined' || row.base.source.reference !== moneySource
-      || row.baseRelation != null || Object.keys(row).some(key => !['id', 'base', 'baseRelation', 'authoringRateMode'].includes(key))
+      || row.baseRelation != null || Object.keys(row).some(key => !['id', 'base', 'baseRelation', 'authoringRateMode', 'rounding'].includes(key))
       || row.authoringRateMode !== undefined && row.authoringRateMode !== 'follow_global'));
   const action: PricingAdminAction = restore || { kind: 'save', changes: draft.changes };
   const scenarioRows = snapshot?.rows || [];
@@ -410,7 +411,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
             const derived = Boolean(row.authoringEntry?.baseRelation);
             const hasRate = row.currentPointsPerCny !== null && (row.mode === 'follow' || row.mode === 'custom');
             const adoptsGlobal = !hasRate && Boolean(snapshot.authoring && globalRate);
-            const editable = !complexDraft && !actual && !free && !derived && row.enabled && row.availability === 'ready' && (hasRate || adoptsGlobal);
+            const editable = !complexDraft && !actual && !free && row.enabled && row.availability === 'ready' && (hasRate || adoptsGlobal);
             const amount = change?.base?.amount ?? projected?.after.baseCny ?? row.baseCny;
             const points = projected || change ? scenario?.adjustedCredits : scenario?.currentCredits;
             const knownBase = amount !== null && amount !== '';
@@ -423,9 +424,11 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
                 <input type="text" inputMode="decimal" maxLength={snapshot.limits.maxNumberLength} aria-label={`${label} ${row.providerLabel} ${scope} 人民币单价（元/${unit}）`} placeholder="待确认" value={amount ?? ''} disabled={saving} onChange={event => {
                   const value = event.target.value;
                   if (value === (row.baseCny ?? '')) updateChanges(changes => ({ ...changes, rows: changes.rows.filter(item => item.id !== row.id) }));
-                  else editRow(row.id, { base: { amount: value, currency: 'CNY', unit: row.identity.unit, source: { type: 'admin_defined', reference: moneySource, note: '' } }, ...(adoptsGlobal ? { authoringRateMode: 'follow_global' as const } : {}) });
+                  else editRow(row.id, { base: { amount: value, currency: 'CNY', unit: row.identity.unit, source: { type: 'admin_defined', reference: moneySource, note: '' } },
+                    ...(adoptsGlobal ? { authoringRateMode: 'follow_global' as const, ...(globalRate === '100' ? { rounding: RMB_INTEGER_ROUNDING } : {}) } : {}) });
                 }} /><small>元/{unit}</small>
               </label> : knownBase ? <>{amount} 元/{unit}{derived && <small>随关联单价更新</small>}</> : <>{'待确认'}{row.availability === 'ready' && !complexDraft && !hasRate && !adoptsGlobal && <small>尚未配置换算</small>}</>}
+              {derived && editable && <small>{change ? '保存后单独定价' : '随关联价更新，手改后单独定价'}</small>}
               {rowFields.map(([key, value]) => <small key={key}>{value}</small>)}</td>
               <td className={styles.moneyPoints}>{actual ? '按实结算' : free ? '0 点' : !knownBase || row.availability !== 'ready' ? '待确认' : points != null ? <><strong>{points} 点</strong><small>{unit === '张' ? '每张' : `${quantity} 秒`}{change || projected ? ' · 待保存' : ''}</small>{scenario?.roundedToZero && <small>按规则取整为 0</small>}</> : change ? '待核对' : '待报价'}</td>
             </tr>;

@@ -1,5 +1,5 @@
-import type { PricingAdminIdentity, PricingAdminExchange, PricingAdminMode } from './admin-contract';
-import { compareDecimal, divideDecimal, multiplyDecimal, normalizeDecimal, roundDecimal, sumDecimal } from './math';
+import { RMB_INTEGER_ROUNDING, type PricingAdminIdentity, type PricingAdminExchange, type PricingAdminMode } from './admin-contract';
+import { compareDecimal, divideDecimal, multiplyDecimal, normalizeDecimal, roundDecimal, roundFixedPricingCredits, sumDecimal } from './math';
 import { creditCents } from '@/lib/credits/precision';
 
 export type FrozenPricingCharge = {
@@ -17,7 +17,7 @@ export type FrozenPricingCharge = {
   legacyRounding: 'ceil_task' | 'fixed_unit' | 'half_up_cent' | null;
   quantity: string;
   issuedAt: string;
-  rounding: 'half_up_tenth' | 'legacy';
+  rounding: 'half_up_tenth' | typeof RMB_INTEGER_ROUNDING | 'legacy';
 };
 
 export class PricingChargeError extends Error {
@@ -55,7 +55,7 @@ export function frozenPricingCredits(charge: FrozenPricingCharge, amountMicros?:
     if (!charge.baseCny || !charge.pointsPerCny) throw new PricingChargeError('该项缺少已确认基价或费率，未受理');
     exact = multiplyDecimal([charge.baseCny, charge.pointsPerCny, charge.quantity]);
   }
-  const rounded = roundDecimal(exact, 1, 'half_up');
+  const rounded = roundFixedPricingCredits(exact, charge.rounding === RMB_INTEGER_ROUNDING ? charge.rounding : undefined);
   return { credits: decimalNumber(rounded, charge.identity.kind === 'image' ? '100000' : '10000000'),
     exactCredits: exact, roundedToZero: compareDecimal(rounded, '0') === 0 && compareDecimal(exact, '0') > 0 };
 }
@@ -81,7 +81,7 @@ export function parseFrozenPricingCharge(value: unknown): FrozenPricingCharge | 
     if (charge.schema !== 'pricing-charge-v1' || typeof charge.revision !== 'string' || !charge.revision
       || typeof charge.ruleId !== 'string' || !charge.ruleId || !charge.identity || !charge.binding
       || !['follow', 'custom', 'free', 'legacy_fixed', 'legacy_actual'].includes(charge.mode)
-      || !['half_up_tenth', 'legacy'].includes(charge.rounding)
+      || !['half_up_tenth', RMB_INTEGER_ROUNDING, 'legacy'].includes(charge.rounding)
       || !Number.isFinite(Date.parse(charge.issuedAt))
       || typeof charge.binding.configFingerprint !== 'string' || !charge.binding.configFingerprint) return null;
     const identity = charge.identity;
@@ -94,7 +94,8 @@ export function parseFrozenPricingCharge(value: unknown): FrozenPricingCharge | 
       || Object.entries(identity.specifications).some(([key, value]) => !key || key.length > 80 || typeof value !== 'string' || value.length > 256)
       || !['site_base_cny', 'supplier_cost_cny'].includes(charge.basisKind)) return null;
     const legacy = charge.mode === 'legacy_fixed' || charge.mode === 'legacy_actual';
-    if (charge.rounding !== (legacy ? 'legacy' : 'half_up_tenth')) return null;
+    if (legacy ? charge.rounding !== 'legacy' : charge.rounding === 'legacy') return null;
+    if (charge.rounding === RMB_INTEGER_ROUNDING && (identity.billingMode !== 'fixed' || !['follow', 'custom'].includes(charge.mode))) return null;
     if (charge.mode === 'legacy_fixed') {
       if (identity.billingMode !== 'fixed' || !['ceil_task', 'fixed_unit'].includes(charge.legacyRounding || '')) return null;
       normalizeDecimal(charge.legacyUnitCredits, { min: '0', max: '10000000', maxScale: 2, allowZero: true });

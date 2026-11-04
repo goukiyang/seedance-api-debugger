@@ -47,12 +47,14 @@ export async function runPricingAuthoringContractFixture(): Promise<{
     equal(prisma, db, 'No implementation helper may resolve a production/default database');
     const { getAdminPricingSnapshot, previewAdminPricing, saveAdminPricing, getAdminPricingOperation,
       getAdminPricingHistory } = await import('@/lib/pricing/policy');
-    const { PRICING_POLICY_KEY, PRICING_REVISION_PREFIX } = await import('@/lib/pricing/admin-contract');
+    const { PRICING_POLICY_KEY, PRICING_REVISION_PREFIX, RMB_INTEGER_ROUNDING } = await import('@/lib/pricing/admin-contract');
     const { PRICING_AUTHORING_KEY } = await import('@/lib/pricing/pricing-authoring-contract');
     const { parsePricingAuthoring, pricingAuthoringContent, derivedPricingBase, assertPricingBaseRelation } = await import('@/lib/pricing/pricing-authoring');
     const { getPricingCatalog, pricingFingerprint, pricingCanonical } = await import('@/lib/pricing/catalog');
     const { fixedPricingCredits, sumDecimal, multiplyDecimal } = await import('@/lib/pricing/math');
-    const { frozenPricingCredits, frozenPricingReservation } = await import('@/lib/pricing/frozen-charge');
+    const { frozenPricingCredits, frozenPricingReservation, parseFrozenPricingCharge } = await import('@/lib/pricing/frozen-charge');
+    const { parseImageBillingContract } = await import('@/lib/image-studio/billing-contract');
+    const { fixedImageBillingContract, withPricingImageContract } = await import('@/lib/image-studio/billing-quote');
     const { normalizedVideoPricingReferenceScope, assertVideoPricingFinalReferences, issueVideoPricingCredential,
       verifyVideoPricingCredential, videoPricingBusinessFingerprint } = await import('@/lib/pricing/video-context');
     const { videoPricingIdentity, quoteVideoPricing } = await import('@/lib/pricing/video');
@@ -401,6 +403,33 @@ export async function runPricingAuthoringContractFixture(): Promise<{
       equal(frozenPricingReservation(actual, 35), authorizedBefore); equal(JSON.stringify(actual), frozenBefore);
       equal(await tx.videoTask.count(), 0); equal(await tx.imageStudioTask.count(), 0); equal(await tx.creditLedger.count(), 0);
       evidence.push('C09: synthetic actual bills and the real policy preview round three independent 0.15 examples to 0.6, not aggregate 0.45 to 0.5; adopting exchange 1/rate 1 then unified rate 2 changes the real preview to 0.9 without changing authorization, frozen reservation, old standards or unselected video prices. Unverified actual readiness still yields no invented price. The candidate-matched isolated runtime uses the real root/immutable reader and live process/module capability; proof IDs are explicitly synthetic and transaction-local, not real supplier, production readiness or billing evidence. All settings/capability/proof roll back; old cent balances and ledger conservation remain the existing G gates.');
+      const normal = { ...normalInput, referenceVideo: 'none' as const, pricingPurpose: 'standard' as const };
+      const previousQuote = await quoteVideoPricing(normal, tx);
+      equal(previousQuote.charge!.rounding, 'half_up_tenth');
+      const previousCredits = frozenPricingCredits(previousQuote.charge!).credits;
+      const actualBefore = row(unverifiedActual!.id).currentPointsPerCny;
+      const integerInput = { ...input({ kind: 'save', changes: { rows: [
+        { id: parent.id, customPointsPerCny: '100', rounding: RMB_INTEGER_ROUNDING },
+      ] } }), scenarios: [{ rowId: parent.id, quantity: '5' }] };
+      const integerPreview = await previewAdminPricing(actor, integerInput, tx);
+      equal(integerPreview.scenarios![0].adjustedCredits, '241');
+      const integerReceipt = await saveAdminPricing(actor, { ...integerInput, operationId: randomUUID(), previewToken: integerPreview.previewToken }, tx);
+      equal(integerReceipt.state, 'succeeded'); snapshot = integerReceipt.snapshot!;
+      const wholeQuote = await quoteVideoPricing(normal, tx);
+      equal(wholeQuote.pricing.estimatedCost, 241);
+      equal(parseFrozenPricingCharge(wholeQuote.charge)?.rounding, RMB_INTEGER_ROUNDING);
+      equal(frozenPricingCredits(previousQuote.charge!).credits, previousCredits);
+      equal(row(unverifiedActual!.id).currentPointsPerCny, actualBefore);
+      await save({ kind: 'save', changes: { rows: [{ id: parent.id, base: base('0.011') }] } });
+      equal((await quoteVideoPricing(normal, tx)).pricing.estimatedCost, 6, 'Edit retains whole task rounding: 0.011 × 100 × 5 = 5.5');
+      const image: FrozenPricingCharge = { ...wholeQuote.charge!, quantity: '1', baseCny: '0.055', identity: {
+        kind: 'image', channelId: 'fixture-image', modelId: 'gpt-image-2.5-sunburst', billingMode: 'fixed', unit: 'image', specifications: {},
+      } };
+      const wrapped = withPricingImageContract(fixedImageBillingContract({ scope: 'a'.repeat(64), model: image.identity.modelId, credits: 6, specification: 'b'.repeat(64) }), image, 6);
+      equal(parseImageBillingContract(JSON.stringify(wrapped))?.authorizedCredits, 6);
+      equal(parseImageBillingContract(JSON.stringify({ ...wrapped, authorizedCredits: 5.5 })), null);
+      equal(parseFrozenPricingCharge({ ...actual, rounding: RMB_INTEGER_ROUNDING }), null);
+      evidence.push('RATE-100: signed preview, saved policy, runtime quote and frozen readers agree on whole-task rounding; amount-only edits retain it, old quotes and actual-bill prices remain unchanged.');
       completed = true;
       throw rollback;
     }, { maxWait: 10000, timeout: 120000 });
