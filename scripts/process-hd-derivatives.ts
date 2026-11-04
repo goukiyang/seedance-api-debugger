@@ -10,6 +10,7 @@ import { claimHdScheduledJob, finishHdScheduledClaim, listHdScheduledJobs, readH
 import { stopHdImageProcessors } from '../src/lib/media/hd-image-processor';
 import { HD_RESOURCE_POLICY } from '../src/lib/media/hd-resource-state';
 import { discoverHdBatch, hdSourceIsolationReason, readHdDiscoveryCheckpoint } from '../src/lib/media/hd-discovery';
+import { publishHdCompatibilityIndex } from '../src/lib/media/hd-compat-index';
 
 const mode = process.argv[2] || 'status';
 const batch = 'ui30-old-20261007';
@@ -135,6 +136,16 @@ async function main() {
   }).catch(error => { if (error.code === 'ENOENT') return { consecutiveViewer: 0, consecutiveForeground: 0 }; throw error; });
   await seedHdSchedulerFairness(fairness);
   await readHdDiscoveryCheckpoint();
+  const refreshCompatibility = async (jobs: Awaited<ReturnType<typeof listHdJobs>>) => {
+    try { await publishHdCompatibilityIndex(jobs, atomicHdJson); }
+    catch { console.warn('hd_compat_index_unavailable'); }
+  };
+  // Also establish read coverage when encoding starts paused. The active
+  // loop can reuse this inventory immediately instead of scanning twice.
+  const activeAtStartup = (await hdControl()).state === 'active';
+  let startupInventory = await listHdJobs().catch(() => undefined);
+  if (startupInventory) await refreshCompatibility(startupInventory);
+  if (!activeAtStartup) startupInventory = undefined;
   let lastDiscoveryAt = 0;
   const wait = () => new Promise(resolve => setTimeout(resolve, HD_RESOURCE_POLICY.minimumCheckMs));
   const fail = async (error: unknown, phase: string) => {
@@ -175,8 +186,12 @@ async function main() {
           let job: Awaited<ReturnType<typeof claimHdScheduledJob>>;
           try {
             const reconcile = clock >= nextReconciliationAt;
-            const jobs = reconcile ? await listHdJobs() : await listHdScheduledJobs();
-            if (reconcile) nextReconciliationAt = clock + HD_RESOURCE_POLICY.discoveryIntervalMs;
+            const jobs = reconcile ? startupInventory ?? await listHdJobs() : await listHdScheduledJobs();
+            if (reconcile) {
+              if (!startupInventory) await refreshCompatibility(jobs);
+              startupInventory = undefined;
+              nextReconciliationAt = clock + HD_RESOURCE_POLICY.discoveryIntervalMs;
+            }
             job = await claimHdScheduledJob(jobs, new Set(contentionUntil.keys()), clock);
             ownerFailures = 0;
           } catch (error) {

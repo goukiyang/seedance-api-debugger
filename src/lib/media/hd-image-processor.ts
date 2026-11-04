@@ -33,7 +33,7 @@ export class HdProcessorError extends Error {
   constructor(readonly kind: string, readonly exited: boolean, readonly diagnostic?: { stage: string; code?: string; message?: string }, readonly integrity?: HdIntegrity) { super(kind); }
 }
 type ProcIdentity = { state: string; group: number; session: number; startTicks: string };
-async function procIdentity(pid: number): Promise<ProcIdentity | null> {
+export async function procIdentity(pid: number): Promise<ProcIdentity | null> {
   try {
     const value = await fs.readFile(`/proc/${pid}/stat`, 'utf8');
     const fields = value.slice(value.lastIndexOf(')') + 2).trim().split(/\s+/);

@@ -9,6 +9,7 @@ import { hdReadonlyDb } from './hd-readonly-db';
 import { HD_CONTROL_PROTOCOL, HD_RETRY_POLICY, HdControl, HdResourceSample, hdManualReason, hdResourceTransition, hdRunState, sampleHdResources } from './hd-resource-state';
 import { HD_MAX_PIXELS as MAX_PIXELS, HD_VALIDATION_VERSION, HD_ENCODER_STRATEGIES, HdOutputIntegrityError, validateHdOutput, hdEncoderOutputFormat, hdEncoderParameters, hdEncoderStrategy, defaultHdEncoderStrategy, type HdIntegrity, type HdEncoderStrategy, type HdEncoderParameters } from './hd-encoder';
 import { hdDirectory, hdWorkerLockPath, assertHdStorageRoot, HD_UPLOAD_DIRECTORY_ACCESS, HD_OUTPUT_DIRECTORY_ACCESS } from './hd-storage-root';
+import { indexedHdCompatibilityKeys } from './hd-compat-index';
 import { HD_IMAGE_PROTOCOL, HdProcessorError, assertHdExecutionExited, hdImageProcessorStopping, runHdImageProcessor, type HdImageResult, type HdProcessorIdentity, type HdChildClose, type HdGroupExit } from './hd-image-processor';
 export type { HdControl, HdResourceSample } from './hd-resource-state';
 export { hdDirectory, hdWorkerLockPath, assertHdStorageRoot, HD_UPLOAD_DIRECTORY_ACCESS, HD_OUTPUT_DIRECTORY_ACCESS } from './hd-storage-root';
@@ -224,20 +225,30 @@ async function compatibleHdRecords(source: string, identity: NonNullable<Awaited
   const local = siteUploadPathFromUrl(source);
   const cacheKey = JSON.stringify([hdDirectory(), local, identity.current.version, identity.preserveText, strategy]);
   const matches = (job: HdJob | null): job is HdJob => Boolean(job && siteUploadPathFromUrl(job.source) === local
-    && job.version === identity.current.version && job.preserveText === identity.preserveText
-    && (!strategy || hdEncoderStrategy(job.encoderStrategy) === strategy));
+    && job.version === identity.current.version && job.preserveText === identity.preserveText);
+  const selected = (job: HdJob) => !strategy || hdEncoderStrategy(job.encoderStrategy) === strategy;
+  const records = (jobs: HdJob[]) => jobs.filter(selected).map(job => ({
+    job, identity: { ...identity, key: job.key, encoderStrategy: hdEncoderStrategy(job.encoderStrategy) },
+  }));
+  if (local) {
+    const keys = await indexedHdCompatibilityKeys(local, identity.current.version, identity.preserveText);
+    if (keys) {
+      const jobs = (await Promise.all(keys.map(readHdJob))).filter(matches);
+      if (jobs.length === keys.length) return records(jobs);
+    }
+  }
   const cached = compatibleHdKeys.get(cacheKey);
-  let jobs = cached ? (await Promise.all(cached.map(readHdJob))).filter(matches) : [];
+  let jobs = cached ? (await Promise.all(cached.map(readHdJob))).filter(matches).filter(selected) : [];
   if (!jobs.length) {
     // Library versions are part of old keys, not the source/quality contract.
     // Retain the original manifest and receipt instead of creating a second job.
-    jobs = (await listHdJobs()).filter(matches);
+    jobs = (await listHdJobs()).filter(matches).filter(selected);
     if (jobs.length) {
       if (compatibleHdKeys.size >= 128) compatibleHdKeys.delete(compatibleHdKeys.keys().next().value!);
       compatibleHdKeys.set(cacheKey, jobs.map(job => job.key));
     } else compatibleHdKeys.delete(cacheKey);
   }
-  return jobs.map(job => ({ job, identity: { ...identity, key: job.key, encoderStrategy: hdEncoderStrategy(job.encoderStrategy) } }));
+  return records(jobs);
 }
 async function registeredHd(source: string, preserveText?: boolean, selection?: { strategy?: HdEncoderStrategy; representation?: string }) {
   const legacy = await hdRequestIdentity(source, preserveText);

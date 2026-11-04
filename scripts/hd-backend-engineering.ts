@@ -144,6 +144,61 @@ let ownerReads: Array<{ table: string; kind: string; rows: number }> = [];
     await sharp({ create: { width: 64, height: 64, channels: 3, background: 'red' } }).png().toFile(original.file);
     assert.equal(await core.lookupHd(original.source), null, 'changed original cannot reuse an old-version output');
   });
+  await check('HD03 shared compatibility coverage avoids scans and preserves old in-flight and pinned keys', async () => {
+    await fixture();
+    const { publishHdCompatibilityIndex } = await import('../src/lib/media/hd-compat-index');
+    const original = await image('compat-old'), absent = await image('compat-missing');
+    const other = await image('compat-fallback');
+    const currentLibrary = sharp.versions.sharp;
+    let old: Awaited<ReturnType<typeof core.requestHd>>;
+    try {
+      sharp.versions.sharp = 'fixture-previous-library';
+      old = await core.requestHd(original.source, 0, false);
+    } finally { sharp.versions.sharp = currentLibrary; }
+    assert.ok(old);
+    assert.notEqual((await core.hdRequestIdentity(original.source, false))!.key, old.key);
+    const inventory = await core.listHdJobs();
+    await publishHdCompatibilityIndex(inventory, core.atomicHdJson);
+    const catalog = path.join(core.hdDirectory(), 'compatibility-v1.json');
+    const stat = await fs.stat(catalog);
+    await publishHdCompatibilityIndex(inventory, core.atomicHdJson);
+    assert.equal((await fs.stat(catalog)).ino, stat.ino, 'unchanged inventory is not rewritten');
+    const readdir = fs.readdir;
+    let scans = 0;
+    const counter = mock.method(fs, 'readdir', (directory: unknown, ...options: unknown[]) => {
+      if (directory === core.hdDirectory()) scans++;
+      return Reflect.apply(readdir, fs, [directory, ...options]);
+    });
+    try {
+      assert.equal(await core.lookupHd(absent.source), null);
+      assert.equal((await core.requestHd(original.source, 1, false))!.key, old.key, 'old queued key is reused');
+      assert.equal(scans, 0);
+      await processJob(old.key);
+      const ready = (await core.lookupHd(original.source))!;
+      const pin = (await core.hdRepresentationVersion(original.source, ready))!;
+      assert.equal(ready.status, 'ready');
+      assert.equal((await core.lookupHd(original.source, pin))!.key, old.key, 'pin resolves against current canonical job');
+      const created = (await core.requestHd(absent.source, 0, false))!;
+      assert.equal((await core.lookupHd(absent.source))!.key, created.key, 'new current key is visible before reconciliation');
+      assert.equal(scans, 0, 'verified misses, pins and new directly addressed keys do not enumerate the directory');
+      const release = process.cwd(), sameStorage = core.hdDirectory();
+      const successor = await fs.mkdtemp(path.join(evidenceRoot, 'successor-'));
+      await fs.mkdir(path.join(successor, 'public'));
+      await fs.symlink(path.join(release, 'public/uploads'), path.join(successor, 'public/uploads'));
+      process.env.HD_DERIVATIVES_ROOT = sameStorage;
+      process.chdir(successor);
+      try {
+        assert.equal(await core.lookupHd(other.source), null);
+        assert.equal(scans, 1, 'another release cannot trust the prior worker catalog for a miss');
+      } finally {
+        process.chdir(release);
+        delete process.env.HD_DERIVATIVES_ROOT;
+      }
+      await fs.writeFile(catalog, '{"schema":1}');
+      assert.equal(await core.lookupHd(other.source), null);
+      assert.equal(scans, 2, 'corrupt coverage uses the original reader');
+    } finally { counter.mock.restore(); }
+  });
   await check('E04 temporary viewing preserves the job role and durable scheduler identity', async () => {
     await fixture(); const original = await image('priority');
     const initial = (await core.requestHd(original.source, 0, false))!;

@@ -15,7 +15,7 @@ export const HD_CHAIN_FIXTURE_SOURCES = [
   'scripts/hd-chain-fixture-inputs.mjs', 'scripts/hd-chain-engineering.mjs',
   ...HD_CHAIN_CHILDREN, 'scripts/hd-display-engineering.ts',
   'scripts/process-hd-derivatives.ts', 'scripts/process-hd-image.ts',
-  'src/lib/media/hd-derivatives.ts', 'src/lib/media/hd-storage-root.ts',
+  'src/lib/media/hd-derivatives.ts', 'src/lib/media/hd-storage-root.ts', 'src/lib/media/hd-compat-index.ts',
   'src/lib/media/hd-encoder.ts', 'src/lib/media/hd-image-processor.ts', 'src/lib/media/hd-scheduler.ts',
   'src/lib/media/hd-discovery.ts', 'src/lib/media/hd-resource-state.ts',
   'src/lib/media/hd-readonly-db.ts', 'src/lib/media/hd-registration.ts',
