@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '后台人民币费率更新', outline: [
-  '已采用新换算的费率按完整任务计算整点',
-  '管理员可编辑人民币单价，历史任务与账本不重算',
+const notice = { title: '图片费率表显示修正', outline: [
+  '主表显示现用通道的人民币单价和生效扣点',
+  '备用通道按需查看，未就绪的通道不混入编辑表',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
