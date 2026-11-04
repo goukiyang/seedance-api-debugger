@@ -11,7 +11,7 @@
 import React, { useCallback, useState } from 'react';
 import { useProductDialog } from './useProductDialog';
 import { getPageExitRisk, refreshPage } from '@/lib/hooks/page-exit-guard';
-import { isProviderFirstFrameRatioError, providerReferenceNumberFromError } from '@/lib/provider/error-message';
+import { isProviderContentPolicyError, isProviderFirstFrameRatioError, providerReferenceNumberFromError } from '@/lib/provider/error-message';
 
 // ---- Types ----
 
@@ -426,17 +426,14 @@ export function translateError(error: string, debugInfo?: DebugInfo): Translated
 
   if (
     lower.includes('provider_content_policy_violation')
-    || lower.includes('policyviolation')
-    || lower.includes('sensitivecontentdetected')
-    || lower.includes('content safety')
-    || lower.includes('copyright restriction')
+    || isProviderContentPolicyError(error)
   ) {
     return {
       code: 'PROVIDER_CONTENT_POLICY_VIOLATION',
       title: '内容安全或版权审核未通过',
       reasons: [
-        '视频生成服务认为本次提示词、参考素材或输出内容存在合规风险',
-        '请调整提示词、参考素材和授权信息后重新提交',
+        '视频生成服务拒绝了本次请求。请检查提示词和参考素材，确认素材使用授权后再提交。',
+        ...(error.includes('已返还冻结点数') ? ['本次冻结的点数已返还。'] : []),
       ],
       actions: [
         { label: '重新提交', action: 'retry' },
