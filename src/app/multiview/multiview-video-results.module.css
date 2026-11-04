@@ -10,7 +10,7 @@
 .resultMeta { min-height: 32px; margin-bottom: 8px; font-size: 13px; }
 .resultMeta > span { color: var(--text-secondary); }
 .result video { display: block; width: 100%; height: min(48vh, 400px); min-height: 180px; object-fit: contain; background: var(--bg-input); }
-.placeholder { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 120px; color: var(--text-secondary); background: var(--bg-input); font-size: 14px; }
+.placeholder { display: flex; align-items: center; justify-content: center; gap: 10px; height: min(48vh, 400px); min-height: 180px; color: var(--text-secondary); background: var(--bg-input); font-size: 14px; }
 .resultFooter { margin-top: 10px; font-size: 13px; color: var(--text-secondary); }
 .resultFooter > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .resultFooter a { display: inline-flex; align-items: center; gap: 5px; }

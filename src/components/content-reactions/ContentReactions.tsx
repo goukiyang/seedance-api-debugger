@@ -7,6 +7,7 @@ import type { ContentKey, ReactionAction, ReactionMutation, ReactionState } from
 import styles from './reactions.module.css';
 import ImageShareButton from './ImageShareButton';
 import LikeButton from './LikeButton';
+import { InlineActionFeedback } from '@/components/InlineActionFeedback';
 
 type Entry = { state?: ReactionState; error?: string; busy?: boolean };
 const entries = new Map<string, Entry>();
@@ -183,10 +184,11 @@ export default function ContentReactions({ contentKey, initialState, onChange, d
   return <span className={`${styles.controls} ${overlay ? parentControlled ? styles.parentOverlayControls : styles.overlayControls : ''} ${favoriteOnly ? styles.favoriteOnly : ''}`} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} data-content-reactions data-overlay={overlay || undefined} aria-busy={entry.busy || undefined}>
     <span className={styles.reactionActions}>
     {/* Sibling keys must include the control type, not just the content identity. */}
-    {canLike && <LikeButton key={`like:${identity}`} active={Boolean(state?.liked || state?.favorited)} count={favoriteOnly ? undefined : state?.likeCount} showCount={!favoriteOnly}
+    {canLike && <InlineActionFeedback feedback={pulse?.identity === identity && pulse.version === state?.version
+      ? { text: pulse.active ? '已喜欢' : '已取消喜欢' } : null}><LikeButton key={`like:${identity}`} active={Boolean(state?.liked || state?.favorited)} count={favoriteOnly ? undefined : state?.likeCount} showCount={!favoriteOnly}
       disabled={Boolean(disabled || entry.busy || uncertain || !state || (!state.available && !(state.liked || state.favorited)))}
       animateCount={Boolean(pulse?.identity === identity && pulse.version === state?.version && pulse.count === state?.likeCount)}
-      bloom={pulse?.identity === identity && pulse.version === state?.version && pulse.active ? pulse.beat : 0} parentControlled={overlay && parentControlled} onClick={() => void act()} />}
+      bloom={pulse?.identity === identity && pulse.version === state?.version && pulse.active ? pulse.beat : 0} parentControlled={overlay && parentControlled} onClick={() => void act()} /></InlineActionFeedback>}
     {!favoriteOnly && secondaryAction !== undefined ? <span className={styles.secondaryAction} data-result-secondary={overlay && parentControlled || undefined}>{secondaryAction}</span>
       : state?.available && imageSharing && !favoriteOnly && <span className={styles.secondaryAction} data-result-secondary={overlay && parentControlled || undefined}><ImageShareButton key={`share:${identity}`} contentKey={contentKey} userId={userId} disabled={disabled} /></span>}
     </span>

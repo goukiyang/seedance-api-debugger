@@ -888,6 +888,7 @@ function AssetsPageContent() {
   }, [user?.id]);
 
   const cardRefs = useRef(new Map<AssetLibraryItemId, HTMLDivElement>());
+  const previewReturnCard = useRef<AssetLibraryItemId | null>(null);
   const detailDrawerRef = useRef<HTMLElement>(null);
   const movePanelRef = useRef<HTMLElement>(null);
   const moveAlbumTriggerRef = useRef<HTMLButtonElement>(null);
@@ -1008,6 +1009,7 @@ function AssetsPageContent() {
   }, []);
 
   const selectAssetItem = useCallback((item: AssetLibraryItem) => {
+    previewReturnCard.current = item.id;
     playback.stopAll('selection');
     playback.setModalBlocked(false);
     clearPreviewSequence();
@@ -1025,7 +1027,13 @@ function AssetsPageContent() {
   const closeAssetPreview = useCallback(() => {
     playback.stopAll('drawer-close');
     playback.setModalBlocked(false);
-    previewRestoreGeneration.current += 1;
+    const generation = ++previewRestoreGeneration.current;
+    const returnId = previewReturnCard.current;
+    previewReturnCard.current = null;
+    if (returnId) requestAnimationFrame(() => {
+      if (generation !== previewRestoreGeneration.current || document.activeElement !== document.body) return;
+      cardRefs.current.get(returnId)?.focus({ preventScroll: true });
+    });
     selectionRestoreOwner.current = user?.id || null;
     clearPreviewSequence();
     setActiveItem(null);
@@ -2432,7 +2440,7 @@ function AssetsPageContent() {
         onPointerUp={handleGridPointerUp}
       >
         <div ref={gridProbe} className={`asset-library-grid asset-library-grid-${cardSize}`} aria-hidden="true" style={{ height: 0, overflow: 'hidden', margin: 0 }} />
-        {loading && (items.length ? <LoadingStatus>正在更新资产，暂时保留上次结果</LoadingStatus> : <LoadingSkeleton label="正在读取资产" grid />)}
+        {loading && (items.length ? <LoadingStatus>正在更新资产，暂时保留上次结果</LoadingStatus> : <LoadingSkeleton label="正在读取资产" grid cards />)}
 
         {!loading && !error && items.length === 0 && (
           <div className="asset-library-empty">
@@ -2723,6 +2731,7 @@ function AssetsPageContent() {
               <button
                 type="button"
                 className={assetStyles.detailPreviewImageButton}
+                data-asset-preview-trigger
                 onClick={openMediaPreview}
                 aria-label="放大预览图片"
               >
@@ -2767,7 +2776,16 @@ function AssetsPageContent() {
         imageNeighbors={imageNeighbors}
         onPrevious={canMovePreviewPrevious ? () => moveActiveItem(-1) : undefined}
         onNext={canMovePreviewNext ? () => moveActiveItem(1) : undefined}
-        onClose={() => { previewRestoreGeneration.current += 1; previewNavigationGeneration.current += 1; setMediaPreviewOpen(false); playback.setModalBlocked(Boolean(restoredPreview)); }}
+        onClose={() => {
+          const generation = ++previewRestoreGeneration.current;
+          previewNavigationGeneration.current += 1;
+          setMediaPreviewOpen(false);
+          playback.setModalBlocked(Boolean(restoredPreview));
+          requestAnimationFrame(() => {
+            if (generation !== previewRestoreGeneration.current || document.activeElement !== document.body) return;
+            detailDrawerRef.current?.querySelector<HTMLElement>('[data-asset-preview-trigger], .asset-detail-preview button')?.focus({ preventScroll: true });
+          });
+        }}
       />}
       {!activeItem && !previewAccountChanged && restoredPreview && <MediaPreview
         src={restoredPreview.previewUrl as string}

@@ -18756,3 +18756,71 @@ body.compare-fullscreen-open {
 }
 [data-tip]:hover::after, [data-tip]:focus-visible::after, [data-tip]:focus-within::after { opacity: 1; transform: translate(-50%, 0); }
 @media (hover: none) { [data-tip]:hover::after { opacity: 0; } }
+
+/* Keep the content slot stable during first reads and async handoffs. */
+.sd2-loading-cards > .sd2-loading-row {
+  display: grid;
+  gap: 10px;
+  padding: 0 0 12px;
+  overflow: hidden;
+}
+.sd2-loading-cards .sd2-loading-thumb {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  border-radius: 0;
+}
+.sd2-loading-cards.sd2-loading-grid .sd2-loading-thumb { aspect-ratio: 4 / 3; }
+.sd2-loading-cards .sd2-loading-lines { margin-inline: 12px; }
+.sd2-result-handoff {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  padding: 12px;
+  text-align: center;
+  background: var(--bg-input);
+  color: var(--text-secondary);
+}
+
+.sd2-action-feedback { position: relative; display: inline-flex; max-width: 100%; }
+.sd2-action-feedback-message[data-visible="false"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.sd2-action-feedback-message[data-visible="true"] {
+  position: absolute;
+  z-index: 2;
+  top: calc(100% + 4px);
+  right: 0;
+  width: max-content;
+  max-width: min(190px, 45vw);
+  padding: 5px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--tone-success-text);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: left;
+  pointer-events: none;
+}
+.sd2-action-feedback-message[data-failed="true"] { color: var(--text-primary); }
+[data-material-arrived="true"] {
+  outline: 2px solid var(--accent-primary, var(--primary));
+  outline-offset: -2px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-preview-settled="true"] { animation: sd2-preview-settle 150ms ease-out; }
+  [data-material-arrived="true"] { animation: sd2-material-arrival 180ms ease-out; }
+}
+@keyframes sd2-preview-settle { from { opacity: 0.9; } to { opacity: 1; } }
+@keyframes sd2-material-arrival { from { outline-color: transparent; } }
+
+[data-reduced-motion="true"] [data-preview-settled],
+[data-reduced-motion="true"] [data-material-arrived],
+[data-motion="reduce"] [data-preview-settled],
+[data-motion="reduce"] [data-material-arrived] { animation: none; }

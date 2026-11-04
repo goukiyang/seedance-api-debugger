@@ -324,6 +324,7 @@ function MediaFilePreview({
             key={`${src}:${attempt}`}
             ref={mediaRef as RefObject<HTMLVideoElement>}
             className={styles.video}
+            data-preview-settled={!loading && !loadError || undefined}
             src={src.trim() ? src : undefined}
             poster={poster || undefined}
             controls

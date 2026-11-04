@@ -7,6 +7,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Download, FolderKanban, MoreHorizontal, Plus, RotateCcw, Search } from 'lucide-react';
 import ProjectFilters from '@/components/projects/ProjectFilters';
 import PaginationControls from '@/components/PaginationControls';
+import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 import ProjectActionConfirmModal from '@/components/ProjectActionConfirmModal';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useProductDialog } from '@/components/useProductDialog';
@@ -976,9 +977,9 @@ function ProjectsPageContent() {
         <div className="card" role="status" style={{ color: 'var(--text-secondary)' }}>正在应用搜索…</div>
       )}
       {loading && !hasCurrentList && !showListError && search === appliedSearch && (
-        <div className="card" role="status" style={{ color: 'var(--text-secondary)' }}>正在读取项目…</div>
+        <LoadingSkeleton label="正在读取项目" cards className={styles.grid} />
       )}
-      {loading && hasCurrentList && <p className="text-gray" role="status">正在更新项目列表…</p>}
+      {loading && hasCurrentList && <LoadingStatus>正在更新项目列表…</LoadingStatus>}
 
       {!loading && !showListError && hasCurrentList && pagination.total === 0 && (
         <div className="card" style={{ textAlign: 'center' }}>

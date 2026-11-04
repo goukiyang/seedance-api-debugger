@@ -107,7 +107,7 @@ export const ResultImageCover = forwardRef<HTMLButtonElement, ResultImageCoverPr
     }}>
     {failedRead ? <span className={styles.readState}><RefreshCw size={18} />{recoverFromThumbnailError ? '缩略图暂不可用，仍可查看或取回原图' : '图片未能读取，点击重试'}</span> : <>
     {/* eslint-disable-next-line @next/next/no-img-element */}
-    <img key={identity} decoding="async" src={src} alt={alt} loading="lazy" onError={() => { cancelPreview(); setFailed(identity); }} onLoad={event => { setLoaded(identity); if (selected && event.currentTarget.naturalWidth > 0) onViewed?.(); }} />
+    <img key={identity} data-preview-settled={loaded === identity || undefined} decoding="async" src={src} alt={alt} loading="lazy" onError={() => { cancelPreview(); setFailed(identity); }} onLoad={event => { setLoaded(identity); if (selected && event.currentTarget.naturalWidth > 0) onViewed?.(); }} />
     {loaded !== identity && (loadingOverlay || <span className={styles.readState} role="status">正在读取图片</span>)}
     {applied && <span className={styles.applied}><Check size={13} />已套用</span>}
     </>}

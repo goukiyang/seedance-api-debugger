@@ -310,7 +310,7 @@ export function TemplateLibraryClient() {
         </aside>
 
         <main className="template-library-main" aria-label="模板列表">
-          {loading && (templates.length ? <LoadingStatus>正在更新模板库</LoadingStatus> : <LoadingSkeleton label="正在读取模板库" grid />)}
+          {loading && (templates.length ? <LoadingStatus>正在更新模板库</LoadingStatus> : <LoadingSkeleton label="正在读取模板库" grid cards />)}
 
           {!loading && error && (
             <div className="template-library-state is-error">

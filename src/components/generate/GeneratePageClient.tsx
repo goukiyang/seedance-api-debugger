@@ -1244,7 +1244,11 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       onAction: checkH3MachineStatus,
     };
   }, [checkH3MachineStatus, currentUser?.role, h3StatusChecking, h3VideoConfig, selectedProvider]);
-  const displayRecentTasks = useMemo(() => orderRecentTaskCards(recentTasks), [recentTasks]);
+  const displayRecentTasks = useMemo(() => {
+    const current = recentTasks.find(task => task.id === result?.id);
+    const history = orderRecentTaskCards(current ? recentTasks.filter(task => task.id !== current.id) : recentTasks);
+    return current ? [current, ...history] : history;
+  }, [recentTasks, result?.id]);
   const handleGenerationModelChange = useCallback((model: string) => {
     if (model === H3_INLINE_MODEL_ID) {
       setSelectedProvider('h3');
@@ -2777,7 +2781,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       if (!unconfirmed) sessionStorage.removeItem(activeGenerationRequestStorageKey);
       setUnconfirmedGenerationRequest(unconfirmed); setResult(unconfirmed ? null : data.task);
       setActivePollingTaskIds(current => [data.task!.id, ...current.filter(id => id !== data.task!.id)].slice(0, MAX_ACTIVE_POLLING_TASKS));
-      void loadRecentTasksPage(0, 'replace');
+      void loadRecentTasksPage(1, 'merge-head');
       setErrorDebug(null); setPolledResult(null);
       setGenerationNotice(unconfirmed ? '上游受理结果待确认，请继续查询原任务' : '已恢复原任务，本次没有再次生成。当前输入保留。');
     } catch (cause) { if (isCurrent()) setGenerationNotice(cause instanceof Error ? cause.message : '原请求暂时无法确认'); }
@@ -2827,7 +2831,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         : '已恢复原请求的任务，本次没有再次生成。当前输入保留。');
       setPolledResult(null);
       setActivePollingTaskIds(current => [task.id, ...current.filter(id => id !== task.id)].slice(0, MAX_ACTIVE_POLLING_TASKS));
-      void loadRecentTasksPage(0, 'replace');
+      void loadRecentTasksPage(1, 'merge-head');
     };
     try {
       const raw = sessionStorage.getItem(requestStorageKey);
@@ -3277,7 +3281,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     : selectedProjectId && videoCards.length === 0 && !loadingVideoCards
       ? '直接保存到项目，视频卡可选'
       : '展开后可切换或创建视频卡';
-  const showRecentTaskSurface = recentTasksLoadingInitial || recentTasks.length > 0 || Boolean(recentTasksError);
+  const showRecentTaskSurface = recentTasksLoadingInitial || recentTasks.length > 0 || Boolean(recentTasksError || unconfirmedGenerationRequest || submitting);
   const normalVideoRedesign = !studioHandoff && !imageResultHandoff;
   const modeSwitchBlocker = unconfirmedGenerationRequest || generationOperation.current || creation.unconfirmedRequestId
     || creation.intent && !isResolvedCreationIntent(creation.intent) ? '原提交结果尚未确认，请先核对原请求'
@@ -3618,17 +3622,6 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           </div>
         )}
 
-        {unconfirmedGenerationRequest && (
-          <button
-            type="button"
-            className="composer-prefill-notice"
-            disabled={submitting}
-            onClick={() => { void checkOriginalGenerationRequest(); }}
-          >
-            查询原请求
-          </button>
-        )}
-
         {loadingUser && (
           <p className="composer-prefill-notice is-loading" role="status">正在确认登录状态</p>
         )}
@@ -3743,8 +3736,15 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         {showRecentTaskSurface && (
           <div className="composer-recent">
             <div className="composer-recent-title">最近任务</div>
-            {recentTasks.length > 0 && (
+            {(recentTasks.length > 0 || unconfirmedGenerationRequest || submitting) && (
               <div className="composer-recent-grid">
+                {(unconfirmedGenerationRequest || submitting) && <article className="composer-task-card" aria-busy={submitting}>
+                  <div className="composer-task-card-preview sd2-result-handoff" role="status">
+                    {unconfirmedGenerationRequest ? '提交结果待确认' : '正在提交视频任务…'}
+                  </div>
+                  {unconfirmedGenerationRequest && <button type="button" className="composer-task-card-reuse" disabled={submitting}
+                    onClick={() => void checkOriginalGenerationRequest()}>核对原请求</button>}
+                </article>}
                 {displayRecentTasks.map((task) => {
                   const chargeText = formatProviderUsdCharge(task);
                   const recentTaskChargeText = chargeText ? formatRecentTaskChargeText(chargeText) : null;

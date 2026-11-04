@@ -12,6 +12,7 @@ import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 import { GenerationCompletionSettings, useGenerationCompletionTarget, watchGenerationCompletion } from '@/components/GenerationCompletion';
 import type { ResultNavigationIntent } from '@/components/useResultPages';
 
+import { useMaterialArrival } from '@/components/useMaterialArrival';
 import { ResourceLibraryPicker } from '@/components/ResourceLibraryPicker';
 import { StudioReferenceGrid } from '@/app/image-studio/reference-grid';
 import { uploadFileAsAsset, type UploadProgressHandler, type UploadedAssetPayload, type UploadProgressSnapshot } from '@/lib/http/file-upload';
@@ -269,6 +270,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     }).catch(error => { if (active && liveDraft.current.ownerId === ownerId) setReferenceError(error.message); });
     return () => { active = false; };
   }, [ownerId, ready, referenceIds]);
+  const referenceArrival = useMaterialArrival(`${ownerId}:${ticketId || 'draft'}`);
   const references = referenceIds.map(id => referenceMetadata.owner === ownerId ? referenceMetadata.assets.find(asset => asset.id === id) || {id} : {id});
   function addReferences(ids: string[]) {
     if (!ready || ownerId !== liveDraft.current.ownerId || busy || referenceUploading || liveDraft.current.draftEditBlocked) throw new Error('当前账号或草稿暂不能修改参考图');
@@ -628,7 +630,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
         if(files.length){event.preventDefault();void uploadPastedReferences(files);}
       }}>
         <div className={styles.referenceHeading}><strong>参考图（可选）</strong><span className={styles.price}>{referenceIds.length}/{MAX_REFERENCE_IMAGES}</span></div>
-        <StudioReferenceGrid items={references} labels="auxiliary" compact standalone disabled={busy||draftEditBlocked}
+        <StudioReferenceGrid items={references} arrivedIds={referenceArrival.arrived} labels="auxiliary" compact standalone disabled={busy||draftEditBlocked}
           onChange={items=>setRules(old=>({...old,referenceIds:items.flatMap(item=>item.id?[item.id]:[])}))}
           onPreview={item=>{if(item.originalUrl)openImage(item.originalUrl,'人物参考图');}}>
           <button type="button" className={styles.addReference} disabled={busy||draftEditBlocked||referenceIds.length>=MAX_REFERENCE_IMAGES} onClick={()=>setPickerOpen(true)}><ImagePlus size={24}/><span>添加参考图</span></button>
@@ -718,7 +720,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
     </section>
     <ResourceLibraryPicker open={pickerOpen} imageOnly target="image-studio" purpose="avatar-reference" contextKey={`${ownerId}:avatar-reference:${ticketId || "draft"}`} initialSource="random-person" title="添加人物参考图" confirmLabel="添加到参考区" maxSelection={MAX_REFERENCE_IMAGES}
       currentCount={referenceIds.length} currentAssetIds={referenceIds} onClose={()=>setPickerOpen(false)} onUploadFile={uploadReference}
-      onConfirm={async ids=>{addReferences(ids);return true;}}/>
+      onConfirm={async ids=>{addReferences(ids);referenceArrival.mark(ids.filter(id => !referenceIds.includes(id)));return true;}}/>
     {imagePreview&&<ZoomableImagePreview src={imagePreview.src} alt={imagePreview.alt} fileName="avatar.png" imageSharing={false}
       comparisonCandidates={[...tasks, ...(sourceTask ? [sourceTask] : []), ...Object.values(recordTasks)].flatMap(task => hasReturnedImage(task) ? [{ src: task.asset.original_url, thumbnailSrc: task.asset.thumbnail_url || undefined, alt: '人物整图', contentKey: `asset:${task.asset.id}` as const }] : [])}
       onClose={()=>setImagePreview(null)}/>} {productDialog}

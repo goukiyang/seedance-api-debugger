@@ -37,6 +37,7 @@ import styles from './cutout.module.css';
 import { isSamModelId } from '@/lib/cutout/models';
 import { cutoutResultContent } from '@/lib/cutout/result-content';
 import { planCutoutJobQuery, refreshCutoutHistoryForQuery, type CutoutJobReadOutcome } from '@/lib/cutout/job-query';
+import { useMaterialArrival } from '@/components/useMaterialArrival';
 import { ResourceLibraryPicker } from '@/components/ResourceLibraryPicker';
 import { uploadFileAsAsset } from '@/lib/http/file-upload';
 import type { PickerItem } from '@/lib/assets/picker-types';
@@ -227,6 +228,7 @@ export default function CutoutPage() {
   const [authChecked, setAuthChecked] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [accountId, setAccountId] = useState('');
+  const sourceArrival = useMaterialArrival(accountId);
   const [capabilities, setCapabilities] = useState<CutoutCapabilities | null>(null);
   const [capabilityLoading, setCapabilityLoading] = useState(false);
   const [source, setSource] = useState<SourceImage | null>(null);
@@ -1048,7 +1050,7 @@ export default function CutoutPage() {
     }
   }, [confirm, draftReady, repairDirty]);
 
-  const acceptFile = useCallback(async (file: File | null, fromHandoff = false) => {
+  const acceptFile = useCallback(async (file: File | null, fromHandoff = false, onAccepted?: (id: string) => void) => {
     if (replacementBusy.current || actionLock.current || isBusy || pendingSubmission || !fromHandoff && getPageExitRisk().busy.length) return false;
     if (!draftReady) { setNotice({ kind: 'info', text: '正在确认本机草稿，请稍后再选择图片。' }); return false; }
     const token = ++sourceSelection.current;
@@ -1070,7 +1072,9 @@ export default function CutoutPage() {
       if (!await preserveBeforeSourceChange(token, fromHandoff)) return false;
       draftWriteAllowedRef.current = true;
       setDraftWriteAllowed(true);
-      setSource(file ? { id: makeId(), kind: 'local', file, name: file.name || 'image.png' } : null);
+      const nextSource = file ? { id: makeId(), kind: 'local' as const, file, name: file.name || 'image.png' } : null;
+      setSource(nextSource);
+      if (nextSource) onAccepted?.(nextSource.id);
       setSourceHandoffId(file && fromHandoff ? handoffId : '');
       handoffSelection.current = false;
       setView('original');
@@ -1097,7 +1101,7 @@ export default function CutoutPage() {
       if (!response.ok) throw new Error('所选原图无法读取，原图和旧结果保留');
       const blob = await response.blob();
       if (!mounted.current || accountIdRef.current !== account || accountGenerationRef.current !== generation || token !== sourceSelection.current || pendingSubmissionRef.current || actionLock.current) return false;
-      return await acceptFile(new File([blob], item.fileName || 'image.png', { type: blob.type.split(';')[0] }));
+      return await acceptFile(new File([blob], item.fileName || 'image.png', { type: blob.type.split(';')[0] }), false, id => sourceArrival.mark([id]));
     } catch (error) { return { success: false, message: error instanceof Error ? error.message : '图片读取失败，原图保留' }; }
   }
 
@@ -1594,7 +1598,7 @@ export default function CutoutPage() {
             </> : mode === 'characters' && characterSettings.strategy === 'sam_box' && sourceUrl && sourceWidth > 0 && sourceHeight > 0 && view === 'original' ?
               <CharacterBoxEditor imageUrl={sourceUrl} width={sourceWidth} height={sourceHeight} boxes={boxes} onBoxesChange={setBoxes} prompts={prompts} onPromptsChange={setPrompts} disabled={isBusy} /> :
               <CutoutWorkspacePreview scope={`${accountId}:${source?.id || outputJob?.job_id || 'empty'}`} originalUrl={sourceUrl} resultUrl={mainResultUrl} matchingOriginal={Boolean(matchingOriginal) && Boolean(activeOutput?.main)} crop={activeOutput?.main ? resultCrop : null} view={view} background={previewBackground} onOriginalSize={setSourceSize} onZoom={url => setZoom({ src: url, alt: source?.name || '抠图结果' })} />}
-            {source && <div className={styles.sourceHint}><span title={source.name}>{source.name}</span><span>{sourceWidth && sourceHeight ? `${sourceWidth} × ${sourceHeight} px` : '正在读取尺寸'} · {source.kind === 'local' ? cachedAsset?.sourceId === source.id ? '已暂存' : '尚未上传' : '任务结果'}</span></div>}
+            {source && <div className={styles.sourceHint} data-material-arrived={sourceArrival.arrived?.includes(source.id) || undefined}><span title={source.name}>{source.name}</span><span>{sourceWidth && sourceHeight ? `${sourceWidth} × ${sourceHeight} px` : '正在读取尺寸'} · {source.kind === 'local' ? cachedAsset?.sourceId === source.id ? '已暂存' : '尚未上传' : '任务结果'}</span></div>}
             <div className={styles.previewTools}><div className={styles.buttonRow}><span>预览底色</span>{(['checker', 'light', 'dark'] as const).map(background => <button className={`${styles.modeTab} ${previewBackground === background ? styles.modeActive : ''}`} aria-pressed={previewBackground === background} key={background} type="button" onClick={() => setPreviewBackground(background)}>{background === 'checker' ? '透明网格' : background === 'light' ? '浅色' : '深色'}</button>)}</div><span>仅预览，不改变导出</span></div>
             {mainResultUrl && <div className={styles.operationBar}>
               <button className={styles.primaryButton} type="button" onClick={() => localRepairVisible ? saveCutoutBlob(localRepair!.result, localRepair!.filename) : void downloadResult(activeOutput!.url, activeOutput!.filename)}><Download size={15} />下载透明PNG</button>

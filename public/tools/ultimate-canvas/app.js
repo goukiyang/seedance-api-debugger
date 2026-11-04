@@ -4960,7 +4960,7 @@
                     assetId: item.assetId, sourceVersion: item.sourceVersion, title: item.title, width: item.width, height: item.height, available: true,
                     preview: item.kind === 'image' && item.referenceImageId ? `/api/reference-images/${encodeURIComponent(item.referenceImageId)}/content?variant=thumbnail` : ''
                 }))];
-                renderGenerationNodeControls(node.id); finishReferenceSelection({ returnToTarget: false });
+                renderGenerationNodeControls(node.id, new Set(additions.map(item => item.assetId))); finishReferenceSelection({ returnToTarget: false });
                 canvasRuntime.pendingGenerationReferenceTargetId = null;
                 engine._hideAddMenu?.(); engine._hideContextMenu?.(); engine.selectNode(node.id);
                 scheduleCanvasSave('generation_reference_import'); success = true;
@@ -5163,7 +5163,7 @@
         return stack;
     }
 
-    function renderGenerationNodeControls(nodeId) {
+    function renderGenerationNodeControls(nodeId, arrivingAssets) {
         planSplit.renderNode(nodeId);
         renderStoryEntry(nodeId);
         renderVideoResultHistory(nodeId);
@@ -5328,7 +5328,7 @@
             referenceList.hidden = references.length === 0;
             referenceList.innerHTML = references.length
                 ? references.map((item, index) => `
-                    <span class="generation-reference-item ${item.available ? '' : 'is-unavailable'}" title="${escapeHtml(item.available ? item.title : `${item.title} 尚未入库`)}">
+                    <span class="generation-reference-item ${item.available ? '' : 'is-unavailable'}" ${arrivingAssets?.has(item.assetId) ? 'data-material-arrived' : ''} title="${escapeHtml(item.available ? item.title : `${item.title} 尚未入库`)}">
                         ${item.preview ? `<img src="${escapeHtml(item.preview)}" alt="">` : '<span class="generation-reference-thumb"></span>'}
                         <strong>${escapeHtml(item.title)}</strong>
                         <span>${item.available
@@ -5338,6 +5338,10 @@
                             title="移除参考素材" aria-label="移除参考素材">&times;</button>
                     </span>`).join('')
                 : '';
+            if (arrivingAssets?.size) {
+                const highlighted = referenceList.querySelectorAll('[data-material-arrived]');
+                setTimeout(() => highlighted.forEach(item => item.removeAttribute('data-material-arrived')), 2400);
+            }
         }
         const region = nodeEl.querySelector('[data-generation-result-region]');
         const hasResultMedia = Boolean(node.data?.originalUrl || node.data?.assetId || node.data?.videoPreviewUrl

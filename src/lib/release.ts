@@ -1,8 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '一键参考可继续原操作', outline: [
-  '参考草稿遇到短暂繁忙时会自动重试一次',
-  '再次点同一作品的「一键参考」可接续原操作',
+const notice = { title: '创作过程反馈更清楚', outline: [
+  '生成进度和成品在同一位置接续',
+  '列表更新保留当前画面，预览关闭回到原位置',
+  '复制和收藏就地反馈，新加素材短暂高亮',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
