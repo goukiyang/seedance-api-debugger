@@ -1,4 +1,23 @@
 .page { min-width: 0; color: var(--text-primary); padding-bottom: 20px; }
+.moneyTable { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 14px; }
+.moneyTable th, .moneyTable td { padding: 12px 10px; text-align: left; border-bottom: 1px solid var(--border-color); overflow-wrap: anywhere; }
+.moneyTable thead th { color: var(--text-secondary); background: var(--bg-secondary); font-size: 13px; font-weight: 500; }
+.moneyTable thead th:nth-child(2) { width: 30%; }
+.moneyTable thead th:nth-child(3) { width: 22%; }
+.moneyTable tbody th { font-weight: 500; }
+.moneyTable th strong { font-weight: 600; }
+.moneyInput { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.moneyInput input { width: 125px; font-variant-numeric: tabular-nums; }
+.moneyPoints { font-variant-numeric: tabular-nums; }
+.moneyPoints strong { font-size: 16px; font-weight: 650; }
+.moneyAffected { padding: 6px 10px; border-bottom: 1px solid var(--border-color); }
+.moneyAffected ul { font-size: 13px; margin: 0 0 10px; padding-left: 20px; overflow-wrap: anywhere; }
+@media (max-width: 540px) {
+  .moneyTable th, .moneyTable td { padding-inline: 6px; }
+  .moneyTable thead th:nth-child(2) { width: 33%; }
+  .moneyTable thead th:nth-child(3) { width: 24%; }
+  .moneyInput { gap: 3px; }
+}
 .identityCheck { position: fixed; top: 90px; left: 50%; transform: translateX(-50%); display: flex; flex-wrap: wrap; align-items: center; gap: 12px; max-width: calc(100vw - 32px); padding: 12px; color: var(--text-primary); background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; z-index: 6; }
 .page h1 { font-size: 26px; font-weight: 700; margin: 0; }
 .page h2 { font-size: 18px; font-weight: 650; margin: 0 0 10px; }

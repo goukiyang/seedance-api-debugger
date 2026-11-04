@@ -18,6 +18,8 @@ import PricingHistory from './PricingHistory';
 import styles from './pricing.module.css';
 
 const endpoint = '/api/admin/pricing';
+const moneySource = '费率页录入';
+const pricingKinds = { image: '图片', video: '视频', enhance: '视频增强', h3: 'H3' } as const;
 const basisLabel = (basis: PricingAdminBasis) => basis === 'site_base_cny' ? '站内人民币基价' : '供应商实际成本';
 const modeLabel: Record<PricingAdminRow['mode'], string> = { follow: '跟随标准', custom: '单独设置', free: '明确免费', legacy_fixed: '保留原价', legacy_actual: '原费用合同', unset: '待设置' };
 const hasChanges = hasPricingAdminChanges;
@@ -28,6 +30,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
   const [snapshot, setSnapshot] = useState<PricingAdminSnapshot | null>(null);
   const [draft, setDraft] = useState<PricingAdminDraft>({ revision: '', changes: { rows: [] } });
   const [view, setView] = useState<PricingAdminView>(defaultPricingAdminView);
+  const [recoveringDraft, setRecoveringDraft] = useState(false);
   const [pending, setPending] = useState<PricingAdminPending | null>(null);
   const [selected, setSelected] = useState<string[]>([]), [allMatched, setAllMatched] = useState(false);
   const [restore, setRestore] = useState<PricingAdminAction | null>(null);
@@ -98,7 +101,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
   useEffect(() => {
     alive.current = true; currentActor.current = actorId; restored.current = false; restoredAnchor.current = false; userInteracted.current = false;
     saveLock.current = false; scrollAnchor.current = null; setOperationStorageFailed(false); setStorageFailed(false); setIdentityVerified(false);
-    setSnapshot(null); setHydrated(false); setDenied(false); setPending(null); setSelected([]); setRestore(null);
+    setSnapshot(null); setHydrated(false); setDenied(false); setPending(null); setSelected([]); setRestore(null); setRecoveringDraft(false);
     void load(true);
     return () => { alive.current = false; };
   }, [actorId, load]);
@@ -170,15 +173,21 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
   const visible = filtered.slice((page - 1) * view.pageSize, page * view.pageSize);
   const dirty = hasChanges(draft.changes), conflict = Boolean(snapshot && dirty && (draft.revision !== snapshot.revision
     || draft.authoringRevision !== snapshot.authoring?.revision || draft.catalogFingerprint !== snapshot.catalogFingerprint));
+  const moneyRows = new Map(draft.changes.rows.map(row => [row.id, row]));
+  const complexDraft = Boolean(Object.keys(draft.changes.standards || {}).length || Object.keys(draft.changes.authoring || {}).length
+    || draft.changes.rows.some(row => !row.base || row.base.source.type !== 'admin_defined' || row.base.source.reference !== moneySource
+      || row.baseRelation != null || Object.keys(row).some(key => !['id', 'base', 'baseRelation', 'authoringRateMode'].includes(key))
+      || row.authoringRateMode !== undefined && row.authoringRateMode !== 'follow_global'));
   const action: PricingAdminAction = restore || { kind: 'save', changes: draft.changes };
   const scenarioRows = snapshot?.rows || [];
-  const validDuration = /^\d+(?:\.\d+)?$/.test(view.quantity) && Number(view.quantity) > 0 && Number(view.quantity) <= 10000000;
+  const quantity = recoveringDraft ? view.quantity : '5';
+  const validDuration = /^\d+(?:\.\d+)?$/.test(quantity) && Number(quantity) > 0 && Number(quantity) <= 10000000;
   const scenarios = scenarioRows.filter(row => row.identity.unit === 'image' || validDuration
-    && (row.identity.kind !== 'video' || isSeedanceVideoDuration(Number(view.quantity), row.identity.modelId)))
-    .map(row => ({ rowId: row.id, quantity: row.identity.unit === 'image' ? '1' : view.quantity,
-      ...(row.identity.billingMode === 'actual' && view.simulationRowId === row.id && view.exampleAmount ? { exampleAmount: view.exampleAmount } : {}) }));
+    && (row.identity.kind !== 'video' || isSeedanceVideoDuration(Number(quantity), row.identity.modelId)))
+    .map(row => ({ rowId: row.id, quantity: row.identity.unit === 'image' ? '1' : quantity,
+      ...(recoveringDraft && row.identity.billingMode === 'actual' && view.simulationRowId === row.id && view.exampleAmount ? { exampleAmount: view.exampleAmount } : {}) }));
   const scenarioOverflow = scenarios.length > 2000;
-  const input: PricingAdminPreviewInput | null = snapshot ? {
+  const input: PricingAdminPreviewInput | null = snapshot && (recoveringDraft || !complexDraft) ? {
     expectedRevision: snapshot.revision, expectedAuthoringRevision: snapshot.authoring?.revision, catalogFingerprint: snapshot.catalogFingerprint, action,
     scenarios,
   } : null;
@@ -362,9 +371,85 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
   const invalidEnhance = action.kind === 'save' && draft.changes.authoring?.enhanceGroup !== undefined && !validPricingEnhanceGroup(draft.changes.authoring.enhanceGroup);
   const canSave = Boolean(preview && actionable && (preview.changes.length || preview.authoringChanged || action.kind === 'save' && Object.keys(draft.changes.standards || {}).length || action.kind === 'restore' && action.standards?.length))
     && !pending && !saving && !previewBusy && !conflict && !readError && !reading && !invalidRate && !invalidEnhance && !operationStorageFailed && !scenarioOverflow;
+  const resetDraft = () => {
+    setRestore(null);
+    setDraft({ revision: snapshot.revision, authoringRevision: snapshot.authoring?.revision, catalogFingerprint: snapshot.catalogFingerprint, changes: { rows: [] } });
+  };
+  if (!recoveringDraft) {
+    const kind = view.filter.kind || 'image';
+    const rows = filterPricingAdminRows(snapshot.rows, { kind, search: view.filter.search, channelId: view.filter.channelId })
+      .filter(row => row.enabled || moneyRows.has(row.id) || view.anchorId === row.id);
+    const globalRate = snapshot.authoring?.globalPointsPerCny;
+    const changedPrices = preview?.changes || [];
+    const hiddenChanges = changedPrices.filter(change => !rows.some(row => row.id === change.sourceRowId));
+    const derivedChanges = changedPrices.filter(change => !moneyRows.has(change.sourceRowId));
+    const affected = Array.from(new Set([...hiddenChanges, ...derivedChanges]));
+    return <>{!identityVerified && <div className={styles.identityCheck} role="status">{readError || '正在核对当前账号'}{readError && <button type="button" className="btn btn-secondary" onClick={() => void load()}>重新读取</button>}</div>}
+      <main className={styles.page} style={{ visibility: identityVerified ? undefined : 'hidden' }} aria-hidden={!identityVerified}>
+        <header className={styles.header}><h1>点数与费率</h1>{globalRate && <span className={styles.muted}>统一换算：1 元 = {globalRate} 点</span>}</header>
+        {(readError || message || storageFailed || conflict || pending || operationStorageFailed || complexDraft || pendingRows.length > 0) &&
+          <div className={styles.notice} role="status">
+            {readError && <p>{readError} <button type="button" disabled={reading} onClick={() => void load()}>重新读取</button></p>}
+            {message && <p>{message}</p>}
+            {storageFailed && <p>浏览器无法保存草稿，离开可能丢失输入。</p>}
+            {operationStorageFailed && <p>原保存记录不可核实，已暂停新保存。</p>}
+            {conflict && <p>费率已变化，原输入仍保留。 <button type="button" disabled={Boolean(pending)} onClick={() => setDraft(current => ({ ...current, revision: snapshot.revision, authoringRevision: snapshot.authoring?.revision, catalogFingerprint: snapshot.catalogFingerprint }))}>按最新费率重新核对</button></p>}
+            {pending && <p>保存结果待确认。 <button type="button" disabled={saving} onClick={() => void queryReceipt(pending)}>查询原回执</button></p>}
+            {(complexDraft || pendingRows.length > 0) && <p>有未处理的旧草稿，未自动提交。 <button type="button" onClick={() => setRecoveringDraft(true)}>查看原草稿</button></p>}
+          </div>}
+        <div className={styles.tabs} role="tablist" aria-label="费率类型">{Object.entries(pricingKinds).filter(([key]) => snapshot.rows.some(row => row.identity.kind === key)).map(([key, label]) => <button key={key} type="button" aria-selected={kind === key} role="tab" onClick={() => changeFilter({ kind: key as PricingAdminFilter['kind'], search: '', channelId: '' })}>{label}</button>)}
+          {(view.filter.search || view.filter.channelId) && <button type="button" onClick={() => changeFilter({ search: '', channelId: '' })}>查看全部型号</button>}
+        </div>
+        <table className={styles.moneyTable}>
+          <thead><tr><th scope="col">型号与规格</th><th scope="col">人民币单价</th><th scope="col">扣点</th></tr></thead>
+          <tbody>{rows.map(row => {
+            const change = !complexDraft ? moneyRows.get(row.id) : undefined;
+            const { change: projected, scenario } = pricingAdminPreviewForSource(preview, row.id);
+            const actual = row.identity.billingMode === 'actual', free = row.mode === 'free';
+            const unit = row.identity.unit === 'image' ? '张' : '秒';
+            const derived = Boolean(row.authoringEntry?.baseRelation);
+            const hasRate = row.currentPointsPerCny !== null && (row.mode === 'follow' || row.mode === 'custom');
+            const adoptsGlobal = !hasRate && Boolean(snapshot.authoring && globalRate);
+            const editable = !complexDraft && !actual && !free && !derived && row.enabled && row.availability === 'ready' && (hasRate || adoptsGlobal);
+            const amount = change?.base?.amount ?? projected?.after.baseCny ?? row.baseCny;
+            const points = projected || change ? scenario?.adjustedCredits : scenario?.currentCredits;
+            const knownBase = amount !== null && amount !== '';
+            const label = pricingDisplayName(row);
+            const scope = pricingDisplayScope(row);
+            const rowFields = Object.entries(fields).filter(([key]) => key.includes(row.id));
+            return <tr key={row.id} data-pricing-row={row.id}>
+              <th scope="row"><strong>{label}</strong><small>{row.providerLabel} · {scope}</small>{row.availability !== 'ready' && <small>{row.unavailableReason || '不可用'}</small>}</th>
+              <td>{actual ? '按供应商账单' : free ? '免费' : editable ? <label className={styles.moneyInput}>
+                <input type="text" inputMode="decimal" maxLength={snapshot.limits.maxNumberLength} aria-label={`${label} ${row.providerLabel} ${scope} 人民币单价（元/${unit}）`} placeholder="待确认" value={amount ?? ''} disabled={saving} onChange={event => {
+                  const value = event.target.value;
+                  if (value === (row.baseCny ?? '')) updateChanges(changes => ({ ...changes, rows: changes.rows.filter(item => item.id !== row.id) }));
+                  else editRow(row.id, { base: { amount: value, currency: 'CNY', unit: row.identity.unit, source: { type: 'admin_defined', reference: moneySource, note: '' } }, ...(adoptsGlobal ? { authoringRateMode: 'follow_global' as const } : {}) });
+                }} /><small>元/{unit}</small>
+              </label> : knownBase ? <>{amount} 元/{unit}{derived && <small>随关联单价更新</small>}</> : <>{'待确认'}{row.availability === 'ready' && !complexDraft && !hasRate && !adoptsGlobal && <small>尚未配置换算</small>}</>}
+              {rowFields.map(([key, value]) => <small key={key}>{value}</small>)}</td>
+              <td className={styles.moneyPoints}>{actual ? '按实结算' : free ? '0 点' : !knownBase || row.availability !== 'ready' ? '待确认' : points != null ? <><strong>{points} 点</strong><small>{unit === '张' ? '每张' : `${quantity} 秒`}{change || projected ? ' · 待保存' : ''}</small>{scenario?.roundedToZero && <small>按规则取整为 0</small>}</> : change ? '待核对' : '待报价'}</td>
+            </tr>;
+          })}</tbody>
+        </table>
+        {!rows.length && <p className={styles.empty}>暂无可显示的型号。</p>}
+        {affected.length > 0 && <details className={styles.moneyAffected} open><summary>同时变更 {affected.length} 项价格</summary><ul>{affected.map(item => {
+          const row = snapshot.rows.find(row => row.id === item.sourceRowId);
+          const scenario = pricingAdminPreviewForSource(preview, item.sourceRowId, item.id).scenario;
+          return <li key={item.id}>{row ? `${pricingDisplayName(row)} · ${row.providerLabel} · ${pricingDisplayScope(row)}` : item.label}：{item.after.baseCny ?? '待确认'} 元/{row?.identity.unit === 'image' ? '张' : '秒'}{scenario?.adjustedCredits != null && `，${scenario.adjustedCredits} 点 / ${scenario.quantity}${scenario.unit === 'image' ? ' 张' : ' 秒'}`}</li>;
+        })}</ul></details>}
+        <footer className={styles.savebar}>
+          <div role="status">{previewMessage ? <><span>{previewMessage}</span><button type="button" onClick={() => setPreviewNonce(value => value + 1)}>重新核对</button></>
+            : scenarioOverflow ? <span>本次报价范围过大，未保存。</span>
+            : dirty && <span>{previewBusy ? '正在核对扣点' : `${draft.changes.rows.length} 项待保存${affected.length ? `，另有 ${affected.length} 项同批变更见表下` : ''}，仅影响新任务`}</span>}</div>
+          <div className={styles.tools}>{dirty && !complexDraft && <button type="button" disabled={saving || Boolean(pending)} onClick={resetDraft}>撤销修改</button>}
+            <button type="button" className="btn btn-primary" disabled={!canSave || complexDraft || pendingRows.length > 0} onClick={() => void save()}><Save size={16} />{saving ? '正在保存' : pending ? '保存待确认' : '保存'}</button></div>
+        </footer>
+      </main>{productDialog}</>;
+  }
   const editEnhance = (next: PricingEnhanceGroup) => updateChanges(changes => ({ ...changes, authoring: { ...changes.authoring, enhanceGroup: next } }));
   return <>{!identityVerified && <div className={styles.identityCheck} role="status">{readError || '正在核对当前账号'}{readError && <button type="button" className="btn btn-secondary" onClick={() => void load()}>重新读取</button>}</div>}<main className={styles.page} style={{ visibility: identityVerified ? undefined : 'hidden' }} aria-hidden={!identityVerified}>
     <header className={styles.header}><h1>点数与费率</h1><div className={styles.tools}>
+      <button type="button" onClick={() => { setRestore(null); setRecoveringDraft(false); }}>返回单价表</button>
       <button type="button" onClick={exportCsv}><Download size={17} />导出费率</button>
       <button type="button" onClick={() => setHistoryOpen(true)}><History size={17} />变更记录</button>
       <button type="button" title="重置视图，不清除草稿或费率" aria-label="重置视图，不清除草稿或费率" onClick={() => { scrollAnchor.current = null; setView({ ...defaultPricingAdminView }); setSelected([]); setRestore(null); }}><RotateCcw size={17} /></button>
