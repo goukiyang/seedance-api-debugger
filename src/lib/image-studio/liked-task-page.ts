@@ -5,10 +5,10 @@ import { studioTaskStates } from './pricing-state';
 /** Correlated filtering keeps the viewer's all-history reactions in SQLite. */
 export async function likedStudioTaskPage(db: Pick<PrismaClient, '$queryRaw' | 'imageStudioTask'>,
   owner: string, module: string, cursor: string | undefined, limit: number, excluded: string[] = [], ownAssets = false,
-  excludedToolBatches: string[] = []) {
+  excludedToolBatches: string[] = [], historyModuleId?: string) {
   const scope = module === `default-${owner}` ? Prisma.sql`(t."module_id" = ${module} OR t."module_id" IS NULL)
     AND (t."snapshot_json" IS NULL OR instr(t."snapshot_json", '"avatar":') = 0 AND instr(t."snapshot_json", '"avatarLayout":') = 0)`
-    : Prisma.sql`t."module_id" = ${module}`;
+    : historyModuleId ? Prisma.sql`t."module_id" IN (${module}, ${historyModuleId})` : Prisma.sql`t."module_id" = ${module}`;
   const where = Prisma.sql`t."owner_id" = ${owner} AND t."deleted_at" IS NULL AND ${scope}
     AND (${excluded.length ? Prisma.sql`t."id" NOT IN (${Prisma.join(excluded)})` : Prisma.sql`1 = 1`})
     AND (${excludedToolBatches.length ? Prisma.sql`t."batch_id" NOT IN (${Prisma.join(excludedToolBatches)})` : Prisma.sql`1 = 1`})
