@@ -28,7 +28,10 @@ export async function POST(request: NextRequest) {
     let result: unknown;
     if (action === 'create-workspace') result = { workspace: await createLabWorkspace(user.id, body.id, body.name, (await getImageStudioSettings()).model) };
     else if (action === 'save-workspace') result = { workspace: await updateLabWorkspace(user.id, body.id, body.revision, body.name, body.draft) };
-    else if (action === 'prepare') result = { plan: await prepareLab(user, body) };
+    else if (action === 'prepare') {
+      if (body.operation !== undefined || body.workbench === 2) throw new StudioError('独立视图暂缓新生成，已有任务和选用图片保留', 503);
+      result = { plan: await prepareLab(user, body) };
+    }
     else if (action === 'quote') result = await quoteLab(user, labId(body.planId));
     else if (action === 'submit') result = await submitLab(user, body);
     else if (action === 'save-result') result = { workspace: await saveLabResult(user, body) };
