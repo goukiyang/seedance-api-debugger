@@ -1,4 +1,4 @@
-import type { CharacterLabConfig, CharacterLabDraft } from './types';
+import { characterLabStrength, type CharacterLabConfig, type CharacterLabDraft, type CharacterLabOperation, type CharacterLabPromptFields } from './types';
 
 const faceDirections = [
   '长脸型，较窄下颌与拉长的中庭，细长眼形，窄直鼻梁，较薄嘴唇',
@@ -11,18 +11,65 @@ const faceDirections = [
   '梨形脸，窄额头、较宽下颌，较低眉位，较浅眼窝，较厚下唇',
   '短宽脸，明显颧弓与短下巴，大眼距，较浅鼻梁，小巧嘴形',
 ];
-export function faceLabPrompt(config: CharacterLabConfig, draft: CharacterLabDraft) {
+export function labFaceRules(draft: Pick<CharacterLabDraft, 'count' | 'diversity'>) {
   const n = draft.count === 9 ? 3 : 2;
-  const degree = draft.diversity <= 25 ? '保留原图核心气质和相近年龄，在面部结构上作温和但可辨认的变化'
-    : draft.diversity <= 60 ? '保持年龄与气质，各方案在脸型、骨相和五官比例上形成中等且清楚的差别'
-      : '探索显著不同的真人身份，强烈拉开脸型、骨相和五官组合；禁止复制原脸，禁止只改体重、年龄、表情、发型或镜头角度冒充不同人';
-  return [config.basePrompt, config.characterContext, config.faceVariables, config.styleConstraints,
-    `输出恰好一张1:1正方形${n}×${n}宫格，${draft.count}个格子等宽等高，每格为一位不同真人的正面头肩近景。`,
-    `面部差异强度${draft.diversity}/100：${degree}。各候选保持同一年龄段和合理的角色身份特征。`,
-    ...faceDirections.slice(0, draft.count).map((direction, index) => `第${index + 1}格结构方向：${direction}。按差异强度调整变化幅度。`),
-    draft.context ? `用户对当前角色的补充：${draft.context}` : '',
-    '所附唯一原始设计图仅用于理解角色；自行在原图中识别同一角色及头部，不要求用户预先抠图、拆分或裁头。整张输出只含候选面部，不含全身、原设定板或文字。',
+  const strength = characterLabStrength(draft.diversity);
+  const degree = strength === '小幅'
+    ? '围绕同一个基准面孔，仅改变一到两处局部比例。保留人物身份、年龄、脸型和骨相，各格不能换成不同人物。'
+    : strength === '中等'
+      ? '保留角色辨识点和基础骨相，在眼鼻比例、下颌轮廓等两三处做适度变化。保持发型、年龄和表情一致。'
+      : '允许探索明显不同的真人面孔，在脸型、骨相和五官组合上拉开差距，保留角色年龄感与标志性特征。';
+  return [
+    `输出一张1:1正方形${n}×${n}宫格，恰好${draft.count}个等宽等高格子，对齐等分坐标。每格独立呈现正面头肩照，不跨格、不留空。`,
+    `面部变化强度为${strength}。${degree}`,
+    ...(strength === '明显' ? faceDirections.slice(0, draft.count).map((direction, index) => `第${index + 1}格结构方向：${direction}。`) : []),
+    '使用原始设计图理解角色。采用统一平视头肩构图、表情、背景和光线，只输出候选头像，不含全身、文字或原设计板。',
+  ];
+}
+export function faceLabPrompt(config: CharacterLabConfig, draft: CharacterLabDraft) {
+  return [
+    ...labFaceRules(draft), config.characterContext, config.styleConstraints,
+    ...(characterLabStrength(draft.diversity) === '明显' ? [config.basePrompt, config.faceVariables] : []),
+    draft.context ? `角色补充（遵守上述变化范围）：${draft.context}` : '',
   ].filter(Boolean).join('\n\n');
+}
+
+export const labViewPromptFields = {
+  'refine-face': 'refineFacePrompt',
+  side: 'sidePrompt',
+  'refine-side': 'refineSidePrompt',
+  'body-front': 'bodyFrontPrompt',
+  'body-back': 'bodyBackPrompt',
+} as const satisfies Record<CharacterLabOperation, keyof CharacterLabPromptFields>;
+
+export const labDefaultViewPrompts = {
+  refineFacePrompt: '保留这张正脸的年龄感、骨相、发型与辨识特征，四个方案只在指定细节上做小幅变化。',
+  sidePrompt: '保持正脸的年龄感、鼻唇轮廓、下颌、发型、眼镜和配饰。背景与正脸协调。',
+  refineSidePrompt: '保留同一个人的身份和侧脸方向，只细调指定部分，四个版本的变化应小而可辨。',
+  bodyFrontPrompt: '保留原角色身体比例、服装层次、材质、颜色、配饰和鞋，以站立全身照还原设计。',
+  bodyBackPrompt: '还原原角色的背部轮廓、服装结构、配饰位置和鞋，保持原设计比例、材质与配色。',
+};
+
+export function labOperationRules(operation: CharacterLabOperation) {
+  switch (operation) {
+    case 'refine-face':
+      return '参考图是用户选定的正脸。输出一张正方形2×2等分宫格，四格都为同一人的正面头肩照。只微调本次描述指定的细节。';
+    case 'side':
+      return '唯一参考图是选定正脸。输出一张同一人的90°纯侧面头肩照，面向画面左侧，视线水平、保留头顶。仅输出单张侧脸。';
+    case 'refine-side':
+      return '参考图1是锁定身份的正脸，参考图2是待细调的侧脸。输出一张正方形2×2等分宫格，四格都是同一人同方向的90°纯侧面头肩照。只微调指定细节。';
+    case 'body-front':
+      return '仅用原始角色设计图作为参考。输出一张严格朝正前方的全身站姿照，头、双脚和鞋完整入画。身体比例、服装与配饰以原设计为准。';
+    case 'body-back':
+      return '仅用原始角色设计图作为参考。输出一张严格朝正后方的全身站姿照，不回头，头、双脚和鞋完整入画。身体比例、服装与配饰以原设计为准。';
+  }
+}
+
+export function labViewPrompt(config: CharacterLabPromptFields, operation: CharacterLabOperation, description: string) {
+  const field = labViewPromptFields[operation];
+  return [labOperationRules(operation), config[field] || labDefaultViewPrompts[field], config.styleConstraints,
+    description ? `本次局部调整：${description}` : '',
+    '保持自然摄影、平视和一致背景。遵守上述身份、参考来源与构图约束。'].filter(Boolean).join('\n\n');
 }
 export function resultLabPrompt(config: CharacterLabConfig, draft: CharacterLabDraft, hasPrevious: boolean) {
   const labels = ['左上正面头肩特写', '右上侧面头肩特写', '左下正面全身', '右下背面全身'];

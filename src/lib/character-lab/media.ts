@@ -9,7 +9,7 @@ import { StudioError } from '@/lib/image-studio/tasks';
 import { studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
 import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
 import { readLabPlan } from './store';
-import type { CharacterLabFace, CharacterLabPlan } from './types';
+import { characterLabSlot, type CharacterLabPlan, type CharacterLabReference } from './types';
 
 export async function ownedLabAsset(user: SessionUser, id: string) {
   const asset = await prisma.asset.findFirst({ where: { id, owner_id: user.id, type: 'image', status: 'active' } });
@@ -23,7 +23,8 @@ export async function labOutput(user: SessionUser, plan: CharacterLabPlan) {
   return { task, asset: await ownedLabAsset(user, task.asset_id) };
 }
 // The provider is asked to use these same cell boundaries. Crops retain source pixels.
-export function labCellRect(width: number, height: number, plan: Pick<CharacterLabPlan, 'kind' | 'count'>, cell: number) {
+export function labCellRect(width: number, height: number, plan: Pick<CharacterLabPlan, 'kind' | 'count' | 'operation'>, cell: number) {
+  if (plan.operation && plan.kind !== 'faces') throw new StudioError('独立视图没有裁切格子');
   const columns = plan.kind === 'faces' && plan.count === 9 ? 3 : 2;
   const count = plan.kind === 'faces' ? plan.count : 4;
   if (!Number.isInteger(cell) || cell < 0 || cell >= count) throw new StudioError('格子选择无效');
@@ -48,8 +49,18 @@ export async function labPngFromBytes(input: Buffer, plan: CharacterLabPlan, cel
   if (!width || !height) throw new StudioError('原图无法解码，未拆分', 409);
   return image.extract(labCellRect(width, height, plan, cell)).png().toBuffer();
 }
-export async function persistLabFace(user: SessionUser, choice: CharacterLabFace) {
+export async function readLabReference(user: SessionUser, workspaceId: string, sourceAssetId: string, choice: CharacterLabReference, slot: 'faces' | 'side' | 'body-front' | 'body-back') {
   const plan = await readLabPlan(user.id, choice.planId);
+  if (plan.workspaceId !== workspaceId || plan.sourceAssetId !== sourceAssetId || characterLabSlot(plan) !== slot) {
+    throw new StudioError('所选图来自其他角色、原图或视图，请重新选择', 409);
+  }
+  if (plan.kind === 'faces' && choice.cell !== undefined) labCellRect(1200, 1800, plan, choice.cell);
+  else if (plan.kind === 'faces' || choice.cell !== undefined) throw new StudioError('请选择有效的单格或独立视图');
+  return plan;
+}
+export async function persistLabFace(user: SessionUser, choice: CharacterLabReference) {
+  const plan = await readLabPlan(user.id, choice.planId);
+  if (choice.cell === undefined) return (await labOutput(user, plan)).asset.id;
   if (plan.kind !== 'faces') throw new StudioError('面部参考须来自原人脸候选', 400);
   await labOutput(user, plan);
   const id = `clab-${createHash('sha256').update(`${user.id}:${plan.id}:${choice.cell}`).digest('hex')}`;

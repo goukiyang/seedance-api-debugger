@@ -2,6 +2,27 @@ import type { ImageBillingView } from '@/lib/image-studio/billing-contract';
 
 export type CharacterLabStage = 'faces' | 'selection' | 'result';
 export type CharacterLabFace = { planId: string; cell: number };
+export const characterLabOperations = ['refine-face', 'side', 'refine-side', 'body-front', 'body-back'] as const;
+export type CharacterLabOperation = typeof characterLabOperations[number];
+export type CharacterLabView = 'side' | 'body-front' | 'body-back';
+export type CharacterLabReference = { planId: string; cell?: number };
+export type CharacterLabViews = Partial<Record<CharacterLabView, CharacterLabReference>>;
+export type CharacterLabComposition = { id: string; name: string; savedAt: string };
+
+export function characterLabSlot(plan: Pick<CharacterLabPlan, 'operation' | 'kind'>) {
+  if (plan.operation === 'side' || plan.operation === 'refine-side') return 'side';
+  if (plan.operation === 'body-front' || plan.operation === 'body-back') return plan.operation;
+  return plan.kind === 'faces' ? 'faces' : 'legacy';
+}
+
+export function characterLabStrength(value: number) {
+  return value <= 25 ? '小幅' : value <= 60 ? '中等' : '明显';
+}
+
+export function sameLabReference(first: CharacterLabReference | null | undefined, second: CharacterLabReference | null | undefined) {
+  return Boolean(first && second && first.planId === second.planId && first.cell === second.cell);
+}
+
 export type CharacterLabDraft = {
   stage: CharacterLabStage;
   sourceAssetId: string | null;
@@ -21,14 +42,22 @@ export type CharacterLabDraft = {
   resultName: string;
   adjustment: string;
   adjustmentCell: number | null;
+  views?: CharacterLabViews;
 };
 export type CharacterLabWorkspace = {
   id: string; name: string; revision: number; createdAt: string; updatedAt: string;
   draft: CharacterLabDraft;
   savedResults: Array<{ planId: string; name: string; savedAt: string }>;
+  views?: CharacterLabViews;
+  compositions?: CharacterLabComposition[];
 };
 export type CharacterLabPromptFields = {
   basePrompt: string; characterContext: string; faceVariables: string; styleConstraints: string; resultPrompt: string;
+  refineFacePrompt?: string;
+  sidePrompt?: string;
+  refineSidePrompt?: string;
+  bodyFrontPrompt?: string;
+  bodyBackPrompt?: string;
 };
 export type CharacterLabConfig = CharacterLabPromptFields & { revision: number; updatedAt: string | null };
 export type CharacterLabPlan = {
@@ -40,6 +69,9 @@ export type CharacterLabPlan = {
   resolution: string; aspectRatio: '1:1' | '2:3'; settingsRevision: number;
   referenceIds: string[]; projectId: string | null;
   imageChannel?: { channelId: string; configRevision: string };
+  operation?: CharacterLabOperation;
+  input?: CharacterLabReference;
+  slotScoped?: true;
 };
 export type CharacterLabTask = {
   id: string; status: string; error: string | null; billing: ImageBillingView | null;

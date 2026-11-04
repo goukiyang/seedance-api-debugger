@@ -1,7 +1,8 @@
 import { prisma } from '@/lib/prisma';
 import { StudioError } from '@/lib/image-studio/tasks';
 import type { SessionUser } from '@/lib/auth/session';
-import type { CharacterLabConfig, CharacterLabDraft, CharacterLabFace, CharacterLabPlan, CharacterLabPromptFields, CharacterLabWorkspace } from './types';
+import type { CharacterLabConfig, CharacterLabDraft, CharacterLabFace, CharacterLabPlan, CharacterLabPromptFields, CharacterLabReference, CharacterLabViews, CharacterLabWorkspace } from './types';
+import { labViewPromptFields } from './prompts';
 
 export const CONFIG_KEY = 'character-lab:v1:config';
 export const workspaceKey = (owner: string, id: string) => `character-lab:v1:${owner}:workspace:${id}`;
@@ -22,6 +23,20 @@ function face(value: unknown): CharacterLabFace | null {
   if (!Number.isInteger(item.cell) || Number(item.cell) < 0 || Number(item.cell) > 8) throw new StudioError('面部格子无效');
   return { planId: labId(item.planId, '候选'), cell: Number(item.cell) };
 }
+export function labReference(value: unknown): CharacterLabReference {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new StudioError('生成参考无效');
+  const item = value as Record<string, unknown>;
+  if (item.cell !== undefined) return face(item)!;
+  return { planId: labId(item.planId, '生成参考') };
+}
+function labViews(value: unknown): CharacterLabViews {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new StudioError('四格选择无效');
+  const input = value as Record<string, unknown>, result: CharacterLabViews = {};
+  for (const slot of ['side', 'body-front', 'body-back'] as const) {
+    if (input[slot] !== undefined) result[slot] = labReference(input[slot]);
+  }
+  return result;
+}
 export function parseLabDraft(value: unknown): CharacterLabDraft {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new StudioError('工作现场无效');
   const draft = value as Record<string, unknown>;
@@ -40,7 +55,8 @@ export function parseLabDraft(value: unknown): CharacterLabDraft {
     channelId: labText(draft.channelId, 80, '通道'), quality: labText(draft.quality, 30, '画质'), resolution: labText(draft.resolution, 20, '分辨率'),
     projectId, facePlanId: optionalId(draft.facePlanId, '候选'), mainFace: face(draft.mainFace), auxiliaryFaces: auxiliaryFaces as CharacterLabFace[],
     auxiliaryFeatures: labText(draft.auxiliaryFeatures, 1000, '辅助特征'), resultPlanId: optionalId(draft.resultPlanId, '成品'), resultName: draft.resultName === undefined ? '' : labText(draft.resultName, 80, '作品名称'),
-    adjustment: labText(draft.adjustment, 3000, '调整要求'), adjustmentCell: draft.adjustmentCell as number | null };
+    adjustment: labText(draft.adjustment, 3000, '调整要求'), adjustmentCell: draft.adjustmentCell as number | null,
+    ...(draft.views !== undefined ? { views: labViews(draft.views) } : {}) };
 }
 export async function readLabWorkspace(owner: string, id: string) {
   const row = await prisma.platformSetting.findUnique({ where: { key: workspaceKey(owner, labId(id)) } });
@@ -80,7 +96,14 @@ export async function saveLabConfig(user: SessionUser, revision: unknown, input:
     const row = await tx.platformSetting.findUnique({ where: { key: CONFIG_KEY } });
     const current = row ? JSON.parse(row.value_json) as CharacterLabConfig : defaultLabConfig;
     if (current.revision !== revision) throw new StudioError('规则已在另一处更新，请重新读取；当前编辑保留', 409);
-    const config = { ...checked, revision: current.revision + 1, updatedAt: new Date().toISOString() };
+    const config = { ...current, ...checked, revision: current.revision + 1, updatedAt: new Date().toISOString() };
+    for (const field of Object.values(labViewPromptFields)) {
+      if (fields[field] !== undefined) {
+        const value = labText(fields[field], 3000, '生成规则');
+        if (!value) throw new StudioError('生成规则不能为空');
+        config[field] = value;
+      }
+    }
     const value_json = JSON.stringify(config);
     if (row) {
       if (!(await tx.platformSetting.updateMany({ where: { key: CONFIG_KEY, value_json: row.value_json }, data: { value_json, updated_by: user.id } })).count) throw new StudioError('规则已更新，请重新读取', 409);
@@ -107,7 +130,8 @@ export async function updateLabWorkspace(owner: string, id: unknown, revision: u
     if (!row) throw new StudioError('角色项目不存在', 404);
     const workspace = JSON.parse(row.value_json) as CharacterLabWorkspace;
     if (workspace.revision !== revision) throw new StudioError('工作现场已在另一页更新，当前编辑保留；请重新读取', 409);
-    const next = { ...workspace, name: title, draft: checked, revision: workspace.revision + 1, updatedAt: new Date().toISOString() };
+    const { views, ...storedDraft } = checked;
+    const next = { ...workspace, name: title, draft: storedDraft, ...(views ? { views } : {}), revision: workspace.revision + 1, updatedAt: new Date().toISOString() };
     if (!(await tx.platformSetting.updateMany({ where: { key, value_json: row.value_json }, data: { value_json: JSON.stringify(next), updated_by: owner } })).count) throw new StudioError('工作现场已更新，请重新读取', 409);
     return next;
   });

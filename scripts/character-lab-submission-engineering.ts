@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import dns from 'node:dns/promises';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
 import { createRequire } from 'node:module';
@@ -220,11 +220,107 @@ async function main() {
     assert.equal(await db.creditLedger.count(), ledgerBefore);
     assert.deepEqual(await db.creditAccount.findUniqueOrThrow({ where: { user_id: owner } }), accountBeforeLegacyQuote);
 
+    const sharp = (await import('sharp')).default;
+    const store = await import('../src/lib/character-lab/store');
+    const compositions = await import('../src/lib/character-lab/composition');
+    const workspaceId = randomUUID();
+    const workspace = await store.createLabWorkspace(owner, workspaceId, '独立四格', 'gpt-image-2');
+    const draft = { ...workspace.draft, sourceAssetId, count: 9, diversity: 0, quality: 'medium', resolution: '2K' };
+    const prepare = (kind: 'faces' | 'result', operation?: string, overrides?: Record<string, unknown>) =>
+      service.prepareLab(user, { workspaceId, requestId: randomUUID(), workbench: 2, kind, operation, draft, ...overrides });
+    const first = await prepare('faces');
+    assert.equal(first.count, 9);
+    assert.match(first.prompt, /3×3宫格/);
+    assert.match(first.prompt, /保留人物身份/);
+    assert.doesNotMatch(first.prompt, /结构方向|系统性改变/);
+    const high = await prepare('faces', undefined, { draft: { ...draft, diversity: 75 } });
+    assert.match(high.prompt, /第9格结构方向/);
+
+    const paint = async (record: { id: string }, color: string) => {
+      const id = randomUUID();
+      const url = '/uploads/assets/' + id + '.png';
+      const png = await sharp({ create: { width: 90, height: 90, channels: 3, background: color } }).png().toBuffer();
+      mkdirSync(path.join(directory, 'public/uploads/assets'), { recursive: true });
+      writeFileSync(path.join(directory, 'public', url), png);
+      await db.asset.create({ data: {
+        id, owner_id: owner, type: 'image', status: 'active', original_url: url, file_name: id + '.png',
+        mime_type: 'image/png', width: 90, height: 90, file_size: png.length,
+      } });
+      await db.imageStudioTask.create({ data: {
+        id: randomUUID(), batch_id: batchId(owner, record.id), owner_id: owner, ordinal: 1, fingerprint: sha(record.id),
+        prompt: 'fixture', context: '', revision: 1, model: 'gpt-image-2', reference_ids: '[]',
+        unit_credits: 5, status: 'succeeded', asset_id: id,
+      } });
+      return id;
+    };
+    await paint(first, '#ff0000');
+    const face = { planId: first.id, cell: 4 };
+    const picked = { ...draft, mainFace: face };
+    const faceRefinement = await prepare('faces', 'refine-face', { draft: picked, input: face, description: '鼻梁略低' });
+    assert.equal(faceRefinement.count, 4);
+    assert.match(faceRefinement.prompt, /鼻梁略低/);
+    assert.deepEqual(faceRefinement.input, face);
+    const side = await prepare('result', 'side', { draft: picked });
+    assert.deepEqual(side.mainFace, face);
+    assert.deepEqual(side.referenceIds, faceRefinement.referenceIds);
+    assert.match(side.referenceIds[0], /^clab-/);
+    const sideAsset = await paint(side, '#00ff00');
+    const sideRefinement = await prepare('faces', 'refine-side', {
+      draft: picked, input: { planId: side.id }, description: '收一点下颌',
+    });
+    assert.deepEqual(sideRefinement.referenceIds, [side.referenceIds[0], sideAsset]);
+    await assert.rejects(prepare('faces', 'refine-side', {
+      draft: { ...picked, mainFace: { ...face, cell: 5 } }, input: { planId: side.id }, description: '收一点下颌',
+    }), /侧脸对应旧正脸/);
+    const retrySide = await prepare('result', 'side', { draft: picked });
+    const sideQuote = await service.quoteLab(user, retrySide.id);
+    await db.platformSetting.update({
+      where: { key: receiptKey(sideRefinement.id) }, data: { value_json: JSON.stringify({ state: 'submitting' }) },
+    });
+    await assert.rejects(service.submitLab(user, { planId: retrySide.id, billingQuoteId: sideQuote.billingQuoteId,
+      pricingRevision: sideQuote.pricingRevision, maxEstimatedCost: sideQuote.estimatedCredits }), /原提交结果待确认/);
+    const bodyFront = await prepare('result', 'body-front', { draft: picked });
+    const bodyBack = await prepare('result', 'body-back', { draft: picked });
+    assert.deepEqual(bodyFront.referenceIds, [sourceAssetId]);
+    assert.deepEqual(bodyBack.referenceIds, [sourceAssetId]);
+    assert.equal(bodyFront.mainFace, null);
+    await paint(bodyFront, '#0000ff');
+    await paint(bodyBack, '#ffff00');
+
+    const views = { side: { planId: side.id }, 'body-front': { planId: bodyFront.id }, 'body-back': { planId: bodyBack.id } };
+    const selected = await store.updateLabWorkspace(owner, workspaceId, workspace.revision, workspace.name, { ...picked, views });
+    assert.deepEqual(selected.views, views);
+    const legacy = await service.labWorkspaceState(user, workspaceId);
+    assert.ok(legacy.plans.every(item => !item.operation));
+    const refreshed = await service.labWorkspaceState(user, workspaceId, true);
+    assert.ok(refreshed.plans.some(item => item.id === sideRefinement.id));
+    assert.equal(refreshed.submissionByRequestId[sideRefinement.id], 'submitting');
+    const beforeCompose = await db.imageStudioTask.count();
+    const beforeComposeLedger = await db.creditLedger.count();
+    const png = await compositions.composeLabSheet(user, selected);
+    const sample = async (left: number, top: number) => Array.from(await sharp(png).extract({ left, top, width: 1, height: 1 }).removeAlpha().raw().toBuffer());
+    assert.deepEqual(await sample(400, 500), [255, 0, 0]);
+    assert.deepEqual(await sample(1200, 500), [0, 255, 0]);
+    assert.deepEqual(await sample(400, 1700), [0, 0, 255]);
+    assert.deepEqual(await sample(1200, 1700), [255, 255, 0]);
+    await assert.rejects(compositions.composeLabSheet(user, { ...selected, draft: { ...selected.draft, mainFace: { ...face, cell: 5 } } }), /侧脸对应旧正脸/);
+    const saved = await compositions.saveLabComposition(user, { workspaceId, revision: selected.revision, name: '四格' });
+    const repeated = await compositions.saveLabComposition(user, { workspaceId, revision: saved.revision, name: '四格' });
+    assert.equal(repeated.compositions?.length, 1);
+    const savedPng = await compositions.readLabComposition(user, workspaceId, saved.compositions![0].id);
+    assert.ok(savedPng.png.equals(png));
+    const savedByLegacy = await store.updateLabWorkspace(owner, workspaceId, saved.revision, saved.name, saved.draft);
+    assert.deepEqual(savedByLegacy.views, views);
+    assert.deepEqual(savedByLegacy.compositions, saved.compositions);
+    assert.equal(await db.imageStudioTask.count(), beforeCompose);
+    assert.equal(await db.creditLedger.count(), beforeComposeLedger);
+
     assert.equal(forbiddenCalls, 0);
     console.log(JSON.stringify({ schema: 'character-lab-submission-engineering.v1', synthetic: true,
       checks: ['lab_source_ignores_global_default_fixed_style_skill', 'quote_create_source_and_specification_match',
         'source_marker_requires_server_internal_parameter', 'accepted_and_unknown_preserve_original_request',
-        'legacy_quote_rejected_before_submitting_or_fees'],
+        'legacy_quote_rejected_before_submitting_or_fees', 'nine_grid_and_strength_rules', 'refinement_and_view_references',
+        'same_slot_pending_only', 'legacy_projection_and_writer', 'composition_png_order_identity_and_idempotency'],
       taskId: created.id, batchId: created.batch_id, databasePath, productionWrites: 0, paidRequests: 0,
       browserRuns: 0, forbiddenCalls }, null, 2));
   } finally {

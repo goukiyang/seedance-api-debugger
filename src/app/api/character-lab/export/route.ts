@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 async function exportResult(request: NextRequest, head: boolean) {
   try {
     const user = await requireLabUser(), plan = await readLabPlan(user.id, labId(request.nextUrl.searchParams.get('plan')));
-    if (plan.kind !== 'result') throw new StudioError('请选择已生成的角色成品');
+    if (plan.kind !== 'result' || plan.operation) throw new StudioError('请选择已生成的角色成品');
     const { asset } = await labOutput(user, plan);
     const mode = request.nextUrl.searchParams.get('mode') || 'sheet';
     if (!['sheet', 'cells', 'all'].includes(mode)) throw new StudioError('导出方式无效');

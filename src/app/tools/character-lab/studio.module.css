@@ -189,6 +189,34 @@
 .promptFooter { flex-wrap: wrap; justify-content: flex-end; border-top: 1px solid var(--lab-line); }
 .promptFooter small { margin-right: auto; }
 .promptFooter p { width: 100%; font-size: 12px; }
+.promptPreview { margin-top: 12px; font-size: 12px; }
+.promptPreview summary, .viewHistory summary { cursor: pointer; color: var(--lab-blue); }
+.promptPreview pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; color: var(--lab-muted); }
+.viewBoard { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 12px; }
+.viewSlot { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.viewSlot .settingsHeading { min-height: 38px; flex-wrap: wrap; column-gap: 4px; }
+.viewSlot .settingsHeading small { color: var(--lab-muted); }
+.root .viewImage, .viewEmpty { width: 100%; aspect-ratio: 800 / 1008; padding: 0; overflow: hidden; border: 1px solid var(--lab-line); border-radius: 6px; background: var(--lab-bg); }
+.root .viewImage { display: block; }
+.viewSlot[data-body='true'] :is(.viewImage, .viewEmpty) { aspect-ratio: 800 / 1392; }
+.viewImage img { width: 100%; height: 100%; object-fit: contain; }
+.viewEmpty { display: grid; place-items: center; padding: 10px; text-align: center; color: var(--lab-muted); }
+.viewActions, .savedSheets, .savedSheets > div { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.viewActions a, .savedSheets a { padding: 8px; color: var(--lab-blue); }
+.viewHistory { font-size: 12px; }
+.viewHistory > div { display: flex; gap: 6px; flex-wrap: wrap; }
+.viewHistory button { flex-direction: column; }
+.viewHistory img { width: 70px; height: 70px; object-fit: contain; }
+.savedSheets > div { border: 1px solid var(--lab-line); border-radius: 6px; }
+.refineEntry, .refineSource { display: flex; align-items: center; gap: 12px; }
+.refineEntry img { width: 66px; height: 66px; object-fit: contain; }
+.refineEntry h2 { margin-bottom: 6px; }
+.refineSource img { width: min(42%, 190px); aspect-ratio: 1; object-fit: contain; }
+.refineSource p { color: var(--lab-muted); }
+.refineChoices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.root .refineChoices button { flex-direction: column; padding: 6px; border-color: var(--lab-line); }
+.refineChoices img { width: 100%; aspect-ratio: 1; object-fit: contain; }
+@media (max-width: 640px) { .viewBoard { gap: 12px 8px; } .viewActions button { padding-inline: 6px; font-size: 12px; } .viewSlot h2 { font-size: 13px; } }
 .imageUnavailable { min-height: 100px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 8px; width: 100%; color: var(--lab-muted); font-size: 12px; }
 .srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .spinner { animation: turn 1s linear infinite; }

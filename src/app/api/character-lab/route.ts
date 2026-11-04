@@ -4,13 +4,15 @@ import { StudioError } from '@/lib/image-studio/tasks';
 import { requireLabUser, labFailure, labPrivateHeaders } from '@/lib/character-lab/http';
 import { createLabWorkspace, labConfigVersions, labId, saveLabConfig, updateLabWorkspace } from '@/lib/character-lab/store';
 import { labBootstrapFor, labPlanState, labWorkspaceState, prepareLab, quoteLab, saveLabResult, submitLab } from '@/lib/character-lab/service';
+import { saveLabComposition } from '@/lib/character-lab/composition';
 
 export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   try {
     const user = await requireLabUser();
     const workspace = request.nextUrl.searchParams.get('workspace'), plan = request.nextUrl.searchParams.get('plan');
-    const result = plan ? await labPlanState(user, labId(plan)) : workspace ? await labWorkspaceState(user, labId(workspace)) : await labBootstrapFor(user);
+    const result = plan ? await labPlanState(user, labId(plan)) : workspace
+      ? await labWorkspaceState(user, labId(workspace), request.nextUrl.searchParams.get('workbench') === '2') : await labBootstrapFor(user);
     return NextResponse.json(result, { headers: labPrivateHeaders });
   } catch (error) { return labFailure(error); }
 }
@@ -30,6 +32,7 @@ export async function POST(request: NextRequest) {
     else if (action === 'quote') result = await quoteLab(user, labId(body.planId));
     else if (action === 'submit') result = await submitLab(user, body);
     else if (action === 'save-result') result = { workspace: await saveLabResult(user, body) };
+    else if (action === 'save-composition') result = { workspace: await saveLabComposition(user, body) };
     else if (action === 'save-config') {
       const config = await saveLabConfig(user, body.revision, body.fields);
       result = { config, configVersions: await labConfigVersions() };
