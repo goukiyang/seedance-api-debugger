@@ -10,7 +10,7 @@ import type { PricingAdminAction, PricingAdminBasis, PricingAdminChanges, Pricin
 import { RMB_INTEGER_ROUNDING } from '@/lib/pricing/admin-contract';
 import { consumePricingAdminDraft, defaultPricingAdminView, filterPricingAdminRows, hasPricingAdminChanges, parsePricingAdminPending, parsePricingAdminWorkspace, patchPricingAdminRow, pricingAdminEnhanceGroup, pricingAdminPreviewForSource, pricingAdminPreviewKey, pricingAdminScenarioDifference, pricingAdminStorageKey, stagePricingAdminMemberExit, stagePricingAdminUnify, submittedPricingAdminDraft, validPricingAdminRate, validPricingEnhanceGroup, type PricingAdminDraft, type PricingAdminPending, type PricingAdminView } from '@/lib/pricing/admin-client-state';
 import { RECOMMENDED_POINTS_PER_CNY, stageGptImageReference, stageVideoPricingReferences, videoPricingReferenceStatus } from '@/lib/pricing/presets';
-import { allPricingFilters, pricingActiveFilters, pricingDisplayName, pricingDisplayRounding, pricingDisplayScope } from '@/lib/pricing/admin-display';
+import { allPricingFilters, canEditPricingBase, pricingActiveFilters, pricingDisplayName, pricingDisplayRounding, pricingDisplayScope, showPricingImageRow } from '@/lib/pricing/admin-display';
 import { isSeedanceVideoDuration } from '@/lib/provider/seedance-models';
 import type { PricingEnhanceGroup } from '@/lib/pricing/pricing-authoring-contract';
 import { multiplyDecimal, roundDecimal } from '@/lib/pricing/math';
@@ -32,6 +32,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
   const [draft, setDraft] = useState<PricingAdminDraft>({ revision: '', changes: { rows: [] } });
   const [view, setView] = useState<PricingAdminView>(defaultPricingAdminView);
   const [recoveringDraft, setRecoveringDraft] = useState(false);
+  const [showAlternateImageChannels, setShowAlternateImageChannels] = useState(false);
   const [pending, setPending] = useState<PricingAdminPending | null>(null);
   const [selected, setSelected] = useState<string[]>([]), [allMatched, setAllMatched] = useState(false);
   const [restore, setRestore] = useState<PricingAdminAction | null>(null);
@@ -90,7 +91,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
         if (Object.keys(explicitFilter).length) nextView = { ...nextView, filter: { kind: 'all', difference: 'all', ...explicitFilter }, page: 1, anchorId: '' };
         if (target) {
           const row = data.rows.find(item => item.id === target);
-          nextView = { ...nextView, filter: { kind: 'all', search: row?.label || target }, page: 1,
+          nextView = { ...nextView, filter: { kind: row?.identity.kind || 'all', search: row?.label || target, channelId: row?.identity.channelId }, page: 1,
             expanded: row ? [target] : [], anchorId: row ? target : '', anchorOffset: 0 };
         }
         setDraft(nextDraft); setView(nextView); setHydrated(true);
@@ -102,7 +103,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
   useEffect(() => {
     alive.current = true; currentActor.current = actorId; restored.current = false; restoredAnchor.current = false; userInteracted.current = false;
     saveLock.current = false; scrollAnchor.current = null; setOperationStorageFailed(false); setStorageFailed(false); setIdentityVerified(false);
-    setSnapshot(null); setHydrated(false); setDenied(false); setPending(null); setSelected([]); setRestore(null); setRecoveringDraft(false);
+    setSnapshot(null); setHydrated(false); setDenied(false); setPending(null); setSelected([]); setRestore(null); setRecoveringDraft(false); setShowAlternateImageChannels(false);
     void load(true);
     return () => { alive.current = false; };
   }, [actorId, load]);
@@ -378,9 +379,12 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
   };
   if (!recoveringDraft) {
     const kind = view.filter.kind || 'image';
-    const rows = filterPricingAdminRows(snapshot.rows, { kind, search: view.filter.search, channelId: view.filter.channelId })
-      .filter(row => row.enabled || moneyRows.has(row.id) || view.anchorId === row.id);
     const globalRate = snapshot.authoring?.globalPointsPerCny;
+    const scopedRows = filterPricingAdminRows(snapshot.rows, { kind, search: view.filter.search, channelId: view.filter.channelId });
+    const hasAlternateImages = !view.filter.channelId && scopedRows.some(row => row.identity.kind === 'image' && !row.isDefault && canEditPricingBase(row, globalRate));
+    const rows = scopedRows.filter(row => row.identity.kind === 'image'
+      ? showPricingImageRow(row, globalRate, Boolean(view.filter.channelId) || showAlternateImageChannels || moneyRows.has(row.id))
+      : row.enabled || moneyRows.has(row.id) || view.anchorId === row.id);
     const changedPrices = preview?.changes || [];
     const hiddenChanges = changedPrices.filter(change => !rows.some(row => row.id === change.sourceRowId));
     const derivedChanges = changedPrices.filter(change => !moneyRows.has(change.sourceRowId));
@@ -394,26 +398,27 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
             {message && <p>{message}</p>}
             {storageFailed && <p>浏览器无法保存草稿，离开可能丢失输入。</p>}
             {operationStorageFailed && <p>原保存记录不可核实，已暂停新保存。</p>}
-            {conflict && <p>费率已变化，原输入仍保留。 <button type="button" disabled={Boolean(pending)} onClick={() => setDraft(current => ({ ...current, revision: snapshot.revision, authoringRevision: snapshot.authoring?.revision, catalogFingerprint: snapshot.catalogFingerprint }))}>按最新费率重新核对</button></p>}
+            {conflict && <p>表中显示当前生效价，原草稿仍保留。 <button type="button" disabled={Boolean(pending)} onClick={() => setDraft(current => ({ ...current, revision: snapshot.revision, authoringRevision: snapshot.authoring?.revision, catalogFingerprint: snapshot.catalogFingerprint }))}>核对原草稿</button></p>}
             {pending && <p>保存结果待确认。 <button type="button" disabled={saving} onClick={() => void queryReceipt(pending)}>查询原回执</button></p>}
             {(complexDraft || pendingRows.length > 0) && <p>有未处理的旧草稿，未自动提交。 <button type="button" onClick={() => setRecoveringDraft(true)}>查看原草稿</button></p>}
           </div>}
         <div className={styles.tabs} role="tablist" aria-label="费率类型">{Object.entries(pricingKinds).filter(([key]) => snapshot.rows.some(row => row.identity.kind === key)).map(([key, label]) => <button key={key} type="button" aria-selected={kind === key} role="tab" onClick={() => changeFilter({ kind: key as PricingAdminFilter['kind'], search: '', channelId: '' })}>{label}</button>)}
           {(view.filter.search || view.filter.channelId) && <button type="button" onClick={() => changeFilter({ search: '', channelId: '' })}>查看全部型号</button>}
         </div>
+        {hasAlternateImages && <button type="button" className={styles.link} aria-expanded={showAlternateImageChannels} onClick={() => setShowAlternateImageChannels(current => !current)}>{showAlternateImageChannels ? '收起其他通道' : '其他通道'}</button>}
         <table className={styles.moneyTable}>
           <thead><tr><th scope="col">型号与规格</th><th scope="col">人民币单价</th><th scope="col">扣点</th></tr></thead>
           <tbody>{rows.map(row => {
-            const change = !complexDraft ? moneyRows.get(row.id) : undefined;
+            const change = !complexDraft && !conflict ? moneyRows.get(row.id) : undefined;
             const { change: projected, scenario } = pricingAdminPreviewForSource(preview, row.id);
             const actual = row.identity.billingMode === 'actual', free = row.mode === 'free';
             const unit = row.identity.unit === 'image' ? '张' : '秒';
             const derived = Boolean(row.authoringEntry?.baseRelation);
             const hasRate = row.currentPointsPerCny !== null && (row.mode === 'follow' || row.mode === 'custom');
             const adoptsGlobal = !hasRate && Boolean(snapshot.authoring && globalRate);
-            const editable = !complexDraft && !actual && !free && row.enabled && row.availability === 'ready' && (hasRate || adoptsGlobal);
+            const editable = canEditPricingBase(row, globalRate);
             const amount = change?.base?.amount ?? projected?.after.baseCny ?? row.baseCny;
-            const points = projected || change ? scenario?.adjustedCredits : scenario?.currentCredits;
+            const points = projected || change ? scenario?.adjustedCredits : unit === '张' ? row.currentUnitCredits : scenario?.currentCredits;
             const knownBase = amount !== null && amount !== '';
             const label = pricingDisplayName(row);
             const scope = pricingDisplayScope(row);
@@ -421,7 +426,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
             return <tr key={row.id} data-pricing-row={row.id}>
               <th scope="row"><strong>{label}</strong><small>{row.providerLabel} · {scope}</small>{row.availability !== 'ready' && <small>{row.unavailableReason || '不可用'}</small>}</th>
               <td>{actual ? '按供应商账单' : free ? '免费' : editable ? <label className={styles.moneyInput}>
-                <input type="text" inputMode="decimal" maxLength={snapshot.limits.maxNumberLength} aria-label={`${label} ${row.providerLabel} ${scope} 人民币单价（元/${unit}）`} placeholder="待确认" value={amount ?? ''} disabled={saving} onChange={event => {
+                <input type="text" inputMode="decimal" maxLength={snapshot.limits.maxNumberLength} aria-label={`${label} ${row.providerLabel} ${scope} 人民币单价（元/${unit}）`} placeholder="填写单价" value={amount ?? ''} disabled={saving || complexDraft || conflict} onChange={event => {
                   const value = event.target.value;
                   if (value === (row.baseCny ?? '')) updateChanges(changes => ({ ...changes, rows: changes.rows.filter(item => item.id !== row.id) }));
                   else editRow(row.id, { base: { amount: value, currency: 'CNY', unit: row.identity.unit, source: { type: 'admin_defined', reference: moneySource, note: '' } },
@@ -430,11 +435,11 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
               </label> : knownBase ? <>{amount} 元/{unit}{derived && <small>随关联单价更新</small>}</> : <>{'待确认'}{row.availability === 'ready' && !complexDraft && !hasRate && !adoptsGlobal && <small>尚未配置换算</small>}</>}
               {derived && editable && <small>{change ? '保存后单独定价' : '随关联价更新，手改后单独定价'}</small>}
               {rowFields.map(([key, value]) => <small key={key}>{value}</small>)}</td>
-              <td className={styles.moneyPoints}>{actual ? '按实结算' : free ? '0 点' : !knownBase || row.availability !== 'ready' ? '待确认' : points != null ? <><strong>{points} 点</strong><small>{unit === '张' ? '每张' : `${quantity} 秒`}{change || projected ? ' · 待保存' : ''}</small>{scenario?.roundedToZero && <small>按规则取整为 0</small>}</> : change ? '待核对' : '待报价'}</td>
+              <td className={styles.moneyPoints}>{actual ? '按实结算' : free ? '0 点' : row.availability !== 'ready' ? '待确认' : points != null && (knownBase || unit === '张') ? <><strong>{points} 点</strong><small>{unit === '张' ? '每张' : `${quantity} 秒`}{change || projected ? ' · 待保存' : !knownBase ? ' · 原价' : ''}</small>{scenario?.roundedToZero && <small>按规则取整为 0</small>}</> : change ? '待核对' : !knownBase ? '待确认' : '待报价'}</td>
             </tr>;
           })}</tbody>
         </table>
-        {!rows.length && <p className={styles.empty}>暂无可显示的型号。</p>}
+        {!rows.length && <p className={styles.empty}>{kind === 'image' ? '这个范围没有可编辑的图片费率。' : '暂无可显示的型号。'}</p>}
         {affected.length > 0 && <details className={styles.moneyAffected} open><summary>同时变更 {affected.length} 项价格</summary><ul>{affected.map(item => {
           const row = snapshot.rows.find(row => row.id === item.sourceRowId);
           const scenario = pricingAdminPreviewForSource(preview, item.sourceRowId, item.id).scenario;
@@ -444,7 +449,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
           <div role="status">{previewMessage ? <><span>{previewMessage}</span><button type="button" onClick={() => setPreviewNonce(value => value + 1)}>重新核对</button></>
             : scenarioOverflow ? <span>本次报价范围过大，未保存。</span>
             : dirty && <span>{previewBusy ? '正在核对扣点' : `${draft.changes.rows.length} 项待保存${affected.length ? `，另有 ${affected.length} 项同批变更见表下` : ''}，仅影响新任务`}</span>}</div>
-          <div className={styles.tools}>{dirty && !complexDraft && <button type="button" disabled={saving || Boolean(pending)} onClick={resetDraft}>撤销修改</button>}
+          <div className={styles.tools}>{dirty && <button type="button" disabled={saving || Boolean(pending)} onClick={resetDraft}>{complexDraft ? '撤销旧草稿' : '撤销修改'}</button>}
             <button type="button" className="btn btn-primary" disabled={!canSave || complexDraft || pendingRows.length > 0} onClick={() => void save()}><Save size={16} />{saving ? '正在保存' : pending ? '保存待确认' : '保存'}</button></div>
         </footer>
       </main>{productDialog}</>;
