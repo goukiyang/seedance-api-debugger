@@ -131,7 +131,7 @@ import { recoverStudioPersonalPrompt, type PersonalPromptSource } from './person
 import { matchingStudioRequestReceipt, isStudioRequestEnded, studioRequestOutcomeMessage } from './submit-recovery';
 
 type StudioSnapshot = { personalPrompt?: string; personalPromptState?: string; personalPromptReason?: string; taskSettings?: StudioTaskSettings; imageChannelLabel?: string | null; imageSupplierName?: string | null; referencePolicy?: StudioReferencePolicy; primaryReferenceImages?: UploadedAssetPayload[]; auxiliaryReferenceImages?: UploadedAssetPayload[]; prompt: string; model: string; quality?: string; resolution?: string | null; count: number; aspectRatio: string; resolvedAspectRatio?: string; aspectRatioSource?: string; outputSize?: string | null; resolvedOutputSize?: string | null; globalContext?: string; moduleContext?: string; unitCredits?: number | null; sourceAvailable?: boolean; contextAvailable?: boolean; contextConfigured?: boolean; referenceImages: UploadedAssetPayload[]; fixedReferenceImages?: FixedStudioReference[]; transientReferenceImages?: UploadedAssetPayload[]; fixedReferenceCount?: number; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; skills?: SkillSummary[]; skillIds?: string[] };
-type StudioTask = { feishu?: ImageFeishuView | null; outputIssue?: StudioOutputIssue | null; inputMainPreview?: StudioInputMainPreview; id: string; batchId: string; ordinal: number; owner?: { id: string; name: string; avatar_url: string | null } | null; prompt: string; model: string; quality?: string; status: string; resultDisposition?: 'accepted' | 'dimensions_mismatch' | 'format_mismatch' | null; error?: string; unitCredits: number; billing?: ImageBillingView | null; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; finishedAt?: string | null; snapshot?: StudioSnapshot & { moduleContextVersion?: string | null; moduleContextVersionState?: string }; delivery?: { phase: string; acceptedAt?: number; waitingStatus?: 'pending' | 'retrying' | 'unconfirmed'; receivedBytes?: number; expectedBytes?: number; generationDetailSuperseded?: boolean; recoveryAvailable: boolean; checkpointRetained: boolean; requestId?: string; upstreamRequestId?: string; asyncRecovery?: StudioAsyncRecovery; validation?: { originalFormat: string; storedFormat: string; width: number; height: number; requestedSize?: string } }; asset: { id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number; file_size?: number; file_name?: string; mime_type?: string } | null };
+type StudioTask = { feishu?: ImageFeishuView | null; outputIssue?: StudioOutputIssue | null; inputMainPreview?: StudioInputMainPreview; id: string; batchId: string; moduleId?: string | null; ordinal: number; owner?: { id: string; name: string; avatar_url: string | null } | null; prompt: string; model: string; quality?: string; status: string; resultDisposition?: 'accepted' | 'dimensions_mismatch' | 'format_mismatch' | null; error?: string; unitCredits: number; billing?: ImageBillingView | null; referenceIds: string[]; aspectRatio: string; outputSize?: string; createdAt: string; finishedAt?: string | null; snapshot?: StudioSnapshot & { moduleContextVersion?: string | null; moduleContextVersionState?: string }; delivery?: { phase: string; acceptedAt?: number; waitingStatus?: 'pending' | 'retrying' | 'unconfirmed'; receivedBytes?: number; expectedBytes?: number; generationDetailSuperseded?: boolean; recoveryAvailable: boolean; checkpointRetained: boolean; requestId?: string; upstreamRequestId?: string; asyncRecovery?: StudioAsyncRecovery; validation?: { originalFormat: string; storedFormat: string; width: number; height: number; requestedSize?: string } }; asset: { id?: string; original_url: string; thumbnail_url?: string; width?: number; height?: number; file_size?: number; file_name?: string; mime_type?: string } | null };
 type StudioRecheckScope = { key: string; active: boolean };
 type RestoredTaskSettings = { sourceTaskId: string; snapshot: StudioSnapshot & {
   templateReferenceCount?: number; templateReferenceImages?: UploadedAssetPayload[]; templatePrompt?: string;
@@ -1836,26 +1836,35 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   }, [recheckScopeKey]);
   const taskReadRequest = useRef<{ scope: string; controller: AbortController; action: 'initial' | 'refresh' | 'silent' | 'view' } | null>(null);
   const currentView = useRef({ token: viewToken, active }); currentView.current = { token: viewToken, active };
-  const [viewedResults, setViewedResults] = useState<{ scope: string; token: number; sequence: number; versions: string[] } | null>(null);
+  const [viewedResults, setViewedResults] = useState<{ scope: string; token: number; sequence: number; byModule: Map<string, Set<string>> } | null>(null);
   const resultReadSequence = useRef(0);
   const readAttemptToken = useRef(0);
   const requestedReadToken = useRef(0);
   useEffect(() => {
     if (!sessionChanged && !isClientSessionBlocked() && templateWorkbench && !hidden && active && viewedResults?.scope === taskReadScope && viewedResults.token === viewToken && readAttemptToken.current !== viewedResults.sequence) {
       readAttemptToken.current = viewedResults.sequence;
-      for (let offset = 0; offset < viewedResults.versions.length; offset += 24) {
-        if (isClientSessionBlocked()) break;
-        void onResultsViewed(module.id, viewedResults.versions.slice(offset, offset + 24));
+      for (const [resultModuleId, observed] of Array.from(viewedResults.byModule)) {
+        const versions = Array.from(observed);
+        for (let offset = 0; offset < versions.length; offset += 24) {
+          if (isClientSessionBlocked()) return;
+          void onResultsViewed(resultModuleId, versions.slice(offset, offset + 24));
+        }
       }
     }
   }, [sessionChanged, templateWorkbench, hidden, active, viewedResults, viewToken, taskReadScope, module.id, onResultsViewed]);
-  function observeResultVersion(version: string | null) {
+  function observeResultVersion(version: string | null, resultModuleId: string | null | undefined) {
     if (!templateWorkbench || hidden || document.hidden || !version) return;
     const token = currentView.current.token;
     const sequence = ++resultReadSequence.current;
-    setViewedResults(previous => ({ scope: taskReadScope, token, sequence, versions: previous?.scope === taskReadScope
-      && previous.token === token && readAttemptToken.current !== previous.sequence
-      ? Array.from(new Set([...previous.versions, version])) : [version] }));
+    const sourceId = resultModuleId || module.id;
+    setViewedResults(previous => {
+      const byModule = new Map(previous?.scope === taskReadScope && previous.token === token
+        && readAttemptToken.current !== previous.sequence ? previous.byModule : undefined);
+      const versions = new Set(byModule.get(sourceId));
+      versions.add(version);
+      byModule.set(sourceId, versions);
+      return { scope: taskReadScope, token, sequence, byModule };
+    });
   }
   const taskReadLoaded = useRef(false);
   const [submitting, setSubmitting] = useState(false);
@@ -3984,7 +3993,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       outputIssue: task.outputIssue, inputMainPreview: task.inputMainPreview,
       notice: image && studioOutputMismatchDisposition(task.resultDisposition) && !templateWorkbench ? task.error : undefined,
       error: asyncRecovery || image && studioOutputMismatchDisposition(task.resultDisposition) ? undefined : task.error,
-      onViewed: () => observeResultVersion(studioResultVersion(task)),
+      onViewed: () => observeResultVersion(studioResultVersion(task), task.moduleId),
       download: image ? () => { setSelected([task.id]); setDownloadMode(true); } : undefined,
       downloadDisabled: downloadBusy,
       downloadTemporarilyBusy: downloadBusy,
@@ -3997,7 +4006,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         safeDetails: { ...image.metadata, width: image.width, height: image.height, fileSize: image.fileSize },
         comparison: image.comparison,
         comparisonCandidates: [...taskComparisonCandidates(task), ...previewableTasks.filter(other => other.batchId === task.batchId).map(other => ({ src: other.asset!.original_url, role: 'generated' as const, thumbnailSrc: other.asset!.thumbnail_url, alt: `生成结果 ${other.ordinal}`, contentKey: `asset:${other.asset!.id}` as const }))],
-        onImageLoaded: (src: string) => { if (src === image.src) observeResultVersion(image.resultVersion || null); },
+        onImageLoaded: (src: string) => { if (src === image.src) observeResultVersion(image.resultVersion || null, task.moduleId); },
       } : undefined,
     } satisfies GeneratedImageResult & { task: StudioTask };
   });
@@ -4208,7 +4217,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     onPointerDownCapture={activateDraft} onFocusCapture={activateDraft}>
     {!draftLoaded && <p role="status">正在恢复工作区…</p>}
     <div hidden={!draftLoaded}>
-    {sharedLive?.methodDraft && <p className={styles.sharedOrigin} role="status">复用草稿 · 这里记录本次复用后生成的作品。<a href={`/template-studio?type=image&presetId=${encodeURIComponent(sharedLive.intent.presetId)}`}>查看原模板作品</a></p>}
+    {sharedLive?.methodDraft && <p className={styles.sharedOrigin} role="status">复用草稿 · 本次设置单独保存。<a href={`/template-studio?type=image&presetId=${encodeURIComponent(sharedLive.intent.presetId)}`}>打开原模板</a></p>}
     <header className={styles.header}>
       <TemplateFavoriteTitle className={styles.moduleTitleRow} contentKey={sharedLive?.available ? `image_template:${sharedLive.intent.presetId}` : module.saved && !sharedLive ? `image_module:${module.id}` : undefined}>
         {!definitionReady ? <strong className={styles.moduleNameDisplay}>{name}</strong> : nameEditing ? <input ref={nameInput} className={styles.moduleName} aria-label="模块名称" value={name} maxLength={80} onChange={event => setName(event.target.value)} onBlur={() => setNameEditing(false)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); setNameEditing(false); } }} /> : <button type="button" className={styles.moduleNameDisplay} title={name} aria-label={`编辑模块标题：${name}`} onClick={() => setNameEditing(true)}>{name}</button>}

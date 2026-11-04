@@ -453,6 +453,40 @@ export async function resolveSharedStudioModule(user: ImageStudioIdentity, modul
   return { binding, definition, personalOverrides, publicDTO, methodDraft: Boolean(methodPin) };
 }
 
+/** Resolve the original read scope without opening or creating a workspace. */
+export async function studioMethodHistoryModuleId(user: ImageStudioIdentity, moduleId: string, client: SharedStudioClient = prisma) {
+  const marker = await client.platformSetting.findUnique({ where: { key: `studio_works_method_pin_v1:${moduleId}` }, select: { value_json: true } });
+  if (!marker) return undefined;
+  const pin = parseRecord(marker.value_json, '作品方法草稿来源无法确认');
+  if (pin.ownerId !== user.id || typeof pin.presetId !== 'string') return undefined;
+  const [draft, preset] = await Promise.all([
+    client.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: user.id, source_preset_id: pin.presetId }, select: { id: true } }),
+    client.imageStudioPreset.findUnique({ where: { id: pin.presetId }, select: { owner_id: true, scope: true, is_shared: true } }),
+  ]);
+  if (!draft || !preset || !canViewStudioPreset(user, preset) || await studioPresetArchived(pin.presetId, client)) return undefined;
+  const owner = preset.owner_id === user.id;
+  if (owner) {
+    const publisher = await studioPublisherModule(user.id, pin.presetId, client);
+    if (publisher) return publisher;
+  }
+  const candidates = await client.imageStudioModule.findMany({
+    where: { owner_id: user.id, source_preset_id: pin.presetId, id: { not: moduleId } },
+    select: { id: true }, orderBy: [{ created_at: 'asc' }, { id: 'asc' }],
+  });
+  if (!candidates.length) return undefined;
+  const markers = await client.platformSetting.findMany({
+    where: { key: { in: candidates.map(candidate => `studio_works_method_pin_v1:${candidate.id}`) } }, select: { key: true },
+  });
+  const drafts = new Set(markers.map(item => item.key));
+  for (const candidate of candidates) {
+    if (drafts.has(`studio_works_method_pin_v1:${candidate.id}`)) continue;
+    const binding = await studioSharedBinding(user.id, candidate.id, client);
+    if (binding?.presetId === pin.presetId && binding.mode === (owner ? 'publisher' : 'live')
+      && !await readStudioWorkspaceDeletion(user.id, candidate.id, client)) return candidate.id;
+  }
+  return undefined;
+}
+
 /** The caller owns the durable operation transaction. Never reuses or edits an existing personal workspace. */
 export async function prepareSharedStudioMethodWorkspace(user: ImageStudioIdentity, presetId: string,
   expectedVersion: string, expectedToken: string | null, client: SharedStudioClient, actualSettings: SharedStudioPersonalOverrides) {

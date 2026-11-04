@@ -185,7 +185,7 @@ export function WorkDetail({ id, viewerId, preparation, revision, likesRevision,
             <h1 ref={heading} tabIndex={-1} id="work-detail-title" className={styles.sourceTitle}>{source ? <a href={source.href}>{source.label}</a> : '作品详情'}</h1>
             <div className={styles.detailSource}>
               {work.provenance?.template && <a href={work.provenance.tool.href}>{work.provenance.tool.label}</a>}
-              {work.provenance?.template && <button type="button" className={styles.primary} disabled={blocked || methodReading || context?.method?.action.kind !== 'template'} title={context?.method?.action.reason} onClick={() => void applyMethod()}>{methodReading ? '正在准备…' : '一键复用'}</button>}
+              {work.provenance?.template && <button type="button" className={styles.primary} disabled={blocked || methodReading || context?.method?.action.kind !== 'template'} title={context?.method?.action.reason} onClick={() => void applyMethod()}>{methodReading ? '正在准备…' : '一键参考'}</button>}
             </div>
             {notice && <p className={styles.notice} role="status">{notice}{notice.startsWith('已加入') && <a href="/generate" className={styles.textAction}>打开生成工作区</a>}</p>}
             <WorkLearning work={work} viewerId={viewerId} disabled={blocked || comparing} onSeek={work.medium === 'video' && !comparing ? seek : undefined} />
