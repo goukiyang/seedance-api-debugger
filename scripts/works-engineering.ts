@@ -6,6 +6,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, symlin
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mock } from 'node:test';
+import { performance } from 'node:perf_hooks';
 import http from 'node:http';
 import https from 'node:https';
 import dns from 'node:dns/promises';
@@ -108,7 +109,9 @@ with sqlite3.connect(sys.argv[1]) as db:
     const { readWorkFilters } = await import('../src/lib/works/filters');
     const { readWorkPage, readWorkDetail } = await import('../src/lib/works/query');
     const { recordWorkView, readWorkActivity } = await import('../src/lib/works/activity');
-    const { workMediaResponse } = await import('../src/lib/works/media');
+    const { workMediaResponse: readWorkMedia } = await import('../src/lib/works/media');
+    const workMediaResponse = (request: Request, user: Parameters<typeof readWorkMedia>[1], workId: string) =>
+      readWorkMedia(request, user, workId, performance.now());
     const { mutateWorkLifecycle, addWorkReference, publishUploadedWork } = await import('../src/lib/works/lifecycle');
     const { assertCanViewTask } = await import('../src/lib/projects/permissions');
     const { mutateWorkPersonalState } = await import('../src/lib/works/interactions');
@@ -212,6 +215,12 @@ with sqlite3.connect(sys.argv[1]) as db:
         { headers: { 'X-Image-View-Token': randomUUID(), 'X-Image-Accept': 'hd-open-v1' } }), owner, current.work.id);
       assert.equal(description.status, 200); assert.equal(description.headers.get('X-Work-Media-Version'), current.media.id);
       assert.equal((await description.json()).reason, 'not_registered');
+      const original = await readWorkMedia(new Request(`https://fixture.invalid/api/works/${current.work.id}/media?version=${current.media.id}&variant=original`,
+        { method: 'HEAD' }), owner, current.work.id, performance.now() - 100);
+      assert.equal(original.status, 200);
+      assert.equal(original.body, null);
+      const accessTiming = original.headers.get('Server-Timing')?.match(/^access;dur=([\d.]+),media;dur=/);
+      assert.ok(accessTiming && Number(accessTiming[1]) >= 100, 'Work image timing must include the elapsed time before media handling');
       const unavailableHd = await workMediaResponse(new Request(`https://fixture.invalid/api/works/${current.work.id}/media?version=${current.media.id}&variant=hd`), owner, current.work.id);
       assert.equal(unavailableHd.status, 409);
       assert.deepEqual(readdirSync(path.join(hdFixture, 'hd')), [], 'Work reads must not create HD manifests or scheduler state');
