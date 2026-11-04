@@ -81,6 +81,7 @@ test('HD edge pilot preserves the current combined GET and fails closed', { time
       assert.equal(response.headers.get('x-image-source-version'), sourceVersion);
       assert.equal(response.headers.get('x-image-representation-version'), representationVersion);
       assert.equal(response.headers.get('etag'), originEtag);
+      assert.match(response.headers.get('server-timing'), /^hd_edge_auth;dur=\d+, hd_edge_object_headers;dur=\d+$/);
       assert.equal(response.headers.get('location'), null);
       assert.equal(response.headers.get('x-cos-request-id'), null);
       assert.deepEqual(JSON.parse(response.headers.get('x-image-hd-description')), {

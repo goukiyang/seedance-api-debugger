@@ -62,6 +62,7 @@ export function createHdEdgePilot({ siteOrigin, appOrigin, objectOrigin, entries
     const denial = status => Response.json({ error: '高清图片暂不可读取' }, { status, headers: privateHeaders });
     const cookie = request.headers.get('cookie');
     if (!cookie) return denial(401);
+    const authStarted = Date.now();
     let permission;
     try {
       permission = await fetchImpl(origin, { method: 'HEAD', redirect: 'manual', signal: request.signal,
@@ -69,6 +70,7 @@ export function createHdEdgePilot({ siteOrigin, appOrigin, objectOrigin, entries
     } catch {
       return denial(503);
     }
+    const authMs = Math.max(0, Date.now() - authStarted);
     if ([401, 403, 404].includes(permission.status)) return denial(permission.status);
     // The existing combined GET returns the actual pending state on this path.
     if (permission.status === 409) return;
@@ -80,6 +82,7 @@ export function createHdEdgePilot({ siteOrigin, appOrigin, objectOrigin, entries
       || allowed.get('content-type') !== entry.mime || allowed.get('content-length') !== String(entry.bytes)
       || !allowed.get('etag')) return;
 
+    const objectStarted = Date.now();
     let bytes;
     try {
       bytes = await fetchImpl(entry.object, { redirect: 'manual', signal: request.signal,
@@ -87,6 +90,7 @@ export function createHdEdgePilot({ siteOrigin, appOrigin, objectOrigin, entries
     } catch {
       return;
     }
+    const objectHeadersMs = Math.max(0, Date.now() - objectStarted);
     const objectHeaders = bytes.headers;
     if (bytes.status !== 200 || !bytes.body || objectHeaders.has('content-range')
       || (objectHeaders.has('content-encoding') && objectHeaders.get('content-encoding') !== 'identity')
@@ -98,6 +102,7 @@ export function createHdEdgePilot({ siteOrigin, appOrigin, objectOrigin, entries
     return new Response(bytes.body, { headers: { ...privateHeaders,
       'Content-Type': entry.mime, 'Content-Length': String(entry.bytes), 'Content-Disposition': 'inline',
       ETag: allowed.get('etag'), 'X-Image-Source-Version': entry.sourceVersion,
+      'Server-Timing': 'hd_edge_auth;dur=' + authMs + ', hd_edge_object_headers;dur=' + objectHeadersMs,
       'X-Image-Representation-Version': entry.representationVersion, 'X-Image-HD-Description': entry.description } });
   };
 }
