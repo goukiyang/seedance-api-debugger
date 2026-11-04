@@ -25,13 +25,13 @@ export function WorkActions({ work, labels = false, cover = false, busy, operate
     <span className={styles.likeControl} data-work-action="like"><LikeButton active={work.personal.liked} count={work.likeCount} showCount={work.likeCount > 0} animateCount={true} disabled={busy} bloom={bloom} onClick={() => void toggleLike()} /></span>
     <button type="button" data-work-action="favorite" title={work.personal.favorited ? '取消收藏' : '收藏到全部收藏'} aria-label={work.personal.favorited ? '取消收藏' : '收藏到全部收藏'} aria-pressed={work.personal.favorited} disabled={busy} onClick={() => state('favorite', !work.personal.favorited)}><Bookmark size={17} fill={work.personal.favorited ? 'currentColor' : 'none'} />{labels && <span>{work.personal.favorited ? '已收藏' : '收藏'}</span>}</button>
     {!cover && work.personal.favorited && <button type="button" data-work-action="classify" className={styles.classifyButton} title="归类到集合" aria-label="归类到集合" disabled={busy} onClick={() => onClassify(work)}><FolderPlus size={17} />{labels && <span>归类</span>}</button>}
-    <span className={styles.actionEnd} data-work-action="manage"><ProductActionMenu label={`管理作品：${work.title}`} disabled={busy} actions={[
+    {!cover && <span className={styles.actionEnd} data-work-action="manage"><ProductActionMenu label={`管理作品：${work.title}`} disabled={busy} actions={[
       ...(work.personal.favorited ? [{ id: 'classify', label: '归类到集合', onSelect: () => onClassify(work) }] : []),
       { id: 'hide', label: work.personal.hidden ? '恢复对我显示' : '对我隐藏', onSelect: () => state('hide', !work.personal.hidden) },
       ...(work.canManage ? [
         ...(!work.withdrawn ? [{ id: 'discovery', label: work.discoverable ? '移出广场' : '恢复到广场', onSelect: () => lifecycle(work.discoverable ? 'exclude' : 'restore-discovery') }] : []),
         { id: 'sharing', label: work.withdrawn ? '恢复分享' : '撤回分享', onSelect: () => lifecycle(work.withdrawn ? 'restore-sharing' : 'withdraw') },
       ] : []),
-    ]} /></span>
+    ]} /></span>}
   </div>;
 }
