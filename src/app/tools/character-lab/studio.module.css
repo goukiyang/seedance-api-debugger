@@ -173,7 +173,7 @@
 .loading > div { background: var(--lab-panel); border: 1px solid var(--lab-line); border-radius: 8px; height: 65dvh; }
 .loading > span { position: absolute; top: 35%; left: 50%; transform: translateX(-50%); color: var(--lab-muted); }
 .settingsHeading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.root .promptTrigger { flex: none; width: auto; margin: 0; padding-inline: 8px; font-size: 12px; color: var(--lab-blue); }
+.root .promptTrigger { flex: none; width: auto; margin: 0; padding-inline: 8px; font-size: 12px; color: var(--lab-blue); white-space: nowrap; }
 .root .adjustments > .promptTrigger { margin-top: 12px; }
 .promptDialog { width: min(640px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 1px solid var(--lab-line); border-radius: 10px; background: var(--lab-panel); color: var(--lab-text); }
 .promptDialog[open] { display: flex; flex-direction: column; }

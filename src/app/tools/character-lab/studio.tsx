@@ -504,7 +504,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
   function renderPromptButton(target: PromptTarget) {
     if (!isAdmin) return null;
     return <button type="button" className={styles.promptTrigger} aria-haspopup="dialog" aria-label={promptTitles[target]} disabled={locked || !configDraft} onClick={() => { setConfigError(''); setPromptTarget(target); }}>
-      <Settings2 size={15} />提示词
+      <Settings2 size={15} />{target === 'faces' ? '人脸提示词' : '成品提示词'}
     </button>;
   }
 
