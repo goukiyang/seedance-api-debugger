@@ -12,6 +12,7 @@
 
 | 编号 | 类别 / 优先级 | 事实、潜在影响与证据边界 | 来源与证据 | 状态 / 下一步 |
 | --- | --- | --- | --- | --- |
+| D-20261105-RATE-FLOAT | 窄屏共享悬浮入口 / P3待核 | 390×844手机模拟中，原意见悬浮入口在特定滚动位置与费率表扣点末尾/单位区域相交，可通过滚动移开；未判定真实手机触控及其它页面影响。 | [本轮工单](todo/2026-11-05-pricing-guide.md)；正式根私有 `docs/materials/2026-11-05-pricing-guide/final-mobile-video.png` | 保留共享反馈能力，不在只读费率页任务里全站挪动或隐藏；后续独立核对手机悬浮工具的安全区域。 |
 | D-20261102-02 | 已确认机制、线上影响待核 / P2 | 网站反馈POST仅前端submittingRef防重，服务端每次新建Feedback；网络丢回执后重提可能形成多条反馈和多份通知。未查生产重复数，不能称已发生。 | [提交源码](https://github.com/goukiyang/seedance-api-debugger/blob/6629e540dadaa816d17e6784a904d24ec50262a1/src/app/api/feedback/route.ts)、[插件反馈工单](todo/2026-11-02-plugin-feedback-entry.md) | 插件新路径已设计同事务耐久提交回执，尚未实施；网站旧入口另行核影响与迁移，保旧行为，不在本轮工单阶段修代码。 |
 | D-20261101-01 | 待核线索 / P2 | 生产构建已确认共享 Prisma 类导入桥；实际客户端实例数、跨 Next 路由 bundle 的展示缓存是否共用仍未知。可能重复建连接或重算菜单，不能认定已发生。 | [窄拓扑证据](../docs/materials/2026-11-01-admin-usage-read-snapshot/built-cache-topology.md)、[初始化](/Volumes/Data/Projects/video-api-debugger-worktrees/admin-usage-read-snapshot-reader-20261101/src/lib/prisma.ts) | 待核；需要时映射实际初始化与缓存身份，不先改 singleton / TTL，不加生产探针。 |
 
