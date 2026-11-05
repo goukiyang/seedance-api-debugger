@@ -1080,3 +1080,9 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 - 本轮额外发现已登记到[统一发现清单](discoveries.md)：D-20261101-01 至 04 分别保留生产 bundle 共享身份待核、目录全局失效放大、报表 Web 计算量和跨能力计价故障范围；均未实施额外重构，原任务与手验边界不变。
 
 - 封面媒体定点接续仅增短时日志并已恢复原配置；同一B/640/revision2自然点击5.256s、媒体TTFB2.390s，对应Nginx上游头/完整响应均113ms、总时长888ms，Node响应构造89.7ms。已把主要等待缩到观察的上游处理区间之外，公网/前置代理/浏览器等细因仍未证；不冒新修复或全站改善。[原代理计时](../docs/materials/2026-11-01-admin-usage-read-snapshot/media-edge-diagnostic/attempt02/timing-snapshot.jsonl)、[配置恢复证明](../docs/materials/2026-11-01-admin-usage-read-snapshot/media-edge-diagnostic/attempt02/automatic-restore.json)保留；App未重启、源88/v0.125.2不变。
+
+<!-- FEISHU-AVATAR-DEFAULT-PROJECT-SUMMARY-20261105 -->
+## FEISHU-AVATAR01 / DEFAULT-PROJECT01（2026-11-05）
+
+飞书账户头像规则及后台/历史漏传、真实设备编辑者和账户命名默认项目已修复。应用796da6b03/v0.133.7已推送并保护部署，完整工程与公网产物核对通过，待用户手动验收。无批量资料回填或数据迁移，完整原单与证据留正式根本地；未新增范围外业务问题。
+<!-- /FEISHU-AVATAR-DEFAULT-PROJECT-SUMMARY-20261105 -->
