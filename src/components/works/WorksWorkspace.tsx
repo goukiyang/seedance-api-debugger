@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ExperienceEmpty, FilterSummary, OperationReceipt } from '@/components/experience/ExperienceParts';
 import { createPortal } from 'react-dom';
 import * as Popper from '@radix-ui/react-popper';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
@@ -142,7 +143,10 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
   }, []);
   const applyResult = useCallback(async (result: Record<string, unknown>, key: string) => {
     if (!alive.current) return;
-    if (key.startsWith('method:') && typeof result.href === 'string' && result.href.startsWith('/') && !result.href.startsWith('//')) setMethodHref(result.href);
+    if (key.startsWith('method:') && typeof result.href === 'string' && result.href.startsWith('/') && !result.href.startsWith('//')) {
+      setMethodHref(result.href);
+      return;
+    }
     const idForPatch = typeof result.workId === 'string' ? result.workId : '';
     if (idForPatch) setPages(old => old.map(page => ({ ...page, items: page.items.map(work => {
       if (work.id !== idForPatch) return work;
@@ -175,7 +179,7 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
     if (operationLocks.current.has(key)) return null; operationLocks.current.add(key); setBusy(old => [...old, key]);
     const isLike = url.endsWith('/state') && body.action === 'like';
     if (!isLike) { setNotice(''); setMethodHref(''); }
-    try { const result = await worksMutate(viewerId, key, url, body, method); if (!alive.current) return null; await applyResult(result, key); if (!isLike) setNotice(url.endsWith('/publish') ? '已加入我的作品，点击刷新查看新作品。' : url.endsWith('/reference') ? '已加入生成工作区' : '已保存'); return result; }
+    try { const result = await worksMutate(viewerId, key, url, body, method); if (!alive.current) return null; await applyResult(result, key); if (!isLike && body.action !== 'favorite') setNotice(url.endsWith('/publish') ? '已加入我的作品，点击刷新查看新作品。' : url.endsWith('/reference') ? '已加入生成工作区' : '已保存'); return result; }
     catch (cause) { if (alive.current) { setNotice(cause instanceof Error ? cause.message : '操作未完成'); if (cause instanceof WorksClientError && cause.status === 409 && (key.startsWith('work:') || key.startsWith('method:'))) { setDetailRevision(value => value + 1); void worksRead<{ viewerId: string; work: WorkCard }>(`/api/works/${encodeURIComponent(key.slice(key.indexOf(':') + 1))}`, viewerId).then(data => { if (alive.current) updateWork(data.work); }).catch(() => {}); } } return null; }
     finally { operationLocks.current.delete(key); if (alive.current) { setBusy(old => old.filter(item => item !== key)); setPending(pendingWorkOperations(viewerId)); } }
   }, [viewerId, applyResult, updateWork]);
@@ -187,6 +191,7 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
   }
   useEffect(() => { if (ready && pagesRef.current.length && loadedQueryRef.current === queryKey) remember(); }, [workId, queryKey, ready, remember]);
   const onRestored = useCallback((generation: number) => { restoringList.current = false; setRestore(old => old?.generation === generation ? null : old); }, []), first = pages[0], last = pages[pages.length - 1];
+  const clearFilters = () => updateQuery({ medium: 'all', q: undefined, author: undefined, project: undefined, collection: undefined });
   const activeFilterCount = [query.q, query.author, query.project, query.collection, query.medium && query.medium !== 'all'].filter(Boolean).length, hasFilters = activeFilterCount > 0;
   autoMore.current = () => {
     if (!ready || loading || error || workId || classify || adding || loadBusy.current) return;
@@ -210,7 +215,7 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
     if (id && label) setFilterNames(old => Object.fromEntries([...Object.entries(old), [`${key}:${id}`, label]].slice(-100)));
     updateQuery({ [key]: id });
   }
-  return <div className={styles.page}>
+  return <div className={`${styles.page} exp-browse`}>
     {!workId && <>
     <header className={styles.toolbar} aria-label="作品浏览工具栏">
       <h1 className={styles.visuallyHidden}>作品广场</h1>
@@ -227,13 +232,8 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
             <WorkFilterPicker viewerId={viewerId} kind="authors" value={query.author} label={filterLabel('author')} onSelect={(id, name) => chooseFilter('author', id, name)} />
             <WorkFilterPicker viewerId={viewerId} kind="projects" value={query.project} label={filterLabel('project')} onSelect={(id, name) => chooseFilter('project', id, name)} />
           </div>
-          {hasFilters && <div className={styles.chips} aria-label="当前筛选">
-            {query.q && <button type="button" title={query.q} onClick={() => updateQuery({ q: undefined })}><span>标题：{query.q}</span><X size={14} /></button>}
-            {(['author', 'project'] as const).map(key => query[key] && <button key={key} type="button" title={filterLabel(key)} onClick={() => updateQuery({ [key]: undefined })}><span>{filterLabel(key) ? `${key === 'author' ? '作者' : '项目'}：${filterLabel(key)}` : key === 'author' ? '已选作者' : '已选项目'}</span><X size={14} /></button>)}
-            {query.collection && <button type="button" onClick={() => updateQuery({ collection: undefined })}><span>{directory.collections.find(item => item.id === query.collection)?.name || '已选集合'}</span><X size={14} /></button>}
-          </div>}
           {query.scope === 'favorites' && <CollectionManager directory={directory} selected={query.collection} onSelect={collection => updateQuery({ collection })} operate={operate} busy={busy.length > 0 || pending.some(item => item.key.startsWith('collection:'))} />}
-          <div className={styles.filterFooter}>{hasFilters && <button type="button" onClick={() => updateQuery({ medium: 'all', q: undefined, author: undefined, project: undefined, collection: undefined })}>清除筛选</button>}<button type="button" disabled={loading} onClick={() => { navigationEpoch.current++; remember(); resetWindow.current = true; window.scrollTo({ top: 0 }); setRefresh(value => value + 1); setFiltersOpen(false); }}><RefreshCw size={16} />刷新作品</button></div>
+          <div className={styles.filterFooter}>{hasFilters && <button type="button" onClick={clearFilters}>清除筛选</button>}<button type="button" disabled={loading} onClick={() => { navigationEpoch.current++; remember(); resetWindow.current = true; window.scrollTo({ top: 0 }); setRefresh(value => value + 1); setFiltersOpen(false); }}><RefreshCw size={16} />刷新作品</button></div>
         </Popper.Content>, document.body)}
       </Popper.Root>
       <button type="button" className={styles.primary} aria-label="添加作品" title="添加作品" onClick={() => setAdding(true)}><Plus size={17} /><span className={styles.toolbarLabel}>添加作品</span></button>
@@ -242,9 +242,20 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
     {notice && <div className={styles.notice} role="status"><span>{notice}{methodHref && <a href={methodHref} className={styles.textAction}>打开本人模板草稿</a>}</span><button type="button" aria-label="关闭提示" onClick={() => { setNotice(''); setMethodHref(''); }}><X size={15} /></button></div>}
     {pending.length > 0 && <div className={styles.pending} role="status"><p>有 {pending.length} 项提交结果待确认，原操作编号已保留。</p>{pending.map(operation => <button key={operation.requestId} type="button" title={operation.requestId} disabled={busy.includes(operation.key)} onClick={() => void reconcile(operation)}>核对原操作 {operation.requestId.slice(0, 8)}</button>)}</div>}
     {!workId && <div>
+      <FilterSummary filters={[
+        ...(query.q ? [{ id: 'q', label: `标题：${query.q}`, remove: () => updateQuery({ q: undefined }) }] : []),
+        ...(query.medium && query.medium !== 'all' ? [{ id: 'medium', label: query.medium === 'image' ? '图片' : '视频', remove: () => updateQuery({ medium: 'all' }) }] : []),
+        ...(['author', 'project'] as const).flatMap(key => query[key] ? [{
+          id: key, label: `${key === 'author' ? '作者' : '项目'}：${filterLabel(key) || '已选'}`,
+          remove: () => updateQuery({ [key]: undefined }),
+        }] : []),
+        ...(query.collection ? [{ id: 'collection', label: directory.collections.find(item => item.id === query.collection)?.name || '已选集合',
+          remove: () => updateQuery({ collection: undefined }) }] : []),
+      ]} clear={clearFilters} />
       <section className={styles.feed} aria-label="作品内容">{first?.previousCursor && <div className={styles.pageControl}><button type="button" disabled={loading} onClick={() => void load('before')}>读取前面的作品</button></div>}
-        {error && failedDirection !== 'after' && <div className={styles.readError} role="status"><p>{error}</p><button type="button" disabled={loading} onClick={() => void load(failedDirection)}>重试读取</button></div>}
-        {items.length > 0 ? <WorksMasonry items={items} playback={playback} contextKey={`${viewerId}:${queryKey}`} detailOpen={Boolean(workId || classify || adding)} busyKeys={busyKeys} operate={operate} onClassify={setClassify} onOpen={open} onFilter={(key, id) => chooseFilter(key, id)} restore={restore} navigationEpoch={navigationEpoch} onRestored={onRestored} /> : loading ? <div className={styles.skeletonGrid} role="status" aria-label="正在读取作品">{Array.from({ length: 6 }, (_, i) => <div key={i} className={styles.skeleton} />)}</div> : !error && <div className={styles.empty}><h2>{hasFilters ? '没有匹配的作品' : query.scope === 'favorites' ? '先收藏喜欢的作品' : query.scope === 'hidden' ? '没有对你隐藏的作品' : query.scope === 'managed' ? '没有可管理的作品分享' : '这里还没有作品'}</h2><p>{hasFilters ? '试试清除筛选，或换一个标题关键词。' : query.scope === 'favorites' ? '先收藏到全部收藏，之后可按需归类。' : query.scope === 'hidden' ? '隐藏的作品可在这里恢复显示。' : '已有成品会按原有权限显示，也可以明确加入本人上传的作品。'}</p><div>{hasFilters ? <button type="button" onClick={() => updateQuery({ medium: 'all', q: undefined, author: undefined, project: undefined, collection: undefined })}>清除筛选</button> : <><button type="button" onClick={() => updateQuery({ scope: 'mine' })}>我的作品</button><button type="button" className={styles.primary} onClick={() => setAdding(true)}>添加作品</button></>}</div></div>}
+        {error && failedDirection !== 'after' && <OperationReceipt className={styles.readError} status={error}
+          actions={<button type="button" disabled={loading} onClick={() => void load(failedDirection)}>重试读取</button>} />}
+        {items.length > 0 ? <WorksMasonry items={items} playback={playback} contextKey={`${viewerId}:${queryKey}`} detailOpen={Boolean(workId || classify || adding)} busyKeys={busyKeys} operate={operate} onClassify={setClassify} onOpen={open} onFilter={(key, id) => chooseFilter(key, id)} restore={restore} navigationEpoch={navigationEpoch} onRestored={onRestored} /> : loading ? <div className={styles.skeletonGrid} role="status" aria-label="正在读取作品">{Array.from({ length: 6 }, (_, i) => <div key={i} className={styles.skeleton} />)}</div> : !error && <ExperienceEmpty className={styles.empty} title={hasFilters ? '没有匹配的作品' : query.scope === 'favorites' ? '先收藏喜欢的作品' : query.scope === 'hidden' ? '没有对你隐藏的作品' : query.scope === 'managed' ? '没有可管理的作品分享' : '这里还没有作品'} description={hasFilters ? '试试清除筛选，或换一个标题关键词。' : query.scope === 'favorites' ? '先收藏到全部收藏，之后可按需归类。' : query.scope === 'hidden' ? '隐藏的作品可在这里恢复显示。' : '已有成品会按原有权限显示，也可以明确加入本人上传的作品。'}>{hasFilters ? <button type="button" onClick={clearFilters}>清除筛选</button> : <><button type="button" onClick={() => updateQuery({ scope: 'mine' })}>我的作品</button><button type="button" className={styles.primary} onClick={() => setAdding(true)}>添加作品</button></>}</ExperienceEmpty>}
         {error && failedDirection === 'after' && <div className={styles.readError} role="status"><p>{error}</p><button type="button" disabled={loading} onClick={() => void load('after')}>在这里重试</button></div>}
         <div ref={sentinel} className={styles.sentinel} aria-hidden="true" />
         {last?.nextCursor && <div className={styles.pageControl}><button type="button" disabled={loading} onClick={() => void load('after')}>{loading ? '正在读取…' : '更多作品'}</button></div>}{loading && items.length > 0 && <p className={styles.muted} role="status">正在读取作品…</p>}

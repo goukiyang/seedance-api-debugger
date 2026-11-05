@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import * as Popper from '@radix-ui/react-popper';
+import { ExperienceActions, OperationReceipt } from '@/components/experience/ExperienceParts';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { Send, Check, CircleAlert, LoaderCircle, X } from 'lucide-react';
 import { useAppSession } from '@/lib/context/AppSessionContext';
@@ -170,25 +171,26 @@ export function ImageFeishuStatus({ owner, taskId, initial, onChanged, presentat
         <div className={styles.heading}><strong>{label}</strong><button type="button" aria-label="关闭发送详情" onClick={() => setDetailsOpen(false)}><X size={14}/></button></div>
         {value?.reason || error ? <p role={error ? 'alert' : undefined}>{error || reasons[value?.reason || ''] || '当前发送未完成，请稍后查看状态。'}</p> : <p>{state === 'sent' ? '这张原图已发送到本人飞书。' : pendingStates.has(state) ? '正在发送，请稍等。' : '发送完整原图到本人飞书。'}</p>}
         <p className={styles.secondary}>{value?.mode === 'file' ? '原图附件' : value?.mode === 'image' ? '原图图片' : '附件上限30MB'}{value?.fileSize ? ` · ${(value.fileSize / 1_000_000).toFixed(1)}MB` : ''}{value?.mode ? ' · 上限30MB' : ''}</p>
-        <div className={styles.actions}>
+        <ExperienceActions className={styles.actions} label="飞书发送操作">
           {value?.canCancel && !mutationUnknown && <button type="button" disabled={busy} onClick={() => void run('cancel')}>取消发送</button>}
           {value?.canRetry && !mutationUnknown && <button type="button" disabled={busy} onClick={() => void run('retry')}>{value.originalSent ? '重试入口' : '重试发送'}</button>}
           <button type="button" disabled={busy} onClick={() => void run()}>查看发送状态</button>
           <button type="button" aria-expanded={recordsOpen} onClick={() => { setRecordsOpen(!recordsOpen); if (!recordsOpen) void runAutomatic(); }}>通知记录</button>
-        </div>
+        </ExperienceActions>
         {recordsOpen && <section className={styles.automatic} aria-label="生成时的飞书通知">
           <p>{autoMutationUnknown ? '通知操作结果尚未确认。' : automaticLabels[automatic?.state || 'not_requested']}</p>
           {autoError && <p role="alert">{autoError}</p>}
           {automatic?.reason && <p>{reasons[automatic.reason] || '这条通知暂未完成。'}</p>}
-          <div className={styles.actions}>
+          <ExperienceActions className={styles.actions} label="飞书发送操作">
             {automatic?.canCancel && !autoMutationUnknown && <button type="button" disabled={busy} onClick={() => void runAutomatic('cancel')}>取消通知</button>}
             {automatic?.canRetry && !autoMutationUnknown && <button type="button" disabled={busy} onClick={() => void runAutomatic('retry')}>继续通知</button>}
             <button type="button" disabled={busy} onClick={() => void runAutomatic()}>查看通知状态</button>
-          </div>
+          </ExperienceActions>
         </section>}
-      </div> : <div ref={feedbackPanel} id={`${id}-feedback`} className={styles.feedbackBody} role="status" aria-live="polite">
-        <span>{presentationLabel ? `${presentationLabel} · ${feedback?.text}` : feedback?.text}</span><button type="button" onClick={openDetails}>{feedback?.kind === 'unknown' ? '查看状态' : feedback?.kind === 'error' ? '查看' : '详情'}</button>
-        <button type="button" className={styles.dismiss} aria-label="收起发送提示" onClick={() => { dismissed.current = true; setFeedback(null); }}><X size={12}/></button>
+      </div> : <div ref={feedbackPanel} id={`${id}-feedback`} className={styles.feedbackBody}>
+        <OperationReceipt status={presentationLabel ? `${presentationLabel} · ${feedback?.text}` : feedback?.text}
+          actions={<><button type="button" onClick={openDetails}>{feedback?.kind === 'unknown' ? '查看状态' : feedback?.kind === 'error' ? '查看' : '详情'}</button>
+          <button type="button" className={styles.dismiss} aria-label="收起发送提示" onClick={() => { dismissed.current = true; setFeedback(null); }}><X size={12}/></button></>} />
       </div>}
     </Popper.Content>, trigger.current?.closest('dialog[open]') || document.body)}
   </div></Popper.Root>;

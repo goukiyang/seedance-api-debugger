@@ -35,6 +35,7 @@ import { TemplateDefinitionRead } from '@/components/TemplateDefinitionRead';
 import { TemplateDefinitionDirectory } from '@/components/TemplateDefinitionDirectory';
 import type { StudioTemplateRead } from '@/lib/image-studio/shared-types';
 import { UploadedImagePicker } from '@/components/UploadedImagePicker';
+import { useMaterialArrival } from '@/components/useMaterialArrival';
 import type { PickerFocusIntent } from '@/components/ResourceLibraryPicker';
 import { UploadSimilarityReview } from '@/components/UploadSimilarityReview';
 import { SessionPreviewImage } from '@/components/SessionPreviewImage';
@@ -1783,6 +1784,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const [imageSourceTarget, setImageSourceTarget] = useState<'reference' | 'auxiliary' | 'banner' | 'fixed' | 'fixed-repair' | 'template'>('reference');
   const [fixedRepairTarget, setFixedRepairTarget] = useState<{ sourceIndex: number; originalAssetId: string; definitionToken: string } | null>(null);
   const [assetPickerOpen, setAssetPickerOpen] = useState(false);
+  const primaryArrival = useMaterialArrival(`${userId}:${module.id}`);
+  const auxiliaryArrival = useMaterialArrival(`${userId}:${module.id}`);
+  const fixedArrival = useMaterialArrival(`${userId}:${module.id}`);
   function openImageSource(target: 'reference' | 'auxiliary' | 'banner' | 'fixed' | 'template') {
     setImageSourceTarget(target);
     setAssetPickerOpen(true);
@@ -4269,7 +4273,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
             <button type="button" className={styles.mainImageReminder} title="替换主图提醒设置" aria-label="替换主图提醒设置" onClick={() => void confirm('此设置仅影响替换主图提醒，不影响生成费用、变价或权限确认。', { title: '主图提醒', confirmLabel: '保存设置', checkbox: { label: '每次替换主图前提醒', checked: !skipMainImageReminder(userId) }, onSubmit: async (_value, checked) => saveMainImageReminder(userId, !checked) })}><Settings size={16} /></button>
           </header>}
           <div onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void addImages(Array.from(event.dataTransfer.files)); }}>
-            <StudioReferenceGrid items={images} onChange={setImages} onPreview={previewReference} labels="primary" materialTiles compact
+            <StudioReferenceGrid items={images} arrivedIds={primaryArrival.arrived} onChange={setImages} onPreview={previewReference} labels="primary" materialTiles compact
               onChangeRole={(image, index) => changeImageRole(image, index, false)} disabled={uploading || submitting || Boolean(pendingSubmission)}>
               <button type="button" className={styles.materialAdd} disabled={uploading || submitting || Boolean(pendingSubmission) || images.length >= currentReferenceCap && generationReferencePolicy.primaryMax !== 1 || currentReferenceCap === 0}
                 title={generationReferencePolicy.primaryMax === 1 && images.length ? '替换主图' : images.length >= currentReferenceCap ? '已达到可用图片数量上限' : '添加主图'} onClick={() => openImageSource('reference')}><Plus size={24} /><span>{uploading ? '上传中' : currentReferenceCap === 0 ? '主图未启用' : generationReferencePolicy.primaryMax === 1 && images.length ? '替换主图' : images.length >= currentReferenceCap ? '主图已满' : '添加主图'}</span></button>
@@ -4300,7 +4304,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
               const files = Array.from(event.clipboardData.items).filter(item => item.kind === 'file' && item.type.startsWith('image/')).map(item => item.getAsFile()).filter((file): file is File => Boolean(file));
               if (files.length) { event.preventDefault(); event.stopPropagation(); void addImages(files, false, true); }
             }} tabIndex={0} aria-label="参考图片">
-            <StudioReferenceGrid items={auxiliaryImages} onChange={setAuxiliaryImages} onPreview={previewReference} labels="auxiliary" compact materialTiles onChangeRole={(image, index) => changeImageRole(image, index, true)} disabled={uploading || submitting || Boolean(pendingSubmission)}>
+            <StudioReferenceGrid items={auxiliaryImages} arrivedIds={auxiliaryArrival.arrived} onChange={setAuxiliaryImages} onPreview={previewReference} labels="auxiliary" compact materialTiles onChangeRole={(image, index) => changeImageRole(image, index, true)} disabled={uploading || submitting || Boolean(pendingSubmission)}>
               {displayTemplateImages.map((image, index) => <div className={styles.styleTile} key={`shared-${image.id}-${index}`}>
                 <button type="button" className={styles.styleTilePreview} disabled={!image.originalUrl} onClick={() => previewReference(image, index + 1, true)} aria-label={`预览共享参考图${index + 1}`}>
                   <ImagePlus size={24} />{image.thumbnailUrl && <img src={image.thumbnailUrl} alt={`共享参考图${index + 1}`} />}
@@ -4515,8 +4519,12 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           </div>
 </> : sharedPin ? <><div className={styles.resultHeading}><p className={styles.prompt}>{name} · 置顶图片</p><span className={styles.resultOwner}>{sharedPin.owner?.name || '模板使用者'}</span></div>
             <div className={styles.resultMeta}><span className={styles.muted}>查看与点赞</span><RelativeTime className={styles.resultTime} value={sharedPin.createdAt} /></div></> : null}
-          renderPrimaryActions={({task}, waitDisplay) => {
+          renderPrimaryActions={({task, viewOnly}, waitDisplay) => {
             if (!task) return null;
+            if (templateWorkbench && !viewOnly && task.asset?.id && studioTaskHasViewableImage(task) && taskDisplay(task)?.sourceAvailable) {
+              return <button type="button" disabled={submitting || Boolean(pendingSubmission) || hidden || !active || sessionChanged}
+                onClick={() => void replaceMainFromResult(task.id)}><ImagePlus size={15} />用作主图</button>;
+            }
             const recovery = studioTaskAsyncRecovery(task), feedback = taskRecheckFeedback(task);
             if (recovery?.canRequestRecheck) return <button type="button" className="sd2-loading-surface" data-busy={feedback?.busy || undefined}
               disabled={Boolean(feedback?.busy) || sessionChanged || isClientSessionBlocked() || sessionUser?.id !== userId || hidden || !active || !(task.delivery?.requestId || recovery.binding)} aria-busy={feedback?.busy || undefined}
@@ -4623,16 +4631,19 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           const additions = picked.filter(asset => !fixedReferences.some(image => image.id === asset.id));
           if (fixedReferences.length + additions.length > MAX_REFERENCE_IMAGES) throw new Error(`固定参考图最多 ${MAX_REFERENCE_IMAGES} 张`);
           changeFixedReferences([...fixedReferences, ...additions.map(asset => ({ ...asset, note: '', available: true }))]);
+          fixedArrival.mark(additions.flatMap(asset => asset.id ? [asset.id] : []));
         } else if (imageSourceTarget === 'auxiliary') {
           if (picked.some(asset => images.some(image => image.id === asset.id))) throw new Error('这张图片已是主图；需要改作辅助参考时，请使用主图上的下移按钮。');
           const additions = picked.filter(asset => !auxiliaryImages.some(image => image.id === asset.id));
           if (auxiliaryImages.length + additions.length > currentAuxiliaryCap) throw new Error(`本次最多选择 ${currentAuxiliaryCap} 张辅助参考图`);
           setAuxiliaryImages(current => [...current, ...additions]);
+          auxiliaryArrival.mark(additions.flatMap(asset => asset.id ? [asset.id] : []));
         } else {
           if (picked.some(asset => auxiliaryImages.some(image => image.id === asset.id))) throw new Error('这张图片已是辅助参考；需要改作主图时，请使用参考图上的上移按钮。');
           const additions = picked.filter(asset => !images.some(image => image.id === asset.id));
           if ((generationReferencePolicy.primaryMax === 1 ? additions.length : images.length + additions.length) > currentReferenceCap) throw new Error(`本次最多选择 ${currentReferenceCap} 张主图`);
           setImages(current => generationReferencePolicy.primaryMax === 1 ? additions : [...current, ...additions]);
+          primaryArrival.mark(additions.flatMap(asset => asset.id ? [asset.id] : []));
         }
       }} />}
     <dialog ref={inputMainDialog} className={styles.dialog} aria-labelledby={`input-main-title-${module.id}`}>
@@ -4732,7 +4743,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         <button type="button" disabled={uploading || submitting || Boolean(pendingSubmission) || !auxiliaryCount} onClick={clearAllReferences}><X size={15} />一键清空参考</button></div>
       {isAdmin && <><label className={styles.label}>固定模板图 <span>{fixedReferences.length}/{MAX_REFERENCE_IMAGES}</span></label>
       <div onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void addImages(Array.from(event.dataTransfer.files), true); }}>
-        <StudioReferenceGrid items={fixedReferences} onChange={changeFixedReferences} onPreview={previewReference} compact labels="template" notes
+        <StudioReferenceGrid items={fixedReferences} arrivedIds={fixedArrival.arrived} onChange={changeFixedReferences} onPreview={previewReference} compact labels="template" notes
           disabled={!fixedEditable || uploading || moduleSaving || submitting || Boolean(pendingSubmission)}>
           {fixedEditable && fixedReferences.length < MAX_REFERENCE_IMAGES && <button type="button" className={styles.add} disabled={uploading || moduleSaving || submitting || Boolean(pendingSubmission)} onClick={() => openImageSource('fixed')}><ImagePlus size={20} />添加图片</button>}
         </StudioReferenceGrid>

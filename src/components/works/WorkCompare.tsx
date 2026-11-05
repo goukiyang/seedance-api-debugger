@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ExperienceActions } from '@/components/experience/ExperienceParts';
 import { AssetPlaybackCoordinator, releaseAssetMediaSource } from '@/lib/media/asset-playback';
 import { worksRead } from '@/lib/works/client';
 import type { WorkCard } from '@/lib/works/types';
@@ -16,6 +17,8 @@ export function WorkCompare({ work, viewerId, candidates, playback, disabled = f
   work: WorkCard; viewerId: string; candidates: WorkCard[]; playback: AssetPlaybackCoordinator;
   disabled?: boolean; onActiveChange?: (active: boolean) => void;
 }) {
+  const [reversed, setReversed] = useState(false);
+  const columns = reversed ? [1, 0] as const : [0, 1] as const;
   const [selected, setSelected] = useState(''), [pair, setPair] = useState<[WorkCard, WorkCard] | null>(null);
   const [methods, setMethods] = useState<[WorkMethod | null, WorkMethod | null]>([null, null]);
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [playing, setPlaying] = useState(false);
@@ -36,7 +39,7 @@ export function WorkCompare({ work, viewerId, candidates, playback, disabled = f
     setPair(null); setPlaying(false); setDurations([null, null]); setTime(0); setAudio('none'); setRate(1); setBusy(false);
   }, []);
   useEffect(() => {
-    setSelected(''); setError(''); setPair(null); setPlaying(false); setDurations([null, null]); setAudio('none'); setTime(0); setBusy(false);
+    setReversed(false); setSelected(''); setError(''); setPair(null); setPlaying(false); setDurations([null, null]); setAudio('none'); setTime(0); setBusy(false);
     session.current += 1;
     return () => { session.current += 1; };
   }, [identity]);
@@ -87,7 +90,7 @@ export function WorkCompare({ work, viewerId, candidates, playback, disabled = f
       if (current.current !== captured || session.current !== attempt) return;
       playback.stopAll('selection');
       setAudio('none'); setRate(1); setDurations([null, null]); setTime(0); setPlaying(false);
-      pairOwner.current = captured; setMethods([first.method, second.method]); setPair([first.work, second.work]);
+      setReversed(false); pairOwner.current = captured; setMethods([first.method, second.method]); setPair([first.work, second.work]);
     } catch (cause) {
       if (current.current === captured && session.current === attempt) setError(cause instanceof Error ? cause.message : '比较读取未完成，请重试。');
     } finally { if (current.current === captured && session.current === attempt) setBusy(false); }
@@ -132,33 +135,39 @@ export function WorkCompare({ work, viewerId, candidates, playback, disabled = f
   }
   if (!options.length && !activePair) return null;
   return <section className={styles.compare} aria-label="作品比较">
-    <div className={styles.heading}><h2>并排比较</h2>{activePair && <button type="button" onClick={close}>退出比较</button>}</div>
+    <div className={styles.heading}><h2>并排比较</h2>{activePair && <ExperienceActions label="对比操作">
+      <button type="button" onClick={() => { pause(); setReversed(value => !value); }}>交换左右</button>
+      <button type="button" onClick={close}>退出比较</button>
+    </ExperienceActions>}</div>
     {error && <p className={styles.error} role="status">{error}</p>}
     {!activePair ? <div className={styles.row}><label className={styles.compareSelect}>比较作品<select value={selected} disabled={busy || disabled} onChange={event => setSelected(event.target.value)}>
       <option value="">选择同组作品</option>{options.map(item => <option key={item.id} value={item.id}>{item.title} · {item.author.name}</option>)}
     </select></label><button type="button" disabled={!selected || busy || disabled} onClick={() => void enter()}>{busy ? '读取比较…' : '进入比较'}</button></div> : <>
-      <div className={styles.comparisonPanes}>{activePair.map((item, index) => <figure key={`${item.id}:${item.mediaVersion}`} className={styles.pane}>
+      <div className={styles.comparisonPanes}>{columns.map(index => {
+        const item = activePair[index];
+        return <figure key={`${item.id}:${item.mediaVersion}`} className={styles.pane}>
         <figcaption>{item.title}<span>{item.author.name}</span></figcaption>
         <div className={styles.comparisonMedia}>{item.medium === 'image' ? <WorkPreviewImage work={item} attempt={0} onFailure={mediaError} /> :
           <video ref={index === 0 ? left : right} src={source(item)!} poster={item.thumbnailUrl || undefined} playsInline muted={audio !== (index === 0 ? 'left' : 'right')} preload="metadata"
-            aria-label={`${index === 0 ? '左侧' : '右侧'}比较视频：${item.title}`} onError={mediaError} onEnded={pause}
+            aria-label={`${index === columns[0] ? '左侧' : '右侧'}比较视频：${item.title}`} onError={mediaError} onEnded={pause}
             onPause={() => { const other = index === 0 ? right.current : left.current; other?.pause(); setPlaying(false); }}
             onTimeUpdate={index === 0 ? tick : undefined} onLoadedMetadata={event => { const value = event.currentTarget.duration;
               setDurations(previous => index === 0 ? [Number.isFinite(value) && value > 0 ? value : null, previous[1]] : [previous[0], Number.isFinite(value) && value > 0 ? value : null]); }} />}</div>
-      </figure>)}</div>
+      </figure>;
+      })}</div>
       {activePair[0].medium === 'video' && <div className={styles.videoControls}>
         <div className={styles.row}><button type="button" onClick={() => void play()} disabled={duration === null}>{playing ? '暂停两段' : '同步播放'}</button>
           <span>{secondsText(time)} / {duration !== null ? secondsText(duration) : '读取时长中'}</span>
-          <label>声音<select value={audio} onChange={event => changeAudio(event.target.value as typeof audio)}><option value="none">静音</option><option value="left">仅左侧</option><option value="right">仅右侧</option></select></label>
+          <label>声音<select value={audio} onChange={event => changeAudio(event.target.value as typeof audio)}><option value="none">静音</option><option value="left">{reversed ? '仅右侧' : '仅左侧'}</option><option value="right">{reversed ? '仅左侧' : '仅右侧'}</option></select></label>
           <label>速度<select value={rate} onChange={event => setRate(Number(event.target.value))}>{[0.5, 1, 1.5, 2].map(value => <option key={value} value={value}>{value}×</option>)}</select></label></div>
         {duration !== null && <input type="range" aria-label="两个视频的共同时间点" min="0" max={duration} step="0.01" value={Math.min(time, duration)} onChange={event => seek(Number(event.target.value))} />}
       </div>}
       <details className={styles.methodDifferences}><summary>设置差异{differences.length ? `（${differences.length}项）` : ''}</summary>
         <p className={styles.muted}>仅显示作品公开的设置记录。</p>
         <div className={styles.tableScroll}><table><thead><tr><th scope="col">设置</th><th scope="col">左侧</th><th scope="col">右侧</th></tr></thead><tbody>
-          <tr><th scope="row">方法</th><td>{methods[0]?.label || '未提供'}</td><td>{methods[1]?.label || '未提供'}</td></tr>
-          {(methods[0]?.template || methods[1]?.template) && <tr><th scope="row">模板版本</th>{methods.map((method, index) => <td key={index}>{method?.template ? `${method.template.label} · ${method.template.version}` : '未提供'}</td>)}</tr>}
-          {differences.map(item => <tr key={item.key}><th scope="row">{item.label}</th><td>{settingText(item.left)}</td><td>{settingText(item.right)}</td></tr>)}
+          <tr><th scope="row">方法</th><td>{methods[columns[0]]?.label || '未提供'}</td><td>{methods[columns[1]]?.label || '未提供'}</td></tr>
+          {(methods[0]?.template || methods[1]?.template) && <tr><th scope="row">模板版本</th>{columns.map(index => { const template = methods[index]?.template; return <td key={index}>{template ? `${template.label} · ${template.version}` : '未提供'}</td>; })}</tr>}
+          {differences.map(item => <tr key={item.key}><th scope="row">{item.label}</th><td>{settingText(reversed ? item.right : item.left)}</td><td>{settingText(reversed ? item.left : item.right)}</td></tr>)}
         </tbody></table></div>
         {!differences.length && <p className={styles.muted}>公开记录中没有可比较的设置差异。</p>}
       </details>

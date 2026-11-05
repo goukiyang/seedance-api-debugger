@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { OperationReceipt } from '@/components/experience/ExperienceParts';
 import { RefreshCw } from 'lucide-react';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
@@ -61,10 +62,9 @@ export function VideoFeishuStatus({ owner, taskId }: { owner: string; taskId: st
   const label = value && (value.videoSent && value.state === 'failed' ? '视频已发送，详情说明未完成'
     : value.videoSent && value.state === 'unknown' ? '视频已发送，详情说明结果待核对' : value.generationSucceeded === true && value.state === 'failed' ? '视频已生成，飞书发送未完成'
     : value.generationSucceeded === true && value.state === 'unknown' ? '视频已生成，飞书结果待核对' : labels[value.state]);
-  return <div className={styles.status} role="status" aria-busy={busy}>
-    <span>{label || '飞书发送记录暂不可核对'}</span><button type="button" title="核对飞书发送状态" aria-label="核对飞书发送状态" disabled={busy} onClick={() => void run()}><RefreshCw size={14} /></button>
+  return <OperationReceipt className={styles.status} busy={busy} status={label || '飞书发送记录暂不可核对'} actions={<>
+    <button type="button" title="核对飞书发送状态" aria-label="核对飞书发送状态" disabled={busy} onClick={() => void run()}><RefreshCw size={14} /></button>
     {value?.canCancel && !uncertainCancel && <button type="button" disabled={busy} onClick={() => void run(true)}>取消本次发送</button>}
     {value?.canRetrySave && <button type="button" disabled={busy} onClick={() => void retrySave()}>重试保存视频</button>}
-    {error && <span>{error}{uncertainCancel ? '；取消结果未确认，请先核对状态' : ''}</span>}
-  </div>;
+  </>} detail={error ? `${error}${uncertainCancel ? '，取消结果未确认，请先核对状态' : ''}` : undefined} />;
 }

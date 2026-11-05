@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Copy, Download, Film, Play, RefreshCw } from 'lucide-react';
+import { Download, Film, Play, RefreshCw } from 'lucide-react';
+import { CopyTextButton } from '@/components/InlineActionFeedback';
 import { RelativeTime } from '@/components/RelativeTime';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import { seedanceVideoModelLabel } from '@/lib/provider/seedance-models';
@@ -164,14 +165,14 @@ export function MultiviewVideoResults({ owner, authority, active, currentTaskId,
     {notice && <p className={styles.notice} role="status">{notice}</p>}
     <div className={styles.layout}>
       <div className={styles.result}>
+        <div className={styles.resultMeta}>{selected && <><strong>{selected.title || '3D多视图视频'}</strong><span>{pendingLabel ? '上次视频' : selected.id === currentTaskId ? '本次视频' : '历史视频'} · {multiviewVideoResultLabel(selected)}</span><strong>{points(selected)}</strong></>}</div>
         {selected ? <>
-          <div className={styles.resultMeta}><strong>{selected.title || '3D多视图视频'}</strong><span>{pendingLabel ? '上次视频' : selected.id === currentTaskId ? '本次视频' : '历史视频'} · {multiviewVideoResultLabel(selected)}</span><strong>{points(selected)}</strong></div>
-          {selected.playUrl ? <video key={`${identity}:${selected.id}`} ref={player} src={selected.playUrl} controls playsInline preload="metadata"
+          {selected.playUrl ? <video key={`${identity}:${selected.id}`} ref={player} src={selected.playUrl} poster={selected.thumbnailUrl || undefined} controls playsInline preload="metadata"
             aria-label="当前选择的视频" onError={() => setMediaError('视频暂时无法播放，请刷新状态后重试。')} onPlaying={() => setMediaError('')} />
             : <div className={styles.placeholder}><Film size={28} /><span>{multiviewVideoResultLabel(selected)}</span></div>}
           <div className={styles.resultFooter}><span>{[selected.model && seedanceVideoModelLabel(selected.model), selected.duration !== null ? `${selected.duration}秒` : null, selected.resolution].filter(Boolean).join(' · ')}</span>
             {selected.downloadUrl && <a href={selected.downloadUrl} download><Download size={15} />下载视频</a>}
-            <button type="button" title="复制完整视频编号" aria-label="复制完整视频编号" onClick={() => void navigator.clipboard.writeText(selected.id).then(() => setMediaError('已复制视频编号。')).catch(() => setMediaError('复制未完成，请重试。'))}><Copy size={15} /></button>
+            <CopyTextButton key={`${identity}:${selected.id}`} text={selected.id} label="复制完整视频编号" iconOnly />
           </div>
           {selected.error && <p className={styles.notice} role="status">{selected.error.message}</p>}
         </> : <div className={styles.placeholder}><Film size={28} /><span>{detailLoading || loading ? '正在读取视频…' : pendingLabel || (focusedId ? '视频暂不可用' : '暂无生成视频')}</span></div>}

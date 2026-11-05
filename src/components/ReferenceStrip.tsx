@@ -16,6 +16,7 @@ interface Props {
   accessibleOrdering?: boolean;
   addLabel?: string;
   assets: WorkspaceAssetItem[];
+  arrivedIds?: string[];
   uploadStatuses: Record<string, UploadStatus>;
   onUpload: (file: File, onProgress?: UploadProgressHandler) => Promise<void>;
   onRemove: (assetId: string) => Promise<void>;
@@ -96,6 +97,7 @@ export function ReferenceStrip({
   accessibleOrdering = false,
   addLabel,
   assets,
+  arrivedIds,
   uploadStatuses,
   onUpload,
   onRemove,
@@ -450,6 +452,7 @@ export function ReferenceStrip({
                 dropReplaceKey === itemKey ? 'ref-thumb-replace-target' : '',
                 isLowResolution ? 'ref-thumb-low-resolution' : '',
               ].filter(Boolean).join(' ')}
+              data-material-arrived={Boolean(arrivedIds?.includes(asset.assetId) || asset.referenceImageId && arrivedIds?.includes(asset.referenceImageId)) || undefined}
               title={lowResolutionTitle}
             >
               <ReferenceThumb

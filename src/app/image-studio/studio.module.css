@@ -1,4 +1,4 @@
-.page { position: relative; display: block; padding: 24px 32px 64px 268px; max-width: none; margin: 0; color: #e6e8eb; background: #101315; min-height: calc(100dvh - 73px); }
+.page { position: relative; display: block; padding: var(--exp-edge) var(--exp-edge) var(--exp-edge-bottom) 268px; max-width: none; margin: 0; color: #e6e8eb; background: #101315; min-height: calc(100dvh - 73px); }
 .content { min-width: 0; }
 /* Keep document scrolling: overflow-x:hidden also makes body a sticky scroll ancestor. */
 :global(body):has(.templateWorkbench) { overflow-x: clip; }

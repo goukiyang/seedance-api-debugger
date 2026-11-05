@@ -5,6 +5,7 @@ import ContentReactions from '@/components/content-reactions/ContentReactions';
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Eye } from 'lucide-react';
+import { SelectionBar } from '@/components/experience/ExperienceParts';
 import PageBanner from '@/components/PageBanner';
 import MediaPreview from '@/components/MediaPreview';
 import ShareAlbumDialog, { type ShareAlbumDialogAlbum } from '@/components/ShareAlbumDialog';
@@ -458,7 +459,7 @@ export default function ReferenceAlbumDetailClient({ albumId, returnTo }: { albu
     ? `/projects/${encodeURIComponent(albumProjectId)}?view=albums` : null);
 
   return (
-    <div>
+    <div className="exp-detail">
       {productDialog}
       <PageBanner
         backHref={returnContext.href}
@@ -503,7 +504,6 @@ export default function ReferenceAlbumDetailClient({ albumId, returnTo }: { albu
             <span>范围：{album.visibility}</span>
             {album.can_share && <span>共享：{album.active_share_count || 0} 个对象</span>}
             <span>权限：{album.permissions.view ? '可查看' : ''} {album.permissions.use ? '可生成' : ''} {album.permissions.edit ? '可编辑' : ''}</span>
-            {album.permissions.use && <span>已选用于生成：{selectedImageIds.length}/{GENERATION_ALBUM_SELECTION_LIMIT}，还可选 {Math.max(0, GENERATION_ALBUM_SELECTION_LIMIT - selectedImageIds.length)} 个</span>}
           </div>
 
           <div className="album-detail-actions">
@@ -516,17 +516,18 @@ export default function ReferenceAlbumDetailClient({ albumId, returnTo }: { albu
                 <button type="button" className="danger" onClick={handleDeleteAlbum} disabled={loading}>删除图集</button>
               </>
             )}
-            {album.permissions.use && (
-              <button type="button" onClick={handleUseForGeneration} disabled={selectedImageIds.length === 0 || loading}>
-                作为参考素材生成（{selectedImageIds.length}/{GENERATION_ALBUM_SELECTION_LIMIT}）
-              </button>
-            )}
             {album.can_share && !['public', 'system'].includes(album.album_type) && (
               <button type="button" onClick={() => setShareDialogAlbum(album)} disabled={loading}>
                 {album.active_share_count > 0 ? '共享设置' : '转为共享图集'}
               </button>
             )}
           </div>
+          {album.permissions.use && (
+            <SelectionBar count={selectedImageIds.length} summary={`作为参考素材使用，最多选择 ${GENERATION_ALBUM_SELECTION_LIMIT} 个`}>
+              <button type="button" className="btn btn-secondary" onClick={() => setSelectedImageIds([])} disabled={!selectedImageIds.length || loading}>取消选择</button>
+              <button type="button" className="btn btn-primary" onClick={handleUseForGeneration} disabled={!selectedImageIds.length || loading}>作为参考素材生成</button>
+            </SelectionBar>
+          )}
 
           <div className="album-image-grid">
             {images.length === 0 ? (

@@ -16,11 +16,11 @@ function ReferenceThumbnail({ src, label, loading, unavailableLabel, onError }: 
     : <span>{loading ? '正在读取图片…' : unavailableLabel || '图片已不可用'}</span>;
 }
 
-export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onChange, onPreview, disabled, offset = 0, notes, children, compact, labels = 'image', onSaveNote, onChangeRole, materialTiles = false, standalone = false, renderDetails, onThumbnailError, loading = false, unavailableLabel }: {
+export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onChange, onPreview, disabled, offset = 0, notes, children, compact, labels = 'image', onSaveNote, onChangeRole, materialTiles = false, standalone = false, renderDetails, onThumbnailError, loading = false, unavailableLabel, arrivedIds }: {
   items: T[]; onChange: (items: T[]) => void; onPreview: (item: T, number: number) => void;
   disabled?: boolean; offset?: number; notes?: boolean; children?: ReactNode; compact?: boolean; materialTiles?: boolean; standalone?: boolean; labels?: 'image' | 'template' | 'style' | 'primary' | 'auxiliary'; onSaveNote?: (items: T[]) => Promise<boolean>; onChangeRole?: (item: T, index: number) => void;
   renderDetails?: (item: T, index: number) => ReactNode; onThumbnailError?: (item: T) => void; loading?: boolean;
-  unavailableLabel?: (item: T, index: number) => string;
+  unavailableLabel?: (item: T, index: number) => string; arrivedIds?: string[];
 }) {
   const { confirm, productDialog } = useProductDialog();
   const root = useRef<HTMLDivElement>(null);
@@ -63,6 +63,7 @@ export function StudioReferenceGrid<T extends UploadedAssetPayload>({ items, onC
     {items.map((item, index) => <div key={renderDetails ? item.id : `${item.id}-${index}`} data-reference-index={index}
       className={`${styles.referenceItem} ${targetIndex === index ? styles.referenceDropTarget : ''}`}
       data-dragging={sourceIndex === index || undefined}
+      data-material-arrived={item.id && arrivedIds?.includes(item.id) || undefined}
       onPointerDown={event => {
         if (disabled || event.button !== 0 || !(event.target instanceof Element)) return;
         const grip = event.target.closest('[data-sort-grip]');

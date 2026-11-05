@@ -4926,3 +4926,8 @@ body.canvas-document-busy #logo { pointer-events: none; }
 .canvas-media-error { padding: 8px; font-size: 12px; color: #e9b16c; }
 [data-media-retry] { width: 28px; height: 28px; border: 0; background: transparent; color: inherit; cursor: pointer; }
 .reference-preview-open { position: absolute; right: 8px; bottom: 8px; width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid #dfe3e6; border-radius: 4px; background: #fff; color: #48515b; }
+
+.generation-reference-item[data-material-arrived] {
+  outline: 2px solid var(--accent-color, #6fcbc1);
+  outline-offset: -2px;
+}

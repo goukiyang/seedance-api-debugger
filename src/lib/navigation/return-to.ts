@@ -55,3 +55,20 @@ export function taskReturnLabel(returnTo: string | null | undefined) {
 export function taskDetailHref(taskId: string, returnTo: string | null | undefined) {
   return `/tasks/${encodeURIComponent(taskId)}?return_to=${encodeURIComponent(sanitizeReturnTo(returnTo))}`;
 }
+
+export function readListReturn(query: URLSearchParams): { item: string | null; page: number | null } {
+  const item = query.get('list_item');
+  const page = Number(query.get('list_page'));
+  return {
+    item: item && /^[a-zA-Z0-9_:-]{1,180}$/.test(item) ? item : null,
+    page: Number.isSafeInteger(page) && page > 0 && page <= 10000 ? page : null,
+  };
+}
+
+export function listReturnHref(path: string, item: string | undefined, page?: number) {
+  const address = new URL(sanitizeReturnTo(path), 'https://internal.invalid');
+  if (item) address.searchParams.set('list_item', item);
+  else address.searchParams.delete('list_item');
+  if (page) address.searchParams.set('list_page', String(page));
+  return `${address.pathname}${address.search}${address.hash}`;
+}
