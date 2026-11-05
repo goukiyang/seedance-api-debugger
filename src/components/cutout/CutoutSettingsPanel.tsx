@@ -96,11 +96,9 @@ export default function CutoutSettingsPanel({
           </button>
         ))}
       </div>
-      <p className={styles.strategyCopy}>{settings.preset ? CUTOUT_PRESETS[settings.preset as CutoutPresetKey]?.name || '已保存预设' : '自定义效果'} · 背景移除 {Math.round(settings.background_removal)} · 细节保护 {Math.round(settings.detail_protection)}</p>
-      <p className={styles.strategyCopy}>选择预设会替换当前效果设置，重新处理后生效。</p>
       {previousPreset.current && <button className={styles.textButton} type="button" disabled={disabled} onClick={() => { const previous = previousPreset.current; previousPreset.current = null; if (previous) onChange(previous); }}>恢复上次设置</button>}
       <details className={styles.advancedSettings} open={adjustmentsOpen} onToggle={event => onAdjustmentsOpenChange(event.currentTarget.open)}>
-      <summary>调整效果 · 六项调节</summary>
+      <summary>调整效果{!settings.preset ? ' · 自定义' : ''}</summary>
       <div className={styles.sliderList}>
         {MAIN_SLIDERS.map((field) => (
           <label className={styles.sliderField} key={field.key} title={field.hint}>

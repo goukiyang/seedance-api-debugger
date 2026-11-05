@@ -47,7 +47,7 @@ export function ImageResultNextActionButtons({ controller, iconOnly = false, cla
   return <ExperienceActions label="继续创作这张图片" className={className} data-image-result-next>
     <button type="button" disabled={!controller.canCutout} aria-busy={busy === 'cutout'}
       aria-label={controller.cutoutDisabledReason ? `${cutoutLabel}，${controller.cutoutDisabledReason}` : cutoutLabel}
-      title={controller.cutoutDisabledReason || '带入普通抠图，费用在目标页确认'} onClick={() => void open('cutout')}>
+      title={controller.cutoutDisabledReason || '带入抠图工作区'} onClick={() => void open('cutout')}>
       <Scissors size={15} />{!iconOnly && (busy === 'cutout' ? '正在导入…' : '一键抠图')}
     </button>
     <button type="button" disabled={!controller.canVideo} aria-busy={busy === 'video'}

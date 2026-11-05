@@ -18,7 +18,7 @@ import type { CutoutAsset, CutoutCapabilities, CutoutJob, CutoutSettings } from 
 import type { CutoutImageHandoff, ImageResultNextIntent, ImageResultNextReceipt } from './types';
 
 const PREFIX = 'image_result_next_v1:';
-const PRICE_MESSAGE = '当前抠图服务没有提供可核实费用。图片可先带入，开始处理前需明确确认；不会自动提交。';
+const CUTOUT_READY_MESSAGE = '图片已带入，点击开始抠图即可免费处理。';
 const sha = (value: string) => createHash('sha256').update(value).digest('hex');
 type Stored = {
   version: 1; receiptId: string; ownerId: string; sourceKey: ContentKey; sourceVersion: string;
@@ -78,7 +78,8 @@ function publicReceipt(record: Stored, asset: Awaited<ReturnType<typeof authoriz
       ...(asset.width ? { width: asset.width } : {}), ...(asset.height ? { height: asset.height } : {}) },
     returnPath: record.returnPath,
     destination: record.intent === 'cutout' ? `/cutout?handoff=${record.receiptId}` : `/generate?image_result_handoff=${record.receiptId}`,
-    message: record.message, ready: record.intent === 'cutout' || record.stage === 'accepted', ...(record.workspaceTabId ? { workspaceTabId: record.workspaceTabId } : {}) };
+    message: record.intent === 'cutout' && ['import-ready', 'awaiting-confirmation'].includes(record.stage) ? CUTOUT_READY_MESSAGE : record.message,
+    ready: record.intent === 'cutout' || record.stage === 'accepted', ...(record.workspaceTabId ? { workspaceTabId: record.workspaceTabId } : {}) };
 }
 async function replace(key: string, raw: string, record: Stored) {
   return (await prisma.platformSetting.updateMany({ where: { key, value_json: raw }, data: { value_json: JSON.stringify(record), updated_by: record.ownerId } })).count === 1;
@@ -90,7 +91,7 @@ export async function createImageResultNext(user: SessionUser, sourceKey: Conten
   const now = Date.now();
   const record: Stored = { version: 1, receiptId: id, ownerId: user.id, sourceKey, sourceVersion: source.version, intent, returnPath,
     createdAt: now, phaseAt: now, stage: 'import-ready', asset: null, job: null,
-    message: intent === 'cutout' ? PRICE_MESSAGE : '正在准备独立视频草稿；不会生成视频。',
+    message: intent === 'cutout' ? CUTOUT_READY_MESSAGE : '正在准备独立视频草稿；不会生成视频。',
     ...(intent === 'video' ? { workspaceTabId: `image-next-${id.slice(0, 48)}` } : {}) };
   await prisma.platformSetting.upsert({ where: { key }, update: {}, create: { key, value_json: JSON.stringify(record), updated_by: user.id } });
   if (intent === 'video') await prepareVideoWorkspace(user, id);
@@ -134,8 +135,9 @@ async function cutoutCall(request: Request, user: SessionUser, path: string[], m
 function cutoutDTO(record: Stored, asset: Awaited<ReturnType<typeof authorizedSource>>['asset']): CutoutImageHandoff {
   const interrupted = ['preparing', 'submitting'].includes(record.stage) && Date.now() - record.phaseAt > 120_000;
   return { ...publicReceipt(record, asset), stage: interrupted ? 'unknown' : record.stage, asset: record.asset, job: record.job,
-    ...(record.settings ? { settings: record.settings } : {}), autoStart: { allowed: false, message: PRICE_MESSAGE },
-    message: interrupted ? '原导入或提交的结果尚未确认。请查询原记录或任务历史，不要重新提交。' : record.message };
+    ...(record.settings ? { settings: record.settings } : {}), autoStart: { allowed: false, message: CUTOUT_READY_MESSAGE },
+    message: interrupted ? '原导入或提交的结果尚未确认。请查询原记录或任务历史，不要重新提交。'
+      : ['import-ready', 'awaiting-confirmation'].includes(record.stage) ? CUTOUT_READY_MESSAGE : record.message };
 }
 export async function getCutoutImageHandoff(request: Request, user: SessionUser, id: string): Promise<CutoutImageHandoff> {
   const { record, source } = await readStored(user, id);
@@ -172,7 +174,7 @@ export async function prepareCutoutImageHandoff(request: Request, user: SessionU
     } else {
       const asset: CutoutAsset = { asset_id: body.asset_id, name: typeof body.name === 'string' ? body.name : source.asset.file_name,
         width: body.width as number, height: body.height as number, size: body.size as number };
-      await replace(key, JSON.stringify(preparing), { ...preparing, asset, stage: 'awaiting-confirmation', message: PRICE_MESSAGE });
+      await replace(key, JSON.stringify(preparing), { ...preparing, asset, stage: 'awaiting-confirmation', message: CUTOUT_READY_MESSAGE });
     }
   } catch {
     await replace(key, JSON.stringify(preparing), { ...preparing, stage: 'unknown', message: '原图传输结果尚未确认，未提交抠图。请保留此次导入，不要再次上传。' });
@@ -188,11 +190,10 @@ function checkedCutoutSettings(value: unknown): CutoutSettings {
   }
   return value as unknown as CutoutSettings;
 }
-export async function startCutoutImageHandoff(request: Request, user: SessionUser, id: string, settingsInput: unknown, confirmUnknownPrice: boolean) {
+export async function startCutoutImageHandoff(request: Request, user: SessionUser, id: string, settingsInput: unknown) {
   const { record, raw, key } = await readStored(user, id);
   if (record.intent !== 'cutout') throw new ImageResultNextError('导入目标无效');
   if (!['awaiting-confirmation', 'not-submitted'].includes(record.stage) || !record.asset) return getCutoutImageHandoff(request, user, id);
-  if (!confirmUnknownPrice) throw new ImageResultNextError(PRICE_MESSAGE, 409);
   const requestedSettings = checkedCutoutSettings(settingsInput);
   const settings = record.settings ? checkedCutoutSettings(record.settings) : requestedSettings;
   if (record.settings && Array.from(new Set([...Object.keys(settings), ...Object.keys(requestedSettings)]))
