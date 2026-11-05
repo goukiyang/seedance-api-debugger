@@ -1,0 +1,77 @@
+{
+  "source": "96b1db811209d634d8953dafe22a60cfebb07391",
+  "passed": 25,
+  "productionWrites": 0,
+  "paidRequests": 0,
+  "browserRuns": 0,
+  "checks": [
+    {
+      "file": "pin-button-engineering.json",
+      "sha256": "2a8f21bf0670cc304c3db8bbf0814e99c157587e633470a8bd6afcff2de85e3f",
+      "result": {
+        "passed": 7,
+        "checks": [
+          "loading_does_not_publish_or_send",
+          "selected_sharing_opens_existing_publication_without_pin_request",
+          "no_publication_capability_keeps_original_gate",
+          "published_template_uses_original_pin_api",
+          "uncertain_pin_cannot_switch_to_publication",
+          "uncertain_retry_preserves_original_identity_and_intent",
+          "existing_unpin_keeps_original_flow"
+        ],
+        "productionWrites": 0,
+        "networkCalls": 0,
+        "generatedTasks": 0
+      }
+    },
+    {
+      "file": "sharing-command-engineering.json",
+      "sha256": "996da3c3079827de4aac01bb0845877a5e55fecc910208694e7ad20135ad9ab2",
+      "result": {
+        "passed": 6,
+        "checks": [
+          "persist_before_send",
+          "lost_response_reuses_original_command",
+          "storage_failure_sends_nothing",
+          "parallel_click_sends_once",
+          "account_switch_drops_late_response",
+          "refresh_retains_original_command"
+        ],
+        "productionWrites": 0,
+        "networkCalls": 0,
+        "generatedTasks": 0
+      }
+    },
+    {
+      "file": "default-sharing-engineering.json",
+      "sha256": "244eb5383a83cc2f0454a1f72c282a16a849be0bc6987aa6b825779c5c732b3a",
+      "result": {
+        "passed": 12,
+        "checks": [
+          "saving_a_named_default_exposes_sharing_without_publishing",
+          "another_account_cannot_choose_sharing_for_the_default",
+          "explicit_preference_is_durable_and_replay_does_not_publish",
+          "unpublished_cover_projects_preference_without_claiming_shared_or_exposing_definition",
+          "stale_preference_and_publication_revisions_remain_rejected",
+          "normal_save_publishes_once_and_preserves_the_default_workspace",
+          "published_cover_uses_source_revision_and_colleague_cannot_toggle_it",
+          "only_the_author_can_withdraw_and_current_source_access_tracks_it",
+          "unnamed_default_cannot_be_published",
+          "legacy_copies_cannot_share_a_foreign_definition",
+          "foreign_legacy_copy_does_not_receive_cover_sharing_capability",
+          "regular_template_controls_remain_available"
+        ],
+        "networkCalls": 0,
+        "generatedTasks": 0
+      }
+    }
+  ],
+  "macIsolationPreparation": "schema engine error before fixture assertions; Linux isolated fixture above passed",
+  "validForCandidate": "7e92cb180b524b43ea8bece6902ffe0ff06bb7c8",
+  "reuseEvidence": {
+    "originalSource": "96b1db811209d634d8953dafe22a60cfebb07391",
+    "onlyChangedFile": "src/components/GeneratedImageResults.module.css",
+    "outsideTheseFixtureInputs": true,
+    "originalResultsAndTimesPreserved": true
+  }
+}

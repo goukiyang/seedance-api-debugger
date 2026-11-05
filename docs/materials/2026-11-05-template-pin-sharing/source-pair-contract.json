@@ -1,0 +1,77 @@
+{
+  "baseline": {
+    "source": "3b4a5e42a16604e882ee626f34dcf063b76b7d09",
+    "version": "0.133.2",
+    "build": "zF_UmzYoJ-dJwnfvff-ND"
+  },
+  "main": {
+    "source": "7e92cb180b524b43ea8bece6902ffe0ff06bb7c8",
+    "version": "0.133.3"
+  },
+  "guard": {
+    "source": "1d452f9186053d3012f420d330f4dce93a33d7f2",
+    "version": "0.133.0+body-pair-reader-guard.1",
+    "readerContract": "works-method-reader.1",
+    "cutoutReaderContract": "cutout-owner-reader.1",
+    "bodyPairReaderContract": "character-body-pair-reader.1",
+    "build": "4THsI43mwKhhvzVsWliHk"
+  },
+  "passed": true,
+  "noSchemaChange": true,
+  "migrationsUnchanged": true,
+  "releaseConfigSha256": "e60531a7ba64f15f40f4b991fc142bc440afac224877bed5b345ed8699ab2e37",
+  "guardFreshFullBuild": true,
+  "guardBuildReused": true,
+  "guardBuildCompletedAt": "2026-11-05T16:46:20.139681+00:00",
+  "mainSourceManifestSha256": "fd396b3846f1df9958579602ade4379328c3bd8ca13d386458aad9c57cd316b7",
+  "guardSourceManifestSha256": "03361b5a35c194ea371f825bba8e9621d4c132689e21c9b0b7148516445f9ded",
+  "recordedAt": "2026-11-05T18:07:27.624552+00:00",
+  "owner": "template-pin-sharing-20261105 / TEMPLATE-PIN-SHARING-20261105",
+  "bodyPairReaderContract": "character-body-pair-reader.1",
+  "guardUnknownClassificationPreserved": true,
+  "cutoutCurrentSourcesUnchanged": true,
+  "cutoutCurrentSourceCount": 24,
+  "sourceAssemblyBaseline": "2aac1e73a4e0c0ed78e75c50babd39a8c1052bbc",
+  "sourceDeltaFromAssemblyBaseline": [
+    "AGENTS.md",
+    "package-lock.json",
+    "package.json",
+    "scripts/generated-image-result-layout-engineering.ts",
+    "scripts/result-pin-publication-engineering.mjs",
+    "src/app/image-studio/result-pin-button.tsx",
+    "src/app/image-studio/studio.tsx",
+    "src/app/multiview/MultiviewWorkViewer.tsx",
+    "src/app/multiview/MultiviewWorks.tsx",
+    "src/app/multiview/multiview-works.module.css",
+    "src/app/multiview/multiview.module.css",
+    "src/app/multiview/page.tsx",
+    "src/app/tools/character-lab/studio.module.css",
+    "src/app/tools/character-lab/studio.tsx",
+    "src/components/GeneratedImageResults.module.css",
+    "src/components/GeneratedImageResults.tsx",
+    "src/components/ImageResultNextActions.tsx",
+    "src/components/ImageResultStatusDetails.tsx",
+    "src/components/ModuleCoverEditor.module.css",
+    "src/components/ModuleCoverEditor.tsx",
+    "src/components/content-reactions/CanvasReactions.tsx",
+    "src/components/content-reactions/ContentCollections.tsx",
+    "src/components/content-reactions/reactions.module.css",
+    "src/components/works/Works.module.css",
+    "src/components/works/WorksMasonry.tsx",
+    "src/lib/release.ts"
+  ],
+  "activationDeltaFromBaseline": [
+    "package-lock.json",
+    "package.json",
+    "scripts/result-pin-publication-engineering.mjs",
+    "src/app/image-studio/result-pin-button.tsx",
+    "src/app/image-studio/studio.tsx",
+    "src/lib/release.ts"
+  ],
+  "unchangedBodyPairEvidence": {
+    "file": "/data/video-api-debugger/release-staging/character-body-pair-20261105/attempt02/main-body-pair-reader.json",
+    "sha256": "3de4fedc0cb8a2110a0231ede5435d92df6ec6a12772e45c0dc92334ee904435",
+    "inputHashesMatched": 11,
+    "originalExecutionPreserved": true
+  }
+}

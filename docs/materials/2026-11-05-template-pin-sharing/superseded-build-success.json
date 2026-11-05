@@ -1,0 +1,11 @@
+{
+  "kind": "main",
+  "source": "96b1db811209d634d8953dafe22a60cfebb07391",
+  "version": "0.133.3",
+  "build": "rEw4ykTkrEP62fvtFsZiX",
+  "completedAt": "2026-11-05T17:58:04.631354+00:00",
+  "fullNextBuildPassed": true,
+  "fullTypeAndLintIncluded": true,
+  "isolatedBuildDatabase": true,
+  "deployed": false
+}

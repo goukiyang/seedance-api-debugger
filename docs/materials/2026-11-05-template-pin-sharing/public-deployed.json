@@ -1,0 +1,72 @@
+{
+  "at": "2026-11-05T18:13:57.000719+00:00",
+  "source": "7e92cb180b524b43ea8bece6902ffe0ff06bb7c8",
+  "version": "0.133.3",
+  "build": "GuM3zGvdPkm0lbmOqc-Ln",
+  "services": {
+    "sd2-gray": {
+      "MainPID": "793693",
+      "WorkingDirectory": "/data/video-api-debugger/managed-releases/7e92cb180b524b43ea8bece6902ffe0ff06bb7c8",
+      "ActiveState": "active"
+    },
+    "sd2-image-studio": {
+      "MainPID": "793874",
+      "WorkingDirectory": "/data/video-api-debugger/managed-releases/7e92cb180b524b43ea8bece6902ffe0ff06bb7c8",
+      "ActiveState": "active"
+    },
+    "sd2-hd-derivatives": {
+      "MainPID": "793533",
+      "WorkingDirectory": "/data/video-api-debugger/managed-releases/7e92cb180b524b43ea8bece6902ffe0ff06bb7c8",
+      "ActiveState": "active"
+    },
+    "sd2-multiview-works": {
+      "MainPID": "793577",
+      "WorkingDirectory": "/data/video-api-debugger/managed-releases/7e92cb180b524b43ea8bece6902ffe0ff06bb7c8",
+      "ActiveState": "active"
+    },
+    "sd2-role-coordinator": {
+      "MainPID": "793673",
+      "WorkingDirectory": "/data/video-api-debugger/managed-releases/7e92cb180b524b43ea8bece6902ffe0ff06bb7c8",
+      "ActiveState": "active"
+    },
+    "sd2-template-prompts": {
+      "MainPID": "793823",
+      "WorkingDirectory": "/data/video-api-debugger/managed-releases/7e92cb180b524b43ea8bece6902ffe0ff06bb7c8",
+      "ActiveState": "active"
+    },
+    "sd2-periodic-credits": {
+      "MainPID": "793695",
+      "WorkingDirectory": "/data/video-api-debugger/managed-releases/7e92cb180b524b43ea8bece6902ffe0ff06bb7c8",
+      "ActiveState": "active"
+    }
+  },
+  "timerCount": 4,
+  "release": {
+    "version": "0.133.3",
+    "channel": "production",
+    "title": "",
+    "outline": [],
+    "summary": ""
+  },
+  "assets": [
+    {
+      "page": "/image-studio/page",
+      "path": "/_next/static/chunks/app/image-studio/page-a160bdccef3a7885.js",
+      "status": 200,
+      "sha256": "692e8f183d180ca7330b12b6ca0d02339ea92bbc1ab0801d110251af48399305"
+    }
+  ],
+  "anonymousRoutes": [
+    {
+      "route": "/api/image-studio/modules",
+      "anonymousStatus": 401
+    }
+  ],
+  "sameEnvironmentAndDataLinks": true,
+  "rolloutCodeUnchanged": true,
+  "privatePolicyUnchanged": true,
+  "pricesUnchanged": true,
+  "functionalAcceptance": false,
+  "paidRequests": 0,
+  "browserRuns": 0
+}

@@ -1064,3 +1064,15 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 - 本轮额外发现已登记到[统一发现清单](discoveries.md)：D-20261101-01 至 04 分别保留生产 bundle 共享身份待核、目录全局失效放大、报表 Web 计算量和跨能力计价故障范围；均未实施额外重构，原任务与手验边界不变。
 
 - 封面媒体定点接续仅增短时日志并已恢复原配置；同一B/640/revision2自然点击5.256s、媒体TTFB2.390s，对应Nginx上游头/完整响应均113ms、总时长888ms，Node响应构造89.7ms。已把主要等待缩到观察的上游处理区间之外，公网/前置代理/浏览器等细因仍未证；不冒新修复或全站改善。[原代理计时](../docs/materials/2026-11-01-admin-usage-read-snapshot/media-edge-diagnostic/attempt02/timing-snapshot.jsonl)、[配置恢复证明](../docs/materials/2026-11-01-admin-usage-read-snapshot/media-edge-diagnostic/attempt02/automatic-restore.json)保留；App未重启、源88/v0.125.2不变。
+
+<!-- TEMPLATE-PIN-SHARING-20261105 -->
+### TEMPLATE-PIN-SHARING-20261105：已选共享但结果不能置顶
+
+- 已修复：共享偏好不冒充已发布；待发布图钉打开原“保存并共享模板”，上下文明确待发布；真实共享元数据变化立即刷新普通/喜欢结果置顶状态。服务端权限、原请求、费用及图片归属保持。
+- 已提交推送源码 7e92cb180b524b43ea8bece6902ffe0ff06bb7c8；合入 3b4 最新封面配色，保留同期抠图及封面改动。
+- 25 项离线工程检查通过；最终原生/价格检查、完整类型/lint/Next 构建通过。Mac 原 schema 准备错误保留，Linux 同 fixture 已通过；无浏览器、收费生成或生产业务测试。
+- 已部署 v0.133.3 / BUILD GuM3zGvdPkm0lbmOqc-Ln，UTC 2026-11-05 18:13:57；run 883b9890-d4b0-465a-9984-b5c0e46780c8，7 服务与 4 timer 正常，未登录模块接口 401，价格全字段不变。
+- 实际模板页面公网 JS 200 且 SHA 对应冻结构建，新发布入口与待发布状态存在。源包构建基线与真实切版基线分别留证；一致备份及固定相容 guard 入口保留，未演练回退、不回业务数据。
+- 已部署，待用户手动验收；入口 /template-studio?type=image。证据：docs/materials/2026-11-05-template-pin-sharing/。
+- 本轮未新增范围外业务问题。
+<!-- /TEMPLATE-PIN-SHARING-20261105 -->

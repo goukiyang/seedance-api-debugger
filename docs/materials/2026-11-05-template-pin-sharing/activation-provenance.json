@@ -1,0 +1,23 @@
+{
+  "at": "2026-11-05T18:07:27.578121+00:00",
+  "main": {
+    "source": "7e92cb180b524b43ea8bece6902ffe0ff06bb7c8",
+    "version": "0.133.3"
+  },
+  "buildDependencyBaseline": {
+    "source": "2aac1e73a4e0c0ed78e75c50babd39a8c1052bbc",
+    "version": "0.133.1",
+    "build": "Tt2TWvLr8nmiSrdHusqGC"
+  },
+  "activationBaseline": {
+    "source": "3b4a5e42a16604e882ee626f34dcf063b76b7d09",
+    "version": "0.133.2",
+    "build": "zF_UmzYoJ-dJwnfvff-ND"
+  },
+  "buildInputSha256": "24840c8e9d76ce27da4b35768d3db378e736abb7547712f1da69f09c7e73940c",
+  "activationInputSha256": "e60531a7ba64f15f40f4b991fc142bc440afac224877bed5b345ed8699ab2e37",
+  "packageAndLockSemanticsMatch": true,
+  "schemaMatches": true,
+  "originalBuildAndAssemblyInputPreserved": true,
+  "productionBusinessWrites": 0
+}

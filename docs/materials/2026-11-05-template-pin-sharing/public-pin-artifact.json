@@ -1,0 +1,18 @@
+{
+  "recordedAt": "2026-11-05T18:17:01.255986+00:00",
+  "source": "7e92cb180b524b43ea8bece6902ffe0ff06bb7c8",
+  "version": "0.133.3",
+  "build": "GuM3zGvdPkm0lbmOqc-Ln",
+  "method": "manual read-only public asset and frozen candidate comparison",
+  "actualPage": "/template-studio/page",
+  "path": "/_next/static/chunks/app/template-studio/page-b60666465bfdc38c.js",
+  "status": 200,
+  "sha256": "727d5670c83fffe71e2713ba1fa80faf8ce6019d0d132eff1a6048ad3bcde162",
+  "matchesFrozenBuild": true,
+  "publicationActionPresent": true,
+  "pendingPublicationPresent": true,
+  "compiledPendingLiteral": "待发布 \\xb7 保存后共享",
+  "browserRuns": 0,
+  "functionalAcceptance": false,
+  "supplementalHelper": "stopped after two false negatives: legacy redirect entry first; exact middle-dot byte matching second. Read-only manual artifact check above resolved the evidence; no production recovery or release-engine change."
+}
