@@ -157,7 +157,7 @@ export function parseUsageQuery(params: URLSearchParams, now = new Date()): Usag
     kind: optionalEnum('kind', ['video', 'image', 'text', 'flow', 'cutout'] as const),
     source_kind: optionalEnum('source_kind', sources),
     model: text('model', 160, token), provider: text('provider', 128, token), status: text('status', 64, token),
-    cost_status: optionalEnum('cost_status', ['confirmed', 'pending', 'conflict', 'unconnected'] as const),
+    cost_status: optionalEnum('cost_status', ['confirmed', 'calculated', 'pending', 'conflict', 'unconnected'] as const),
     attribution: optionalEnum('attribution', ['frozen', 'legacy_current', 'legacy_snapshot', 'unassigned', 'conflict'] as const),
     resolution: text('resolution', 40, /^[a-zA-Z0-9_.xX-]+$/), keyword: text('keyword', 120),
     retention_status: optionalEnum('retention_status', ['active', 'user_deleted', 'admin_hidden', 'retained', 'unknown'] as const),

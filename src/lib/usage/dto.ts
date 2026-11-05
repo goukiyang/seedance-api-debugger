@@ -19,6 +19,9 @@ export interface UsagePublicQuery {
 }
 
 export interface UsageCashDTO {
+  calculatedCnyMicros?: string | null;
+  accountedCnyMicros?: string | null;
+  calculatedCount?: number;
   chargeOriginal: Array<{ currency: string; amountMicros: string }>;
   refundOriginal: Array<{ currency: string; amountMicros: string }>;
   netOriginal: Array<{ currency: string; amountMicros: string }>;
@@ -27,6 +30,10 @@ export interface UsageCashDTO {
   netCnyMicros: string | null;
   basis: 'CNY' | 'USD_CNY_DISPLAY' | 'MIXED_CNY_USD' | 'UNAVAILABLE';
   state: 'confirmed' | 'partial' | 'pending' | 'conflict' | 'unavailable';
+}
+
+export function usageAccountedMoney(cash: UsageCashDTO): string | null {
+  return cash.accountedCnyMicros ?? cash.netCnyMicros;
 }
 
 export interface UsagePointsPartDTO {

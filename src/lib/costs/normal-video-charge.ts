@@ -7,13 +7,18 @@ export type NormalVideoChargeEstimate = {
   usdPerMillionTokens: number;
 };
 
-type ChargeTask = {
+export type ChargeTask = {
   provider: string;
   model: string;
   reference_video_urls: string | null;
   is_draft: boolean;
 };
-type ChargeGroup = { model: string; referenceVideo: boolean; key: string };
+export type ChargeGroup = { model: string; referenceVideo: boolean; key: string };
+export type NormalChargeBill = ChargeTask & {
+  provider_final_amount_micros: number | null; provider_official_amount_micros: number | null;
+  provider_final_amount_minor: number | null; provider_official_amount_minor: number | null;
+  provider_usage_snapshot: string | null; provider_cost_snapshot: string | null;
+};
 
 function objectFromJson(value: string | null) {
   try {
@@ -49,13 +54,13 @@ export function completionTokensFromSnapshot(usageJson: string | null, statusJso
   return typeof tokens === 'number' && Number.isSafeInteger(tokens) && tokens > 0 ? tokens : null;
 }
 
-export async function loadNormalVideoChargeRates(tasks: ChargeTask[]) {
+export async function loadNormalVideoChargeRates(tasks: ChargeTask[], findBills?: (group: ChargeGroup) => Promise<NormalChargeBill[]>) {
   const groups = new Map<string, ChargeGroup>();
   for (const task of tasks) { const group = chargeGroup(task); if (group) groups.set(group.key, group); }
   const rates = new Map<string, number>();
   // Use the latest matching confirmed ordinary bill, not a points-to-cash conversion.
   await Promise.all(Array.from(groups.values()).map(async (group) => {
-    const bills = await prisma.videoTask.findMany({
+    const bills = await (findBills ? findBills(group) : prisma.videoTask.findMany({
       where: {
         provider: 'seedance', model: group.model, is_draft: false, local_status: 'succeeded',
         provider_cost_currency: 'USD', provider_cost_status: { in: ['official_confirmed', 'reconciled'] },
@@ -72,7 +77,7 @@ export async function loadNormalVideoChargeRates(tasks: ChargeTask[]) {
         provider_usage_snapshot: true,
         provider_cost_snapshot: true,
       },
-    });
+    }));
     for (const bill of bills) {
       if (chargeGroup(bill)?.key !== group.key) continue;
       if (objectFromJson(bill.provider_cost_snapshot)?.source !== 'provider_get_result') continue;

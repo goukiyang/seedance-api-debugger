@@ -19,7 +19,7 @@ export async function* usageCsvChunks(snapshot: UsageExportSnapshot): AsyncGener
     'task_count', 'request_count', 'successful_count', 'output_count', 'available_count', 'cash_state', 'cash_basis',
     'charge_original_micros', 'refund_original_micros', 'net_original_micros', 'charge_cny_micros', 'refund_cny_micros', 'net_cny_micros',
     'points_charged', 'points_refunded', 'points_net', 'points_reserved', 'points_released',
-    'personal_points', 'project_points', 'unclassified_points', 'original_href']);
+    'personal_points', 'project_points', 'unclassified_points', 'original_href', 'calculated_cny_micros', 'accounted_cny_micros', 'calculated_count']);
   const rows = Array.isArray(records) ? records : records.values();
   try {
     let chunk = '';
@@ -29,8 +29,9 @@ export async function* usageCsvChunks(snapshot: UsageExportSnapshot): AsyncGener
         JSON.stringify(record.cash.chargeOriginal), JSON.stringify(record.cash.refundOriginal), JSON.stringify(record.cash.netOriginal),
         record.cash.chargeCnyMicros, record.cash.refundCnyMicros, record.cash.netCnyMicros,
         record.points.charged, record.points.refunded, record.points.net, record.points.reserved, record.points.released,
-        JSON.stringify(record.points.personal), JSON.stringify(record.points.project), JSON.stringify(record.points.unclassified), record.originalHref];
-      chunk += `${values.map((value, index) => usageCsvCell(value, index >= 8 && index <= 12 || index >= 18 && index <= 25)).join(',')}\r\n`;
+        JSON.stringify(record.points.personal), JSON.stringify(record.points.project), JSON.stringify(record.points.unclassified), record.originalHref,
+        record.cash.calculatedCnyMicros, record.cash.accountedCnyMicros, record.cash.calculatedCount || 0];
+      chunk += `${values.map((value, index) => usageCsvCell(value, index >= 8 && index <= 12 || index >= 18 && index <= 25 || index >= 30 && index <= 32)).join(',')}\r\n`;
       if (chunk.length >= 16 * 1024) { yield chunk; chunk = ''; }
     }
     if (chunk) yield chunk;

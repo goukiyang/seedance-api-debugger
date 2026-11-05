@@ -50,9 +50,14 @@ export function publicUsageCash(facts: UsageFact[], events: UsageCashEvent[]): U
   const basis: UsageCashDTO['basis'] = !currencies.size || Array.from(currencies).some(currency => !['CNY', 'USD'].includes(currency)) ? 'UNAVAILABLE'
     : currencies.size === 2 ? 'MIXED_CNY_USD' : currencies.has('USD') ? 'USD_CNY_DISPLAY' : 'CNY';
   const known = confirmed.length > 0;
+  const calculated = leaves.filter(fact => fact.costStatus === 'calculated' && fact.accountingCost);
+  const calculatedCnyMicros = calculated.length ? calculated.reduce((sum, fact) => sum + BigInt(fact.accountingCost!.amountCnyMicros), ZERO).toString() : null;
+  const netCnyMicros = usageCnyMicros(netOriginal);
   const emptySide = (values: ReturnType<typeof money>) => values.length ? usageCnyMicros(values) : known && basis !== 'UNAVAILABLE' ? '0' : null;
   return { chargeOriginal, refundOriginal, netOriginal,
-    chargeCnyMicros: emptySide(chargeOriginal), refundCnyMicros: emptySide(refundOriginal), netCnyMicros: usageCnyMicros(netOriginal), basis,
+    calculatedCnyMicros, calculatedCount: calculated.length,
+    accountedCnyMicros: netCnyMicros === null && calculatedCnyMicros === null ? null : (BigInt(netCnyMicros || '0') + BigInt(calculatedCnyMicros || '0')).toString(),
+    chargeCnyMicros: emptySide(chargeOriginal), refundCnyMicros: emptySide(refundOriginal), netCnyMicros, basis,
     state: conflicts.size || selected.some(event => event.status === 'conflict') ? 'conflict'
       : known ? unknown || selected.some(event => event.status !== 'confirmed') || basis === 'UNAVAILABLE' ? 'partial' : 'confirmed'
         : leaves.some(fact => fact.costStatus === 'pending') ? 'pending' : 'unavailable' };

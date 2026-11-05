@@ -31,17 +31,22 @@ function pointSum(facts: UsageFact[], field: 'chargedPoints' | 'reservedPoints' 
 export function summarizeUsageFacts(facts: UsageFact[]): UsageSummary {
   const leaf = facts.filter(fact => fact.leaf);
   const confirmedCost = usageMoneyTotals(leaf.flatMap(fact => fact.confirmedCost));
+  const calculated = leaf.filter(fact => fact.costStatus === 'calculated' && fact.accountingCost);
+  const calculatedCny = calculated.reduce((sum, fact) => sum + BigInt(fact.accountingCost!.amountCnyMicros), ZERO);
+  const confirmedCny = leaf.length ? usageCnyMicros(confirmedCost) : '0';
   return {
     usageCount: leaf.length, outputCount: leaf.reduce((sum, fact) => sum + fact.outputCount, 0),
     flowCount: facts.filter(fact => !fact.leaf).length,
     activeMemberCount: new Set(facts.map(fact => fact.ownerUserId).filter(Boolean)).size,
     projectCount: new Set(facts.map(fact => fact.projectId).filter(Boolean)).size,
-    confirmedCost, confirmedCostCnyMicros: leaf.length ? usageCnyMicros(confirmedCost) : '0',
+    confirmedCost, confirmedCostCnyMicros: confirmedCny, calculatedCount: calculated.length,
+    calculatedCostCnyMicros: calculated.length ? calculatedCny.toString() : null,
+    accountedCostCnyMicros: confirmedCny === null && !calculated.length ? null : (BigInt(confirmedCny || '0') + calculatedCny).toString(),
     chargedPoints: pointSum(facts, 'chargedPoints'), reservedPoints: pointSum(facts, 'reservedPoints'),
     releasedPoints: pointSum(facts, 'releasedPoints'), refundedPoints: pointSum(facts, 'refundedPoints'),
     pendingCount: leaf.filter(fact => fact.costStatus === 'pending').length,
     conflictCount: facts.filter(fact => fact.attribution === 'conflict' || fact.leaf && fact.costStatus === 'conflict').length,
-    unknownCostCount: leaf.filter(fact => fact.costStatus !== 'confirmed').length,
+    unknownCostCount: leaf.filter(fact => !['confirmed', 'calculated'].includes(fact.costStatus)).length,
     unassignedCount: facts.filter(fact => !fact.projectId || !fact.ownerUserId).length,
     failedCount: leaf.filter(fact => failedStates.has(fact.status)).length,
     resultNotReadyCount: leaf.filter(fact => fact.resultReady === false).length,
@@ -87,7 +92,7 @@ function cmpBig(a: bigint | null, b: bigint | null, descending = true) {
 
 function compareFact(a: UsageFact, b: UsageFact, sort: UsageQuery['sort']) {
   let comparison = 0;
-  if (sort === 'cost') comparison = cmpBig(usageInteger(a.confirmedCostCnyMicros), usageInteger(b.confirmedCostCnyMicros));
+  if (sort === 'cost') comparison = cmpBig(usageInteger(a.accountingCost?.amountCnyMicros ?? a.confirmedCostCnyMicros), usageInteger(b.accountingCost?.amountCnyMicros ?? b.confirmedCostCnyMicros));
   else if (sort === 'usage') comparison = Number(b.leaf) - Number(a.leaf) || b.outputCount - a.outputCount;
   else if (sort === 'name') comparison = a.ownerLabel.localeCompare(b.ownerLabel, 'zh-CN') || a.projectLabel.localeCompare(b.projectLabel, 'zh-CN');
   else comparison = sort === 'oldest' ? a.occurredAt.localeCompare(b.occurredAt) : b.occurredAt.localeCompare(a.occurredAt);
@@ -124,7 +129,7 @@ function sortedDistributions(values: Dimension[], sort: UsageQuery['sort'], sear
   const filtered = search ? values.filter(value => `${value.id || 'unassigned'} ${value.label}`.toLocaleLowerCase().includes(search.toLocaleLowerCase())) : values.slice();
   filtered.sort((a, b) => {
     let comparison = 0;
-    if (sort === 'cost') comparison = cmpBig(usageInteger(a.summary.confirmedCostCnyMicros), usageInteger(b.summary.confirmedCostCnyMicros));
+    if (sort === 'cost') comparison = cmpBig(usageInteger(a.summary.accountedCostCnyMicros ?? a.summary.confirmedCostCnyMicros), usageInteger(b.summary.accountedCostCnyMicros ?? b.summary.confirmedCostCnyMicros));
     else if (sort === 'usage') comparison = b.summary.usageCount - a.summary.usageCount || b.summary.flowCount - a.summary.flowCount;
     else if (sort === 'oldest') comparison = !a.first || !b.first ? Number(!a.first) - Number(!b.first) : a.first.localeCompare(b.first);
     else if (sort === 'newest') comparison = b.last.localeCompare(a.last);

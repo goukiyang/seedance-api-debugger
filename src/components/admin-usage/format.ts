@@ -21,9 +21,10 @@ export function fixedDecimal(value: string | null | undefined, scale = 0, places
 export function points(value: string | null | undefined) { return fixedDecimal(value); }
 export function money(value: string | null | undefined) { return value === null || value === undefined ? '待核' : `¥${fixedDecimal(value, 6, 2)}`; }
 export function originalMoney(values: UsageMoney[]) {
-  return values.length ? values.map(item => `${item.currency} ${fixedDecimal(item.amountMicros, 6, 6)}`).join(' · ') : '未接入或待核';
+  return values.length ? values.map(item => `${item.currency} ${fixedDecimal(item.amountMicros, 6, 6)}`).join(' · ') : '尚无实扣凭据';
 }
 export function summaryCost(summary: UsageSummary) {
+  if (summary.accountedCostCnyMicros != null) return money(summary.accountedCostCnyMicros);
   if (summary.confirmedCostCnyMicros !== null) return money(summary.confirmedCostCnyMicros);
   return summary.confirmedCost.length ? originalMoney(summary.confirmedCost) : '待核 / 未接入';
 }
@@ -34,7 +35,7 @@ export const SOURCE_LABELS: Record<string, string> = {
 };
 export const RESULT_LABELS: Record<string, string> = { ready: '文件已就绪', not_ready: '文件未就绪', unknown: '文件状态未知' };
 export const RETENTION_LABELS: Record<string, string> = { active: '正常留存', user_deleted: '本人已删除', admin_hidden: '管理隐藏', retained: '保留中', unknown: '留存待确认' };
-export const COST_LABELS: Record<string, string> = { confirmed: '费用已确认', pending: '费用待核', conflict: '费用冲突', unconnected: '费用未接入' };
+export const COST_LABELS: Record<string, string> = { confirmed: '费用已确认', calculated: '费用已核算', pending: '费用待核', conflict: '费用冲突', unconnected: '费用未接入' };
 export const ATTRIBUTION_LABELS: Record<string, string> = {
   frozen: '原使用归属', legacy_current: '历史按现有归属', legacy_snapshot: '历史快照归属', unassigned: '未归属', conflict: '归属冲突',
 };

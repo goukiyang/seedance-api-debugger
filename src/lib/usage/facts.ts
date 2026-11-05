@@ -6,6 +6,7 @@ import { usageInteger, usageDecimalUnits, usageUnitsText, usageMoneyTotals, usag
 import { usageRecordHref } from '@/lib/admin/usage-record-link';
 import { usageDatabase, usageDateTime, type UsageDb, type UsageDbSource } from './database';
 import { usageWindowCondition, usageSqlTime, type UsageReadWindow } from './read-window';
+import { attachAccountingCosts } from './accounting';
 
 type Cell = string | number | bigint | Date | boolean | null;
 type Row = Record<string, Cell>;
@@ -62,11 +63,15 @@ async function rows(db: Db, from: Prisma.Sql, fields: Prisma.Sql, id: Prisma.Sql
 
 // JSON is reduced inside SQLite. Prompts, references, raw responses, and settings
 // blobs never cross the DB boundary into this reader.
-const imageFields = Prisma.sql`"id", "owner_id", "batch_id", "model", "output_size", "status", "billing_status",
+const imageFields = Prisma.sql`"id", "owner_id", "batch_id", "model", "quality", "output_size", "status", "billing_status",
   "actual_credits", "unit_credits", "billing_settled_at", "tool_flow_run_id", "created_at", "updated_at", "finished_at",
   "billing_scope", "gateway_request_id", CASE WHEN "deleted_at" IS NOT NULL THEN 'user_deleted' ELSE 'active' END AS "retention",
   CASE WHEN "asset_id" IS NOT NULL AND "asset_id" <> '' THEN 1 ELSE 0 END AS "has_output",
   json_extract(CASE WHEN json_valid("snapshot_json") THEN "snapshot_json" ELSE '{}' END, '$.imageChannel.channelId') AS "channel_id",
+  json_extract(CASE WHEN json_valid("billing_contract_json") THEN "billing_contract_json" ELSE '{}' END, '$.pricing.baseCny') AS "frozen_base",
+  json_extract(CASE WHEN json_valid("billing_contract_json") THEN "billing_contract_json" ELSE '{}' END, '$.pricing.mode') AS "frozen_mode",
+  json_extract(CASE WHEN json_valid("billing_contract_json") THEN "billing_contract_json" ELSE '{}' END, '$.pricing.identity.billingMode') AS "frozen_billing_mode",
+  json_extract(CASE WHEN json_valid("billing_contract_json") THEN "billing_contract_json" ELSE '{}' END, '$.pricing.revision') AS "frozen_revision",
   json_extract(CASE WHEN json_valid("usage_json") THEN "usage_json" ELSE '{}' END, '$.studioDelivery.code') AS "delivery_code",
   (SELECT json_extract(CASE WHEN json_valid(f."snapshot_json") THEN f."snapshot_json" ELSE '{}' END, '$.project_id') FROM "ToolFlowRun" f
     WHERE f."id" = "tool_flow_run_id" AND json_extract(CASE WHEN json_valid(f."snapshot_json") THEN f."snapshot_json" ELSE '{}' END, '$.schema') = 'toolflow.v1') AS "original_project"`;
@@ -284,6 +289,24 @@ export async function readUsageFacts(source: UsageDbSource, dataAsOf: string, op
   const videos = await rows(db, Prisma.sql`"VideoTask"`, Prisma.sql`"id", "provider", "model", "local_status", "user_id", "owner_user_id", "project_id",
     "resolution", "created_at", "updated_at", "completed_at", "retention_status", "actual_cost", "frozen_cost", "refund_amount",
     "billing_scope", "billing_account_id", "provider_cost_status", "provider_task_id", "provider_client_request_id", "template_studio_run_id",
+    "duration", "is_draft", "provider_cost_currency", "provider_final_amount_micros", "provider_official_amount_micros",
+    "provider_final_amount_minor", "provider_official_amount_minor",
+    CASE WHEN "source_draft_task_id" IS NOT NULL OR "draft_upgrade_mode" = 'draft_upgrade' THEN 1 ELSE 0 END AS "is_upgrade",
+    json_extract(CASE WHEN json_valid("pricing_snapshot") THEN "pricing_snapshot" ELSE '{}' END, '$.toolVersion') AS "tool_version",
+    COALESCE(json_extract(CASE WHEN json_valid("pricing_snapshot") THEN "pricing_snapshot" ELSE '{}' END, '$.fps'),
+      json_extract(CASE WHEN json_valid("raw_status_response") THEN "raw_status_response" ELSE '{}' END, '$.result.fps'),
+      json_extract(CASE WHEN json_valid("raw_status_response") THEN "raw_status_response" ELSE '{}' END, '$.data.result.fps')) AS "fps",
+    CASE WHEN json_valid("reference_video_urls") THEN CASE WHEN json_array_length("reference_video_urls") > 0 THEN '["reference"]' ELSE NULL END
+      WHEN "reference_video_urls" IS NULL OR trim("reference_video_urls") = '' THEN NULL ELSE 'invalid' END AS "reference_video_urls",
+    json_object('completion_tokens', json_extract(CASE WHEN json_valid("provider_usage_snapshot") THEN "provider_usage_snapshot" ELSE '{}' END, '$.completion_tokens')) AS "provider_usage_snapshot",
+    json_object('usage', json_object('completion_tokens', COALESCE(
+      json_extract(CASE WHEN json_valid("raw_status_response") THEN "raw_status_response" ELSE '{}' END, '$.usage.completion_tokens'),
+      json_extract(CASE WHEN json_valid("raw_status_response") THEN "raw_status_response" ELSE '{}' END, '$.data.usage.completion_tokens')))) AS "raw_status_response",
+    json_extract(CASE WHEN json_valid("pricing_snapshot") THEN "pricing_snapshot" ELSE '{}' END, '$.pricingCharge.baseCny') AS "frozen_base",
+    json_extract(CASE WHEN json_valid("pricing_snapshot") THEN "pricing_snapshot" ELSE '{}' END, '$.pricingCharge.mode') AS "frozen_mode",
+    json_extract(CASE WHEN json_valid("pricing_snapshot") THEN "pricing_snapshot" ELSE '{}' END, '$.pricingCharge.identity.billingMode') AS "frozen_billing_mode",
+    json_extract(CASE WHEN json_valid("pricing_snapshot") THEN "pricing_snapshot" ELSE '{}' END, '$.pricingCharge.revision') AS "frozen_revision",
+    json_extract(CASE WHEN json_valid("pricing_snapshot") THEN "pricing_snapshot" ELSE '{}' END, '$.pricingCharge.quantity') AS "frozen_quantity",
     CASE WHEN ("local_video_path" IS NOT NULL AND "local_video_path" <> '') OR ("public_video_url" IS NOT NULL AND "public_video_url" <> '') THEN 1 ELSE 0 END AS "has_output"`, Prisma.sql`"id"`, condition('video_task'));
   const images = await rows(db, Prisma.sql`"ImageStudioTask"`, imageFields, Prisma.sql`"id"`, condition('image_task'));
   const studio = await rows(db, Prisma.sql`"VideoStudioRun"`, Prisma.sql`"id", "owner_user_id", "model", "mode", "status", "created_at", "updated_at", "completed_at"`, Prisma.sql`"id"`, Prisma.sql`"mode" = 'llm' AND ${condition('video_studio_run')}`);
@@ -464,6 +487,7 @@ export async function readUsageFacts(source: UsageDbSource, dataAsOf: string, op
     }
   }
   const cashEvents = await attachCash(db, internal, !!options || !!window || !!slice, options ? undefined : window, !!slice && !options);
+  await attachAccountingCosts(db, internal);
   const pointVersions: string[] = [];
   const pointProof = await attachPoints(db, internal, pointVersions, !!options);
   // Include present members/projects with no use as actual empty groups.
@@ -492,7 +516,7 @@ export async function readUsageFacts(source: UsageDbSource, dataAsOf: string, op
   const sourceDiagnostics: UsageSourceDiagnostic[] = (Object.keys(sourceLabels) as UsageSourceKind[]).map(source => {
     const items = internal.filter(item => item.fact.sourceKind === source), invalid = invalidCounts.get(source) || 0;
     const frozen = items.filter(item => item.fact.attribution === 'frozen' || item.fact.attribution === 'conflict').length;
-    const unavailableCash = items.filter(item => item.fact.leaf && item.fact.costStatus !== 'confirmed').length;
+    const unavailableCash = items.filter(item => item.fact.leaf && !['confirmed', 'calculated'].includes(item.fact.costStatus)).length;
     return { source, total: items.length, frozen, invalid, unavailableCash,
       pointMissing: pointProof.missing.get(source) || 0, pointConflicts: pointProof.conflicts.get(source) || 0 };
   });
@@ -510,7 +534,8 @@ export async function readUsageFacts(source: UsageDbSource, dataAsOf: string, op
     detail: attribution.available ? '仅读取现存首建归属；缺行按已支持的历史依据，报表 GET 不补写。' : '兼容部署尚无 UsageAttribution 表；使用已支持的历史依据，不写入、不回填。' });
   return { facts: internal.map(item => item.fact), coverage, cashEvents, sourceDiagnostics,
     sourceFingerprintParts: [...bindings.map(row => `binding:${row.id}:${row.run_id}:${row.source_kind}:${row.source_task_id}:${iso(row.updated_at)}`),
-      ...cashEvents.map(event => JSON.stringify(event)), ...pointVersions],
+      ...cashEvents.map(event => JSON.stringify(event)), ...pointVersions,
+      ...internal.filter(item => item.fact.accountingCost).map(item => JSON.stringify([item.fact.sourceKind, item.fact.sourceId, item.fact.accountingCost]))],
     memberDirectory: Array.from(memberNames, ([id, label]) => ({ id, label })),
     projectDirectory: Array.from(projectNames, ([id, label]) => ({ id, label })),
     ...(options ? { publicMetadata: new Map(images.map(row => [keyOf('image_task', String(row.id)), { batchId: str(row.batch_id) || undefined }])) } : {}) };
