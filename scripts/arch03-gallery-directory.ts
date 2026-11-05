@@ -30,7 +30,8 @@ export async function verifyGalleryDirectory(db: PrismaClient) {
     { user_id: owner, content_key: 'image_template:gallery-preset-8', category: 'template', liked: false, favorited: false },
     { user_id: other, content_key: 'image_template:gallery-preset-9', category: 'template', liked: true, favorited: true },
   ] });
-  const expectedFavorites = ['image_template:gallery-preset-5', 'image_template:gallery-preset-6', 'image_template:gallery-preset-7'].sort();
+  // The preceding writer fixture also leaves a legitimate like-only workspace.
+  const expectedFavorites = ['image_module:22222222-2222-4222-8222-222222222222', 'image_template:gallery-preset-5', 'image_template:gallery-preset-6', 'image_template:gallery-preset-7'].sort();
   const unionQuery = { scope: 'favorites' as const, pageSize: 24, navigationOnly: true };
   const unionReference = await queryStudioGallery(actor, unionQuery);
   const unionSql = await galleryDirectorySql(db, actor, unionQuery);
