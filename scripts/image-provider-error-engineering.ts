@@ -197,6 +197,25 @@ async function main() {
     const durableFailure = new Error('synthetic original response durability failed');
     const business = await run({ ...initial, recordResponse: async () => { throw durableFailure; } }, [() => new Response('{}', { status: 429 })]);
     assert.equal(business.error, durableFailure);
+    const callbackOrder: string[] = [];
+    let acceptedReceipt: { taskId: string; pollAfterMs?: number; expiresAt?: string } | undefined;
+    const acceptedBeforeAccounting = await run({ ...initial,
+      onAsyncAccepted: async receipt => { acceptedReceipt = receipt; callbackOrder.push('accepted'); },
+      recordResponse: async response => {
+        assert.equal(response.status, 202); callbackOrder.push('accounting'); throw durableFailure;
+      },
+    }, [() => Response.json({ task_id: 'imgtask-accounting-timeout', poll_after_ms: 2000 }, { status: 202 })]);
+    assert.equal(acceptedBeforeAccounting.error, durableFailure);
+    assert.deepEqual(acceptedReceipt, { taskId: 'imgtask-accounting-timeout', pollAfterMs: 2000 });
+    assert.deepEqual(callbackOrder, ['accepted', 'accounting']);
+    assert.equal(acceptedBeforeAccounting.calls.length, 1, 'Accounting failure does not poll or resend the accepted request');
+    assert.equal(acceptedBeforeAccounting.calls[0].method, 'POST');
+    let invalidReceiptRecorded = 0;
+    const invalidAccepted = await run({ ...initial, recordResponse: async response => {
+      assert.equal(response.status, 202); invalidReceiptRecorded++;
+    } }, [() => Response.json({ task_id: 'invalid task id' }, { status: 202 })]);
+    assert.equal((invalidAccepted.error as InstanceType<typeof StudioProviderError>).code, 'async_receipt_invalid');
+    assert.equal(invalidReceiptRecorded, 1, 'Invalid accepted response still records its HTTP receipt exactly once');
     checks.push('large_success_download_and_callback_failures_preserve_business');
 
     const malicious = JSON.parse(JSON.stringify({ status: secret, safe_error: { ...safeError(secret), attempt: 1e100, image_retry_count: {},

@@ -363,22 +363,26 @@ async function requestStudioImagesImplementation(params: {
     diagnostics.phase('initial_request');
     try { response = await transport(url, { method: 'POST', headers, body, signal: params.signal, redirect: params.protocol ? 'error' : 'follow' }); }
     catch (error) { if (error instanceof PrivatePromptError) throw error; throw new StudioProviderError('request', params.signal.aborted ? 'timeout' : 'network'); }
-    await params.recordResponse?.(response);
-    diagnostics.phase('initial_request', response.status);
-    if (!response.ok) { const observed = await readProviderErrorBody(response, params.signal);
-      diagnostics.body(observed.value, observed.bodyRead);
-      throw Object.assign(new StudioProviderError('request', 'http_error', response.status),
-        { retryFailure: retryFailure(observed.value, response.status, 'create', response.headers.get('retry-after')) }); }
-    value = await boundedJson(response, params.count * MAX_STUDIO_GENERATED_BASE64 + 1024 * 1024,
-      async (body, observation) => { diagnostics.body(body, observation.parseOutcome); });
-    if (response.status === 202) {
-      const taskId = value.task_id || value.id;
-      if (typeof taskId !== 'string' || !/^[a-zA-Z0-9_-]{1,180}$/.test(taskId)) throw new StudioProviderError('response', 'async_receipt_invalid', 202);
-      if (!params.onAsyncAccepted) throw new StudioProviderError('response', 'async_receipt_storage_required', 202);
-      asyncTask = { taskId, pollAfterMs: boundedPollDelay(value.poll_after_ms),
-        ...(typeof value.expires_at === 'string' && Number.isFinite(Date.parse(value.expires_at)) ? { expiresAt: value.expires_at } : {}) };
-      // Save the exact task identity before any query or outcome interpretation.
-      await params.onAsyncAccepted(asyncTask);
+    try {
+      if (response.status !== 202) await params.recordResponse?.(response);
+      diagnostics.phase('initial_request', response.status);
+      if (!response.ok) { const observed = await readProviderErrorBody(response, params.signal);
+        diagnostics.body(observed.value, observed.bodyRead);
+        throw Object.assign(new StudioProviderError('request', 'http_error', response.status),
+          { retryFailure: retryFailure(observed.value, response.status, 'create', response.headers.get('retry-after')) }); }
+      value = await boundedJson(response, params.count * MAX_STUDIO_GENERATED_BASE64 + 1024 * 1024,
+        async (body, observation) => { diagnostics.body(body, observation.parseOutcome); });
+      if (response.status === 202) {
+        const taskId = value.task_id || value.id;
+        if (typeof taskId !== 'string' || !/^[a-zA-Z0-9_-]{1,180}$/.test(taskId)) throw new StudioProviderError('response', 'async_receipt_invalid', 202);
+        if (!params.onAsyncAccepted) throw new StudioProviderError('response', 'async_receipt_storage_required', 202);
+        asyncTask = { taskId, pollAfterMs: boundedPollDelay(value.poll_after_ms),
+          ...(typeof value.expires_at === 'string' && Number.isFinite(Date.parse(value.expires_at)) ? { expiresAt: value.expires_at } : {}) };
+        // Preserve the provider task id before response accounting can fail.
+        await params.onAsyncAccepted(asyncTask);
+      }
+    } finally {
+      if (response.status === 202) await params.recordResponse?.(response);
     }
   }
   if (asyncTask) {

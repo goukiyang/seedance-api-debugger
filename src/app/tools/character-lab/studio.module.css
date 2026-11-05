@@ -102,6 +102,8 @@
 .canvasEmpty p { max-width: 30ch; line-height: 1.8; font-size: 13px; }
 .canvasEmpty button { margin-top: 10px; }
 .taskStatus { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--lab-bg); font-size: 12px; border-radius: 5px; margin-bottom: 12px; flex-wrap: wrap; }
+.previousOutput { display: flex; flex-direction: column; gap: 5px; padding: 12px; border: 1px solid var(--lab-line); border-radius: 5px; margin-bottom: 12px; font-size: 13px; }
+.previousOutput span { color: var(--lab-muted); font-size: 12px; }
 .resultArea { background: var(--lab-bg); border-radius: 5px; display: flex; justify-content: center; align-items: center; min-height: 420px; padding: 6px; }
 .root .resultImage { padding: 0; display: flex; width: min(100%, 520px); min-height: 300px; align-items: center; justify-content: center; border-radius: 2px; }
 .resultImage img { object-fit: contain; width: 100%; max-height: calc(100dvh - 230px); min-height: 300px; }
