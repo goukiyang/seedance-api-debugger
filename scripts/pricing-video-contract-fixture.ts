@@ -116,8 +116,8 @@ async function run() {
       evidence.push('G13/G21: changed current revision rejects stale creation while the accepted frozen contract remains unchanged');
       const oldEnhance = (await quoteVideoPricing(enhance, tx)).charge!;
       assert.equal(oldEnhance.quantity, '3', 'Previously adopted tenth-point contracts retain ceil-second metering');
-      assert.equal((await quoteVideoPricing({ ...enhance, fps: null, sourceFps: 60, sourceDuration: 2.2 }, tx)).pricing.estimatedCost,
-        calculateEnhanceVideoEstimatedCost({ ...enhance, fps: null }).estimatedCost, 'New metadata must not silently reprice a legacy scope before explicit RMB adoption');
+      await assert.rejects(() => quoteVideoPricing({ ...enhance, fps: null, sourceFps: 60, sourceDuration: 2.2 }, tx),
+        { code: 'pricing_scope_unmatched' }, 'New source facts must not bypass an unmatched partially adopted scope');
       const enhanceRows = snapshot.rows.filter(row => row.identity.kind === 'enhance');
       assert.equal(enhanceRows.length, 30, 'All five resolutions, two versions and three frame-rate tiers have independent identities');
       const perSecond: Record<string, string[]> = {
