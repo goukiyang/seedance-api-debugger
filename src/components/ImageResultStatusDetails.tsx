@@ -1,14 +1,15 @@
 'use client';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import * as Popper from '@radix-ui/react-popper';
-import { CircleAlert } from 'lucide-react';
+import { CircleAlert, Info } from 'lucide-react';
 import { useDialogDismiss } from './useDialogDismiss';
 import styles from './GeneratedImageResults.module.css';
 
-export function ImageResultStatusDetails({ detail, reason = false, active, scopeKey }: {
-  detail: string; reason?: boolean; active: boolean; scopeKey: string;
+export function ImageResultStatusDetails({ detail, children, reason = false, active, scopeKey, label: requestedLabel, heading }: {
+  detail?: string; children?: ReactNode; reason?: boolean; active: boolean; scopeKey: string;
+  label?: string; heading?: string;
 }) {
   const [openScope, setOpenScope] = useState<string | null>(null);
   const [copyState, setCopyState] = useState<'idle' | 'busy' | 'success' | 'error'>('idle');
@@ -19,7 +20,9 @@ export function ImageResultStatusDetails({ detail, reason = false, active, scope
   const context = useRef({ active, scopeKey, detail });
   context.current = { active, scopeKey, detail };
   const open = active && openScope === scopeKey;
-  const label = reason ? '查看原因' : '查看详情';
+  const structured = children !== undefined && children !== null;
+  const label = requestedLabel || (reason ? '查看原因' : '查看详情');
+  const title = heading || (reason ? '原因说明' : '详细说明');
 
   function close() {
     copyRun.current += 1;
@@ -43,6 +46,7 @@ export function ImageResultStatusDetails({ detail, reason = false, active, scope
   });
 
   async function copyDetail() {
+    if (!detail) return;
     const run = ++copyRun.current;
     const original = { scopeKey, detail };
     setCopyState('busy');
@@ -62,23 +66,25 @@ export function ImageResultStatusDetails({ detail, reason = false, active, scope
       <button ref={trigger} type="button" className={styles.issueTrigger} aria-expanded={open}
         aria-controls={open ? id : undefined} aria-haspopup="dialog" disabled={!active}
         aria-label={label} data-reason={reason || undefined}
+        data-result-details={structured || undefined} title={label}
         onPointerDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}
         onKeyDown={event => event.stopPropagation()}
         onClick={event => { event.preventDefault(); event.stopPropagation(); if (open) close(); else { setCopyState('idle'); setOpenScope(scopeKey); } }}>
-        {reason ? <CircleAlert size={18} aria-hidden="true" /> : label}
+        {reason ? <CircleAlert size={18} aria-hidden="true" /> : structured ? <Info size={17} aria-hidden="true" /> : label}
       </button>
     </Popper.Anchor>
     {open && createPortal(<Popper.Content side="bottom" align="end" sideOffset={6} collisionPadding={12}
-      avoidCollisions sticky="always" hideWhenDetached className={styles.issueLayer}
+      avoidCollisions sticky="always" hideWhenDetached className={styles.issueLayer} data-structured={structured || undefined}
       onPointerDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}
       onClick={event => event.stopPropagation()}>
-      <div ref={dialog} id={id} role="dialog" aria-label={reason ? '生成结果原因' : '生成结果详情'} tabIndex={-1}>
-        <strong>{reason ? '原因说明' : '详细说明'}</strong>
-        <p className={styles.statusDetailText}>{detail}</p>
+      <div ref={dialog} id={id} role="dialog" aria-label={title} tabIndex={-1}>
+        <strong>{title}</strong>
+        {detail && <p className={styles.statusDetailText}>{detail}</p>}
+        {children}
         <div className={styles.statusDetailActions}>
-          <button type="button" className={styles.issueClose} disabled={copyState === 'busy'} onClick={() => void copyDetail()}>
-            {copyState === 'busy' ? '复制中' : '复制完整详情'}
-          </button>
+          {detail && <button type="button" className={styles.issueClose} disabled={copyState === 'busy'} onClick={() => void copyDetail()}>
+            {copyState === 'busy' ? '复制中' : structured ? '复制说明' : '复制完整详情'}
+          </button>}
           <button type="button" className={styles.issueClose} onClick={close}>关闭</button>
         </div>
         {copyState === 'success' && <span className={styles.statusCopyFeedback} role="status">已复制</span>}

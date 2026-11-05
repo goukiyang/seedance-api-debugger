@@ -15,7 +15,7 @@ import { ImageGenerationWaiting, type ImageGenerationWait } from './ImageGenerat
 import { useImageGenerationWaitDisplay } from './useImageGenerationWaitDisplay';
 import type { ImageGenerationWaitDisplay } from '@/lib/image-studio/wait-display';
 import { ExperienceActions } from '@/components/experience/ExperienceParts';
-import { ImageResultNextActions, ImageResultNextActionFeedback } from './ImageResultNextActions';
+import { ImageResultNextActionButtons, ImageResultNextActionFeedback } from './ImageResultNextActions';
 import { useImageResultNextActions } from './useImageResultNextActions';
 import { ResultImageContextMenu, type ResultImageContextMenuItem } from './ResultImageContextMenu';
 import { useAppSession } from '@/lib/context/AppSessionContext';
@@ -113,7 +113,7 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
   const [menuOpen, setMenuOpen] = useState(false);
   const cancelPreviewRef = useRef<(() => void) | null>(null);
   const nextEnabled = Boolean(item.media?.contentKey && nextSourceSet.has(item.media.contentKey));
-  const controller = useImageResultNextActions({ sourceKey: item.media?.contentKey, resultId: item.id, scope, enabled: contextActionsEnabled && nextEnabled });
+  const controller = useImageResultNextActions({ sourceKey: item.media?.contentKey, resultId: item.id, scope, enabled: nextEnabled });
   const identity = JSON.stringify([scope, user?.id || '', item.id, item.media?.contentKey || '']);
   const menuActive = visible && !sessionChanged && !isClientSessionBlocked();
   const readOnly = Boolean(item.viewOnly || item.media?.previewOnly);
@@ -151,15 +151,17 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
   }
   const inputMenuEnabled = Boolean(input && menuItems.some(action => action.id === 'view-input-main' || action.id === 'input-main'));
   const resultMenuEnabled = contextActionsEnabled || inputMenuEnabled;
-  const compactNotice = compactInformation && item.notice && !item.outputIssue ? item.notice : null;
-  const statusDetail = compactInformation
-    ? resultError && compactNotice && compactNotice !== resultError ? `${resultError}\n\n${compactNotice}` : resultError || compactNotice
-    : null;
+  const visibleNotice = item.notice && !item.outputIssue ? item.notice : null;
+  const statusDetail = resultError && visibleNotice && visibleNotice !== resultError ? `${resultError}\n\n${visibleNotice}` : resultError || visibleNotice;
   const secondaryActions = contextActionsEnabled && readOnly ? null : renderActions?.(item);
   const deliveryAction = renderDeliveryAction?.(item);
   const primaryActions = renderPrimaryActions?.(item, waitDisplay);
+  const metadata = renderMetadata ? renderMetadata(item) : <div className={styles.heading}><strong title={item.label}>{item.label}</strong><span>{item.status}</span></div>;
+  const supplement = renderSupplement?.(item);
   const groupedDelete = coverDeleteWithContextActions ? renderDelete?.(item) : null;
   const hasCommonActions = Boolean(groupedDelete || item.media && (!coverDeleteWithContextActions || item.download && (!contextActionsEnabled || !readOnly)));
+  const hasMediaDetails = Boolean(item.media && (metadata || supplement || statusDetail));
+  const showNextActions = Boolean(item.media && nextEnabled && !contextActionsEnabled);
   const coverReactions = Boolean(renderReactionAction && item.media?.contentKey);
   const reactions = item.media?.contentKey ? <ContentReactions contentKey={item.media.contentKey} imageSharing={item.media.imageSharing}
     secondaryAction={renderReactionAction ? null : undefined} overlay={!renderReactionAction} parentControlled={!renderReactionAction} /> : null;
@@ -193,11 +195,14 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
       {coverReactions ? <div className={styles.coverReactions}>{reactions}<div className={styles.coverPin}>{renderReactionAction?.(item)}</div></div> : reactions}
       {renderOverlay?.(item, { openPreview: () => changePreview(item) })}
       {!contextActionsEnabled && !coverDeleteWithContextActions && renderDelete && <div className={styles.deleteSlot} data-result-secondary onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>{renderDelete(item)}</div>}
-      {(hasCommonActions || secondaryActions || deliveryAction || item.media && statusDetail) && <div className={styles.mediaActions}
+      {(hasCommonActions || secondaryActions || deliveryAction || item.media && primaryActions || hasMediaDetails || showNextActions) && <div className={styles.mediaActions}
         data-cover-context-delete={coverDeleteWithContextActions || undefined} data-has-status-detail={Boolean(item.media && statusDetail) || undefined}
-        data-result-secondary aria-busy={feedback?.id === item.id && feedback.busy || undefined} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
-        {item.media && statusDetail && <div className={styles.mediaDetailAction}>
-          <ImageResultStatusDetails detail={statusDetail} reason={Boolean(resultError)} active={menuActive} scopeKey={identity} />
+        data-result-secondary aria-busy={feedback?.id === item.id && feedback.busy || Boolean(controller.busy) || undefined} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
+        {hasMediaDetails && <div className={styles.mediaDetailAction}>
+          <ImageResultStatusDetails detail={statusDetail || undefined} reason={Boolean(resultError)} active={menuActive} scopeKey={`${identity}:details`}
+            label={resultError ? '查看原因与结果详情' : '查看结果详情'} heading={resultError ? '原因与结果详情' : '结果详情'}>
+            <div className={styles.resultDetailsContent}>{metadata}{supplement && <div className={styles.resultSupplement}>{supplement}</div>}</div>
+          </ImageResultStatusDetails>
         </div>}
         {hasCommonActions && <div className={styles.commonActions}>
           {item.media && <>
@@ -209,16 +214,20 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
         </div>}
         {secondaryActions && <div className={styles.specialtyActions}>{secondaryActions}</div>}
         {deliveryAction && <div className={styles.deliveryAction}>{deliveryAction}</div>}
+        {item.media && primaryActions && <ExperienceActions label="继续使用结果" className={styles.mediaPrimaryActions}>{primaryActions}</ExperienceActions>}
+        {showNextActions && <ImageResultNextActionButtons controller={controller} iconOnly className={styles.mediaNextActions} />}
       </div>}
     </div>
-    {contextActionsEnabled ? <ImageResultNextActionFeedback controller={controller} className={`${styles.feedback} ${styles.nextFeedback}`} /> : item.media?.contentKey && nextSourceSet.has(item.media.contentKey) && <ImageResultNextActions sourceKey={item.media.contentKey} resultId={item.id} className={styles.nextActions} />}
-    {renderMetadata ? renderMetadata(item) : <div className={styles.heading}><strong title={item.label}>{item.label}</strong><span>{item.status}</span></div>}
-    {primaryActions && <ExperienceActions label="继续使用结果" className={styles.actions} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>{primaryActions}</ExperienceActions>}
-    {feedback?.id === item.id && (compactInformation ? <ImageResultOperationFeedback feedback={feedback} anchorRef={feedbackAnchor} onDismiss={dismissFeedback}
-      onRetry={feedback.phase === 'error' ? () => void operate(item, feedback.action === '复制' ? 'copy' : 'download') : undefined} /> : <p className={styles.feedback} role="status">{feedback.message}</p>)}
-    {!compactInformation && item.notice && <TaskNotice kind="status" className={styles.notice}>{item.notice}</TaskNotice>}
-    {!compactInformation && resultError && <TaskNotice kind={waitDisplay?.pending && !waitDisplay.showRecovery ? 'status' : 'recoverable'} className={styles.notice}>{resultError}</TaskNotice>}
-    {renderSupplement?.(item)}
+    {item.media && nextEnabled && <ImageResultNextActionFeedback controller={controller} anchorRef={cardRef} />}
+    {feedback?.id === item.id && <ImageResultOperationFeedback feedback={feedback} anchorRef={feedbackAnchor} onDismiss={dismissFeedback}
+      onRetry={feedback.phase === 'error' ? () => void operate(item, feedback.action === '复制' ? 'copy' : 'download') : undefined} />}
+    {!item.media && <>
+      {metadata}
+      {primaryActions && <ExperienceActions label="继续使用结果" className={styles.actions} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>{primaryActions}</ExperienceActions>}
+      {!compactInformation && item.notice && <TaskNotice kind="status" className={styles.notice}>{item.notice}</TaskNotice>}
+      {!compactInformation && resultError && <TaskNotice kind={waitDisplay?.pending && !waitDisplay.showRecovery ? 'status' : 'recoverable'} className={styles.notice}>{resultError}</TaskNotice>}
+      {supplement}
+    </>}
   </article>;
 }
 

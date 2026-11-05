@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { RefreshCw, Search } from 'lucide-react';
 import { RelativeTime } from '@/components/RelativeTime';
+import { ImageResultStatusDetails } from '@/components/ImageResultStatusDetails';
 import { useProductDialog } from '@/components/useProductDialog';
 import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import type { MultiviewWorkDto, MultiviewWorkList, MultiviewWorkMutationResult, MultiviewWorkReceipt } from '@/lib/video/multiview-work-contract';
@@ -294,9 +295,15 @@ export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, o
         {items.map(item => { const image = multiviewWorkFile(item, 'thumbnail'); return <article className={styles.card} key={item.id} data-work-id={item.id}>
           <button type="button" className={styles.cardImage} onClick={() => navigate(item.id)} aria-label={`浏览${item.title}`}>
             {image ? <img src={workFileUrl(item.id, image)} loading="lazy" alt={item.title} /> : <span>{item.status === 'failed' ? '拼图准备未完成' : '正在准备拼图'}</span>}
-          </button><div className={styles.cardCaption}><button type="button" className={styles.title} onClick={() => navigate(item.id)}>{item.title}</button>
+          </button>{image ? <div className={styles.cardDetails}><ImageResultStatusDetails active={loadedIdentity === identity}
+            scopeKey={`${identity}:${item.id}:${item.updatedAt}`} label="查看拼图作品详情" heading="拼图作品详情">
+            <div className={styles.cardCaption}><button type="button" className={styles.title} onClick={() => navigate(item.id)}>{item.title}</button>
+              <span className={styles.meta}>{item.ready?.frameCount || item.recipe?.slots.length || 0}张 · {item.projectTitle || '未关联项目'}</span>
+              <span className={styles.meta}><RelativeTime value={item.updatedAt} />{item.ready?.revision !== item.draftRevision && ' · 正在准备更新'}</span>
+              <button type="button" className={styles.button} onClick={() => navigate(item.id)}>打开作品</button></div>
+          </ImageResultStatusDetails></div> : <div className={styles.cardCaption}><button type="button" className={styles.title} onClick={() => navigate(item.id)}>{item.title}</button>
             <span className={styles.meta}>{item.ready?.frameCount || item.recipe?.slots.length || 0}张 · {item.projectTitle || '未关联项目'}</span>
-            <span className={styles.meta}><RelativeTime value={item.updatedAt} />{item.ready?.revision !== item.draftRevision && ' · 正在准备更新'}</span></div>
+            <span className={styles.meta}><RelativeTime value={item.updatedAt} />{item.ready?.revision !== item.draftRevision && ' · 正在准备更新'}</span></div>}
         </article>; })}
       </div>}
       {(loading || !listReady && !notice) && <p role="status" className={styles.notice}>正在读取作品…</p>}

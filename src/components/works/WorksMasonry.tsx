@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MutableRefObject } from 'react';
 import { ArrowUpRight, Eye, Repeat2 } from 'lucide-react';
 import { defaultRangeExtractor, useWindowVirtualizer } from '@tanstack/react-virtual';
+import { ImageResultStatusDetails } from '@/components/ImageResultStatusDetails';
+import { RelativeTime } from '@/components/RelativeTime';
 import type { WorkCard } from '@/lib/works/types';
 import type { WorkAnchor, WorkRestore } from '@/lib/works/view-state';
 import type { AssetPlaybackCoordinator } from '@/lib/media/asset-playback';
@@ -52,7 +54,7 @@ export function WorksMasonry({ items, playback, contextKey, detailOpen, busyKeys
   const focusedIndex = items.findIndex(work => work.id === (restore?.focusId || focused)), geometry = `${width}:${margin}:${items.map(work => `${work.id}:${work.width}:${work.height}`).join(',')}`;
   const getItemKey = useCallback((index: number) => itemsRef.current[index].id, []);
   const virtual = useWindowVirtualizer({ count: width ? items.length : 0, lanes, gap, scrollMargin: margin, overscan: 2, getItemKey,
-    estimateSize: index => { const work = itemsRef.current[index]; return Math.max(40, columnWidth * (work.width && work.height ? work.height / work.width : 1)) + 44; },
+    estimateSize: index => { const work = itemsRef.current[index]; return Math.max(40, columnWidth * (work.width && work.height ? work.height / work.width : 1)) + (work.medium === 'video' ? 44 : 0); },
     rangeExtractor: range => { const visible = defaultRangeExtractor(range); return focusedIndex < 0 || visible.includes(focusedIndex) ? visible : [...visible, focusedIndex].sort((a, b) => a - b); },
   });
   useLayoutEffect(() => {
@@ -120,14 +122,29 @@ export function WorksMasonry({ items, playback, contextKey, detailOpen, busyKeys
   return <div ref={container} className={styles.masonry} style={{ height: virtual.getTotalSize() }} aria-label="作品列表">{virtual.getVirtualItems().map(item => { const work = items[item.index];
     const canReuse = Boolean(work.provenance?.template?.reuseVersion);
     const busy = busyKeys.includes(`work:${work.id}`) || busyKeys.includes(`method:${work.id}`);
+    const source = work.provenance?.template || work.provenance?.tool;
     return <article key={work.id} className={styles.workCard} data-work-card={work.id} style={{ width: columnWidth, position: 'absolute', top: 0, left: item.lane * (columnWidth + gap), transform: `translateY(${item.start - margin}px)` }}
     onFocusCapture={event => rememberFocus(work.id, event.target)} onKeyDownCapture={event => rememberFocus(work.id, event.target)} onPointerDownCapture={event => { if (event.currentTarget.contains(document.activeElement)) rememberFocus(work.id, document.activeElement); }}>
     <div className={styles.cardVisual}>
       <div className={styles.mediaButton} data-work-action="preview" role="button" tabIndex={0} aria-label={`查看作品：${work.title}`} onClick={() => onOpen(work)} onKeyDown={event => { if (event.target === event.currentTarget && ['Enter', ' '].includes(event.key)) { event.preventDefault(); onOpen(work); } }}><WorkMedia key={`${work.id}:${work.mediaVersion}`} work={work} playback={playback} contextKey={contextKey} detailOpen={detailOpen} /></div>
+      {work.medium === 'image' && <div className={styles.imageCardDetails} data-work-action="details">
+        <ImageResultStatusDetails active={!detailOpen} scopeKey={`${contextKey}:${work.id}:${work.mediaVersion}:card-details`} label="查看作品详情" heading="作品详情">
+          <div className={styles.imageCardDetailsBody}>
+            <p className={styles.imageCardTitle}>{work.title}</p>
+            <dl className={styles.imageCardDetailsList}>
+              <div><dt>作者</dt><dd><WorkAuthor author={work.author} onClick={() => onFilter('author', work.author.id)} /></dd></div>
+              <div><dt>完成时间</dt><dd><RelativeTime value={work.completedAt} /></dd></div>
+              <div><dt>来源</dt><dd>{source ? <a href={source.href} title={`${work.provenance?.tool.label || source.label} · ${source.label}`}>{source.label}</a> : '来源未记录'}</dd></div>
+              {work.activity && <div><dt>使用情况</dt><dd>{work.activity.views} 次查看 · {work.activity.reuses} 次复用</dd></div>}
+            </dl>
+            <button type="button" className={styles.imageCardDetailAction} onClick={() => onOpen(work)}>打开完整作品详情</button>
+          </div>
+        </ImageResultStatusDetails>
+      </div>}
       <div className={styles.cardOverlay}><WorkActions work={work} cover busy={busy} operate={operate} onClassify={onClassify} /></div>
       {canReuse && <button type="button" className={styles.reuseButton} data-work-action="reuse" disabled={busy} onClick={() => void reuse(work)}><span>一键参考</span><ArrowUpRight size={15} aria-hidden="true" /></button>}
     </div>
-    <div className={styles.cardInfo}>
+    {work.medium === 'video' && <div className={styles.cardInfo}>
       <div className={styles.cardSource} data-work-action="source">{work.provenance
         ? <a href={(work.provenance.template || work.provenance.tool).href} title={`${work.provenance.tool.label} · ${work.provenance.template?.label || work.provenance.tool.label}`}>{(work.provenance.template || work.provenance.tool).label}</a>
         : <span>来源未记录</span>}</div>
@@ -136,6 +153,6 @@ export function WorksMasonry({ items, playback, contextKey, detailOpen, busyKeys
         <span role="img" title={`复用 ${work.activity.reuses} 次`} aria-label={`复用 ${work.activity.reuses} 次`}><Repeat2 size={13} aria-hidden="true" />{compactCount.format(work.activity.reuses)}</span>
       </div>}
       <div className={styles.cardIdentity} data-work-action="author"><WorkAuthor author={work.author} onClick={() => onFilter('author', work.author.id)} /></div>
-    </div>
+    </div>}
   </article>; })}</div>;
 }

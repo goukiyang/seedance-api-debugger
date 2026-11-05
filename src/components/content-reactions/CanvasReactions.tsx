@@ -35,7 +35,7 @@ export default function CanvasReactions({ frame }: { frame: RefObject<HTMLIFrame
       const doc = iframe.contentDocument;
       if (!child || !doc) return;
       const style = doc.createElement('style');
-      style.textContent = '.sd2-reaction-mount{display:flex;flex-wrap:wrap;gap:6px;padding:5px 10px;position:relative;z-index:3}.sd2-reaction-mount [data-content-reactions]{display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap}.sd2-reaction-mount button{display:inline-flex;align-items:center;justify-content:center;gap:4px;min-width:30px;height:30px;border:1px solid #485454;border-radius:5px;background:#152020;color:#cddcdb;cursor:pointer}.sd2-reaction-mount button[aria-pressed=true]{color:#f3bb64}.sd2-reaction-mount button:disabled{opacity:.45}.sd2-reaction-mount small{font-size:11px;color:#aabbbb}';
+      style.textContent = '.sd2-reaction-mount{display:flex;flex-wrap:wrap;gap:6px;padding:5px 10px;position:relative;z-index:3}.sd2-reaction-mount [data-content-reactions]{display:inline-flex;align-items:center;gap:4px;flex-wrap:wrap}.sd2-reaction-mount button{display:inline-flex;align-items:center;justify-content:center;gap:4px;min-width:30px;height:30px;border:1px solid #485454;border-radius:5px;background:#152020;color:#cddcdb;cursor:pointer}.sd2-reaction-mount button[aria-pressed=true]{color:#f3bb64}.sd2-reaction-mount button:disabled{opacity:.45}.sd2-reaction-mount small{font-size:11px;color:#aabbbb}.sd2-reaction-mount[data-canvas-image-reactions]{padding:0;flex:0 0 auto}.sd2-reaction-mount[data-canvas-image-reactions] [data-content-reactions]{flex-wrap:nowrap}.sd2-reaction-mount[data-canvas-image-reactions] [role=status]{white-space:nowrap}';
       doc.head.append(style);
       let scheduled = 0;
       let stopped = false;
@@ -46,9 +46,14 @@ export default function CanvasReactions({ frame }: { frame: RefObject<HTMLIFrame
           const nodeId = node.dataset.nodeId || '';
           const item = child.canvasEngine?.nodes.get(nodeId);
           const key = item?.data ? keyFor(item.type, item.data) : null;
-          let host = node.querySelector<HTMLElement>(':scope > .sd2-reaction-mount');
-          if (!key) { host?.remove(); continue; }
-          if (!host) { host = doc.createElement('div'); host.className = 'sd2-reaction-mount'; node.append(host); }
+          const target = item?.type === 'image' ? node.querySelector<HTMLElement>('.image-generation-toolbar') : node;
+          const existing = Array.from(node.querySelectorAll<HTMLElement>('.sd2-reaction-mount'));
+          let host = target ? existing.find(candidate => candidate.parentElement === target) || existing[0] : undefined;
+          if (!key || !target) { existing.forEach(candidate => candidate.remove()); continue; }
+          existing.forEach(candidate => { if (candidate !== host) candidate.remove(); });
+          if (!host) { host = doc.createElement('div'); host.className = 'sd2-reaction-mount'; }
+          if (host.parentElement !== target) target.append(host);
+          host.toggleAttribute('data-canvas-image-reactions', item?.type === 'image');
           result.push({ element: host, key, nodeId });
         }
         setMounts(current => current.length === result.length && current.every((item, index) => item.element === result[index].element && item.key === result[index].key) ? current : result);

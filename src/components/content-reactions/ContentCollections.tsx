@@ -8,6 +8,7 @@ import { Copy, Download, ExternalLink, Image as ImageIcon, Music, X, Undo2, Refr
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
 import MediaPreview from '@/components/MediaPreview';
+import { ImageResultStatusDetails } from '@/components/ImageResultStatusDetails';
 import { handImageDownloadToBrowser } from '@/lib/media/native-download';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { RelativeTime } from '@/components/RelativeTime';
@@ -439,12 +440,8 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
     {error && <p role="alert">{error}<button className={styles.command} type="button" onClick={() => void load(cursor || undefined)}>重试</button></p>}
     {storageWarning && <p role="status">{storageWarning}</p>}
     {message && <p role="status">{message}</p>}
-    <div className={styles.grid}>{items.map((item, index) => <article className={styles.card} key={item.key} data-remember-scroll-anchor={index < MAX_RESTORED_ITEMS ? item.key : undefined}>
-      <div className="media-reaction-cover" data-reaction-surface>
-        <button className={`${styles.media} ${mediaClassName || ''}`.trim()} type="button" disabled={!item.content} onClick={() => void open(item)} aria-label={item.content ? `打开${item.content.title}` : '内容已不可用'}>{item.content ? <CollectionThumbnail content={item.content} preferPreviewImage={preferPreviewImageThumbnails} /> : '内容已不可用'}</button>
-        {['image', 'video', 'audio'].includes(item.category) && <ContentReactions contentKey={item.key} initialState={item.state} overlay onChange={(state, act, active, previous) => changed(item, state, act, active, previous)} />}
-      </div>
-      <div className={styles.body}>{item.category === 'template' ? <TemplateFavoriteTitle contentKey={item.key} initialState={item.state} onChange={(state, act, active, previous) => changed(item, state, act, active, previous)}><h3 className={styles.title} title={item.content?.title || '内容已不可用'}>{item.content?.title || '内容已不可用'}</h3></TemplateFavoriteTitle> : <h3 className={styles.title}>{item.content?.title || '内容已不可用'}</h3>}{item.content?.owner && <UserIdentityBadge size="sm" user={item.content.owner} />}
+    <div className={styles.grid}>{items.map((item, index) => {
+      const cardBody = <div className={item.category === 'image' ? styles.imageDetailsBody : styles.body}>{item.category === 'template' ? <TemplateFavoriteTitle contentKey={item.key} initialState={item.state} onChange={(state, act, active, previous) => changed(item, state, act, active, previous)}><h3 className={styles.title} title={item.content?.title || '内容已不可用'}>{item.content?.title || '内容已不可用'}</h3></TemplateFavoriteTitle> : <h3 className={styles.title}>{item.content?.title || '内容已不可用'}</h3>}{item.content?.owner && <UserIdentityBadge size="sm" user={item.content.owner} />}
         <span className={styles.muted}>{item.category === 'template' ? '收藏于' : '喜欢于'} <RelativeTime value={item.markedAt} /></span>
         {item.content?.versionLabel && <span className={styles.muted}>{/^\d{4}-\d{2}-\d{2}T/.test(item.content.versionLabel) ? <>{item.category === 'prompt' ? '生成于' : '更新于'} <RelativeTime value={item.content.versionLabel} /></> : <>版本：{item.content.versionLabel}</>}</span>}
         {item.category === 'template' && <TemplateUsageCount count={item.content?.usageCount} />}
@@ -456,8 +453,20 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
           {item.content && item.category === 'prompt' && <button className={styles.command} title="复制文案" aria-label="复制文案" type="button" onClick={() => void open(item, true)}><Copy size={16} /></button>}
           {item.content?.reuse && <button className={styles.command} type="button" onClick={() => void sendMediaToGeneration(item)}>带到生成</button>}
         </div>
-      </div>
-    </article>)}</div>
+      </div>;
+      return <article className={styles.card} key={item.key} data-remember-scroll-anchor={index < MAX_RESTORED_ITEMS ? item.key : undefined}>
+        <div className="media-reaction-cover" data-reaction-surface>
+          <button className={`${styles.media} ${mediaClassName || ''}`.trim()} type="button" disabled={!item.content} onClick={() => void open(item)} aria-label={item.content ? `打开${item.content.title}` : '内容已不可用'}>{item.content ? <CollectionThumbnail content={item.content} preferPreviewImage={preferPreviewImageThumbnails} /> : '内容已不可用'}</button>
+          {['image', 'video', 'audio'].includes(item.category) && <ContentReactions contentKey={item.key} initialState={item.state} overlay onChange={(state, act, active, previous) => changed(item, state, act, active, previous)} />}
+          {item.category === 'image' && <div className={styles.imageDetails}>
+            <ImageResultStatusDetails active scopeKey={`${scope}:${item.key}:card-details`} label="查看图片详情与操作" heading="图片详情与操作">
+              {cardBody}
+            </ImageResultStatusDetails>
+          </div>}
+        </div>
+        {item.category !== 'image' && cardBody}
+      </article>;
+    })}</div>
     {!loading && loaded && !items.length && !error && <p className={styles.status}>暂无符合条件的内容</p>}
     <div ref={sentinel} className={styles.status}>{loading ? '正在读取…' : cursor ? <button className={styles.command} type="button" onClick={() => void load(cursor)}>加载更多</button> : loaded && items.length ? '已显示全部' : null}</div>
     {undo && <div className={styles.undo} role="status">{undo.item.category === 'template' ? '已取消收藏' : '已取消喜欢'}<button className={styles.command} type="button" onClick={async () => { const current = currentOperation(); try {

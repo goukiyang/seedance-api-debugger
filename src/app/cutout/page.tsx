@@ -24,6 +24,7 @@ import CutoutSettingsPanel from '@/components/cutout/CutoutSettingsPanel';
 import RegionSelector from '@/components/cutout/RegionSelector';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 import { GeneratedImageResults, type GeneratedImageResult } from '@/components/GeneratedImageResults';
+import { ImageResultStatusDetails } from '@/components/ImageResultStatusDetails';
 import {
   cancelCutoutJob, createCutoutJob, cutoutResultReference, cutoutSubmissionUncertain, downloadCutoutBlob,
   getCutoutCapabilities, getCutoutHistory, getCutoutJob, saveCutoutBlob, uploadCutoutAsset,
@@ -1564,6 +1565,17 @@ export default function CutoutPage() {
   const localRepairVisible = Boolean(localRepair && outputJob && localRepair.jobId === outputJob.job_id
     && localRepair.sourceVersion === `${outputJob.job_id}:${outputJob.updated_at}:${activeOutput?.filename || ''}`);
   const mainResultUrl = localRepairVisible ? repairObjectUrl : activeOutput?.url || '';
+  const draftDetailsVisible = Boolean(mainResultUrl && (localRepairVisible || draftMessage || draftReady && !draftWriteAllowed || previousDraftAvailable));
+  const draftStatusContent = <>
+    {localRepairVisible && <div className={styles.draftStrip} role="status">
+      <span>{draftStatus === 'saving' ? '修复已应用，正在保存本机草稿…' : draftStatus === 'saved' ? '本机修复草稿 · 7天内可恢复' : '修复仅在当前页面，离开前请下载'}</span>
+      <button className={styles.textButton} type="button" onClick={() => saveCutoutBlob(localRepair!.mask, localRepair!.filename.replace(/\.png$/, '-mask.png'))}>下载修复遮罩</button>
+      <button className={styles.quietButton} type="button" onClick={async () => { if (await confirm('放弃本机修复草稿？原图和服务器结果仍保留。', { title: '放弃修复', confirmLabel: '放弃草稿', danger: true })) setLocalRepair(null); }}><Trash2 size={14} />放弃草稿</button>
+    </div>}
+    {draftMessage && <p className={styles.strategyCopy} role="status">{draftMessage}</p>}
+    {draftReady && !draftWriteAllowed && <div className={styles.buttonRow}><button className={styles.secondaryButton} type="button" onClick={() => void recheckWorkspaceDraft()}>重新检查草稿</button><Link className={styles.quietButton} href="/cutout">返回上次草稿</Link></div>}
+    {previousDraftAvailable && <div className={styles.buttonRow}><button className={styles.quietButton} type="button" onClick={() => void restorePreviousWorkspace()} disabled={!draftReady || isBusy || handoffBusy || Boolean(pendingSubmission)}>{previousDraftAvailable === 'unknown' ? '检查上次图片草稿' : '恢复上次图片草稿'}</button><span className={styles.strategyCopy}>{previousDraftAvailable === 'unknown' ? '暂时无法读取，可重新检查' : '本机保留一个上次现场，7天内可恢复'}</span></div>}
+  </>;
   const settingsChanged = Boolean(outputJob?.parameters?.settings && JSON.stringify(outputJob.parameters.settings) !== JSON.stringify(settings));
   const samAvailable = Boolean(capabilities?.models?.some(model => model.available === true && isSamModelId(model.id) && model.id === characterSettings.sam_model_id));
   const handoffBlocked = Boolean(handoffSelection.current && handoff && ['preparing', 'submitting', 'unknown'].includes(handoff.stage));
@@ -1600,7 +1612,13 @@ export default function CutoutPage() {
               <div className={styles.buttonRow} role="group" aria-label="图片视图">
                 {(['original', 'result', 'compare'] as const).map(tab => <button type="button" className={`${styles.modeTab} ${view === tab ? styles.modeActive : ''}`} aria-pressed={view === tab} key={tab} onClick={() => setView(tab)} disabled={Boolean(repairTarget) || (tab === 'original' ? !sourceUrl : tab === 'result' ? !mainResultUrl : !mainResultUrl || !matchingOriginal || !activeOutput?.main)}><span>{tab === 'original' ? '原图' : tab === 'result' ? '结果' : '对照'}</span></button>)}
               </div>
-              {source && <div className={styles.buttonRow}><button className={styles.quietButton} type="button" onClick={() => setImagePickerOpen(true)} disabled={isBusy || handoffBusy || Boolean(pendingSubmission)}>更换图片</button><button className={styles.iconButton} type="button" aria-label="清除当前图片" onClick={() => void acceptFile(null)} disabled={isBusy || Boolean(pendingSubmission)}><X size={15} /></button></div>}
+              <div className={styles.workspaceToolbarActions}>
+                {source && <div className={styles.buttonRow}><button className={styles.quietButton} type="button" onClick={() => setImagePickerOpen(true)} disabled={isBusy || handoffBusy || Boolean(pendingSubmission)}>更换图片</button><button className={styles.iconButton} type="button" aria-label="清除当前图片" onClick={() => void acceptFile(null)} disabled={isBusy || Boolean(pendingSubmission)}><X size={15} /></button></div>}
+                {draftDetailsVisible && <ImageResultStatusDetails active={authChecked && cutoutAccess && Boolean(accountId)}
+                  scopeKey={`${accountId}:${source?.id || outputJob?.job_id || 'result'}:draft-details`} label="查看草稿与恢复" heading="草稿与恢复">
+                  <div className={styles.resultDetailBody}>{draftStatusContent}</div>
+                </ImageResultStatusDetails>}
+              </div>
             </div>
             {!source && !mainResultUrl ? <div className={`${styles.sourceDropzone} ${dragActive ? styles.sourceDropActive : ''}`} onDragEnter={event => { event.preventDefault(); if (!isBusy && !pendingSubmission) setDragActive(true); }} onDragOver={event => event.preventDefault()} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragActive(false); }} onDrop={onDrop}>
               <ImageIcon size={36} aria-hidden="true" /><strong>选择要处理的图片</strong><span>拖入图片或粘贴，支持 PNG、JPG、WebP</span><div className={styles.buttonRow}><button type="button" className={styles.primaryButton} onClick={() => setImagePickerOpen(true)} disabled={isBusy}>选择或上传图片</button></div>
@@ -1617,21 +1635,18 @@ export default function CutoutPage() {
               {activeOutput?.main && outputJob?.kind === 'cutout' && <button className={styles.secondaryButton} type="button" onClick={() => setRepairTarget({ url: mainResultUrl, originalUrl: matchingOriginal?.src, cropMeta: resultCrop, filename: activeOutput.filename })}><Brush size={15} />修一下</button>}
               <button className={styles.secondaryButton} type="button" disabled={isBusy || handoffBlocked || Boolean(pendingSubmission)} onClick={() => localRepairVisible ? loadRepairAsNewImage() : void sourceFromResult(activeOutput!.url, activeOutput!.filename, activeOutput!.main)}>继续处理这张图</button>
             </div>}
-            {localRepairVisible && <div className={styles.draftStrip} role="status">
-              <span>{draftStatus === 'saving' ? '修复已应用，正在保存本机草稿…' : draftStatus === 'saved' ? '本机修复草稿 · 7天内可恢复' : '修复仅在当前页面，离开前请下载'}</span>
-              <button className={styles.textButton} type="button" onClick={() => saveCutoutBlob(localRepair!.mask, localRepair!.filename.replace(/\.png$/, '-mask.png'))}>下载修复遮罩</button>
-              <button className={styles.quietButton} type="button" onClick={async () => { if (await confirm('放弃本机修复草稿？原图和服务器结果仍保留。', { title: '放弃修复', confirmLabel: '放弃草稿', danger: true })) setLocalRepair(null); }}><Trash2 size={14} />放弃草稿</button>
-            </div>}
-            {draftMessage && <p className={styles.strategyCopy} role="status">{draftMessage}</p>}
-            {draftReady && !draftWriteAllowed && <div className={styles.buttonRow}><button className={styles.secondaryButton} type="button" onClick={() => void recheckWorkspaceDraft()}>重新检查草稿</button><Link className={styles.quietButton} href="/cutout">返回上次草稿</Link></div>}
-            {previousDraftAvailable && <div className={styles.buttonRow}><button className={styles.quietButton} type="button" onClick={() => void restorePreviousWorkspace()} disabled={!draftReady || isBusy || handoffBusy || Boolean(pendingSubmission)}>{previousDraftAvailable === 'unknown' ? '检查上次图片草稿' : '恢复上次图片草稿'}</button><span className={styles.strategyCopy}>{previousDraftAvailable === 'unknown' ? '暂时无法读取，可重新检查' : '本机保留一个上次现场，7天内可恢复'}</span></div>}
+            {!mainResultUrl && draftStatusContent}
           </section>
           <section className={styles.section} aria-labelledby="cutout-result-title">
             <div className={styles.resultHeader}>
               <div className={styles.sectionTitle}><ImageIcon size={17} aria-hidden="true" /><div><h2 id="cutout-result-title">当前状态与输出</h2><p>{selectedJob ? `${selectedJob.status === 'queued' ? '排队中' : selectedJob.status === 'running' ? '处理中' : selectedJob.status === 'succeeded' ? '已完成' : selectedJob.status === 'failed' ? '失败' : '已取消'}` : selectedJobId ? `${selectedJobId.slice(0, 12)} · 等待读取状态` : '选择一条任务查看结果。'}</p></div></div>
-              {(selectedJob || selectedJobId) && <div className={styles.buttonRow}>
-                <button className={styles.iconButton} type="button" title="重新查询" aria-label="重新查询" onClick={() => void requerySelected()} disabled={isBusy || manualQueryBusy}><RefreshCw size={15} /></button>
+              {(selectedJob || selectedJobId || mainResultUrl && notice) && <div className={styles.buttonRow}>
+                {(selectedJob || selectedJobId) && <button className={styles.iconButton} type="button" title="重新查询" aria-label="重新查询" onClick={() => void requerySelected()} disabled={isBusy || manualQueryBusy}><RefreshCw size={15} /></button>}
                 {selectedJob?.status === 'queued' && <button className={styles.iconButton} type="button" title="取消排队任务" aria-label="取消排队任务" onClick={() => void cancelQueued()} disabled={isBusy}><X size={15} /></button>}
+                {mainResultUrl && notice && <ImageResultStatusDetails active={authChecked && cutoutAccess && Boolean(accountId)} reason={notice.kind === 'error' || notice.kind === 'warning'}
+                  scopeKey={`${accountId}:${selectedJobId || outputJob?.job_id || 'result'}:${notice.kind}:${notice.text}`} label={notice.kind === 'error' || notice.kind === 'warning' ? '查看输出提示与原因' : '查看输出提示'} heading={notice.kind === 'error' || notice.kind === 'warning' ? '输出提示与原因' : '输出提示'}>
+                  <OperationReceipt className={`${styles.statusNotice} ${notice.kind === 'error' ? styles.statusError : notice.kind === 'warning' ? styles.statusWarning : ''}`} status={notice.text} />
+                </ImageResultStatusDetails>}
               </div>}
             </div>
 
@@ -1774,7 +1789,7 @@ export default function CutoutPage() {
               }}><RefreshCw size={14} aria-hidden="true" /></button>
             </div>
 
-            {notice && <OperationReceipt className={`${styles.statusNotice} ${notice.kind === 'error' ? styles.statusError : notice.kind === 'warning' ? styles.statusWarning : ''}`} status={notice.text} />}
+            {!mainResultUrl && notice && <OperationReceipt className={`${styles.statusNotice} ${notice.kind === 'error' ? styles.statusError : notice.kind === 'warning' ? styles.statusWarning : ''}`} status={notice.text} />}
 
             <div className={styles.primaryActions}>
               <button className={styles.primaryButton} type="button" onClick={submitMain} disabled={!source || !sourceSize || !preferencesReady || !draftReady || !actionReady || isBusy || handoffBusy || Boolean(pendingSubmission) || Boolean(handoffSelection.current && mode === 'cutout' && (!handoff || ['preparing', 'submitting', 'unknown', 'accepted'].includes(handoff.stage))) || (mode === 'characters' && characterSettings.strategy === 'sam_box' && !samAvailable)}>
