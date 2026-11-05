@@ -35,7 +35,7 @@ export function cmpVersion(a: string, b: string) {
   return 0;
 }
 
-function publicKey() {
+export function bridgeSigningPublicKey() {
   // 32 字节 raw Ed25519 公钥包成 SPKI DER
   const prefix = Buffer.from('302a300506032b6570032100', 'hex');
   return crypto.createPublicKey({ key: Buffer.concat([prefix, Buffer.from(RULES_PUBKEY_B64, 'base64')]), format: 'der', type: 'spki' });
@@ -48,7 +48,7 @@ export function verifyBundle(b: unknown): { ok: true; bundle: StoredBundle } | {
   if (rules.length > 200_000) return { ok: false, error: '规则包过大' };
   let valid = false;
   try {
-    valid = crypto.verify(null, Buffer.from(rules, 'utf8'), publicKey(), Buffer.from(rulesSig, 'base64'));
+    valid = crypto.verify(null, Buffer.from(rules, 'utf8'), bridgeSigningPublicKey(), Buffer.from(rulesSig, 'base64'));
   } catch {
     valid = false;
   }

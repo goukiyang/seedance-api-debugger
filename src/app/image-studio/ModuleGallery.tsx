@@ -24,6 +24,7 @@ export type ModuleGalleryItem = {
   canEditCover?: boolean;
   author?: GalleryAuthor;
   reactions?: ReactNode;
+  sharingControl?: ReactNode;
   onOpen: () => void;
   onEditCover?: () => void;
 };
@@ -150,6 +151,7 @@ export function ModuleGallery({ items, total, filteredTotal, query, onQueryChang
           <div className={styles.footer}>
             <div className={styles.titleRow}>
               <h3 title={item.name}>{item.name}</h3>
+              {item.sharingControl && <span className={styles.sharingControl}>{item.sharingControl}</span>}
               {item.unread && <span className={styles.unread} role="img" aria-label="有未读结果" />}
             </div>
             <button type="button" className={styles.author} disabled={!item.author?.known || !item.author.key}

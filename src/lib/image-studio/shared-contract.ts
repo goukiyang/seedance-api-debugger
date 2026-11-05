@@ -963,7 +963,7 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
       return value;
     };
     const name = stringField('name', base.name, 80, false).trim();
-    if (name === '未命名模块' || moduleId.startsWith('default-')) throw new StudioSharingError('请先完成模板名称，默认空模板不能共享', 400);
+    if (name === '未命名模块') throw new StudioSharingError('请先完成模板名称后再共享', 400);
     const groupName = stringField('groupName', base.group_name || '未分组', 40).trim() || '未分组';
     if (has(input, 'prompt') && has(input, 'templatePrompt') && input.prompt !== input.templatePrompt) throw new StudioSharingError('模板提示词定义不一致', 400);
     const contextSource = reproduction || base;

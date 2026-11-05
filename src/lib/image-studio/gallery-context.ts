@@ -36,10 +36,10 @@ export async function createGalleryReadContext(tx: Prisma.TransactionClient, own
     { id: { in: modules.flatMap(row => row.source_preset_id ? [row.source_preset_id] : []) } }] }, orderBy: { id: 'asc' } });
   const settingPrefixes = ['studio_shared_binding_v1:', 'studio_shared_publisher_v1:', 'studio_fixed_references_v1:',
     'studio_reference_policy_v1:', 'studio_style_', 'studio_skill_selection_v1:', 'studio_shared_reproduction_v1:',
-    'studio_preset_archived_v1:', 'studio_deleted_workspace', 'studio_module_cover_v1:', 'studio_removed_default_groups_v1:'];
+    'studio_preset_archived_v1:', 'studio_module_sharing_preference_v1:', 'studio_deleted_workspace', 'studio_module_cover_v1:', 'studio_removed_default_groups_v1:'];
   const dependency = await sharedDependencyState(sources, tx);
   const pageKeys = [...sharedDependencySettingKeys(sources), ...dependency.styles.map(row => row.key),
-    ...modules.flatMap(row => [`studio_shared_binding_v1:${row.id}`, moduleCoverKey({ kind: 'module', id: row.id }),
+    ...modules.flatMap(row => [`studio_shared_binding_v1:${row.id}`, `studio_module_sharing_preference_v1:${row.id}`, moduleCoverKey({ kind: 'module', id: row.id }),
       `studio_deleted_workspace_v1:${sharedCommandFingerprint(ownerId)}:${row.id}`]),
     ...sources.flatMap(row => [`studio_shared_publisher_v1:${row.id}`, `studio_preset_archived_v1:${row.id}`,
       `studio_deleted_workspace_source_v1:${sharedCommandFingerprint(ownerId)}:${sharedCommandFingerprint(row.id)}`]), `studio_removed_default_groups_v1:${ownerId}`];

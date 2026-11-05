@@ -1,5 +1,6 @@
 import { templateUsageCounts } from '@/lib/template-studio/usage-counts';
 import 'server-only';
+import { readStudioModuleSharingPreference } from './module-sharing-preference';
 import { createHash } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { readSharedStudioSnapshot } from './read-snapshot';
@@ -182,7 +183,18 @@ export async function queryStudioGallery(user: ImageStudioIdentity, raw: unknown
           }
         }
       }
-      items.push({ ...entry, usageCount: entry.available ? usage.get(entry.key) ?? null : null, fixedCover, banner, cover, originalActions: { open: true, editCover: entry.coverEditable, deletion: entry.deletion } });
+      let sharing: GalleryItem['sharing'];
+      if (entry.available && target) {
+        const module = target.kind === 'module' ? catalog.modules.find(row => row.id === target.id) : null;
+        const source = catalog.sourceById.get(target.kind === 'preset' ? target.id : module?.source_preset_id || '');
+        if (source && canManageStudioPreset(catalog.actor, source) && !await studioPresetArchived(source.id, catalog.client)) {
+          sharing = { kind: 'preset', id: source.id, shared: source.is_shared, revision: source.updated_at.toISOString() };
+        } else if (module && !module.source_preset_id && entry.objectKind === 'local') {
+          const preference = await readStudioModuleSharingPreference(catalog.actor.id, module.id, catalog.client);
+          sharing = { kind: 'module', id: module.id, selected: preference?.enabled === true, revision: module.revision };
+        }
+      }
+      items.push({ ...entry, sharing, usageCount: entry.available ? usage.get(entry.key) ?? null : null, fixedCover, banner, cover, originalActions: { open: true, editCover: entry.coverEditable, deletion: entry.deletion } });
     }
     return { items, navigation: entries, matches, total: matches.length, page, pageSize, catalogRevision: revision, capabilities: { independentReactions: true },
       removedDefaultGroups: await getStudioRemovedDefaultGroups(catalog.actor.id, catalog.client),

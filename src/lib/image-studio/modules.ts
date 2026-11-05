@@ -183,7 +183,7 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
     sourcePresetOwnedByViewer: Boolean(sourcePreset && sourcePreset.owner_id === ownerId),
     sourcePresetCanManageSharing: Boolean(sourcePreset && canManageStudioPreset(user, sourcePreset) && !(await studioPresetArchived(sourcePreset.id))),
     sharingPreference: saved ? await readStudioModuleSharingPreference(ownerId, row.id) : null,
-    canChooseSharing: saved && !row.id.startsWith('default-') && (!row.source_preset_id || Boolean(sourcePreset && canManageStudioPreset(user, sourcePreset) && !sourceArchived)),
+    canChooseSharing: saved && (!row.source_preset_id || Boolean(sourcePreset && canManageStudioPreset(user, sourcePreset) && !sourceArchived)),
     contextEditable: privateOrigins.length ? privateCapabilities.canEditPrivatePrompt : !protectedSource && templateRead.canViewTemplateContext,
     evolution: evolutionCapability(row),
     fixedReferencesEditable: isAdmin && (!sourcePreset || sourcePreset.owner_id === ownerId),
@@ -703,7 +703,7 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
 }
 
 export async function chooseStudioModuleSharing(ownerId: string, body: Record<string, unknown>) {
-  if (!validStudioModuleId(body.id, ownerId) || body.id.startsWith('default-') || typeof body.isShared !== 'boolean'
+  if (!validStudioModuleId(body.id, ownerId) || typeof body.isShared !== 'boolean'
     || typeof body.requestId !== 'string' || !/^[a-zA-Z0-9_-]{16,100}$/.test(body.requestId)
     || !Number.isInteger(body.revision)) throw new StudioModuleError('共享设置参数无效');
   const id = body.id;

@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '费率说明', outline: [
-  '统一查看换算比例、基础费率和扣点规则',
-  '费率说明自动读取已保存价格',
-  '管理员编辑入口和原有计费保持不变',
+const notice = { title: '插件下载与封面共享', outline: [
+  '工具菜单新增 Chrome 插件，集中下载 Mac、Windows 和 Chrome 最新版',
+  '模板封面可直接切换共享，与模板内部状态同步',
+  '未发布模板在保存后共享，当前编辑内容保留',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

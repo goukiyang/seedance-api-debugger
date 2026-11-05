@@ -15,6 +15,8 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { Heart, ChevronFirst, ChevronLast, ChevronLeft, ChevronDown, ChevronRight, Copy, ClipboardList, Download, Eye, ImagePlus, Settings, X, RefreshCw, RotateCcw, LoaderCircle, Plus, Save, Trash2, Pencil, FolderCog } from 'lucide-react';
 import { useResultPages } from '@/components/useResultPages';
 import { ModuleGallery } from './ModuleGallery';
+import TemplateSharingSwitch from '@/components/TemplateSharingSwitch';
+import { useModuleSharingPreference } from './use-module-sharing-preference';
 import { mergeModuleGalleryLastOpened, type GalleryScope, type GallerySort } from './module-gallery-state';
 import { useModuleGalleryState } from './useModuleGalleryState';
 import { useGalleryCatalog } from './useGalleryCatalog';
@@ -634,8 +636,14 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       setModules(items => items.map(item => item.sourcePresetId === presetId ? { ...item, sourcePresetShared: current.isShared } : item));
     }
     shared.refresh();
+    pool.refresh();
     void refreshPresetCatalogs().catch(cause => setPresetsError(cause instanceof Error ? cause.message : '共享事实已更新，目录暂时无法读取'));
   } });
+  const preferenceSharing = useModuleSharingPreference(userId, result => {
+    setModules(items => items.map(item => item.id === result.id ? { ...item, revision: result.revision,
+      sharingPreference: result.sharingPreference, canChooseSharing: result.canChooseSharing } : item));
+    pool.refresh();
+  });
   const presetSharingId = sharing.busyId;
   const [lifecycleHistory, setLifecycleHistory] = useState<{ presetId: string; name: string; anchor?: HTMLElement } | null>(null);
   useEffect(() => setLifecycleHistory(null), [userId]);
@@ -1516,6 +1524,19 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       const onReadError = () => setGalleryReadErrors(current => new Set(Array.from(current).concat(entry.key)));
       return { key: entry.key, id: entry.id, name: entry.name, groupName: entry.groupName, mine: entry.mine, shared: entry.shared,
         lastOpenedAt: galleryLastUsed[entry.key], unread: attention.unread.has(entry.id),
+        sharingControl: pageItem?.sharing && <TemplateSharingSwitch name={entry.name}
+          shared={pageItem.sharing.kind === 'preset' && pageItem.sharing.shared}
+          selected={pageItem.sharing.kind === 'module' && pageItem.sharing.selected}
+          pending={pageItem.sharing.kind === 'preset' ? Boolean(sharing.pending[pageItem.sharing.id]) : preferenceSharing.pending[pageItem.sharing.id]}
+          disabled={Boolean(presetSharingId || preferenceSharing.busyId || pool.loading || pool.error)}
+          onChange={anchor => {
+            const state = pageItem.sharing!;
+            setError('');
+            void (state.kind === 'preset'
+              ? requestPresetSharing(state.id, !state.shared, state.revision, 'workbench', anchor)
+              : preferenceSharing.submit(state.id, state.revision, !state.selected))
+              .catch(cause => { setError(cause instanceof Error ? cause.message : '共享状态保存未确认'); pool.refresh(); });
+          }} />,
         usageCount: pageItem?.usageCount, author: entry.author, reactions: entry.reaction && <GalleryReactionButtons key={`${userId}:${entry.key}`} userId={userId} initial={entry.reaction} enabled={!pool.error && pool.data?.capabilities.independentReactions === true} />,
         loading: !pageItem && pool.loading, error: galleryReadErrors.has(entry.key),
         visual: pageItem?.fixedCover ? <FixedCoverVisual key={coverRetry} cover={pageItem.fixedCover} name={entry.name} onReadError={onReadError} />
@@ -1524,7 +1545,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
         canEditCover: entry.coverEditable === true, onOpen: () => navigateToEntry(entry, { explicitSelection: true }), onEditCover: () => editGalleryCover(entry, pageItem?.fixedCover) };
     })} />}
     <div hidden={coverView || !viewRestored || !directoryReady || Boolean(routeQuery && resolvedRoute !== `${userId}:${routeQuery.startsWith("?") ? routeQuery : `?${routeQuery}`}`)}>
-    {orderedModules.map(module => <ImageStudioBlock key={`${userId}:${module.id}`} templateWorkbench={templateWorkbench} module={module} hidden={coverView || Boolean(selectedGroup && module.groupName !== selectedGroup)} onSharedRefresh={shared.refresh} onMetadataChange={updateModuleMetadata} groups={groups} protectedGroups={['未分组', ...groups.filter(group => !DEFAULT_GROUPS.includes(group) && !(groupedModules[group] || []).some(canManageStudioGroupEntry))]} onDeleteGroup={deleteGroup} groupDeleting={groupDeleting} isAdmin={isAdmin} onToggleSharing={toggleModuleSharing} sharingId={presetSharingId}
+    {orderedModules.map(module => <ImageStudioBlock key={`${userId}:${module.id}`} templateWorkbench={templateWorkbench} module={module} hidden={coverView || Boolean(selectedGroup && module.groupName !== selectedGroup)} onSharedRefresh={shared.refresh} onMetadataChange={updateModuleMetadata} groups={groups} protectedGroups={['未分组', ...groups.filter(group => !DEFAULT_GROUPS.includes(group) && !(groupedModules[group] || []).some(canManageStudioGroupEntry))]} onDeleteGroup={deleteGroup} groupDeleting={groupDeleting} isAdmin={isAdmin} onToggleSharing={toggleModuleSharing} onChooseSharing={preferenceSharing.submit} preferenceSharingId={preferenceSharing.busyId} preferenceSharingPending={Boolean(preferenceSharing.pending[module.id])} sharingId={presetSharingId}
       sharingPending={Boolean(module.sourcePresetId && sharing.pending[module.sourcePresetId])}
       sharingMessage={module.sourcePresetId ? sharing.pending[module.sourcePresetId]?.error : undefined}
       onQuerySharing={async () => { if (module.sourcePresetId) { const result = await sharing.query(module.sourcePresetId); if (result.status !== 'completed') setError(result.error || '共享结果仍待确认'); } }}
@@ -1585,7 +1606,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   </main>)}</>;
 }
 
-function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, onMetadataChange, onModuleDelete, moduleDeletionPending, groups, protectedGroups, onDeleteGroup, groupDeleting, onToggleSharing, sharingId, sharingPending, sharingMessage, onQuerySharing, onLifecycleHistory, settings, imageChannels, imageChannelId, imageChannelReady, imageChannelMessage, onImageChannelChange, globalSettingsSaving, settingsError, active, onActivate, onModuleChange, onReloadSettings, ratios, templateWorkbench, quickPresetVersion, viewToken, onResultsViewed, onTemplateEntered, onResultsAvailable, onGenerationAccepted, onManagePresets, onPresetSaved, registerPresetSource, registerResolutionDirty, resolutionDelta }: {
+function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, onMetadataChange, onModuleDelete, moduleDeletionPending, groups, protectedGroups, onDeleteGroup, groupDeleting, onToggleSharing, onChooseSharing, preferenceSharingId, preferenceSharingPending, sharingId, sharingPending, sharingMessage, onQuerySharing, onLifecycleHistory, settings, imageChannels, imageChannelId, imageChannelReady, imageChannelMessage, onImageChannelChange, globalSettingsSaving, settingsError, active, onActivate, onModuleChange, onReloadSettings, ratios, templateWorkbench, quickPresetVersion, viewToken, onResultsViewed, onTemplateEntered, onResultsAvailable, onGenerationAccepted, onManagePresets, onPresetSaved, registerPresetSource, registerResolutionDirty, resolutionDelta }: {
   onSharedRefresh: () => void;
   protectedGroups: string[];
   groupDeleting: boolean;
@@ -1598,7 +1619,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   onModuleDelete: (module: StudioModule, anchor?: HTMLElement) => Promise<void>;
   moduleDeletionPending: boolean;
   hidden: boolean; onMetadataChange: (id: string, name: string, groupName: string, followGroup?: boolean) => void;
-  isAdmin: boolean; userId: string; module: StudioModule & { fixedReferences?: FixedStudioReference[]; contextEditable?: boolean }; groups: string[]; onDeleteGroup: (group: string) => Promise<void>; onToggleSharing: (module: StudioModule, anchor?: HTMLElement) => Promise<void>; sharingId: string | null; sharingPending: boolean; sharingMessage?: string; onQuerySharing: () => Promise<void>; onLifecycleHistory: (anchor: HTMLElement) => void; settings: SettingsValue | null;
+  isAdmin: boolean; userId: string; module: StudioModule & { fixedReferences?: FixedStudioReference[]; contextEditable?: boolean }; groups: string[]; onDeleteGroup: (group: string) => Promise<void>; onToggleSharing: (module: StudioModule, anchor?: HTMLElement) => Promise<void>; onChooseSharing: ReturnType<typeof useModuleSharingPreference>['submit']; preferenceSharingId: string | null; preferenceSharingPending: boolean; sharingId: string | null; sharingPending: boolean; sharingMessage?: string; onQuerySharing: () => Promise<void>; onLifecycleHistory: (anchor: HTMLElement) => void; settings: SettingsValue | null;
   imageChannels: ReturnType<typeof useImageStudioChannel>['channels']; imageChannelId: string; imageChannelReady: boolean; imageChannelMessage: string; onImageChannelChange: (value: string) => void;
   globalSettingsSaving: boolean; settingsError: string; active: boolean; onActivate: () => void; onModuleChange: (module: StudioModule) => void;
   viewToken: number; onResultsViewed: (moduleId: string, versions: string[]) => Promise<void>; onResultsAvailable: () => Promise<void>;
@@ -1652,7 +1673,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const [reproductionStyles, setReproductionStyles] = useState<StudioStyleSummary[]>(module.reproductionState?.styleGroups || []);
   const [saveStatus, setSaveStatus] = useState('');
   const [sharingPreferenceSaving, setSharingPreferenceSaving] = useState(false);
-  const sharingPreferenceRequest = useRef<{ id: string; revision: number; isShared: boolean; requestId: string } | null>(null);
   const unpublishedSharing = !sharedLive && module.sharingPreference?.enabled === true;
   const [quickPresets, setQuickPresets] = useState<QuickStudioPreset[]>([]);
   const [quickPresetsError, setQuickPresetsError] = useState('');
@@ -2171,8 +2191,6 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     (restoredSnapshot ? generationReferencePolicy.auxiliaryMax : auxiliaryLimit) - ordinaryReferenceCount, MAX_REFERENCE_IMAGES - images.length - ordinaryReferenceCount));
   // A shared view can only be (un)shared through its source preset by someone who manages it.
   const sharingLocked = Boolean(sharedLive && !(module.sourcePresetCanManageSharing && module.sourcePresetId));
-  const sharingTip = sharingLocked ? '只有创建者或管理员可以修改共享'
-    : module.sourcePresetShared === true || unpublishedSharing ? '已共享：同事可见，点击取消共享' : '未共享：仅自己可见，点击共享给同事';
   const sourceSharingBlocked = sharedLive ? !sharedReady : Boolean(module.sourcePresetId && module.sourcePresetShared === false && !module.sourcePresetOwnedByViewer);
 
   useLayoutEffect(() => {
@@ -2583,16 +2601,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       return;
     }
     if (!module.canChooseSharing || sharedLive) { setError('只有创建者或管理员可以修改共享'); return; }
-    const request = sharingPreferenceRequest.current ||= { id: module.id, revision: revisionRef.current,
-      isShared: !module.sharingPreference?.enabled, requestId: crypto.randomUUID() };
+    const isShared = !module.sharingPreference?.enabled;
     moduleSaveLock.current = true; setSharingPreferenceSaving(true); setError('');
     try {
-      const result: StudioModule = await readResponse(await fetch('/api/image-studio/modules', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'set-sharing-preference', ...request, entryPoint: 'workbench' }) }));
-      if (result.sharingPreference?.requestId !== request.requestId || result.sharingPreference.enabled !== request.isShared) throw new Error('共享选择尚未确认，请重试原操作；当前内容保留');
+      const result = await onChooseSharing(module.id, revisionRef.current, isShared);
       revisionRef.current = result.revision; setModuleRevision(result.revision);
-      onModuleChange(result); sharingPreferenceRequest.current = null;
-      setSaveStatus(request.isShared ? '已选择共享，保存模板后生效' : '已设为仅自己可见，内容保持不变');
+      // The parent merges sharing metadata only; current unsaved inputs remain intact.
+      setSaveStatus(result.sharingPreference?.enabled ? '已选择共享，保存模板后生效' : '已设为仅自己可见，内容保持不变');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '共享选择保存未确认，请重试原操作');
     } finally { moduleSaveLock.current = false; setSharingPreferenceSaving(false); }
@@ -4204,11 +4219,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
 
   const canManageTemplateSharing = Boolean(module.sourcePresetCanManageSharing && module.sourcePresetId || module.canChooseSharing);
   const sharingControls = <>
-    {canManageTemplateSharing && <label className={`toggle-switch ${styles.moduleShareSwitch}`} data-tip={sharingTip} title={sharingTip}>
-      <input type="checkbox" role="switch" aria-label={`共享给同事：${sharingTip}`} checked={module.sourcePresetShared === true || unpublishedSharing}
-        disabled={sharingLocked || sharingPending || !draftLoaded || draftRestoring || moduleSaving || sharingPreferenceSaving || Boolean(module.sourcePresetId && sharingId === module.sourcePresetId) || uploading || bannerUploading || submitting || Boolean(pendingSubmission)} onChange={event => void changeModuleSharing(event.currentTarget)} />
-      <span className="toggle-slider" />
-    </label>}
+    {canManageTemplateSharing && <TemplateSharingSwitch shared={module.sourcePresetShared === true} selected={unpublishedSharing}
+      pending={sharingPending || preferenceSharingPending} className={styles.moduleShareSwitch}
+      disabled={sharingLocked || sharingPending || !draftLoaded || draftRestoring || moduleSaving || sharingPreferenceSaving || Boolean(preferenceSharingId) || Boolean(module.sourcePresetId && sharingId === module.sourcePresetId) || uploading || bannerUploading || submitting || Boolean(pendingSubmission)}
+      onChange={anchor => void changeModuleSharing(anchor)} />}
     {sharingPending && <button type="button" disabled={Boolean(sharingId)} onClick={() => void onQuerySharing()}>查询共享结果</button>}
   </>;
   const templateSharingAttributes = templateWorkbench && (canManageTemplateSharing || sharingPending)

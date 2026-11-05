@@ -14,6 +14,8 @@ export type GalleryNavigationItem = {
   reaction: ReactionState | null; coverEditable: boolean; deletion: StudioDeletionCapability;
 };
 export type GalleryItem = GalleryNavigationItem & {
+  sharing?: { kind: 'preset'; id: string; shared: boolean; revision: string }
+    | { kind: 'module'; id: string; selected: boolean; revision: number };
   usageCount?: number | null;
   fixedCover: ModuleCoverDTO | null;
   cover?: { thumbnailUrl: string; resultUrl: string } | null;

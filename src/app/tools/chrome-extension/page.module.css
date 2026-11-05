@@ -1,0 +1,23 @@
+.page { max-width: 1056px; width: 100%; margin: 0 auto; padding: 40px 28px 64px; color: var(--text-primary); }
+.page h1 { margin: 8px 0 12px; font-size: 30px; line-height: 1.2; }
+.page p { color: var(--text-secondary); line-height: 1.7; max-width: 70ch; }
+.eyebrow { margin: 0; font-size: 13px; }
+.release { padding: 20px 0 28px; border-bottom: 1px solid var(--border-color); }
+.release span { font-size: 13px; color: var(--accent-color, #80d8c8); }
+.release p { font-size: 13px; margin: 6px 0 0; }
+.product { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 20px; padding: 32px 0; border-bottom: 1px solid var(--border-color); }
+.icon { padding-top: 3px; color: var(--text-secondary); }
+.product h2 { margin: 0; font-size: 21px; }
+.product h2 small { font-size: 12px; font-weight: 400; margin-left: 8px; color: var(--text-secondary); }
+.product p { margin: 10px 0 18px; font-size: 14px; }
+.downloads { display: flex; flex-wrap: wrap; gap: 12px; }
+.downloads a { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 10px 14px; border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); text-decoration: none; background: var(--bg-secondary); font-size: 14px; }
+.downloads a:hover { border-color: var(--accent-color, #80d8c8); }
+.downloads small { color: var(--text-secondary); font-size: 11px; }
+.page a:focus-visible, .page summary:focus-visible { outline: 2px solid var(--accent-color, #80d8c8); outline-offset: 4px; }
+.product details { margin-top: 20px; font-size: 13px; color: var(--text-secondary); line-height: 1.8; }
+.product summary { width: fit-content; cursor: pointer; padding: 6px 0; color: var(--text-primary); }
+.product ol { padding-left: 20px; }
+.error { padding: 20px 0; }
+.error a { margin-left: 12px; color: var(--accent-color, #80d8c8); }
+@media (max-width: 600px) { .page { padding: 24px 16px 40px; } .product { grid-template-columns: minmax(0, 1fr); gap: 10px; } .icon { display: none; } .downloads { flex-direction: column; align-items: stretch; } }
