@@ -46,6 +46,8 @@ async function run() {
     const f = fixture(context); await f.controller.open('video');
     assert.deepEqual(f.events, [], 'disabled/missing source never opens a page or queries'); f.controller.dispose();
   }
+  assert.equal(imageResultNextCapabilities({accountId:'member',admin:false,cutoutAccess:true,sourceKey}).canCutout,true);
+  assert.equal(imageResultNextCapabilities({accountId:'admin',admin:true,cutoutAccess:false,sourceKey}).canCutout,false);
   const unauthorized = fixture({ admin: false }); await unauthorized.controller.open('cutout');
   assert.deepEqual(unauthorized.events, []); unauthorized.controller.dispose();
   assert.equal(imageResultNextCapabilities({ accountId: 'a', admin: false, sourceKey }).canVideo, true);

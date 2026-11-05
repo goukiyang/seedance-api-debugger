@@ -1,4 +1,6 @@
 'use client';
+import { canUseCutout } from '@/lib/cutout/access';
+import type { AccountScopedUser } from '@/lib/access/external-role';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent } from 'react';
@@ -228,7 +230,7 @@ export default function CutoutPage() {
   const currentHistoryLoaderRef = useRef<(() => Promise<void>) | null>(null);
   const originalSourceByJob = useRef(new Map<string, string>());
   const [authChecked, setAuthChecked] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [cutoutAccess, setCutoutAccess] = useState(false);
   const [accountId, setAccountId] = useState('');
   const sourceArrival = useMaterialArrival(accountId);
   const [capabilities, setCapabilities] = useState<CutoutCapabilities | null>(null);
@@ -650,11 +652,11 @@ export default function CutoutPage() {
     let active = true;
     fetch('/api/auth/me', { cache: 'no-store' })
       .then((response) => response.json())
-      .then((body: { user?: { id?: string; role?: string } | null }) => {
+      .then((body: { user?: (AccountScopedUser & {id?:string}) | null }) => {
         if (!active) return;
         const user = body?.user;
-        if (user?.role === 'admin') {
-          setIsAdmin(true);
+        if (user && canUseCutout(user)) {
+          setCutoutAccess(true);
           setAccountId(typeof user.id === 'string' ? user.id : '');
         } else {
           window.location.assign(user ? '/generate' : '/login?next=/cutout');
@@ -670,7 +672,7 @@ export default function CutoutPage() {
   }, []);
 
   useEffect(() => {
-    if (!authChecked || !isAdmin) return;
+    if (!authChecked || !cutoutAccess) return;
     let active = true;
     setCapabilityLoading(true);
     getCutoutCapabilities()
@@ -678,10 +680,10 @@ export default function CutoutPage() {
       .catch(() => { if (active) setCapabilities(null); })
       .finally(() => { if (active) setCapabilityLoading(false); });
     return () => { active = false; };
-  }, [authChecked, isAdmin]);
+  }, [authChecked, cutoutAccess]);
 
   useEffect(() => {
-    if (!authChecked || !isAdmin) return;
+    if (!authChecked || !cutoutAccess) return;
     if (accountId) {
       const preferences = loadCutoutPreferences(accountId);
       if (preferences) {
@@ -705,7 +707,7 @@ export default function CutoutPage() {
       }
     }
     setPreferencesReady(true);
-  }, [accountId, authChecked, isAdmin, setJobContext]);
+  }, [accountId, authChecked, cutoutAccess, setJobContext]);
 
   useEffect(() => {
     if (!preferencesReady || !accountId) return;
@@ -919,9 +921,9 @@ export default function CutoutPage() {
   currentHistoryLoaderRef.current = loadHistory;
 
   useEffect(() => {
-    if (!authChecked || !isAdmin || !preferencesReady) return;
+    if (!authChecked || !cutoutAccess || !preferencesReady) return;
     void loadHistory();
-  }, [authChecked, isAdmin, loadHistory, preferencesReady]);
+  }, [authChecked, cutoutAccess, loadHistory, preferencesReady]);
 
   useEffect(() => {
     if (!selectedJob || !['queued', 'running'].includes(selectedJob.status)) return;
@@ -1110,7 +1112,7 @@ export default function CutoutPage() {
   }
 
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!cutoutAccess) return;
     const paste = (event: ClipboardEvent) => {
       if (imagePickerOpen || (event.target as Element | null)?.closest?.('input,textarea,[contenteditable="true"]')) return;
       const file = Array.from(event.clipboardData?.files || []).find(item => IMAGE_TYPES.has(item.type));
@@ -1118,7 +1120,7 @@ export default function CutoutPage() {
     };
     document.addEventListener('paste', paste);
     return () => document.removeEventListener('paste', paste);
-  }, [acceptFile, isAdmin, imagePickerOpen]);
+  }, [acceptFile, cutoutAccess, imagePickerOpen]);
 
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -1513,7 +1515,7 @@ export default function CutoutPage() {
   const previousPage = () => setHistoryOffset((current) => Math.max(0, current - PAGE_SIZE));
   const canGoNext = historyTotal == null ? history.length === PAGE_SIZE : historyOffset + PAGE_SIZE < historyTotal;
 
-  if (!authChecked || !isAdmin) {
+  if (!authChecked || !cutoutAccess) {
     return <main className={styles.page}><div className={styles.statusNotice}>正在确认管理员权限…</div></main>;
   }
 

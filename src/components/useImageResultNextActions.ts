@@ -1,4 +1,5 @@
 'use client';
+import { canUseCutout } from '@/lib/cutout/access';
 import { useEffect, useRef, useSyncExternalStore } from 'react';
 import type { ContentKey } from '@/lib/content-reactions/types';
 import { useAppSession } from '@/lib/context/AppSessionContext';
@@ -10,7 +11,7 @@ export function useImageResultNextActions({ sourceKey, resultId, scope, enabled 
   sourceKey?: ContentKey; resultId?: string; scope?: string; enabled?: boolean;
 }) {
   const { user, sessionChanged } = useAppSession();
-  const context: ImageResultNextContext = { sourceKey, resultId, scope, enabled, accountId: user?.id || '', admin: user?.role === 'admin', sessionChanged };
+  const context: ImageResultNextContext = { sourceKey, resultId, scope, enabled, accountId: user?.id || '', admin: user?.role === 'admin', cutoutAccess:canUseCutout(user), sessionChanged };
   const latest = useRef(context); latest.current = context;
   const holder = useRef<ReturnType<typeof createImageResultNextController> | null>(null);
   if (!holder.current) holder.current = createImageResultNextController({

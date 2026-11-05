@@ -3,7 +3,7 @@ import type { ImageResultNextIntent, ImageResultNextReceipt } from './types';
 
 export type ImageResultNextContext = {
   sourceKey?: ContentKey; resultId?: string; scope?: string; accountId: string;
-  admin: boolean; enabled?: boolean; sessionChanged?: boolean;
+  admin: boolean; cutoutAccess?: boolean; enabled?: boolean; sessionChanged?: boolean;
 };
 export type ImageResultNextState = { identity: string; busy: ImageResultNextIntent | null; message: string; destination: string };
 export type ImageResultNextTarget = { close: () => void; closed: () => boolean; replace: (destination: string) => void };
@@ -14,12 +14,12 @@ type Dependencies = {
   create: (source: ContentKey, intent: ImageResultNextIntent, returnPath: string) => Promise<ImageResultNextReceipt>;
 };
 export function imageResultNextIdentity(context: ImageResultNextContext, blocked = false) {
-  return JSON.stringify([context.scope || '', context.accountId, context.admin, context.resultId || '', context.sourceKey || '', context.enabled !== false, Boolean(context.sessionChanged || blocked)]);
+  return JSON.stringify([context.scope || '', context.accountId, context.admin, context.cutoutAccess, context.resultId || '', context.sourceKey || '', context.enabled !== false, Boolean(context.sessionChanged || blocked)]);
 }
 export function imageResultNextCapabilities(context: ImageResultNextContext, blocked = false, busy: ImageResultNextIntent | null = null) {
   const common = !context.sourceKey ? '当前图片不可用于交接' : context.enabled === false ? '当前图片不可继续使用'
     : context.sessionChanged || blocked ? '登录状态已变化，请重新登录' : !context.accountId ? '请先登录' : busy ? '正在导入，请等待' : '';
-  const cutoutDisabledReason = common || (!context.admin ? '抠图暂时仅对有业务授权的管理员开放' : '');
+  const cutoutDisabledReason = common || (!(context.cutoutAccess??context.admin) ? '当前账户尚不能使用抠图业务入口' : '');
   return { canCutout: !cutoutDisabledReason, canVideo: !common, cutoutDisabledReason, videoDisabledReason: common };
 }
 

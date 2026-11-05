@@ -10,6 +10,7 @@ import { attachAssetToSiteReferenceImage } from '@/lib/assets/reference-import';
 import { authorizedImageResponse } from '@/lib/media/authorized-image-response';
 import { readStudioImage } from '@/lib/image-studio/media';
 import { studioOutputTaskWhere, studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
+import { canUseCutout } from '@/lib/cutout/access';
 import { proxyCutout, cutoutBusinessCredential } from '@/lib/cutout/proxy';
 import { isCutoutJob, isRecord } from '@/lib/cutout/receipt';
 import { normalizeCutoutSettings } from '@/lib/cutout/settings';
@@ -64,7 +65,7 @@ async function readStored(user: SessionUser, id: string) {
   if (record.version !== 1 || record.receiptId !== id || record.ownerId !== user.id || !['cutout', 'video'].includes(record.intent)) throw new ImageResultNextError('无权打开这次导入', 403);
   const source = await authorizedSource(user, record.sourceKey);
   if (source.version !== record.sourceVersion) throw new ImageResultNextError('原图片记录已改变，未使用其他图片替代，请返回原结果', 409);
-  if (record.intent === 'cutout' && (user.role !== 'admin' || !cutoutBusinessCredential(process.env, user.id))) throw new ImageResultNextError('当前账户没有抠图业务授权，请联系管理员；没有提交任务', 403);
+  if (record.intent === 'cutout' && (!canUseCutout(user) || !cutoutBusinessCredential(process.env, user.id))) throw new ImageResultNextError('当前账户没有抠图业务授权，请联系管理员；没有提交任务', 403);
   if (record.intent === 'video' && record.stage === 'accepted') {
     const workspace = await prisma.workspace.findUnique({ where: { id: `image_next_${id}` }, select: { owner_id: true, status: true, name: true } });
     if (!workspace || workspace.owner_id !== user.id || workspace.status !== 'active' || workspace.name !== `默认工作台:${record.workspaceTabId}`) throw new ImageResultNextError('原独立视频草稿已不可用，未创建空白草稿或覆盖其他内容', 409);
@@ -84,7 +85,7 @@ async function replace(key: string, raw: string, record: Stored) {
 }
 export async function createImageResultNext(user: SessionUser, sourceKey: ContentKey, intent: ImageResultNextIntent, returnPath: string) {
   const source = await authorizedSource(user, sourceKey);
-  if (intent === 'cutout' && (user.role !== 'admin' || !cutoutBusinessCredential(process.env, user.id))) throw new ImageResultNextError('当前账户没有抠图业务授权，请联系管理员；没有提交任务', 403);
+  if (intent === 'cutout' && (!canUseCutout(user) || !cutoutBusinessCredential(process.env, user.id))) throw new ImageResultNextError('当前账户没有抠图业务授权，请联系管理员；没有提交任务', 403);
   const id = receiptId(user, sourceKey, intent), key = settingKey(id);
   const now = Date.now();
   const record: Stored = { version: 1, receiptId: id, ownerId: user.id, sourceKey, sourceVersion: source.version, intent, returnPath,

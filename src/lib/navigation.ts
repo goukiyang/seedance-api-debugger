@@ -1,3 +1,4 @@
+import { canUseCutout } from '@/lib/cutout/access';
 import { hasInternalEmailAuthorization, isExternalUser, type AccountScopedUser } from '@/lib/access/external-role';
 
 export interface NavItem {
@@ -123,7 +124,7 @@ export const userNavGroups: NavGroup[] = [
     items: [
       { label: '人物生成', href: '/tools/avatar-studio', prefixMatch: true, imageStudioOnly: true },
       { label: '角色参考图', href: '/tools/character-lab', prefixMatch: true, imageStudioOnly: true },
-      { label: 'AI 抠图', href: '/cutout', prefixMatch: true, adminOnly: true },
+      { label: 'AI 抠图', href: '/cutout', prefixMatch: true, externalHidden: true },
       { label: '3D多视图', href: '/multiview', prefixMatch: true },
       { label: 'Chrome 插件', href: '/tools/chrome-extension', prefixMatch: true, externalHidden: true },
     ],
@@ -213,6 +214,7 @@ export function isNavItemVisible(
     : !viewer || isExternalUser(viewer);
 
   if (item.adminOnly && !isAdmin) return false;
+  if(item.href==='/cutout'&&typeof viewer!=='boolean'&&!canUseCutout(viewer))return false;
   if (item.href === '/works' && (typeof viewer === 'boolean' || viewer?.works_preview !== true)) return false;
   if (item.imageStudioOnly && (typeof viewer === 'boolean' ? !viewer : viewer?.account_type !== 'internal' || !isAdmin && !hasInternalEmailAuthorization(viewer) && (!viewer?.feishu?.tenant_key || !Boolean(viewer?.feishu?.user_id || viewer?.feishu?.open_id || viewer?.feishu?.union_id)))) return false;
   if ((item.externalHidden || item.externalOnlyHidden) && isExternal) return false;

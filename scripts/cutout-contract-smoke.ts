@@ -5,7 +5,8 @@ import { cutoutResultReference } from '../src/lib/cutout/client';
 async function main() {
   let checks = 0;
   const check = (value: unknown, message: string) => { assert.ok(value, message); checks++; };
-  const user = { id: 'fixture-user', role: 'admin' };
+  const user = { id: 'fixture-user', role: 'admin', account_type: 'internal' };
+  const member = {id:'member-a',role:'user',account_type:'internal',feishu:{open_id:'fixture-open-id'}};
   const fixtureKey = 'fixture-business-key-not-a-real-credential';
   const env = { CUTOUT_BUSINESS_KEYS: JSON.stringify({ [user.id]: fixtureKey }) };
   const request = (path: string, init: RequestInit = {}) => new Request(`https://sd2.youdooart.com/api/cutout/${path}`, {
@@ -13,7 +14,8 @@ async function main() {
   });
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   let reply = () => Response.json({ success: true });
-  const fetcher: typeof fetch = async (url, init) => { calls.push({ url: String(url), init }); return reply(); };
+  let identityReply = () => Response.json({success:true,owner_id:'legacy-api-key',kind:'legacy_api',credential_id:null,scopes:['business','legacy']});
+  const fetcher: typeof fetch = async (url, init) => { calls.push({ url: String(url), init }); return String(url).endsWith('/api/v1/identity') ? identityReply() : reply(); };
   check(cutoutServiceBase({}) === 'https://cutout.youdooart.com', 'default is production cutout service');
   for (const url of ['https://user:pass@cutout.youdooart.com', 'http://external.invalid', 'https://cutout.youdooart.com/api/v1']) {
     assert.throws(() => cutoutServiceBase({ CUTOUT_SERVICE_BASE_URL: url })); checks++;
@@ -29,8 +31,8 @@ async function main() {
   reply = () => Response.json(capability);
   let response = await proxyCutout(request('v1/capabilities'), ['v1', 'capabilities'], null, {}, fetcher);
   check(response.status === 401 && calls.length === 0, 'unauthenticated does not reach upstream');
-  response = await proxyCutout(request('v1/capabilities'), ['v1', 'capabilities'], { ...user, role: 'user' }, env, fetcher);
-  check(response.status === 403 && calls.length === 0, 'admin scope preserved');
+  response = await proxyCutout(request('v1/capabilities'), ['v1', 'capabilities'], { ...user, account_type: 'external' }, env, fetcher);
+  check(response.status === 403 && calls.length === 0, 'external account cannot enter even with an admin role');
   response = await proxyCutout(request('v1/capabilities'), ['v1', 'capabilities'], user, {}, fetcher);
   const missing = await response.json();
   check(missing.integration.configured === false && missing.integration.ready === false && missing.worker.online === true, 'online service does not mean business identity connected');
@@ -40,8 +42,8 @@ async function main() {
   response = await proxyCutout(request('v1/jobs', { method: 'POST', headers: { origin: 'https://external.invalid' }, body: '{}' }), ['v1', 'jobs'], user, env, fetcher);
   check(response.status === 403 && calls.length === before, 'cross-site mutation blocked');
   response = await proxyCutout(request('v1/capabilities'), ['v1', 'capabilities'], user, env, fetcher);
-  check((await response.json()).integration.ready === true && calls.at(-1)?.url.includes('/jobs/history?limit=1'), 'read-only identity probe before ready');
-  check(new Headers(calls.at(-1)?.init?.headers).get('x-api-key') === fixtureKey, 'server bound credential used');
+  check((await response.json()).integration.ready === true && calls.at(-2)?.url.endsWith('/api/v1/identity'), 'metadata-only identity probe before ready');
+  check(new Headers(calls.at(-2)?.init?.headers).get('x-api-key') === fixtureKey, 'server bound credential used');
   const payload = { asset_id: 'asset-fixture', kind: 'characters', parameters: { settings: { hole_repair: 35 }, character_split_settings: { manual_boxes: [{ id: '1', x: 10, y: 20, w: 50, h: 60 }] } } };
   reply = () => Response.json({ job_id: 'job-fixture', status: 'queued', poll_url: '/api/v1/jobs/job-fixture' }, { status: 202 });
   response = await proxyCutout(request('v1/jobs', { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'fixture-retry-key-1', cookie: 'fixture-sd2-cookie', authorization: 'fixture-browser', 'x-api-key': 'fixture-browser-key' }, body: JSON.stringify(payload) }), ['v1', 'jobs'], user, env, fetcher);
@@ -54,7 +56,7 @@ async function main() {
   check(response.status === 400, 'retry key required');
   const invalidBefore = calls.length;
   response = await proxyCutout(request('v1/jobs', { method: 'POST', body: JSON.stringify({ ...payload, kind: 'worker' }) }), ['v1', 'jobs'], user, env, fetcher);
-  check(response.status === 400 && calls.length === invalidBefore, 'unsupported kind rejected before upstream');
+  check(response.status === 400 && calls.slice(invalidBefore).every(call => call.url.endsWith('/identity')), 'unsupported kind rejected before upstream');
   const rewritten = rewriteCutoutUrls({ result_url: '/api/v1/results/j/a.png', filename: '/api/v1/results/j/a.png', mask_url: 'https://evil.invalid/api/v1/results/j/a.png', nested: [{ trim_url: 'https://cutout.youdooart.com/api/v1/results/j/b.png' }] }, 'https://cutout.youdooart.com') as Record<string, unknown>;
   check(rewritten.result_url === '/api/cutout/v1/results/j/a.png' && rewritten.mask_url === null && rewritten.filename === '/api/v1/results/j/a.png', 'URL rewrite confines media origin without corrupting filename');
   check(cutoutResultReference('/api/cutout/v1/results/j/a.png') === '/api/v1/results/j/a.png', 'continuation job references exact upstream result');
@@ -87,8 +89,37 @@ async function main() {
   reply = () => Response.json({ items: [], total: 0 });
   await proxyCutout(request('v1/jobs/history?limit=12&offset=24&owner=other'), ['v1', 'jobs', 'history'], user, env, fetcher);
   check(calls.at(-1)?.url.endsWith('?limit=12&offset=24'), 'pagination forwarded, client ownership query ignored');
-  response = await proxyCutout(request('v1/jobs/j'), ['v1', 'jobs', 'j'], user, env, async () => { throw Error('fixture network'); });
+  response = await proxyCutout(request('v1/jobs/j'), ['v1', 'jobs', 'j'], user, env, async (url, init) => { if(String(url).endsWith('/identity'))return identityReply(); throw Error('fixture network'); });
   check(response.status === 502 && (await response.json()).submission_made === null, 'network uncertainty never masquerades as unsubmitted');
+  const bindings = {CUTOUT_BUSINESS_KEYS:JSON.stringify({[user.id]:{key:fixtureKey,expectedOwnerId:'legacy-api-key'},[member.id]:{key:'fixture-independent-member-key',expectedOwnerId:'sd2:member-a'},'member-b':{key:'fixture-independent-member-b-key',expectedOwnerId:'sd2:member-b'}})};
+  check(cutoutBusinessCredential(bindings,member.id)==='fixture-independent-member-key','multi-owner exact member binding');
+  for(const broken of [
+    {[user.id]:{key:fixtureKey,expectedOwnerId:'same'},[member.id]:{key:fixtureKey+'b',expectedOwnerId:'same'}},
+    {[user.id]:{key:fixtureKey,expectedOwnerId:'a'},[member.id]:{key:fixtureKey,expectedOwnerId:'b'}},
+    {[user.id]:fixtureKey,[member.id]:{key:fixtureKey+'b',expectedOwnerId:'b'}},
+    {[member.id]:{key:fixtureKey}},
+  ])check(cutoutBusinessCredential({CUTOUT_BUSINESS_KEYS:JSON.stringify(broken)},member.id)===null,'ambiguous binding fails closed');
+  identityReply=()=>Response.json({success:true,owner_id:'sd2:member-a',kind:'external',credential_id:'fixture-key-a',scopes:['business']});
+  reply=()=>Response.json(capability);
+  response=await proxyCutout(request('v1/capabilities'),['v1','capabilities'],member,bindings,fetcher);
+  const readyMember=await response.json();
+  check(response.ok&&readyMember.integration.ready&&!JSON.stringify(readyMember).includes('fixture-key-a'),'member gets readiness without identity secrets');
+  for(const identity of [
+    {success:true,owner_id:'sd2:member-b',kind:'external',credential_id:'fixture-key-b',scopes:['business']},
+    {success:true,owner_id:'sd2:member-a',kind:'worker',credential_id:'fixture-key-a',scopes:['business']},
+    {success:true,owner_id:'sd2:member-a',kind:'admin',credential_id:'fixture-key-a',scopes:['business']},
+    {success:true,owner_id:'sd2:member-a',kind:'external',credential_id:'fixture-key-a',scopes:[]},
+    {success:true,owner_id:'sd2:member-a',kind:'external',credential_id:null,scopes:['business']},
+  ]){
+    identityReply=()=>Response.json(identity); const count=calls.length;
+    response=await proxyCutout(request('v1/assets',{method:'POST',body:'fixture'}),['v1','assets'],member,bindings,fetcher);
+    check(response.status===503&&(await response.json()).submission_made===false&&calls.slice(count).every(call=>call.url.endsWith('/identity')),'wrong or nonbusiness identity cannot upload');
+  }
+  identityReply=()=>Response.json({detail:{code:'UNAUTHORIZED'}},{status:401});
+  response=await proxyCutout(request('v1/capabilities'),['v1','capabilities'],member,bindings,fetcher);
+  check(!(await response.json()).integration.ready,'revoked key is not ready');
+  response=await proxyCutout(request('v1/assets',{method:'POST',body:'fixture'}),['v1','assets'],member,bindings,async()=>{throw Error('identity unavailable')});
+  check(response.status===503&&(await response.json()).submission_made===false,'identity network failure proves no business forwarding');
   console.log(JSON.stringify({ checks, passed: true, scope: 'in-memory proxy contract only', realImageJobs: 0, fees: 0 }));
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

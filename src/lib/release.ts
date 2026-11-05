@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '插件下载与封面共享', outline: [
+const notice = { title: '插件下载、封面共享与成员抠图', outline: [
   '工具菜单新增 Chrome 插件，集中下载 Mac、Windows 和 Chrome 最新版',
   '模板封面可直接切换共享，与模板内部状态同步',
-  '未发布模板在保存后共享，当前编辑内容保留',
+  '内部成员可使用各自授权进行 AI 抠图，原账号历史继续保留',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
