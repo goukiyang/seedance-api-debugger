@@ -1060,3 +1060,13 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 - 本轮额外发现已登记到[统一发现清单](discoveries.md)：D-20261101-01 至 04 分别保留生产 bundle 共享身份待核、目录全局失效放大、报表 Web 计算量和跨能力计价故障范围；均未实施额外重构，原任务与手验边界不变。
 
 - 封面媒体定点接续仅增短时日志并已恢复原配置；同一B/640/revision2自然点击5.256s、媒体TTFB2.390s，对应Nginx上游头/完整响应均113ms、总时长888ms，Node响应构造89.7ms。已把主要等待缩到观察的上游处理区间之外，公网/前置代理/浏览器等细因仍未证；不冒新修复或全站改善。[原代理计时](../docs/materials/2026-11-01-admin-usage-read-snapshot/media-edge-diagnostic/attempt02/timing-snapshot.jsonl)、[配置恢复证明](../docs/materials/2026-11-01-admin-usage-read-snapshot/media-edge-diagnostic/attempt02/automatic-restore.json)保留；App未重启、源88/v0.125.2不变。
+
+<!-- VIDEO-DRAFT-TOOLBAR-20261105 -->
+## VIDEO-DRAFT01 样片选项移入下方参数栏（2026-11-05）
+
+已部署，待用户手动验收。删除原常显黄色480p/Draft长说明，保留“样片模式”checkbox并放到分辨率/设置同一参数栏；复用既有chip与换行，原显示条件、能力禁用、checked/onChange、480p切换、生成/报价/费用不变。
+
+UI源dd937b795已提交推送，定向lint（仅既有warnings）及完整Linux原生/价格/Next/types/lint通过。第一次v0.132.2因误填不存在的/api/tasks为匿名401（实际404）触发固定guard程序恢复，14:45:06Z已恢复7服务/4timer，数据未回退；失败与备份原证保留，不重跑原成功构建。后续合并候选4b679e4c016fbff28cd98c918d6e6b075ce83940逐字继承两组件，于14:54:06Z以v0.132.3/BUILD V5usaUOiwn_qrka4Rvoxp上线。普通/generate新JS2291-d675781c3eed073c.js已公网200且SHA匹配，含新参数槽与样片名称；7服务/4timer/价格保护正常。无浏览器或收费生成，实际位置、勾选和小屏使用待用户手验。
+
+证据：docs/materials/2026-11-05-video-draft-toolbar/delivery-summary.json与原构建/回退/合并公网证明；本轮未新增范围外问题。
+<!-- /VIDEO-DRAFT-TOOLBAR-20261105 -->
