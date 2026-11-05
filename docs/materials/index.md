@@ -1,5 +1,9 @@
 # 项目资料索引
 
+## REWARD-DESIGN01 模板贡献奖励机制（2026-11-05）
+
+[正式机制稿](../../tasks/todo/2026-11-05-template-contribution-mechanism.md)，[可复算合成情景](../../tasks/todo/fixtures/template-contribution-scenarios.mjs)。40个离线情景运行完成，无断言失败；保留2类自动奖励风险、1项误批局限和1项工时假设。不启用奖励，不改费率或账本。正式根私有结果目录为 `2026-11-05-template-contribution/`，合成模型不代表线上防刷、权限、事务或到账验证。
+
 <!-- TEMPLATE-MARK01-MATERIALS-20261104 -->
 ## TEMPLATE-MARK01 模板喜欢与收藏合并（2026-11-04）
 
