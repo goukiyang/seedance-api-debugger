@@ -91,7 +91,7 @@ function ProductDialog({ request, onResolve }: { request: Request; onResolve: (v
     <form onSubmit={event => { event.preventDefault(); void submit(); }} onKeyDown={event => {
       if (event.key === 'Enter' && (event.nativeEvent.isComposing || event.keyCode === 229)) event.preventDefault();
     }} aria-busy={saving}>
-      <header className={styles.header}><h2 id={titleId}>{request.title || (naming ? '命名' : '确认操作')}</h2>
+      <header className={`${styles.header} exp-heading`}><h2 id={titleId}>{request.title || (naming ? '命名' : '确认操作')}</h2>
         <button type="button" className={styles.close} disabled={saving} onClick={dismiss} aria-label="关闭" title="关闭"><X size={18} /></button></header>
       <p id={descriptionId} className={styles.message}>{request.message}</p>
       {naming && (request.multiline
@@ -100,7 +100,7 @@ function ProductDialog({ request, onResolve }: { request: Request; onResolve: (v
       {naming && maxLength !== null && value.trim().length > maxLength && <p role="alert" className={styles.message}>最多 {maxLength} 字，请缩短后再提交。</p>}
       {error && <p role="alert" className={styles.message}>{error}</p>}
       {request.checkbox && <label className={styles.checkbox}><input type="checkbox" checked={checked} disabled={saving} onChange={event => setChecked(event.target.checked)} />{request.checkbox.label}</label>}
-      <footer className={styles.actions}>
+      <footer className={`${styles.actions} exp-dialog-actions`}>
         <button ref={cancel} type="button" disabled={saving} className={styles.secondary} onClick={dismiss}>取消</button>
         <button type="submit" className={request.danger ? styles.danger : styles.primary} disabled={!valid || saving}>{saving ? '保存中…' : request.confirmLabel || (naming ? '保存名称' : '继续')}</button>
       </footer>

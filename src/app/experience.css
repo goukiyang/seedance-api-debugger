@@ -1,0 +1,84 @@
+:root {
+  --exp-edge: 24px;
+  --exp-edge-bottom: 64px;
+  --exp-section-gap: 16px;
+  --exp-control-gap: 8px;
+  --exp-heading-gap: 12px;
+  --exp-control-height: 36px;
+  --exp-card-radius: 8px;
+  --exp-browse-width: 1920px;
+  --exp-editor-width: 1600px;
+  --exp-detail-width: 1440px;
+}
+
+@media (max-width: 760px) {
+  :root {
+    --exp-edge: 14px;
+    --exp-edge-bottom: 48px;
+    --exp-section-gap: 12px;
+    --exp-control-height: 40px;
+  }
+}
+
+.exp-browse, .exp-editor, .exp-detail { min-width: 0; width: 100%; margin-inline: auto; }
+.exp-browse { max-width: var(--exp-browse-width); }
+.exp-editor { max-width: var(--exp-editor-width); }
+.exp-detail { max-width: var(--exp-detail-width); }
+.exp-heading { gap: var(--exp-heading-gap); }
+.exp-browse-toolbar { gap: var(--exp-control-gap); min-width: 0; }
+.exp-card-grid { column-gap: var(--exp-section-gap); row-gap: var(--exp-section-gap); }
+.exp-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--exp-control-gap); min-width: 0; }
+.exp-actions > :is(button, a) { flex-shrink: 0; max-width: 100%; }
+.exp-actions > :is(button, a) svg { flex-shrink: 0; }
+
+.exp-selection {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--exp-heading-gap);
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--exp-card-radius);
+  background: var(--bg-panel);
+}
+.exp-selection-summary { display: grid; gap: 3px; min-width: 0; flex: 1 1 140px; }
+.exp-selection-summary strong { color: var(--text-primary); }
+.exp-selection-summary small { color: var(--text-secondary); overflow-wrap: anywhere; }
+
+.exp-filters { display: flex; flex-wrap: wrap; gap: var(--exp-control-gap); min-width: 0; margin-block: 8px; }
+.exp-filters .exp-filter, .exp-filters .exp-filter-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: var(--exp-control-height);
+  padding: 5px 9px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--exp-card-radius);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.exp-filters .exp-filter span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.exp-filters .exp-filter svg { flex-shrink: 0; }
+.exp-filters :is(button, a):focus-visible { outline: 2px solid var(--tone-info-text); outline-offset: 2px; }
+.exp-filters .exp-filter-clear { border-color: transparent; background: transparent; color: var(--text-secondary); }
+
+.exp-empty { display: grid; justify-items: center; gap: var(--exp-control-gap); padding: var(--exp-edge); text-align: center; }
+.exp-empty > strong { color: var(--text-primary); font-size: 16px; }
+.exp-empty > p { max-width: 52ch; margin: 0; color: var(--text-secondary); }
+.exp-empty .exp-actions { justify-content: center; }
+
+.exp-receipt { display: flex; align-items: center; flex-wrap: wrap; gap: var(--exp-control-gap); min-width: 0; }
+.exp-receipt-status { min-width: 0; overflow-wrap: anywhere; }
+.exp-receipt-detail { flex-basis: 100%; color: var(--text-secondary); overflow-wrap: anywhere; }
+.exp-dialog-actions { gap: var(--exp-control-gap); }
+
+.exp-actions > .btn,
+.exp-selection .exp-actions > button,
+.exp-dialog-actions > .btn {
+  min-height: var(--exp-control-height);
+}
+.exp-data-table :is(th, td) { font-variant-numeric: tabular-nums; }

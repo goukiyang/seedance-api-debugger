@@ -1564,7 +1564,7 @@ export default function CutoutPage() {
 
 
   return (
-    <main className={styles.page}>
+    <main className={`${styles.page} exp-editor`}>
       <header className={styles.workspaceHeader}>
         <div className={styles.buttonRow}><Link className={styles.quietButton} href={returnHref}><ChevronLeft size={16} />返回来源</Link><h1>抠图</h1></div>
         <button type="button" className={styles.secondaryButton} onClick={() => setHistoryOpen(true)}><Archive size={16} />最近任务{history.some(job => ['queued', 'running'].includes(job.status)) ? ' · 处理中' : ''}</button>

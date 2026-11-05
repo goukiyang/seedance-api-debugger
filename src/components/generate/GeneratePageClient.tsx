@@ -3476,7 +3476,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       )}
 
       {/* ===== 页面主体 ===== */}
-      <main ref={composerMainRef} className="composer-main" aria-busy={reuseUiLocked}>
+      <main ref={composerMainRef} className="composer-main exp-editor" aria-busy={reuseUiLocked}>
         {projectReturnTo && (
           <div>
             <Link href={projectReturnTo}>{taskReturnLabel(projectReturnTo)}</Link>

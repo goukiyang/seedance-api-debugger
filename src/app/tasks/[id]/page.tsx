@@ -10,6 +10,7 @@ import type { VideoPromptGroupRef } from '@/lib/video/prompt-groups';
 import { MultiviewEntry } from '@/components/MultiviewEntry';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import { CopyTextButton, InlineActionFeedback, useInlineActionFeedback } from '@/components/InlineActionFeedback';
+import { ExperienceActions, OperationReceipt } from '@/components/experience/ExperienceParts';
 import MediaPreview from '@/components/MediaPreview';
 import { VideoLoopButton } from '@/components/VideoLoopButton';
 import { useMediaPreviewState, useVideoLoopState } from '@/lib/hooks/use-media-preview-state';
@@ -1890,7 +1891,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
   const agentRunHref = isAdmin && task.agent_run_id ? `/admin/agent-runs/${task.agent_run_id}` : null;
 
   return (
-    <div className={`task-detail-page ${resultStyles.page}`}>
+    <div className={`task-detail-page exp-detail ${resultStyles.page}`}>
       <SafeRetryStatus kind="video" id={task.id} />
       {taskLoadError && <div className="alert alert-warning" role="alert">最新状态读取失败：{taskLoadError}。可以重新刷新状态，现有结果仍保留。</div>}
       {openError && <div className="alert alert-warning" role="alert">{openError}</div>}
@@ -1947,7 +1948,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
                 {hasResultVideo ? (
                   showEnhanceCompare ? (
                     <>
-                      <div className={loopStyles.compareToolbar}>
+                      <div className={`${loopStyles.compareToolbar} exp-actions`} role="group" aria-label="超分对比操作">
                       <VideoLoopButton synchronized enabled={synchronizedLoop.enabled} onToggle={synchronizedLoop.toggle} disabled={!synchronizedLoop.ready} storageUnavailable={synchronizedLoop.storageUnavailable} />
                       <button
                         type="button"
@@ -2105,12 +2106,14 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
                 </details>
               )}
 
-              <div className="task-result-actions">
+              <ExperienceActions label="继续使用结果" className="task-result-actions">
                 {hasResultVideo && <MultiviewEntry contentKey={`video_task:${task.id}`} />}
-                {shouldShowRefresh && (
-                  <button className="btn btn-secondary" onClick={queryStatus} disabled={querying}>
-                    <RefreshCcw size={16} aria-hidden="true" />
-                    {querying ? '查询中...' : isSubmissionUnknown ? '查询原请求' : '刷新结果'}
+                {isSubmissionUnknown ? <OperationReceipt status="提交结果待确认" busy={querying}
+                  actions={<button type="button" className="btn btn-secondary" onClick={queryStatus} disabled={querying}>
+                    <RefreshCcw size={16} aria-hidden="true" />{querying ? '查询中…' : '查询原请求'}
+                  </button>} /> : shouldShowRefresh && (
+                  <button type="button" className="btn btn-secondary" onClick={queryStatus} disabled={querying}>
+                    <RefreshCcw size={16} aria-hidden="true" />{querying ? '查询中…' : '刷新结果'}
                   </button>
                 )}
                 {canUseVideoActions && <details className={resultStyles.more}>
@@ -2188,7 +2191,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
                     </div>
                   </label>
                 )}
-              </div>
+              </ExperienceActions>
 
               {(downloading || downloadProgress) && (
                 <div className="task-download-state sd2-loading-surface" data-busy={downloadPhase === 'preparing' && (downloading || querying || autoPoll || publicDeliveryPollStartedAt !== null)} role="status">

@@ -1,4 +1,5 @@
 'use client';
+import { ExperienceEmpty, FilterSummary } from '@/components/experience/ExperienceParts';
 import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 import { RelativeTime } from '@/components/RelativeTime';
 import TemplateFavoriteTitle from '@/components/content-reactions/TemplateFavoriteTitle';
@@ -153,6 +154,7 @@ export function TemplateLibraryClient() {
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  const clearFilters = () => { setSearch(''); setSceneFilter('全部场景'); setStatusFilter('全部状态'); };
   const canManageTemplates = currentUser?.role === 'admin';
 
   const loadTemplates = useCallback(async (preferredTemplateId?: string | null) => {
@@ -247,8 +249,8 @@ export function TemplateLibraryClient() {
   const selectedPreviewFailed = selectedView ? failedPreviewIds.includes(selectedView.template.id) : false;
 
   return (
-    <div className="template-library-page">
-      <section className="template-library-head" aria-label="动画模板选择">
+    <div className="template-library-page exp-browse">
+      <section className="template-library-head exp-heading" aria-label="动画模板选择">
         <div>
           <span className="template-library-kicker">动画模板</span>
           <h1>选择动画模板</h1>
@@ -310,6 +312,11 @@ export function TemplateLibraryClient() {
         </aside>
 
         <main className="template-library-main" aria-label="模板列表">
+          <FilterSummary filters={[
+            ...(search.trim() ? [{ id: 'search', label: `搜索：${search.trim()}`, remove: () => setSearch('') }] : []),
+            ...(sceneFilter !== '全部场景' ? [{ id: 'scene', label: sceneFilter, remove: () => setSceneFilter('全部场景') }] : []),
+            ...(statusFilter !== '全部状态' ? [{ id: 'status', label: statusFilter, remove: () => setStatusFilter('全部状态') }] : []),
+          ]} clear={clearFilters} />
           {loading && (templates.length ? <LoadingStatus>正在更新模板库</LoadingStatus> : <LoadingSkeleton label="正在读取模板库" grid cards />)}
 
           {!loading && error && (
@@ -322,29 +329,13 @@ export function TemplateLibraryClient() {
           )}
 
           {!loading && !error && templates.length === 0 && (
-            <div className="template-library-state">
-              <ImageIcon size={22} aria-hidden="true" />
-              <strong>还没有可用模板</strong>
-              <p>管理员创建模板后，这里会显示可选择的动画模板。</p>
-            </div>
+            <ExperienceEmpty className="template-library-state" title="还没有可用模板" description="管理员创建模板后，这里会显示可选择的动画模板。" />
           )}
 
           {!loading && !error && templates.length > 0 && filteredViews.length === 0 && (
-            <div className="template-library-state">
-              <Search size={22} aria-hidden="true" />
-              <strong>没有匹配模板</strong>
-              <p>清空搜索或筛选条件后再选择。</p>
-              <button
-                type="button"
-                onClick={() => {
-                  setSearch('');
-                  setSceneFilter('全部场景');
-                  setStatusFilter('全部状态');
-                }}
-              >
-                清空筛选
-              </button>
-            </div>
+            <ExperienceEmpty className="template-library-state" title="没有匹配模板" description="清空搜索或筛选条件后再选择。">
+              <button type="button" onClick={clearFilters}>清空筛选</button>
+            </ExperienceEmpty>
           )}
 
           {filteredViews.length > 0 && (

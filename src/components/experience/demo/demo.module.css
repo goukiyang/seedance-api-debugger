@@ -1,0 +1,26 @@
+.demo { min-width: 0; max-width: 760px; margin-block: 12px; color: var(--text-secondary); }
+.demo > summary { cursor: pointer; color: var(--text-primary); }
+.body { display: grid; gap: 8px; margin-block: 8px 12px; }
+.body ol { margin: 0; padding-inline-start: 1.4em; font-size: 13px; line-height: 1.55; }
+.scene { width: 100%; overflow: hidden; border-radius: 9px; background: oklch(0.17 0.01 240); }
+.frame { width: 648px; margin: 20px 0 0 36px; color: oklch(0.92 0.014 233); }
+.workflow { display: grid; grid-template-columns: 1fr 1fr; min-height: 205px; }
+.source, .destination { display: flex; flex-direction: column; gap: 12px; align-items: flex-start; padding: 17px; }
+.destination { border-inline-start: 1px solid oklch(0.3 0.018 243); }
+.caption { color: oklch(0.78 0.02 235); font-size: 12px; font-weight: 650; }
+.choice, .result { display: flex; align-items: center; gap: 8px; min-height: 54px; width: 100%; padding: 7px; border: 1px solid oklch(0.32 0.025 245); border-radius: 6px; background: oklch(0.21 0.02 244); font-size: 13px; }
+.choice[data-picked="true"], .destination[data-applied="true"] .result { border-color: oklch(0.69 0.084 180); }
+.choice strong { flex: 1; }
+.tile { display: grid; place-items: center; flex: 0 0 42px; height: 38px; border-radius: 4px; color: oklch(0.87 0.08 180); background: linear-gradient(135deg, oklch(0.31 0.06 242), oklch(0.35 0.07 183)); }
+.tile[data-arrived="false"] { opacity: .44; }
+.confirm { display: flex; align-items: center; gap: 6px; min-height: 31px; padding: 5px 9px; border-radius: 5px; background: oklch(0.28 0.026 245); font-size: 12px; }
+.confirm[data-active="true"] { color: oklch(0.9 0.07 180); background: oklch(0.38 0.068 182); }
+.receipt { font-size: 12px; color: oklch(0.74 0.023 243); }
+.destination[data-applied="true"] .receipt { color: oklch(0.84 0.092 175); }
+.compact { width: 326px; margin: 14px 0 0 16px; }
+.compact .workflow { grid-template-columns: 1fr; }
+.compact :is(.source, .destination) { padding: 12px; gap: 8px; }
+.compact .destination { border-inline-start: 0; border-top: 1px solid oklch(0.3 0.018 243); }
+@media (prefers-reduced-motion: no-preference) {
+  .choice, .result, .confirm, .receipt, .tile { transition: color 160ms ease-out, background-color 160ms ease-out, border-color 160ms ease-out, opacity 160ms ease-out; }
+}

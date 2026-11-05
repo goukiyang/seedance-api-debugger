@@ -7,13 +7,15 @@ import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 import { RelativeTime } from '@/components/RelativeTime';
 import { useProductDialog } from '@/components/useProductDialog';
 import PageBanner from '@/components/PageBanner';
+import { ExperienceEmpty, OperationReceipt, SelectionBar } from '@/components/experience/ExperienceParts';
+import { useReturnAnchor } from '@/components/experience/useReturnAnchor';
 import PaginationControls from '@/components/PaginationControls';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { isExternalUser } from '@/lib/access/external-role';
 import { formatAmountMicrosWithFixedCny, formatAmountMinorWithFixedCny } from '@/lib/costs/currency';
-import { taskDetailHref } from '@/lib/navigation/return-to';
+import { listReturnHref, readListReturn, taskDetailHref } from '@/lib/navigation/return-to';
 import { enhanceWorkspaceHref, taskReuseHref } from '@/lib/navigation/task-reuse';
 import { BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT, downloadBulkVideoZip } from '@/lib/video/download-client';
 import type { TaskGenerationMode } from '@/types';
@@ -190,6 +192,13 @@ export default function TasksPage() {
   const [pagination, setPagination] = useState<Pagination | null>(null);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const [returnPageLoaded, setReturnPageLoaded] = useState(false);
+  useEffect(() => {
+    const target = readListReturn(new URLSearchParams(window.location.search));
+    if (target.page) setPage(target.page);
+    setReturnPageLoaded(true);
+  }, []);
+  const returnUnavailable = useReturnAnchor(currentUser?.id, hasTaskData && loadedOwner.current === currentUser?.id && !loading && loadedPage.current === page);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -222,7 +231,7 @@ export default function TasksPage() {
   }, [hasLoadedUser, loadingUser, refreshUser]);
 
   const fetchTasks = useCallback(async () => {
-    if (!hasLoadedUser) return;
+    if (!returnPageLoaded || !hasLoadedUser) return;
     const sequence = ++taskReadSequence.current;
     const owner = currentUser?.id || null;
     if (loadedOwner.current !== owner) {
@@ -256,7 +265,7 @@ export default function TasksPage() {
     } finally {
       if (sequence === taskReadSequence.current) setLoading(false);
     }
-  }, [currentUser?.id, externalUser, hasLoadedUser, page]);
+  }, [currentUser?.id, externalUser, hasLoadedUser, page, returnPageLoaded]);
 
   useEffect(() => {
     void fetchTasks();
@@ -327,7 +336,7 @@ export default function TasksPage() {
   };
 
   return (
-    <div className="tasks-page">
+    <div className="tasks-page exp-browse">
       <PageBanner
         eyebrow="我的任务"
         title="任务列表"
@@ -351,6 +360,7 @@ export default function TasksPage() {
       )}
 
       <div className="tasks-list-shell">
+        {returnUnavailable && <OperationReceipt status="原任务不在这一页，已返回任务列表。" />}
         {loading && hasTaskData && <LoadingStatus>{loadedPage.current === page ? '正在更新任务列表' : `正在读取第 ${page} 页，暂时保留第 ${loadedPage.current} 页结果`}</LoadingStatus>}
         {!loading && hasTaskData && loadedPage.current !== page && <p role="status">最新页未读取成功，当前仍显示第 {loadedPage.current} 页。请重试读取。</p>}
         {loading && !hasTaskData ? (
@@ -358,17 +368,15 @@ export default function TasksPage() {
         ) : error && !hasTaskData ? (
           <button className="btn btn-secondary" type="button" onClick={() => void fetchTasks()}>重新读取</button>
         ) : tasks.length === 0 && !loading && !error ? (
-          <div className="tasks-empty">
-            <h2>暂无任务</h2>
-            <p>先创建一个视频任务，生成记录会出现在这里。</p>
-            <Link href={createTaskHref} className="btn btn-primary">
-              {createTaskLabel}
-            </Link>
-          </div>
+          <ExperienceEmpty title="暂无任务" description="先创建一个视频任务，生成记录会出现在这里。" className="tasks-empty">
+            <Link href={createTaskHref} className="btn btn-primary">{createTaskLabel}</Link>
+          </ExperienceEmpty>
         ) : (
           <>
             {!externalUser && (
-            <div className="bulk-download-toolbar">
+            <SelectionBar count={selectedDownloadableTasks.length}
+              summary={`本页可下载 ${downloadableTasks.length} 个`}
+              selection={(
               <label className="bulk-download-check">
                 <input
                   type="checkbox"
@@ -378,11 +386,7 @@ export default function TasksPage() {
                 />
                 <span>选择本页可下载视频</span>
               </label>
-              <div className="bulk-download-toolbar-meta">
-                已选 {selectedDownloadableTasks.length} 个
-                {downloadableTasks.length > 0 && ` · 本页可下载 ${downloadableTasks.length} 个`}
-              </div>
-              <div className="bulk-download-toolbar-actions">
+              )}>
                 <button
                   className="btn btn-primary"
                   type="button"
@@ -401,8 +405,7 @@ export default function TasksPage() {
                 >
                   清空选择
                 </button>
-              </div>
-            </div>
+            </SelectionBar>
             )}
             {selectedTooMany && (
               <div className="alert alert-warning">
@@ -416,7 +419,7 @@ export default function TasksPage() {
                 const downloadable = isTaskDownloadable(task);
                 const enhanceTask = isEnhanceTask(task);
                 return (
-                  <article key={task.id} className="tasks-card">
+                  <article key={task.id} className="tasks-card" data-list-return={task.id}>
                     <div className="tasks-preview-cell">
                       <TaskVideoThumbnail
                         taskId={task.id}
@@ -432,7 +435,7 @@ export default function TasksPage() {
                         retryAfterMs={task.retry_after_ms}
                         provider={task.provider}
                         generationMode={task.generation_mode}
-                        href={taskDetailHref(task.id, '/tasks')}
+                        href={taskDetailHref(task.id, listReturnHref('/tasks', task.id, loadedPage.current || page))}
                         size="medium"
                         className="tasks-preview"
                         reactions={task.local_status === 'succeeded'}
@@ -502,7 +505,7 @@ export default function TasksPage() {
                     </div>
 
                     <div className="tasks-card-actions">
-                      <Link href={taskDetailHref(task.id, '/tasks')} className="btn btn-secondary">
+                      <Link href={taskDetailHref(task.id, listReturnHref('/tasks', task.id, loadedPage.current || page))} className="btn btn-secondary">
                         查看详情
                       </Link>
                       {!externalUser && (enhanceTask ? (
@@ -541,7 +544,10 @@ export default function TasksPage() {
                 total={pagination.total}
                 pageSize={pagination.limit}
                 label="任务"
-                onPageChange={setPage}
+                onPageChange={nextPage => {
+                  setPage(nextPage);
+                  window.history.replaceState(window.history.state, '', listReturnHref('/tasks', undefined, nextPage));
+                }}
               />
             )}
           </>
@@ -551,7 +557,7 @@ export default function TasksPage() {
       {bulkConfirmOpen && (
         <div ref={bulkDownloadBackdropRef} className="modal-overlay" role="presentation">
           <div ref={bulkDownloadDialogRef} className="modal-panel bulk-download-modal" role="dialog" aria-modal="true" aria-label="批量下载视频">
-            <div className="modal-header">
+            <div className="modal-header exp-heading">
               <div>
                 <h2>批量下载视频</h2>
                 <p>将选中的已完成视频打包为 ZIP</p>

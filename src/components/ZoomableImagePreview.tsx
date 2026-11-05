@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import * as Popper from '@radix-ui/react-popper';
 import { ArrowLeft, ArrowLeftRight, ArrowRight, ArrowUpDown, Check, Copy, Download, Lock, Unlock, MoreHorizontal, Plus, RotateCcw, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { copyImage } from '@/lib/media/copy-image';
+import { ExperienceActions } from '@/components/experience/ExperienceParts';
 import styles from './ZoomableImagePreview.module.css';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import type { ContentKey } from '@/lib/content-reactions/types';
@@ -1029,10 +1030,10 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
         <button ref={zoomTriggerRef} type="button" className={styles.zoomTrigger} title="缩放选中图" aria-label={`${safeSide === 'current' ? '当前图' : '对比图'}缩放 ${Math.round(selectedView.scale * 100)}%${comparisonMode && linked ? '，联动已开启' : ''}`} aria-expanded={controlsOpen === 'zoom'} aria-controls={controlsOpen === 'zoom' ? controlsId : undefined} aria-haspopup="dialog" onClick={() => setControlsOpen(value => value === 'zoom' ? null : 'zoom')}><ZoomIn size={16} /><span>{Math.round(selectedView.scale * 100)}%</span></button>
         <button type="button" className={styles.fitButton} aria-pressed={selectedView.mode === 'fit'} title={`让${sideLabel(safeSide)}适合窗口`} onClick={() => applyMode('fit')}>适合窗口</button>
       </div>
-      <div className={styles.compareSources} role="group" aria-label="图片对比">{thumbnail(paneOrder[0])}<button ref={compareToggleRef} type="button" className={styles.compareToggle} data-image-preview-compare aria-pressed={comparisonMode}
+      <ExperienceActions className={styles.compareSources} label="图片对比">{thumbnail(paneOrder[0])}<button ref={compareToggleRef} type="button" className={styles.compareToggle} data-image-preview-compare aria-pressed={comparisonMode}
           title={comparisonMode ? '退出对比' : '开启对比'}
           aria-label={comparisonMode ? '退出对比' : '开启对比'}
-          onClick={toggleComparison}><ArrowLeftRight size={16} /></button>{thumbnail(paneOrder[1])}</div>
+          onClick={toggleComparison}><ArrowLeftRight size={16} /></button>{thumbnail(paneOrder[1])}</ExperienceActions>
       <div className={styles.actions}>
         {hasOriginalDownloadUrl ? <a className={styles.downloadAction} href={originalDownloadSource} download={selectedImage.fileName || 'original-image'} title={`下载${sideLabel(safeSide)}原图`} aria-label={`下载${sideLabel(safeSide)}原图`}><Download size={16} /><span>下载原图</span></a>
           : downloadSelectedSource && <button type="button" className={styles.downloadAction} disabled={downloadBusy} title={downloadBusy ? '准备下载原图' : `下载${sideLabel(safeSide)}原图`} aria-label={downloadBusy ? '准备下载原图' : `下载${sideLabel(safeSide)}原图`} aria-busy={downloadBusy} onClick={downloadOriginal}><Download size={16} /><span>{downloadBusy ? '准备下载' : '下载原图'}</span></button>}

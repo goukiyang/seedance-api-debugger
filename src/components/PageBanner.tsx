@@ -21,7 +21,7 @@ export default function PageBanner({
   tone = 'default',
 }: PageBannerProps) {
   return (
-    <header className={`page-banner page-banner-${tone}`}>
+    <header className={`page-banner exp-heading page-banner-${tone}`}>
       <div className="page-banner-main">
         {backHref && (
           <Link className="page-banner-back" href={backHref}>
@@ -32,7 +32,7 @@ export default function PageBanner({
         <h1 className="page-banner-title">{title}</h1>
         {description && <p className="page-banner-description">{description}</p>}
       </div>
-      {actions && <div className="page-banner-actions">{actions}</div>}
+      {actions && <div className="page-banner-actions exp-actions">{actions}</div>}
     </header>
   );
 }

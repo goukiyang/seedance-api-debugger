@@ -1229,7 +1229,7 @@ function MultiviewPageContent() {
     </div></SortableContext></DndContext>;
   }
 
-  return <div className={styles.page}>
+  return <div className={`${styles.page} exp-editor`}>
     <PageBanner title="3D多视图" description="旋转选帧、参考拼图与动作视频。" backHref={backHref} backLabel={taskId ? '返回原视频' : '返回创作首页'} />
     <div className={styles.pageTabs} aria-label="3D多视图区域"><button type="button" aria-pressed={pageView === 'editor'} onClick={() => writeLocation('editor', editingWorkId)}><WandSparkles size={16} />工作台</button><button type="button" aria-pressed={pageView !== 'editor'} disabled={exporting || workState.busy || Boolean(generation.leavingBusy)} onClick={() => { setReferenceLibrary(false); video.current?.pause(); writeLocation('generations'); }}><History size={16} />记录{['submitting', 'submitted', 'unknown'].includes(generation.phase) && <span className={styles.tabBadge}>进行中</span>}</button><button type="button" aria-pressed={pageView === 'works' && referenceLibrary} onClick={()=>{writeLocation('works');setReferenceLibrary(true);const url=new URL(window.location.href);url.searchParams.set('kind','reference');window.history.replaceState(window.history.state,'',url.pathname+url.search);}}>动作作品</button></div>
     <div hidden={pageView !== 'generations'}><MultiviewRecords key={`${owner}:${authority}`} owner={owner} authority={authority} active={pageView === 'generations' && sessionReady}

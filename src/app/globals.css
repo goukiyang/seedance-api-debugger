@@ -2893,7 +2893,7 @@ a {
 
 .task-detail-page {
   display: grid;
-  gap: 18px;
+  gap: var(--exp-section-gap);
 }
 
 .task-detail-page .btn {
@@ -4439,7 +4439,7 @@ body.compare-fullscreen-open {
 
 .tasks-page {
   display: grid;
-  gap: 18px;
+  gap: var(--exp-section-gap);
 }
 
 .tasks-header,
@@ -5463,7 +5463,7 @@ body.compare-fullscreen-open {
 
 .shell-content {
   min-width: 0;
-  padding: 24px;
+  padding: var(--exp-edge);
 }
 
 .shell-body-topbar-only {
@@ -6958,8 +6958,8 @@ body.compare-fullscreen-open {
 
 /* 页面主体 */
 .composer-main {
-  padding: 32px 48px 72px;
-  max-width: 1440px;
+  padding: var(--exp-edge) var(--exp-edge) var(--exp-edge-bottom);
+  max-width: var(--exp-editor-width);
   margin: 0 auto;
 }
 
@@ -10835,9 +10835,8 @@ body.compare-fullscreen-open {
 
 .template-library-page {
   display: grid;
-  gap: 18px;
+  gap: var(--exp-section-gap);
   margin: 0 auto;
-  max-width: 1440px;
 }
 
 .template-library-head {
@@ -17394,7 +17393,7 @@ body.compare-fullscreen-open {
 
 .asset-library-page {
   min-height: 100vh;
-  padding: 26px 30px 64px;
+  padding: var(--exp-edge) var(--exp-edge) var(--exp-edge-bottom);
   color: oklch(0.93 0.012 245);
   background: oklch(0.16 0.01 250);
 }
@@ -18685,9 +18684,6 @@ body.compare-fullscreen-open {
 }
 
 @media (max-width: 720px) {
-  .asset-library-page {
-    padding: 18px 14px 42px;
-  }
 
   .asset-library-header,
   .asset-library-bulkbar,

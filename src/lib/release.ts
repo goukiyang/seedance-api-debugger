@@ -1,9 +1,10 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '创作过程反馈更清楚', outline: [
-  '生成进度和成品在同一位置接续',
-  '列表更新保留当前画面，预览关闭回到原位置',
-  '复制和收藏就地反馈，新加素材短暂高亮',
+const notice = { title: '常用页面和操作更一致', outline: [
+  '统一列表、工作台、详情页的留白与操作区',
+  '打开详情后可回到原列表位置，筛选和批量选择一眼可见',
+  '对比、原请求查询和交付回执更好找',
+  '帮助页可按需查看素材和对比演示',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
