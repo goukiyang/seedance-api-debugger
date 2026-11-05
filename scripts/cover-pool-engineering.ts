@@ -92,7 +92,8 @@ async function main() {
   await assert.rejects(api.setIndependentReaction(actor, operation('wrong-actor-request', { viewerId: 'owner-b' })), { status: 409 });
   checks.push('fresh_transaction_actor_source_revocation_and_bound_module_key_guards');
   bound = false;
-  for (const [liked, favorited] of [[true, false], [false, true], [true, true], [false, false]]) {
+  const unifiedEnabled = fixtureRequire('./template-mark').TEMPLATE_MARK_WRITES_ENABLED;
+  if (unifiedEnabled) for (const [liked, favorited] of [[true, false], [false, true], [true, true], [false, false]]) {
     rows.set(`${actor.id}/${key}`, { id: 'unified-history', content_key: key, user_id: actor.id, liked, favorited, liked_at: liked ? new Date(1000) : null, favorited_at: favorited ? new Date(2000) : null, version: 20 });
     const remove = operation(`unified-remove-${liked}-${favorited}`, { protocol: 3, action: 'favorite', active: false, expectedVersion: 20 });
     const removed = await api.setIndependentReaction(actor, remove);
@@ -103,8 +104,19 @@ async function main() {
     const added = await api.setIndependentReaction(actor, operation(`unified-add-${liked}-${favorited}`, { protocol: 3, action: 'favorite', expectedVersion: 21 }));
     assert.equal(added.state.favorited, true); assert.equal(added.state.liked, false); assert.equal(added.state.likeCount, 0);
   }
-  await assert.rejects(api.setIndependentReaction(actor, operation('unified-invalid-like', { protocol: 3, expectedVersion: 22 })), { status: 400 });
-  checks.push('unified_v3_all_historical_flags_remove_once_replay_and_readd_privately');
+  if (!unifiedEnabled) {
+    const request = operation('guard-unified-request', { protocol: 3, action: 'favorite', expectedVersion: 7 });
+    const beforeBlocked = writes;
+    await assert.rejects(api.setIndependentReaction(actor, request), { status: 503 });
+    assert.equal(writes, beforeBlocked);
+    events.set(`${actor.id}/${request.requestId}`, { content_key: key, fingerprint: 'template-mark-v3:' + createHash('sha256').update(JSON.stringify(['template-mark-v3', key, request.action, request.active, request.expectedVersion])).digest('hex') });
+    assert.equal((await api.readIndependentReaction(actor, { key, requestId: request.requestId })).protocol, 3);
+    assert.equal((await api.setIndependentReaction(actor, request)).status, 'committed');
+    assert.equal(writes, beforeBlocked);
+    checks.push('compatible_guard_reads_and_replays_unified_receipts_but_blocks_new_writes');
+  }
+  await assert.rejects(api.setIndependentReaction(actor, operation('unified-invalid-like' , { protocol: 3, expectedVersion: 22 })), { status: 400 });
+  if (unifiedEnabled) checks.push('unified_v3_all_historical_flags_remove_once_replay_and_readd_privately');
   const studioFile = 'src/app/image-studio/studio.tsx';
   const studioAst = ts.createSourceFile(studioFile, readFileSync(path.join(root, studioFile), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   let projection: ts.Expression | undefined;
