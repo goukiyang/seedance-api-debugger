@@ -62,7 +62,8 @@ function CropSlot({ slot, aspect, disabled, onCrop, onInteract }: { slot: NonNul
     onCrop(area);
   };
   return <div className={styles.cropSlot} aria-disabled={disabled || !ready || undefined}>
-    <Cropper image={slot.source.previewUrl} crop={position} zoom={zoom} aspect={aspect} maxZoom={12}
+    <Cropper image={slot.source.previewUrl} crop={position} zoom={zoom} aspect={aspect} maxZoom={12} objectFit="cover"
+      style={{ cropAreaStyle: { border: 0, boxShadow: 'none' } }}
       setImageRef={ref => { cropImage.current = ref.current; }}
       initialCroppedAreaPercentages={slot.restore}
       onCropChange={value => { if (!restored.current || !disabled) setPosition(value); }}
@@ -80,7 +81,7 @@ function CropSlot({ slot, aspect, disabled, onCrop, onInteract }: { slot: NonNul
         if (latestArea.current) publishCrop(latestArea.current);
       }}
       onWheelRequest={() => ready && !disabled} onTouchRequest={() => ready && !disabled}
-      showGrid={!disabled} keyboardStep={5} cropperProps={{ tabIndex: disabled || !ready ? -1 : 0, 'aria-label': '拖动图片选择封面局部，可用方向键微调' }}
+      showGrid={false} keyboardStep={5} cropperProps={{ tabIndex: disabled || !ready ? -1 : 0, 'aria-label': '拖动图片选择封面局部，可用方向键微调' }}
       mediaProps={{ onError: () => { loaded.current = false; restored.current = false; setFailed(true); setReady(false); onCrop(); } }} />
     {failed && <span className={styles.imageError}>图片无法读取，请重新选择</span>}
     {!failed && !ready && <span className={styles.imageError} role="status">正在准备裁剪；若未能恢复，可重置裁剪或重新选图。</span>}
@@ -310,29 +311,47 @@ export function ModuleCoverEditor({ userId, moduleId, moduleName, initialFixedCo
   const currentIdentity = state ? `${state.target.kind}:${state.target.id}:${state.revision}` : hint ? `${hint.target.kind}:${hint.target.id}:${hint.revision}` : '';
   const currentSrc = currentCover ? currentCover.available ? currentCover.thumbnailUrl || currentCover.imageUrl : null : preview?.imageUrl;
   return createPortal(<>{productDialog}<dialog ref={dialog} className={styles.dialog} aria-label={`设置封面：${moduleName}`} aria-busy={busy || undefined}>
-    <header className={styles.header}><div><h2>设置封面</h2><p>{moduleName}</p></div><button type="button" onClick={dismiss} disabled={busy || Boolean(pending)} aria-label="关闭封面编辑"><X size={20} /></button></header>
-    {sessionAllowed && (state || hint) && <CurrentCover key={`${hint ? 'initial' : 'fresh'}:${currentIdentity}:${currentSrc || ''}`} cover={currentCover} preview={state ? preview : null} error={previewError}
-      visible={!loading && Boolean(state)} onReadError={hint ? () => setInitialCover(null) : undefined} />}
-    {!sessionAllowed ? <p role="status">账号状态已变化，当前封面操作已暂停。</p> : loading ? <p role="status">正在读取当前封面…</p> : !state ? <div role="alert"><p>{error}</p><button type="button" onClick={() => void initialize()}>重新读取</button></div> : <>
-      {!state.canManage && <p role="status">封面由模块创建者维护。</p>}
-      {state.recipe?.version === 3 && !editing && state.canManage && <button type="button" disabled={disabled} onClick={() => { setEditing(true); setDirty(true); setLayout('single'); setSlots(previous => [previous[0] ? { source: previous[0].source, key: ++sequence.current } : null, null]); }}>调整封面</button>}
-      {editing && <><div className={styles.toolbar}><div className={styles.layouts} role="group" aria-label="封面排版">{layouts.map(([value, label]) => <button key={value} type="button" aria-pressed={layout === value} disabled={disabled || !state.canManage} onClick={() => changeLayout(value)}>{label}</button>)}</div>
-        {count === 2 && <button type="button" disabled={disabled || !state.canManage || !slots[0]?.crop || !slots[1]?.crop} onClick={() => { if (selection.current) selection.current.index = 1 - selection.current.index; setSlots(([left, right]) => [right, left].map(slot => slot ? { ...slot, crop: undefined, restore: slot.crop, key: ++sequence.current } : null)); setDirty(true); }}><ArrowLeftRight size={16} />交换位置</button>}
-      </div>
-      <p className={styles.hint}>选图后拖动或缩放选择局部；左右、上下排版会自动带入所选生成结果的输入原图。保存为 1:1 方形封面，所有有权查看模块的人会看到同一封面。{legacyDraft ? '旧封面保持原样，只有保存后才替换。' : ''}</p>
-      <div className={`${styles.editFrame} ${styles[layout]}`}>{slots.slice(0, count).map((slot, index) => <div key={index} className={styles.cell}>
-        {slot ? <CropSlot key={`${scopeKey}:${index}:${slot.key}`} slot={slot} aspect={layout === 'horizontal' ? 1 / 2 : layout === 'vertical' ? 2 : 1} disabled={disabled || !state.canManage}
-          onInteract={modified} onCrop={crop => { if (current()) setSlots(previous => previous.map((item, i) => i === index && item?.key === slot.key && !(item.crop && crop && sameCrop(item.crop, crop)) ? { ...item, crop } : item)); }} /> : <span className={styles.empty}>选择图片</span>}
-        <div className={styles.cellActions}><button type="button" disabled={disabled || !state.canManage} onClick={() => setPickerSlot(index)}><ImagePlus size={16} />{slot ? '换图' : '选择图片'}</button>
-          {slot && <button type="button" title="重置这张图的裁剪" aria-label="重置这张图的裁剪" disabled={disabled || !state.canManage} onClick={() => { setSlots(current => current.map((item, i) => i === index && item ? { source: item.source, key: ++sequence.current } : item)); setDirty(true); }}><RotateCcw size={16} /></button>}</div>
-      </div>)}</div>
-      <div className={styles.previewRow}><span>草稿预览{dirty ? '（未保存）' : legacyDraft ? '（保存后生效）' : ''}</span><div className={`${styles.preview} ${styles[layout]}`}>{slots.slice(0, count).map((slot, index) => <CropPreview key={index} slot={slot} />)}</div></div></>}
+    <header className={styles.header}><div><h2>设置封面</h2><p title={moduleName}>{moduleName}</p></div><button type="button" onClick={dismiss} disabled={busy || Boolean(pending)} aria-label="关闭封面编辑"><X size={20} /></button></header>
+    <div className={styles.workspace} data-editing={editing}>
+      <section className={styles.editorPanel} aria-label="封面编辑区">
+        {!sessionAllowed ? <p role="status">账号状态已变化，当前封面操作已暂停。</p> : loading ? <p role="status">正在读取当前封面…</p> : !state ? <div role="alert"><p>{error}</p><button type="button" onClick={() => void initialize()}>重新读取</button></div> : <>
+          {!state.canManage && <p role="status">封面由模块创建者维护。</p>}
+          {state.recipe?.version === 3 && !editing && state.canManage && <button type="button" disabled={disabled} onClick={() => { setEditing(true); setDirty(true); setLayout('single'); setSlots(previous => [previous[0] ? { source: previous[0].source, key: ++sequence.current } : null, null]); }}>调整封面</button>}
+          {editing && <>
+            <div className={styles.toolbar}>
+              <div className={styles.layouts} role="group" aria-label="封面排版">{layouts.map(([value, label]) => <button key={value} type="button" aria-pressed={layout === value} disabled={disabled || !state.canManage} onClick={() => changeLayout(value)}>{label}</button>)}</div>
+              <div className={styles.tools}>
+                {count === 2 && <button type="button" title="交换两张图片" aria-label="交换两张图片" disabled={disabled || !state.canManage || !slots[0]?.crop || !slots[1]?.crop} onClick={() => { if (selection.current) selection.current.index = 1 - selection.current.index; setSlots(([left, right]) => [right, left].map(slot => slot ? { ...slot, crop: undefined, restore: slot.crop, key: ++sequence.current } : null)); setDirty(true); }}><ArrowLeftRight size={16} /></button>}
+                <details className={styles.help}><summary>操作说明</summary><p>拖动图片或用方向键调整取景，滚轮或滑条缩放。左右、上下排版会带入所选生成结果的输入原图，也可以分别换图。封面保存为 1:1 方形，供有权查看模块的人使用。{legacyDraft ? '旧封面只有保存后才会替换。' : ''}</p></details>
+              </div>
+            </div>
+            <div className={styles.canvasArea}>
+              <div className={`${styles.editFrame} ${styles[layout]}`}>{slots.slice(0, count).map((slot, index) => <div key={index} className={styles.cell}>
+                {slot ? <CropSlot key={`${scopeKey}:${index}:${slot.key}`} slot={slot} aspect={layout === 'horizontal' ? 1 / 2 : layout === 'vertical' ? 2 : 1} disabled={disabled || !state.canManage}
+                  onInteract={modified} onCrop={crop => { if (current()) setSlots(previous => previous.map((item, i) => i === index && item?.key === slot.key && !(item.crop && crop && sameCrop(item.crop, crop)) ? { ...item, crop } : item)); }} /> : <span className={styles.empty}>选择图片</span>}
+                <div className={styles.cellActions}><button type="button" aria-label={count === 1 ? '选择封面图片' : `选择第${index + 1}张封面图片`} disabled={disabled || !state.canManage} onClick={() => setPickerSlot(index)}><ImagePlus size={16} /><span>{slot ? '换图' : '选图'}</span></button>
+                  {slot && <button type="button" title="重置这张图的裁剪" aria-label="重置这张图的裁剪" disabled={disabled || !state.canManage} onClick={() => { setSlots(current => current.map((item, i) => i === index && item ? { source: item.source, key: ++sequence.current } : item)); setDirty(true); }}><RotateCcw size={16} /></button>}</div>
+              </div>)}</div>
+            </div>
+          </>}
+        </>}
+      </section>
+      <aside className={styles.previewPanel} aria-label="封面预览">
+        {sessionAllowed && state && !loading && editing && <section className={styles.livePreview} aria-label="实时封面预览">
+          <div className={styles.previewHeading}><span>实时预览</span><span className={styles.draftState}>{dirty || legacyDraft ? '未保存' : '1:1'}</span></div>
+          <div className={`${styles.preview} ${styles[layout]}`}>{slots.slice(0, count).map((slot, index) => <CropPreview key={index} slot={slot} />)}</div>
+        </section>}
+        {sessionAllowed && (state || hint) && <CurrentCover key={`${hint ? 'initial' : 'fresh'}:${currentIdentity}:${currentSrc || ''}`} cover={currentCover} preview={state ? preview : null} error={previewError}
+          visible={!loading && Boolean(state)} onReadError={hint ? () => setInitialCover(null) : undefined} />}
+      </aside>
+    </div>
+    {sessionAllowed && state && !loading && <footer className={styles.footer}>
       {error && <p className={styles.error} role="alert">{error}</p>}
-      <footer className={styles.footer}><button type="button" onClick={dismiss} disabled={busy || Boolean(pending)}>取消</button>
+      <div className={styles.footerActions}><button type="button" onClick={dismiss} disabled={busy || Boolean(pending)}>取消</button>
         {pending ? <><button type="button" disabled={busy} onClick={() => void checkPending()}>{busy ? '确认中…' : '检查保存结果'}</button>{retryAllowed && <button type="button" disabled={busy} onClick={() => void save(pending)}>重试本次保存</button>}</>
           : editing && <button type="button" className={styles.primary} disabled={disabled || !editing || !state.canManage || (!dirty && !legacyDraft) || slots.slice(0, count).some(slot => !slot?.crop)} onClick={() => void save()}><Save size={16} />{busy ? '正在保存…' : legacyDraft ? '保存正方形封面' : '保存封面'}</button>}
-      </footer>
-    </>}
+      </div>
+    </footer>}
     {pickerSlot !== null && <UploadedImagePicker open imageOnly target="image-studio" title="选择封面图片（只能用作者本人的图片）" confirmLabel="使用这张图片" purpose="module-cover" contextTemplateId={moduleId} contextKey={`${userId}:module-cover:${moduleId}:${pickerSlot}`} maxSelection={1} currentCount={0} currentAssetIds={[]} portalContainer={dialog.current}
       onClose={() => { selectionEpoch.current += 1; selectionRequest.current?.abort(); selectionRequest.current = null; setReading(false); setPickerSlot(null); }} onUploadFile={(file, onProgress) => uploadFileAsAsset(file, { onProgress })}
       onConfirm={async ids => {

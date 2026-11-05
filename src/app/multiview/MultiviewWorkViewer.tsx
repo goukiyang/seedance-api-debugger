@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Copy, Download, Expand, Pencil, RefreshCw } from 'lucide-react';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
 import { RelativeTime } from '@/components/RelativeTime';
+import { ImageResultStatusDetails } from '@/components/ImageResultStatusDetails';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useProductDialog } from '@/components/useProductDialog';
 import { useUnsavedNavigation } from '@/lib/hooks/use-unsaved-navigation';
@@ -151,6 +152,12 @@ export function MultiviewWorkViewer(props: WorkViewerProps) {
       <input aria-label="作品名称" value={title} maxLength={120} disabled={busy} onChange={event => { titleAttempted.current = ''; setTitle(event.target.value); retainReader(mode, selected, event.target.value); }}
         onKeyDown={event => { if (event.key === 'Enter' && !busy && title.trim() && title.trim() !== work.title) { event.preventDefault(); titleAttempted.current = title.trim(); props.onRename(title.trim()); } }} />
       <span className={styles.status}>{statusText(work)}</span>
+      <ImageResultStatusDetails active={!isClientSessionBlocked()} scopeKey={`${identity}:${mode}:${selected}:details`}
+        detail={notice || work.lastError || undefined} reason={Boolean(work.lastError || imageFailed)} label="查看作品信息与操作反馈" heading="作品信息与操作反馈">
+        <div className={styles.cardCaption}><span>{work.projectTitle || '未关联项目'} · <RelativeTime value={work.updatedAt} /></span>
+          {ready && <span>{mode === 'single' ? slot?.name || '当前单张' : `${ready.frameCount}张 · ${ready.width}×${ready.height}`}{ready.revision !== work.draftRevision && ' · 上次已保存版本'}</span>}
+          <a href={`/tasks/${encodeURIComponent(work.sourceTaskId)}?returnTo=${encodeURIComponent(`/multiview?view=works&workId=${work.id}`)}`}>查看原视频</a></div>
+      </ImageResultStatusDetails>
       <details ref={menu} className={styles.menu} onToggle={event => setMenuOpen(event.currentTarget.open)}><summary>作品操作</summary><div onClick={event => {
         if ((event.target as HTMLElement).closest('button') && menu.current) { menu.current.open = false; setMenuOpen(false); }
       }}>
@@ -159,7 +166,6 @@ export function MultiviewWorkViewer(props: WorkViewerProps) {
         <button type="button" disabled={busy} onClick={props.onRemove}>{work.removed ? '恢复到作品库' : '移出作品库'}</button>
       </div></details>
     </header>
-    <div className={styles.meta}>{work.projectTitle || '未关联项目'} · <RelativeTime value={work.updatedAt} /></div>
     <div className={styles.mediaStage}>
       <button type="button" className={`${styles.button} ${styles.previous}`} disabled={!props.onPrevious || busy} onClick={() => void leave(props.onPrevious)} aria-label="上一件作品"><ArrowLeft size={20} /></button>
       {src && !imageFailed ? <button type="button" className={styles.mainImage} onClick={() => setZoom(true)} aria-label="放大查看当前图片">
@@ -173,12 +179,11 @@ export function MultiviewWorkViewer(props: WorkViewerProps) {
       <div className={styles.thumbnails} aria-label="组内图片">{ready.recipe.slots.map((item, index) => {
         const frame = multiviewWorkFile(work, `frame-${item.id}`);
         return <button type="button" key={item.id} aria-label={`查看第${index + 1}张${item.name ? ` ${item.name}` : ''}`} aria-pressed={mode === 'single' && slot?.id === item.id}
-          title="单击放大这个角度" onClick={() => { choose('single', item.id, true); setZoom(true); }}>{frame && <img src={workFileUrl(work.id, frame)} alt="" loading="lazy" />}<span>{item.name || index + 1}</span></button>;
+          title={`放大${item.name || `第${index + 1}个角度`}`} onClick={() => { choose('single', item.id, true); setZoom(true); }}>{frame && <img src={workFileUrl(work.id, frame)} alt="" loading="lazy" />}</button>;
       })}</div>
       <div className={styles.segment} aria-label="浏览模式"><button type="button" aria-pressed={mode === 'collage'} onClick={() => choose('collage')}>拼图</button>
         <button type="button" aria-pressed={mode === 'single'} onClick={() => choose('single')}>单张</button></div>
-    </div><div className={styles.meta}>{mode === 'single' ? slot?.name || '当前单张' : `${ready.frameCount}张 · ${ready.width}×${ready.height}`}
-      {ready.revision !== work.draftRevision && ' · 上次已保存版本'}</div></>}
+    </div></>}
     <footer className={styles.viewerActions}>
       <button type="button" className={styles.button} onClick={() => void leave(() => props.onEdit(work))} disabled={busy || work.removed || work.sourceState !== 'current'}><Pencil size={16} />继续编辑</button>
       {props.onUseReference && <button type="button" className={styles.button} disabled={!ready || reading || busy || work.removed || mode === 'single' && !slot}
@@ -191,8 +196,8 @@ export function MultiviewWorkViewer(props: WorkViewerProps) {
       {work.status === 'failed' && <button type="button" className={styles.button} disabled={busy || work.removed || !work.recipe || work.sourceState !== 'current'} onClick={props.onRetry}>重新准备拼图</button>}
       <button type="button" className={styles.button} disabled={busy} onClick={props.onRefresh}><RefreshCw size={15} />重新核对</button>
     </footer>
-    <p role="status" className={styles.notice}>{notice || work.lastError || ''}</p>
-    <details className={styles.original}><summary>查看原视频</summary><a href={`/tasks/${encodeURIComponent(work.sourceTaskId)}?returnTo=${encodeURIComponent(`/multiview?view=works&workId=${work.id}`)}`}>打开原视频</a></details>
+    {src && !imageFailed ? <span role="status" className={styles.visuallyHidden}>{notice || work.lastError || ''}</span>
+      : <p role="status" className={styles.notice}>{notice || work.lastError || ''}</p>}
     {zoom && src && !imageFailed && <ZoomableImagePreview src={src} alt={mode === 'single' ? slot?.name || '当前单张' : work.title}
       title={mode === 'single' ? slot?.name || '当前单张' : '拼图'} sourceVersion={`${work.sourceVersion}:${ready?.revision}:${role}`}
       previewKey={`multiview-work:${owner}:${work.id}:${ready?.revision}:${role}`} hasNavigation={Boolean(ready?.recipe.slots.length)}

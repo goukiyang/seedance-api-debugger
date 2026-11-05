@@ -10,6 +10,7 @@ import { SortableContext, arrayMove, rectSortingStrategy, sortableKeyboardCoordi
 import { CSS } from '@dnd-kit/utilities';
 import PageBanner from '@/components/PageBanner';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
+import { ImageResultStatusDetails } from '@/components/ImageResultStatusDetails';
 import { VideoLoopButton } from '@/components/VideoLoopButton';
 import { useProductDialog } from '@/components/useProductDialog';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
@@ -1349,13 +1350,18 @@ function MultiviewPageContent() {
           </fieldset>
         </aside></div>}
       </div>
-      <GuidedDemo kind="frames" />
-      {validSlots.length > 0 && validSlots.length < draft.slots.length && <div className={styles.partial} role="status"><p>{validSlots.length} / {draft.slots.length} 张预览可用。完整拼图仍按全部选帧准备原尺寸图片，也可只下载当前可预览部分。</p><div className={styles.inlineActions}><button type="button" disabled={exporting || Boolean(quickFrame)} onClick={() => void download('png', true)}>下载当前可预览 {validSlots.length} / {draft.slots.length} 张（PNG拼图）</button><button type="button" disabled={exporting || Boolean(quickFrame)} onClick={() => void download('zip', true)}>下载当前可预览 {validSlots.length} / {draft.slots.length} 张（ZIP单图包）</button></div></div>}
-      {notice && <OperationReceipt className={styles.notice} status={notice} busy={exporting} actions={exportFile && <button type="button" disabled={exporting} onClick={() => void downloadPrepared(exportFile)}>下载已准备文件</button>} />}
-      {(!saved || !viewSaved) && <p className={styles.warning} role="status">本机存储暂不可用，刷新可能丢失本次工作现场；当前编辑和原图导出仍可使用。</p>}
       <footer ref={exportBar} className={styles.exportBar} style={dock && dock.width >= 160 ? { left: dock.left, width: dock.width, bottom: dock.bottom } : { visibility: 'hidden', width: 'min(100%, 600px)' }}>
-        <div><strong>{dimensions?.width} × {dimensions?.height}</strong><small>{validSlots.length} / {draft.slots.length} 张预览可用</small></div>
+        <span className={styles.visuallyHidden} role="status">{notice}</span>
         <ExperienceActions className={styles.exportActions} label="拼图导出">
+          <ImageResultStatusDetails active={sessionReady && pageView === 'editor'} scopeKey={`${authority}:${taskId}:${info.sourceVersion}:image-details`}
+            detail={notice || undefined} reason={!saved || !viewSaved || validSlots.length > 0 && validSlots.length < draft.slots.length}
+            label="查看拼图信息与操作反馈" heading="拼图信息与操作反馈">
+            <p>{dimensions?.width} × {dimensions?.height} px · {validSlots.length} / {draft.slots.length} 张预览可用</p>
+            {validSlots.length > 0 && validSlots.length < draft.slots.length && <div role="status"><p>{validSlots.length} / {draft.slots.length} 张预览可用。完整拼图仍按全部选帧准备原尺寸图片，也可只下载当前可预览部分。</p><div className={styles.inlineActions}><button type="button" disabled={exporting || Boolean(quickFrame)} onClick={() => void download('png', true)}>下载当前可预览 {validSlots.length} / {draft.slots.length} 张（PNG拼图）</button><button type="button" disabled={exporting || Boolean(quickFrame)} onClick={() => void download('zip', true)}>下载当前可预览 {validSlots.length} / {draft.slots.length} 张（ZIP单图包）</button></div></div>}
+            {notice && exportFile && <button type="button" disabled={exporting} onClick={() => void downloadPrepared(exportFile)}>下载已准备文件</button>}
+            {(!saved || !viewSaved) && <p role="status">本机存储暂不可用，刷新可能丢失本次工作现场；当前编辑和原图导出仍可使用。</p>}
+            <GuidedDemo kind="frames" />
+          </ImageResultStatusDetails>
           <button type="button" className={styles.primary} disabled={exporting || Boolean(quickFrame)} onClick={copyCollage}><Copy size={16} />{exporting ? '正在准备原尺寸…' : '复制拼图'}</button>
           <button type="button" disabled={exporting || Boolean(quickFrame)} onClick={() => void download('png')}><Download size={16} />下载拼图</button>
           <ProductActionMenu label="更多下载方式" disabled={exporting || Boolean(quickFrame)} actions={[

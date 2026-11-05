@@ -62,7 +62,7 @@ const CircleAlert = Symbol('circle-alert');
 const Status = load(statusSource, {
   'react-dom': { createPortal: (value: unknown) => value },
   '@radix-ui/react-popper': { Root: Symbol('root'), Anchor: Symbol('anchor'), Content: Symbol('content') },
-  'lucide-react': { CircleAlert }, './useDialogDismiss': { useDialogDismiss() {} },
+  'lucide-react': { CircleAlert, Info: Symbol('info') }, './useDialogDismiss': { useDialogDismiss() {} },
 }).ImageResultStatusDetails;
 const reasonTrigger = nodes(render(Status, { detail: 'fixture', reason: true, active: true, scopeKey: 'reason' })).find(node => node.type === 'button')!;
 assert.equal(reasonTrigger.props['aria-label'], '查看原因');
@@ -90,6 +90,7 @@ const Feishu = load(read('src/components/image-studio/ImageFeishuStatus.tsx'), {
   '@radix-ui/react-popper': { Root: Symbol('root'), Anchor: Symbol('anchor'), Content: Symbol('content') },
   'lucide-react': { Send, Check, CircleAlert: Alert, LoaderCircle: Symbol('loader'), X: Symbol('close') },
   '@/components/useDialogDismiss': { useDialogDismiss() {} },
+  '@/components/experience/ExperienceParts': { ExperienceActions: Symbol('experience-actions'), OperationReceipt: Symbol('receipt') },
   '@/lib/context/AppSessionContext': { useAppSession: () => ({ user: { id: 'fixture-user' }, hasLoadedUser: true, sessionChanged: false }) },
   '@/lib/auth/client-session-boundary': { isClientSessionBlocked: () => false },
   '@/lib/video/feishu-errors': { videoFeishuErrorText: () => 'fixture error' },
@@ -139,7 +140,8 @@ const results = load(resultsSource, {
   './useImageGenerationWaitDisplay': { useImageGenerationWaitDisplay: (value: Props | undefined) => value ? {
     label: '生成中', detail: '原任务返回异常', showIssue: true, showTrack: true, progress: 37, busy: true, pending: true,
   } : undefined },
-  './ImageResultNextActions': { ImageResultNextActions: Symbol('next'), ImageResultNextActionFeedback: Symbol('next-feedback') },
+  './ImageResultNextActions': { ImageResultNextActionButtons: Symbol('next-buttons'), ImageResultNextActionFeedback: Symbol('next-feedback') },
+  '@/components/experience/ExperienceParts': { ExperienceActions: Symbol('experience-actions'), OperationReceipt: Symbol('receipt') },
   './useImageResultNextActions': { useImageResultNextActions: () => ({ canCutout: false, canVideo: false }) },
   './ResultImageContextMenu': { ResultImageContextMenu: Symbol('menu') },
   '@/lib/context/AppSessionContext': { useAppSession: () => ({ user: { id: 'fixture-user', role: 'admin' }, hasLoadedUser: true, sessionChanged: false }) },

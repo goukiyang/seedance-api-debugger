@@ -2,9 +2,6 @@
 .contextHint { display: inline; margin-inline-start: 10px; color: #aab8b4; font-size: 13px; font-weight: 400; line-height: 1.5; }
 .touchHint { display: none; }
 @media (hover: none), (any-pointer: coarse) { .pointerHint { display: none; } .touchHint { display: inline; } }
-.nextFeedback { margin: 5px 0; }
-.nextFeedback a { margin-inline-start: 8px; color: #a5e5d7; text-decoration: underline; }
-.nextFeedback a:focus-visible { outline: 2px solid #79daca; outline-offset: 2px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: var(--exp-section-gap); }
 .card { min-width: 0; position: relative; }
 .coverReactions { position: absolute; top: 6px; left: 6px; z-index: 7; width: calc(100% - 12px); color: #e0e9e5; pointer-events: none; }
@@ -27,16 +24,6 @@
   .media:hover .coverReactions button[data-reaction-action="like"], .media:focus-within .coverReactions button[data-reaction-action="like"],
   .media:hover .coverReactions [data-studio-pin-control], .media:focus-within .coverReactions [data-studio-pin-control] { opacity: 1; pointer-events: auto; }
 }
-.nextActions { padding-block: 7px 3px; min-width: 0; color: #c4d7cd; }
-.nextActions > div { display: flex; flex-wrap: wrap; gap: 6px; }
-.nextActions button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 34px; padding: 6px 8px; border: 1px solid #414b48; border-radius: 4px; background: #202725; color: #e0e9e5; font-size: 13px; cursor: pointer; }
-.nextActions button:hover { background: #303c37; }
-.nextActions button:focus-visible, .nextActions a:focus-visible { outline: 2px solid #79daca; outline-offset: 2px; }
-.nextActions button:disabled { opacity: .5; cursor: default; }
-.nextActions small { display: block; margin-top: 4px; font-size: 12px; line-height: 1.5; }
-.nextActions p { margin: 5px 0; font-size: 13px; overflow-wrap: anywhere; }
-.nextActions a { margin-left: 8px; color: #a5e5d7; text-decoration: underline; }
-@media (any-pointer: coarse) { .nextActions button { min-height: 40px; } }
 .media { position: relative; container-type: inline-size; aspect-ratio: 1; overflow: hidden; border: 1px solid #333b40; border-radius: 6px; background: #080a0b; }
 .media[data-transparent] { background-color: #d3dad8; background-image: repeating-conic-gradient(#aab4b1 0% 25%, transparent 0% 50%); background-size: 20px 20px; }
 .pending { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #adb6bd; }
@@ -104,6 +91,9 @@
 .specialtyActions { min-width: 0; }
 .deliveryAction { display: contents; }
 .commonActions button { width: 32px; height: 32px; padding: 0; flex: 0 0 32px; }
+.mediaDetailAction .issueTrigger { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; color: #e0e9e5; text-decoration: none; }
+.mediaPrimaryActions, .mediaNextActions { display: contents; }
+.mediaNextActions button { width: 32px; height: 32px; padding: 0; flex: 0 0 32px; }
 @media (hover: hover) and (pointer: fine) {
   .card [data-result-secondary] { opacity: 0; pointer-events: none; }
   .card:hover [data-result-secondary], .card:focus-within [data-result-secondary],
@@ -122,6 +112,8 @@
 .mediaActions[data-cover-context-delete] button { position: relative; flex: 0 0 35px; width: 35px; min-width: 35px; height: 35px; min-height: 35px; padding: 0; border-radius: 5px; }
 .mediaActions[data-cover-context-delete] button svg { width: 17.5px; height: 17.5px; }
 @media (hover: none), (any-pointer: coarse) {
+  .mediaDetailAction .issueTrigger, .mediaNextActions button, .mediaPrimaryActions button { min-height: 40px; }
+  .mediaDetailAction .issueTrigger, .mediaNextActions button { width: 40px; height: 40px; flex-basis: 40px; }
   /* Keep a full touch target without painting a large slab over the image. */
   .mediaActions[data-cover-context-delete] { gap: 0; padding: 4px; border: 0; background: transparent; box-shadow: none; }
   .mediaActions[data-cover-context-delete] button { isolation: isolate; flex-basis: 44px; width: 44px; min-width: 44px; height: 44px; min-height: 44px; border: 0; background: transparent; }
@@ -142,6 +134,7 @@
 .issueTrigger[data-reason] { display: inline-flex; align-items: center; justify-content: center; color: #ff6b6b; text-decoration: none; }
 .issueTrigger:focus-visible, .issueClose:focus-visible, .operationFeedback button:focus-visible { outline: 2px solid #79daca; outline-offset: 2px; }
 .issueLayer, .operationFeedback { z-index: 2147000200; max-width: min(320px, calc(100vw - 24px)); max-height: min(420px, calc(100dvh - 24px)); overflow: auto; padding: 12px; border: 1px solid #414b48; border-radius: 6px; background: #202725; color: #e0e9e5; box-shadow: 0 6px 24px #10171570; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.issueLayer[data-structured] { width: min(420px, calc(100vw - 24px)); max-width: min(420px, calc(100vw - 24px)); }
 .issueLayer strong { font-size: 14px; }
 .issueLayer dl { margin-block: 8px; }
 .issueLayer dl > div { display: grid; grid-template-columns: 5em minmax(0, 1fr); gap: 8px; margin-block: 5px; }
@@ -149,9 +142,17 @@
 .issueLayer dd { margin: 0; }
 .issueLayer p, .operationDetail p { margin: 6px 0; }
 .statusDetailText { white-space: pre-wrap; }
+.resultDetailsContent { min-width: 0; margin-top: 8px; }
+.resultDetailsContent .heading { padding: 0; }
+.resultSupplement { min-width: 0; margin-top: 10px; padding-top: 10px; border-top: 1px solid #414b48; }
+.resultSupplement > :first-child { margin-top: 0; }
+.resultSupplement > :last-child { margin-bottom: 0; }
 .statusDetailActions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .statusCopyFeedback { display: block; margin-top: 4px; color: #c4d7cd; }
 .issueClose, .operationFeedback button { border: 0; padding: 3px 5px; background: transparent; color: #a5e5d7; font: inherit; cursor: pointer; }
 .issueClose:disabled { opacity: .55; cursor: default; }
 .operationFeedback { padding: 7px 10px; width: max-content; }
+.nextActionFeedback { display: flex; align-items: center; gap: 8px; width: max-content; }
+.nextActionFeedback a { color: #a5e5d7; text-decoration: underline; white-space: nowrap; }
+.nextActionFeedback a:focus-visible { outline: 2px solid #79daca; outline-offset: 2px; }
 .operationDetail { max-width: 280px; }
