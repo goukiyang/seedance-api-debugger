@@ -4,7 +4,7 @@ import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 import { RelativeTime } from '@/components/RelativeTime';
 import TemplateFavoriteTitle from '@/components/content-reactions/TemplateFavoriteTitle';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -142,6 +142,8 @@ function buildTemplateView(template: SerializedGenerationTemplate): TemplateView
 export function TemplateLibraryClient() {
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<TemplateLibraryUser | null>(null);
+  const restoredOwner = useRef('');
+  const [preferencesOwner, setPreferencesOwner] = useState('');
   const [templates, setTemplates] = useState<SerializedGenerationTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -173,9 +175,24 @@ export function TemplateLibraryClient() {
       if (!response.ok) throw new Error(data.message || data.error || '模板列表加载失败');
 
       const items = Array.isArray(data.templates) ? data.templates as SerializedGenerationTemplate[] : [];
+      let savedSelection: string | null = null;
+      const ownerChanged = restoredOwner.current !== user?.id;
+      if (user?.id && ownerChanged) {
+        setSearch(''); setSceneFilter('全部场景'); setStatusFilter('全部状态');
+        try {
+          const saved = JSON.parse(localStorage.getItem(`sd2:template-library:v1:${user.id}`) || 'null');
+          if (saved?.version === 1) {
+            if (typeof saved.search === 'string' && saved.search.length <= 160) setSearch(saved.search);
+            if (SCENE_FILTERS.includes(saved.scene)) setSceneFilter(saved.scene);
+            if (STATUS_FILTERS.includes(saved.status)) setStatusFilter(saved.status);
+            if (typeof saved.selected === 'string') savedSelection = saved.selected;
+          }
+        } catch { /* Browse preferences are optional. */ }
+        restoredOwner.current = user.id; setPreferencesOwner(user.id);
+      }
       setTemplates(items);
       setSelectedTemplateId((current) => {
-        const preferred = preferredTemplateId || current;
+        const preferred = preferredTemplateId || savedSelection || (ownerChanged ? null : current);
         return (preferred && items.some((item) => item.id === preferred)) ? preferred : items[0]?.id || null;
       });
     } catch (loadError) {
@@ -190,6 +207,15 @@ export function TemplateLibraryClient() {
   useEffect(() => {
     void loadTemplates();
   }, [loadTemplates]);
+
+  useEffect(() => {
+    if (loading || !currentUser?.id || preferencesOwner !== currentUser.id) return;
+    try {
+      localStorage.setItem(`sd2:template-library:v1:${currentUser.id}`, JSON.stringify({
+        version: 1, selected: selectedTemplateId, search, scene: sceneFilter, status: statusFilter,
+      }));
+    } catch { /* The library remains usable without storage. */ }
+  }, [loading, currentUser?.id, preferencesOwner, selectedTemplateId, search, sceneFilter, statusFilter]);
 
   const templateViews = useMemo(() => templates.map(buildTemplateView), [templates]);
   const filteredViews = useMemo(() => {

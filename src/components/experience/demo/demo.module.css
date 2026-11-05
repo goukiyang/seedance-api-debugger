@@ -19,8 +19,18 @@
 .destination[data-applied="true"] .receipt { color: oklch(0.84 0.092 175); }
 .compact { width: 326px; margin: 14px 0 0 16px; }
 .compact .workflow { grid-template-columns: 1fr; }
-.compact :is(.source, .destination) { padding: 12px; gap: 8px; }
+.compact :is(.source, .destination) { padding: 12px; gap: 6px; }
 .compact .destination { border-inline-start: 0; border-top: 1px solid oklch(0.3 0.018 243); }
 @media (prefers-reduced-motion: no-preference) {
   .choice, .result, .confirm, .receipt, .tile { transition: color 160ms ease-out, background-color 160ms ease-out, border-color 160ms ease-out, opacity 160ms ease-out; }
 }
+
+.confirm[data-visible="false"] { visibility: hidden; }
+.result strong { min-width: 0; overflow-wrap: anywhere; font-size: 13px; line-height: 1.4; }
+.compareResult { flex-direction: column; align-items: flex-start; }
+.compareTiles { display: flex; gap: 8px; }
+.compareTiles .tile { display: flex; flex-direction: column; gap: 3px; width: 72px; flex-basis: 72px; height: 54px; }
+.compareTiles .tile small { font-size: 10px; }
+.compareTiles[data-swapped="true"] .tile:first-child { transform: translateX(80px); }
+.compareTiles[data-swapped="true"] .tile:last-child { transform: translateX(-80px); }
+@media (prefers-reduced-motion: no-preference) { .compareTiles .tile { transition: transform 180ms ease-out, opacity 160ms ease-out; } }

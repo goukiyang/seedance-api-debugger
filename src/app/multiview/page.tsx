@@ -1,6 +1,8 @@
 'use client';
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
+import { ExperienceActions, OperationReceipt } from '@/components/experience/ExperienceParts';
+import { GuidedDemo } from '@/components/experience/demo/GuidedDemo';
 import { useSearchParams } from 'next/navigation';
 import { ArrowLeft, ArrowRight, Copy, Download, Expand, Film, History, Images, Pencil, RefreshCw, Undo2, WandSparkles, X } from 'lucide-react';
 import { DndContext, KeyboardCode, KeyboardSensor, MouseSensor, TouchSensor, closestCenter, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
@@ -1283,13 +1285,14 @@ function MultiviewPageContent() {
         {sharedOperation.canResume && <button type="button" disabled={sharedOperation.busy} onClick={() => void sharedOperation.resume()}>恢复原另存</button>}
         {sharedOperation.error && <p role="status">{sharedOperation.error}</p>}
       </div> : <div className={styles.workStatus}>
-        <span role="status">{workState.loading ? '正在读取作品…' : workState.phase === 'saved' ? '已保存到我的作品' : workState.phase === 'saving' ? '正在确认保存…' : workState.phase === 'unknown' ? '保存结果待确认' : workState.phase === 'preparing' ? workState.work?.recipe ? '选帧已保存，正在准备拼图' : '作品正在准备，当前修改仅此设备保留' : workState.phase === 'failed' ? '选帧已保存，拼图准备未完成' : '仅此设备保留，尚未保存到作品'}</span>
+        <OperationReceipt busy={workState.busy} status={workState.loading ? '正在读取作品…' : workState.phase === 'saved' ? '已保存到我的作品' : workState.phase === 'saving' ? '正在确认保存…' : workState.phase === 'unknown' ? '保存结果待确认' : workState.phase === 'preparing' ? workState.work?.recipe ? '选帧已保存，正在准备拼图' : '作品正在准备，当前修改仅此设备保留' : workState.phase === 'failed' ? '选帧已保存，拼图准备未完成' : '仅此设备保留，尚未保存到作品'} />
+        {workState.phase === 'saved' && !workState.changed && workState.work?.ready && <a href="/assets?type=image&source=multiview-output">查看多视图成品</a>}
         {workState.pending ? <button type="button" disabled={workState.busy} onClick={() => void workState.queryOriginal()}>查询原保存</button>
           : workState.conflict ? <><button type="button" disabled={!workState.canSaveCurrent || exporting || Boolean(quickFrame) || applyingFrame} onClick={() => void workState.saveCurrent()}>保存到原作品</button><button type="button" disabled={workState.busy || exporting || Boolean(quickFrame) || applyingFrame || !workState.work?.recipe || workState.work.sourceVersion !== info.sourceVersion} onClick={workState.openServer}>打开服务器版本</button><button type="button" disabled={!workState.canBranch || exporting || Boolean(quickFrame) || applyingFrame} onClick={event => branchWork(event.currentTarget)}>将此设备修改另存一版</button></>
             : <button type="button" disabled={workState.busy || workState.loading || Boolean(quickFrame) || exporting || applyingFrame || Boolean(workState.work && !workState.canSaveCurrent)} onClick={() => { setAllowWorkCreate(true); void (workState.work ? workState.saveCurrent() : workState.create()); }}>保存</button>}
         {workState.work && !workState.title.trim() && <p role="status">请填写作品名称，当前修改尚未保存到作品。</p>}
         {workState.canRetrySave && <button type="button" onClick={workState.retrySave}>{workState.work?.status === 'failed' ? '重新准备拼图' : '重试保存当前修改'}</button>}
-        {workState.message && <p role="status">{workState.message}<button type="button" className={styles.quiet} disabled={workState.busy} onClick={workState.retry}>重新核对作品</button></p>}
+        {workState.message && <OperationReceipt status={workState.message} actions={<button type="button" className={styles.quiet} disabled={workState.busy} onClick={workState.retry}>查询原作品</button>} />}
         {workState.work && <button type="button" onClick={() => setShareOpen(true)}>分享</button>}
       </div>}
       {reduceCount !== null && <section className={styles.retain} aria-label="选择保留图片"><h3>保留哪 {reduceCount} 张？</h3><p>其余留在本次草稿，增加数量或撤销时可找回。</p><div className={styles.retainOptions}>{draft.slots.map((item, index) => <label key={item.id}><input type="checkbox" checked={retained.includes(item.id)} disabled={Boolean(item.locked)} onChange={event => setRetained(value => event.target.checked ? [...value, item.id] : value.filter(id => id !== item.id))} />第 {index + 1} 张{item.locked ? ' · 已锁定' : item.manual ? ' · 已手选' : ''}{item.name && ` · ${item.name}`}</label>)}</div><button type="button" className={styles.primary} disabled={retained.length !== reduceCount} onClick={() => {
@@ -1346,18 +1349,19 @@ function MultiviewPageContent() {
           </fieldset>
         </aside></div>}
       </div>
+      <GuidedDemo kind="frames" />
       {validSlots.length > 0 && validSlots.length < draft.slots.length && <div className={styles.partial} role="status"><p>{validSlots.length} / {draft.slots.length} 张预览可用。完整拼图仍按全部选帧准备原尺寸图片，也可只下载当前可预览部分。</p><div className={styles.inlineActions}><button type="button" disabled={exporting || Boolean(quickFrame)} onClick={() => void download('png', true)}>下载当前可预览 {validSlots.length} / {draft.slots.length} 张（PNG拼图）</button><button type="button" disabled={exporting || Boolean(quickFrame)} onClick={() => void download('zip', true)}>下载当前可预览 {validSlots.length} / {draft.slots.length} 张（ZIP单图包）</button></div></div>}
-      {notice && <div className={styles.notice} role="status">{notice}{exportFile && <button type="button" disabled={exporting} onClick={() => void downloadPrepared(exportFile)}>下载已准备文件</button>}</div>}
+      {notice && <OperationReceipt className={styles.notice} status={notice} busy={exporting} actions={exportFile && <button type="button" disabled={exporting} onClick={() => void downloadPrepared(exportFile)}>下载已准备文件</button>} />}
       {(!saved || !viewSaved) && <p className={styles.warning} role="status">本机存储暂不可用，刷新可能丢失本次工作现场；当前编辑和原图导出仍可使用。</p>}
       <footer ref={exportBar} className={styles.exportBar} style={dock && dock.width >= 160 ? { left: dock.left, width: dock.width, bottom: dock.bottom } : { visibility: 'hidden', width: 'min(100%, 600px)' }}>
         <div><strong>{dimensions?.width} × {dimensions?.height}</strong><small>{validSlots.length} / {draft.slots.length} 张预览可用</small></div>
-        <div className={styles.exportActions}>
+        <ExperienceActions className={styles.exportActions} label="拼图导出">
           <button type="button" className={styles.primary} disabled={exporting || Boolean(quickFrame)} onClick={copyCollage}><Copy size={16} />{exporting ? '正在准备原尺寸…' : '复制拼图'}</button>
           <button type="button" disabled={exporting || Boolean(quickFrame)} onClick={() => void download('png')}><Download size={16} />下载拼图</button>
           <ProductActionMenu label="更多下载方式" disabled={exporting || Boolean(quickFrame)} actions={[
             { id: 'zip', label: '下载单张图片（ZIP）', onSelect: () => void download('zip') },
           ]} />
-        </div>
+        </ExperienceActions>
       </footer>
       {preview !== null && frames[preview]?.localFrame?.isCurrent() && <ZoomableImagePreview src={frames[preview].url!} localFrame={frames[preview].localFrame} alt="3D多视图原尺寸帧" imageSharing={false} sourceVersion={info.sourceVersion} previewKey={`multiview-${taskId}-${info.sourceVersion}-${preview}`} onClose={() => { previewSlot.current = null; setPreview(null); }} safeDetails={{ width: info.width, height: info.height }} />}
     </section>}

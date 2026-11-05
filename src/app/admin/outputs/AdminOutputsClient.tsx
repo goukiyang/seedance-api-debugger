@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Eye, EyeOff, RefreshCcw, RotateCcw, Search } from 'lucide-react';
 import PageBanner from '@/components/PageBanner';
+import { ExperienceEmpty, FilterSummary, type ExperienceFilter } from '@/components/experience/ExperienceParts';
 import PaginationControls from '@/components/PaginationControls';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
@@ -308,6 +309,21 @@ export default function AdminOutputsClient() {
     return params.toString();
   }, [attribution, costStatus, dateFrom, dateTo, includeDeleted, keyword, ownerUserId, page, pageSize, projectId, resolution, resultStatus, retentionStatus, status]);
   const returnTo = `/admin/outputs?${query}`;
+  const activeFilters: ExperienceFilter[] = [
+    ...(keyword.trim() ? [{ id: 'keyword', label: `搜索：${keyword.trim()}`, remove: () => setKeyword('') }] : []),
+    ...(status ? [{ id: 'status', label: statusOptions.find(([value]) => value === status)?.[1] || '所选任务状态', remove: () => { setStatus(''); setResultStatus(''); } }] : []),
+    ...(retentionStatus ? [{ id: 'retention', label: retentionOptions.find(([value]) => value === retentionStatus)?.[1] || '所选留存状态', remove: () => setRetentionStatus('') }] : []),
+    ...(ownerUserId ? [{ id: 'owner', label: `归属人：${ownerUserId}`, remove: () => setOwnerUserId('') }] : []),
+    ...(projectId ? [{ id: 'project', label: `项目：${projectId === 'unassigned' ? '未归属项目' : projectId}`, remove: () => setProjectId('') }] : []),
+    ...(resolution ? [{ id: 'resolution', label: `分辨率：${resolution}`, remove: () => setResolution('') }] : []),
+    ...(dateFrom ? [{ id: 'from', label: `开始日期：${dateFrom}`, remove: () => setDateFrom('') }] : []),
+    ...(dateTo ? [{ id: 'to', label: `截止日期：${dateTo}`, remove: () => setDateTo('') }] : []),
+    ...(costStatus ? [{ id: 'cost', label: `费用：${({ pending: '待核', conflict: '冲突', confirmed: '已确认' } as Record<string, string>)[costStatus] || costStatus}`, remove: () => setCostStatus('') }] : []),
+    ...(resultStatus ? [{ id: 'result', label: `结果：${resultStatus === 'not_ready' ? '稳定文件未就绪' : '稳定文件已就绪'}`, remove: () => setResultStatus('') }] : []),
+    ...(attribution ? [{ id: 'attribution', label: `归属：${attribution === 'unassigned' ? '未分配' : attribution}`, remove: () => setAttribution('') }] : []),
+    ...(!includeDeleted ? [{ id: 'deleted', label: '排除已删除来源', remove: () => setIncludeDeleted(true) }] : []),
+  ];
+
 
   useEffect(() => {
     if (!user?.id) return;
@@ -451,6 +467,7 @@ export default function AdminOutputsClient() {
           </div>
         </div>
 
+        <FilterSummary filters={activeFilters.map(filter => ({ ...filter, remove: () => { filter.remove(); setPage(1); } }))} clear={resetFilters} />
         <div className="outputs-filter-panel">
           <label className="outputs-search">
             <Search size={16} />
@@ -582,11 +599,9 @@ export default function AdminOutputsClient() {
             ))}
           </div>
         ) : outputs.length === 0 && !error ? (
-          <div className="outputs-empty">
-            <h3>没有符合条件的产出</h3>
-            <p>调整状态或清空筛选后再查看。</p>
-            <button className="btn btn-secondary" type="button" onClick={resetFilters}>清空筛选</button>
-          </div>
+          <ExperienceEmpty className="outputs-empty" title="没有符合条件的产出" description="调整状态或清空筛选后再查看。">
+            {activeFilters.length > 0 && <button className="btn btn-secondary" type="button" onClick={resetFilters}>清除筛选</button>}
+          </ExperienceEmpty>
         ) : (
           <div className="outputs-list">
             {outputs.map((output) => {

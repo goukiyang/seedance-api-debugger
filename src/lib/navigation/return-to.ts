@@ -56,19 +56,23 @@ export function taskDetailHref(taskId: string, returnTo: string | null | undefin
   return `/tasks/${encodeURIComponent(taskId)}?return_to=${encodeURIComponent(sanitizeReturnTo(returnTo))}`;
 }
 
-export function readListReturn(query: URLSearchParams): { item: string | null; page: number | null } {
+export function readListReturn(query: URLSearchParams): { item: string | null; page: number | null; anchor: number | null } {
   const item = query.get('list_item');
   const page = Number(query.get('list_page'));
+  const anchor = query.has('list_anchor') ? Number(query.get('list_anchor')) : NaN;
   return {
     item: item && /^[a-zA-Z0-9_:-]{1,180}$/.test(item) ? item : null,
     page: Number.isSafeInteger(page) && page > 0 && page <= 10000 ? page : null,
+    anchor: Number.isSafeInteger(anchor) && anchor >= 0 && anchor < 1_000_000 ? anchor : null,
   };
 }
 
-export function listReturnHref(path: string, item: string | undefined, page?: number) {
+export function listReturnHref(path: string, item: string | undefined, page?: number, anchor?: number) {
   const address = new URL(sanitizeReturnTo(path), 'https://internal.invalid');
   if (item) address.searchParams.set('list_item', item);
   else address.searchParams.delete('list_item');
   if (page) address.searchParams.set('list_page', String(page));
+  if (item && anchor !== undefined) address.searchParams.set('list_anchor', String(anchor));
+  else address.searchParams.delete('list_anchor');
   return `${address.pathname}${address.search}${address.hash}`;
 }

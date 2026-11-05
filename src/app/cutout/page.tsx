@@ -12,6 +12,8 @@ import { useDialogDismiss } from '@/components/useDialogDismiss';
 import CutoutWorkspacePreview from '@/components/cutout/CutoutWorkspacePreview';
 import { clearCutoutWorkspaceDraft, cutoutWorkspaceDraftContentEqual, readCutoutWorkspaceDraft, saveCutoutWorkspaceDraft, swapCutoutWorkspaceDraft, readCutoutViewPreferences, saveCutoutViewPreferences, type CutoutViewPreferences, type CutoutWorkspaceDraft } from '@/lib/cutout/workspace-draft';
 import { getImageResultCutoutHandoff, prepareImageResultCutoutHandoff, startImageResultCutoutHandoff, type CutoutImageHandoff } from '@/lib/cutout/image-result-bridge';
+import { OperationReceipt, SelectionBar } from '@/components/experience/ExperienceParts';
+import { GuidedDemo } from '@/components/experience/demo/GuidedDemo';
 import { RelativeTime } from '@/components/RelativeTime';
 import { useProductDialog } from '@/components/useProductDialog';
 import BrushRepair from '@/components/cutout/BrushRepair';
@@ -244,6 +246,8 @@ export default function CutoutPage() {
   const [prompts, setPrompts] = useState<PromptOverride[]>([]);
   const [regionBox, setRegionBox] = useState<Box | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const downloadLock = useRef(false);
   const [mutation, setMutation] = useState<'upload' | 'submit' | 'cancel' | null>(null);
   const [uploadProgress, setUploadProgress] = useState<CutoutUploadProgress | null>(null);
   const [pendingSubmission, setPendingSubmission] = useState<PendingSubmission | null>(null);
@@ -1469,12 +1473,18 @@ export default function CutoutPage() {
   };
 
   const downloadResult = async (url: string, filename: string) => {
-    if (!url) return;
+    if (!url) return false;
+    const owner = accountIdRef.current;
+    const selected = selectedJobIdRef.current;
     try {
       const blob = await downloadCutoutBlob(url);
+      if (accountIdRef.current !== owner || !mounted.current) return false;
       saveCutoutBlob(blob, filename);
+      if (selectedJobIdRef.current === selected) setNotice({ kind: 'success', text: `已将「${filename}」交给浏览器下载。` });
+      return true;
     } catch (error) {
-      setNotice({ kind: 'error', text: safeError(error, 'download') });
+      if (mounted.current && accountIdRef.current === owner && selectedJobIdRef.current === selected) setNotice({ kind: 'error', text: safeError(error, 'download') });
+      return false;
     }
   };
 
@@ -1623,6 +1633,7 @@ export default function CutoutPage() {
               </div>}
             </div>
 
+            {selectedJobId && <GuidedDemo kind="request" />}
             {selectedJob && <details className={styles.taskDetails}><summary>任务详情</summary><p>{selectedJob.job_id}</p>{selectedJob.error?.message && <p>{selectedJob.error.message}</p>}</details>}
             {!source && !selectedJob && <p className={styles.emptyHint}>{selectedJobId ? '尚未读取到任务详情。可重新查询；不会因此重新提交任务。' : '提交任务后，处理进度和可用结果会显示在这里。'}</p>}
             {activeJob && <div className={styles.statusNotice} role="status" aria-live="polite">
@@ -1639,7 +1650,8 @@ export default function CutoutPage() {
             {jobReadIssue && <div className={`${styles.statusNotice} ${styles.statusWarning}`} role="status">{jobReadIssue}</div>}
             {selectedJob?.status === 'failed' && <div className={`${styles.statusNotice} ${styles.statusError}`}>任务未完成。原图仍保留，请检查参数后重新提交。</div>}
             {selectedJob?.status === 'canceled' && <div className={styles.statusNotice}>任务已取消，原图与其他任务结果不受影响。</div>}
-            {selectedJob?.status === 'succeeded' && ['cutout', 'characters', 'crop'].includes(selectedJob.kind) && !cutoutOutputs.length && <div className={`${styles.statusNotice} ${styles.statusWarning}`} role="status">任务已结束，但图片结果尚不可用。原图保留，可重新查询；不会重新提交任务。</div>}
+            {selectedJob?.status === 'succeeded' && ['cutout', 'characters', 'crop'].includes(selectedJob.kind) && !cutoutOutputs.length && <OperationReceipt className={styles.statusNotice} status="任务已结束，图片结果尚不可用" actions={<button type="button" disabled={isBusy || manualQueryBusy} onClick={() => void requerySelected()}>查询原任务</button>} />}
+            {outputJob?.status === 'succeeded' && result?.zip_url && <OperationReceipt className={styles.statusNotice} status="导出文件已就绪" actions={<button type="button" onClick={() => void downloadResult(resultFileUrl(outputJob.job_id, result.zip_url!), 'cutout-results.zip')}>下载导出包</button>} />}
 
             {(cutoutOutputs.length > 1 || outputJob?.kind === 'characters') && <GeneratedImageResults key={`${accountId}:${outputJob?.job_id}`} items={sharedResults} selectedId={selectedOutputId} onSelect={item => { void chooseOutput(item.id); }}
               scope={`sd2:cutout-results:v1:${accountId}:${selectedJobId}:output`} emptyLabel={selectedJob ? '暂无可显示的图片结果' : '暂无任务结果'}
@@ -1650,11 +1662,25 @@ export default function CutoutPage() {
                 {item.output.main && outputJob?.kind === 'cutout' && <button type="button" onClick={() => setRepairTarget({url: item.output!.url, originalUrl: matchingOriginal?.src, cropMeta: resultCrop, filename: item.output!.filename})}><Brush size={14} />局部修复</button>}
               </> : null}
             />}
-            {outputJob?.kind === 'characters' && cutoutOutputs.some(output => !output.main) && <div className={styles.operationBar}>
-              <span className={styles.subtleText}>已选 {selectedCharacters.length} 个（当前任务的已加载角色）</span>
-              <button className={styles.primaryButton} type="button" disabled={!selectedCharacters.length || isBusy} onClick={async () => { for (const output of selectedCharacters) await downloadResult(output.url, output.filename); }}><Download size={15} />导出所选PNG</button>
-              <span className={styles.subtleText}>按实际提供的角色尺寸导出；未提供全画布文件时不伪造。</span>
-            </div>}
+            {outputJob?.kind === 'characters' && cutoutOutputs.some(output => !output.main) && <SelectionBar className={styles.operationBar} count={selectedCharacters.length} summary="当前任务已加载的角色，按实际提供尺寸导出">
+              <button className={styles.primaryButton} type="button" disabled={!selectedCharacters.length || isBusy || downloading} onClick={async () => {
+                if (downloadLock.current) return;
+                downloadLock.current = true; setDownloading(true);
+                const owner = accountIdRef.current, job = selectedJobIdRef.current;
+                let completed = 0;
+                try {
+                  for (const output of selectedCharacters) {
+                    if (accountIdRef.current !== owner || !mounted.current) break;
+                    if (await downloadResult(output.url, output.filename)) completed++;
+                  }
+                  if (mounted.current && accountIdRef.current === owner && selectedJobIdRef.current === job) setNotice({
+                    kind: completed === selectedCharacters.length ? 'success' : 'warning',
+                    text: `已将 ${completed}/${selectedCharacters.length} 个角色PNG交给浏览器下载。${completed < selectedCharacters.length ? '其余文件可单独重试下载。' : ''}`,
+                  });
+                } finally { downloadLock.current = false; if (mounted.current) setDownloading(false); }
+              }}><Download size={15} />{downloading ? '正在准备PNG…' : '导出所选PNG'}</button>
+              <button type="button" className={styles.secondaryButton} disabled={downloading || !selectedCharacters.length} onClick={() => setSelectedEntryKeys([])}>取消选择</button>
+            </SelectionBar>}
             {retainedResultJob && selectedJob?.status !== 'succeeded' && <p className={styles.strategyCopy}>当前保留上次可用结果；新任务完成后才更新画面。</p>}
             {outputJob?.status === 'succeeded' && result && (
               <>
@@ -1685,14 +1711,16 @@ export default function CutoutPage() {
                         </span>
                       </div>;
                     })}
-                    <div className={styles.operationBar}>
+                    <SelectionBar className={styles.operationBar} count={selectedEntries.length} summary={`本次可导出 ${selectedExportEntries.length} 个对象`}
+                      selection={<div className={styles.buttonRow}>
                       <label className={styles.checkField}><input type="checkbox" checked={exportModes.trim} onChange={(event) => setExportModes((value) => ({ ...value, trim: event.target.checked }))} />紧裁剪图</label>
                       <label className={styles.checkField}><input type="checkbox" checked={exportModes.canvas} onChange={(event) => setExportModes((value) => ({ ...value, canvas: event.target.checked }))} />全尺寸画布</label>
+                      </div>}>
                       <button className={styles.secondaryButton} type="button" onClick={runMerge} disabled={!actionReady || isBusy || Boolean(pendingSubmission) || selectedEntries.length < 2 || !sameCanvasSize || selectedEntries.some((entry) => !entry.fullCanvas || !entryReferences(entry))}><LayersIcon />合并所选</button>
-                      <span className={styles.subtleText}>已选 {selectedEntries.length} 个（当前已加载对象）</span><button className={styles.primaryButton} type="button" onClick={runExport} disabled={!actionReady || isBusy || Boolean(pendingSubmission) || selectedExportEntries.length === 0 || (!exportModes.trim && !exportModes.canvas)}><Archive size={15} />导出所选</button>
+                      <button className={styles.primaryButton} type="button" onClick={runExport} disabled={!actionReady || isBusy || Boolean(pendingSubmission) || selectedExportEntries.length === 0 || (!exportModes.trim && !exportModes.canvas)}><Archive size={15} />导出所选</button>
                       {selectedEntries.length > 1 && (!sameCanvasSize || selectedEntries.some(entry => !entry.fullCanvas || !entryReferences(entry))) && <span className={styles.subtleText}>所选对象缺少一致的全尺寸画布，不能合并。</span>}
-                      <span className={styles.subtleText}>紧裁剪图去掉透明留白，全尺寸画布保留原位置与尺寸。</span>
-                    </div>
+                    </SelectionBar>
+                    <p className={styles.subtleText}>紧裁剪图去掉透明留白，全尺寸画布保留原位置与尺寸。</p>
                   </div>
                 )}
               </>
@@ -1744,14 +1772,14 @@ export default function CutoutPage() {
               }}><RefreshCw size={14} aria-hidden="true" /></button>
             </div>
 
-            {notice && <div className={`${styles.statusNotice} ${notice.kind === 'error' ? styles.statusError : notice.kind === 'warning' ? styles.statusWarning : ''}`} role="status">{notice.text}</div>}
+            {notice && <OperationReceipt className={`${styles.statusNotice} ${notice.kind === 'error' ? styles.statusError : notice.kind === 'warning' ? styles.statusWarning : ''}`} status={notice.text} />}
 
             <div className={styles.primaryActions}>
               <button className={styles.primaryButton} type="button" onClick={submitMain} disabled={!source || !sourceSize || !preferencesReady || !draftReady || !actionReady || isBusy || handoffBusy || Boolean(pendingSubmission) || Boolean(handoffSelection.current && mode === 'cutout' && (!handoff || ['preparing', 'submitting', 'unknown', 'accepted'].includes(handoff.stage))) || (mode === 'characters' && characterSettings.strategy === 'sam_box' && !samAvailable)}>
                 {isBusy ? <LoaderCircle size={16} className="spin" aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}
                 {mutation === 'upload' ? '正在上传…' : mutation === 'submit' ? '正在提交…' : mode === 'cutout' ? settingsChanged ? '按新设置重新处理' : '开始抠图' : '开始角色拆切'}
               </button>
-              {pendingSubmission && <button className={styles.secondaryButton} type="button" onClick={retrySubmission} disabled={isBusy || !actionReady}><RefreshCw size={15} />重试确认提交</button>}
+              {pendingSubmission && <OperationReceipt status="原提交结果待确认" busy={isBusy} actions={<button className={styles.secondaryButton} type="button" onClick={retrySubmission} disabled={isBusy || !actionReady}><RefreshCw size={15} />重试确认原提交</button>} detail={<button type="button" className={styles.quietButton} onClick={() => { setHistoryOpen(true); void loadHistory(); }}>查看任务历史</button>} />}
               {source?.kind === 'result' && <button className={styles.secondaryButton} type="button" onClick={runCrop} disabled={!actionReady || isBusy || Boolean(pendingSubmission)}><Crop size={15} />裁剪透明边缘</button>}
               {source && <button className={styles.secondaryButton} type="button" onClick={runSplitPreview} disabled={!actionReady || isBusy || Boolean(pendingSubmission)}><Scan size={15} />拆分透明对象</button>}
               {mutation === 'upload' && <div className={styles.uploadProgress} role="status" aria-live="polite">

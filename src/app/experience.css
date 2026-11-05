@@ -82,3 +82,31 @@
   min-height: var(--exp-control-height);
 }
 .exp-data-table :is(th, td) { font-variant-numeric: tabular-nums; }
+
+.exp-actions :is(button, a):focus-visible,
+.exp-selection :is(button, a, input):focus-visible {
+  outline: 2px solid var(--tone-info-text);
+  outline-offset: 3px;
+}
+.exp-filters button:disabled { opacity: .55; cursor: default; }
+.exp-data-table :is(th, td) { padding-block: 10px; }
+
+@media (max-width: 760px) {
+  .exp-selection[data-selected="true"] {
+    position: sticky;
+    top: calc(var(--composer-topbar-height, 48px) + 8px);
+    z-index: 25;
+    gap: 8px;
+    box-shadow: 0 4px 12px rgb(8 12 18 / 14%);
+  }
+  .exp-selection-summary { flex-basis: 100%; }
+  .exp-selection > .exp-actions { width: 100%; }
+  .exp-selection > .exp-actions > button { flex: 1 1 auto; }
+  .exp-filters { max-height: 100px; overflow-y: auto; overscroll-behavior: contain; }
+}
+@media (pointer: coarse) {
+  .exp-actions > :is(button, a), .exp-filters > button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}

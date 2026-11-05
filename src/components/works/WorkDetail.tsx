@@ -189,6 +189,7 @@ export function WorkDetail({ id, viewerId, preparation, revision, likesRevision,
               {work.provenance?.template && <a href={work.provenance.tool.href}>{work.provenance.tool.label}</a>}
               {work.provenance?.template && <button type="button" className={styles.primary} disabled={blocked || methodReading || context?.method?.action.kind !== 'template'} title={context?.method?.action.reason} onClick={() => void applyMethod()}>{methodReading ? '正在准备…' : '一键参考'}</button>}
             </ExperienceActions>
+            {work.provenance?.template && <GuidedDemo kind="reuse" />}
             {notice && <OperationReceipt className={styles.notice} status={notice}
               actions={notice.startsWith('已加入') && <a href="/generate" className={styles.textAction}>打开生成工作区</a>} />}
             <WorkLearning work={work} viewerId={viewerId} disabled={blocked || comparing} onSeek={work.medium === 'video' && !comparing ? seek : undefined} />

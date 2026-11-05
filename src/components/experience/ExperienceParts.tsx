@@ -10,7 +10,7 @@ export function ExperienceActions({ label, className, children, ...events }: HTM
 export function SelectionBar({ count, summary, selection, children, className }: {
   count: number; summary?: ReactNode; selection?: ReactNode; children: ReactNode; className?: string;
 }) {
-  return <section className={['exp-selection', className].filter(Boolean).join(' ')} aria-label="批量操作">
+  return <section className={['exp-selection', className].filter(Boolean).join(' ')} aria-label="批量操作" data-selected={count > 0}>
     {selection}
     <div className="exp-selection-summary">
       <strong role="status">已选 {count} 个</strong>{summary && <small>{summary}</small>}
@@ -21,12 +21,12 @@ export function SelectionBar({ count, summary, selection, children, className }:
 
 export type ExperienceFilter = { id: string; label: string; remove: () => void };
 
-export function FilterSummary({ filters, clear }: { filters: ExperienceFilter[]; clear?: () => void }) {
+export function FilterSummary({ filters, clear, disabled = false }: { filters: ExperienceFilter[]; clear?: () => void; disabled?: boolean }) {
   if (!filters.length) return null;
   return <div className="exp-filters" role="group" aria-label="当前筛选">
     {filters.map(({ id, label, remove }) => <button key={id} type="button" className="exp-filter" title={label}
-      aria-label={`移除筛选：${label}`} onClick={remove}><span>{label}</span><X size={13} aria-hidden="true" /></button>)}
-    {clear && filters.length > 1 && <button type="button" className="exp-filter-clear" onClick={clear}>清除筛选</button>}
+      aria-label={`移除筛选：${label}`} disabled={disabled} onClick={remove}><span>{label}</span><X size={13} aria-hidden="true" /></button>)}
+    {clear && filters.length > 1 && <button type="button" className="exp-filter-clear" disabled={disabled} onClick={clear}>清除筛选</button>}
   </div>;
 }
 

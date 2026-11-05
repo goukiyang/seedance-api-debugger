@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { OctagonX } from 'lucide-react';
 import { OperationReceipt } from '@/components/experience/ExperienceParts';
+import { GuidedDemo } from '@/components/experience/demo/GuidedDemo';
 import { RelativeTime } from '@/components/RelativeTime';
 import type { publicRetry } from '@/lib/generation-retry/store';
 type View = NonNullable<ReturnType<typeof publicRetry>>;
@@ -34,6 +35,7 @@ export default function SafeRetryStatus({ kind, id, initial, onChanged }: { kind
       actions={<button type="button" className="btn btn-secondary" disabled={checking} onClick={() => {
         setError(''); setChecking(true); setReadRevision(value => value + 1);
       }}>查询原请求</button>} />}
+    {value.state === 'unknown' && <GuidedDemo kind="request" />}
     {value.retries > 0 && value.state === 'active' && <p role="status">自动重试 {value.retries}/3</p>}
     {value.canStop && <button type="button" className="btn btn-secondary" disabled={busy} title="停止后续重试" onClick={async () => {
       setBusy(true); setError('');

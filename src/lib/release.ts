@@ -1,9 +1,10 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '角色参考图工作台支持逐格制作', outline: [
-  '选定正脸后可生成四个微调方案',
-  '侧脸与全身正背分别生成和选用',
-  '四格确认后可合并保存或复制',
+const notice = { title: '找素材和交付成品更顺手', outline: [
+  '筛选条件可逐项移除，空列表提供下一步入口',
+  '抠图与多视图显示实际导出结果和原任务核对入口',
+  '手机批量操作和弹层按钮更好找，返回列表保留位置',
+  '帮助页新增模板参考、换帧导出和原请求查询演示',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

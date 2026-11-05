@@ -7,6 +7,9 @@ export default function HelpPage() {
     <section className="card" aria-label="操作演示">
       <GuidedDemo kind="reference" />
       <GuidedDemo kind="compare" />
+      <GuidedDemo kind="reuse" />
+      <GuidedDemo kind="frames" />
+      <GuidedDemo kind="request" />
     </section>
   </div>;
 }

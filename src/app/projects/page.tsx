@@ -343,6 +343,7 @@ function ProjectsPageContent() {
   const [storageUnavailable, setStorageUnavailable] = useState(false);
   const [locationRevision, setLocationRevision] = useState(0);
   const [returnAnchorId, setReturnAnchorId] = useState('');
+  const restoredAnchor = useRef('');
   const [highlightProjectId, setHighlightProjectId] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
   const [actionError, setActionError] = useState('');
@@ -686,14 +687,18 @@ function ProjectsPageContent() {
   useEffect(() => {
     if (!hasCurrentList) return;
     const targetId = highlightProjectId ? `project-card-${highlightProjectId}` : returnAnchorId;
-    if (!targetId) return;
+    if (!targetId || restoredAnchor.current === targetId) return;
     const target = document.getElementById(targetId);
     if (!target) return;
-    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    restoredAnchor.current = targetId;
+    target.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' as ScrollBehavior : 'smooth', block: 'center' });
+  }, [hasCurrentList, highlightProjectId, projects, returnAnchorId]);
+
+  useEffect(() => {
     if (!highlightProjectId) return;
     const timer = window.setTimeout(() => setHighlightProjectId(null), 4_000);
     return () => window.clearTimeout(timer);
-  }, [hasCurrentList, highlightProjectId, projects, returnAnchorId]);
+  }, [highlightProjectId]);
 
   function applyPreferences(update: Partial<ListPreferences>) {
     const next = normalizePreferences({ ...currentPreferences, ...update });

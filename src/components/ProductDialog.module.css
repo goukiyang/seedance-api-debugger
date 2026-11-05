@@ -8,7 +8,7 @@
 .dialog .close { width: 36px; min-height: 36px; padding: 6px; color: #adb6bd; background: transparent; }
 .message { margin: 16px 0; color: #c6d0d5; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-line; }
 .input { box-sizing: border-box; width: 100%; padding: 10px 12px; border: 1px solid #465057; border-radius: 6px; background: #101315; color: #e6e8eb; font: inherit; }
-.actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 20px; }
+.actions { display: flex; justify-content: flex-end; gap: var(--exp-control-gap); flex-wrap: wrap; margin-top: 20px; position: sticky; bottom: 0; padding-block: 12px; background: #1a2023; }
 .dialog .secondary { background: #202629; color: #c6d0d5; }
 .dialog .primary { background: #79daca; border-color: #79daca; color: #102721; }
 .dialog .danger { background: #ab383e; border-color: #ce5961; color: #fff1f1; }

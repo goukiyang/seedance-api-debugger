@@ -148,7 +148,7 @@
   .meta { padding: 5px 7px; gap: 1px 6px; }
   .meta > strong { font-size: 13px; }
   .more { gap: 6px; }
-  .footer { padding: 7px 10px; grid-template-columns: max-content minmax(0, 1fr) minmax(0, 1.2fr); grid-template-areas: "limits limits limits" "upload toggle actions" "selection selection selection"; gap: 0 6px; }
+  .footer { padding: 7px 10px calc(7px + env(safe-area-inset-bottom, 0px)); grid-template-columns: max-content minmax(0, 1fr) minmax(0, 1.2fr); grid-template-areas: "limits limits limits" "upload toggle actions" "selection selection selection"; gap: 0 6px; }
   .count, .footerActions .cancelAction { display: none; }
   .footer .uploadAction { min-height: 44px; gap: 5px; padding: 7px 8px; font-size: 13px; }
   .footer .uploadAction svg { width: 16px; }
@@ -177,3 +177,8 @@
 .cardDetails summary:focus-visible { outline: 2px solid var(--accent, #8ef0c2); outline-offset: 2px; border-radius: 3px; }
 .meta .originalName { overflow-wrap: anywhere; }
 @media (hover: none), (pointer: coarse) { .sourceSegments button { min-height: 44px; } .pagination button { flex-basis: 44px; width: 44px; height: 44px; } .card .removeButton { width: 44px; height: 44px; } .cardDetails summary { min-width: 44px; min-height: 44px; } }
+
+.dialog .empty { align-content: center; gap: var(--exp-control-gap); }
+.dialog .empty p { font-size: 13px; }
+.dialog .filters :global(.exp-filters) { margin: 0; padding-block: 6px; }
+.dialog :is(button, a, input, select):focus-visible { outline: 2px solid var(--accent, #8ef0c2); outline-offset: 2px; }

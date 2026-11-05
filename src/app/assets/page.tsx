@@ -805,7 +805,8 @@ function AssetsPageContent() {
       if (grid.getBoundingClientRect().width <= 0) return;
       const capacity = Math.min(99, gridPageCapacity(grid));
       if (capacity === latestPage.current.capacity) return;
-      const anchor = (latestPage.current.page - 1) * latestPage.current.capacity;
+      const returning = readListReturn(new URLSearchParams(window.location.search));
+      const anchor = returning.item && returning.anchor !== null ? returning.anchor : (latestPage.current.page - 1) * latestPage.current.capacity;
       latestPage.current = { page: Math.floor(anchor / capacity) + 1, capacity };
       setPage(latestPage.current.page); setPageCapacity(capacity);
     };
@@ -818,7 +819,7 @@ function AssetsPageContent() {
     let anchor = 0;
     try { const saved = JSON.parse(localStorage.getItem(`sd2:asset-page:v1:${pageScope}`) || 'null'); if (saved?.version === 1 && Number.isSafeInteger(saved.anchor) && saved.anchor >= 0 && saved.anchor < 1_000_000) anchor = saved.anchor; } catch {}
     const target = readListReturn(new URLSearchParams(window.location.search));
-    setPage((target.item && target.page) || Math.floor(anchor / latestPage.current.capacity) + 1);
+    setPage(target.item && target.anchor !== null ? Math.floor(target.anchor / latestPage.current.capacity) + 1 : (target.item && target.page) || Math.floor(anchor / latestPage.current.capacity) + 1);
     setRestoredPageScope(pageScope);
   }, [user?.id, pageScope]);
   const [items, setItems] = useState<AssetLibraryItem[]>([]);
@@ -1455,10 +1456,20 @@ function AssetsPageContent() {
     resetForFilterChange();
   };
 
+  const hasBrowseFilters = Boolean(keyword || projectId || ownerUserId || status !== 'all' || (!isEnhanceView && (type !== 'all' || sourceFilter !== 'all')));
+  const clearBrowseFilters = () => {
+    setKeyword(''); setKeywordDraft(''); setStatus('all');
+    setProjectId(''); setOwnerUserId(''); setSourceFilter('all');
+    if (!isEnhanceView) setType('all');
+    resetForFilterChange();
+  };
+
   const currentAssetReturnTo = () => {
     if (typeof window === 'undefined') return '/assets?type=video';
     const source = taskReuseReturnTo(`${window.location.pathname}${window.location.search || ''}`) || '/assets';
-    return listReturnHref(source, activeItem?.id, pagination?.page || page);
+    const position = items.findIndex(item => item.id === activeItem?.id);
+    const sourcePage = pagination?.page || page;
+    return listReturnHref(source, activeItem?.id, sourcePage, position >= 0 ? (sourcePage - 1) * pageCapacity + position : undefined);
   };
 
   const activeReuseHref = activeItem?.taskId && !isExternalUser(user) ? taskReuseHref({
@@ -2448,19 +2459,20 @@ function AssetsPageContent() {
         {returnUnavailable && <OperationReceipt status="原资产不在这一页，已返回素材列表。" />}
         <FilterSummary filters={[
           ...(keyword ? [{ id: 'keyword', label: `搜索：${keyword}`, remove: () => { setKeyword(''); setKeywordDraft(''); resetForFilterChange(); } }] : []),
-          ...(status !== 'succeeded' ? [{ id: 'status', label: `状态：${statusOptions.find(option => option.id === status)?.label || status}`, remove: () => { setStatus('succeeded'); resetForFilterChange(); } }] : []),
-          ...(sourceFilter === 'multiview-output' ? [{ id: 'source', label: '3D多视图成品', remove: () => { setSourceFilter('all'); resetForFilterChange(); } }] : []),
-        ]} />
+          ...(status !== 'all' ? [{ id: 'status', label: `状态：${statusOptions.find(option => option.id === status)?.label || status}`, remove: () => { setStatus('all'); resetForFilterChange(); } }] : []),
+          ...(!isEnhanceView && type !== 'all' ? [{ id: 'type', label: `类型：${type === 'image' ? '图片' : type === 'audio' ? '音频' : '视频'}`, remove: () => { setType('all'); resetForFilterChange(); } }] : []),
+          ...(projectId ? [{ id: 'project', label: `项目：${projects.find(project => project.id === projectId)?.name || '所选项目'}`, remove: () => { setProjectId(''); resetForFilterChange(); } }] : []),
+          ...(ownerUserId ? [{ id: 'owner', label: `归属人：${users.find(owner => owner.id === ownerUserId)?.name || '所选成员'}`, remove: () => { setOwnerUserId(''); resetForFilterChange(); } }] : []),
+          ...(!isEnhanceView && sourceFilter === 'multiview-output' ? [{ id: 'source', label: '3D多视图成品', remove: () => { setSourceFilter('all'); resetForFilterChange(); } }] : []),
+        ]} clear={clearBrowseFilters} />
         <div ref={gridProbe} className={`asset-library-grid asset-library-grid-${cardSize}`} aria-hidden="true" style={{ height: 0, overflow: 'hidden', margin: 0 }} />
         {loading && (items.length ? <LoadingStatus>正在更新资产，暂时保留上次结果</LoadingStatus> : <LoadingSkeleton label="正在读取资产" grid cards />)}
 
         {!loading && !error && items.length === 0 && (
-          <ExperienceEmpty title={keyword || sourceFilter !== 'all' ? '没有符合条件的资产' : '暂无资产'}
+          <ExperienceEmpty title={hasBrowseFilters ? '没有符合条件的资产' : '暂无资产'}
             description={isEnhanceView ? '当前没有可超分视频或超分结果，完成视频生成后会自动出现在这里。' : '调整筛选条件，或先到生成页创建视频。'}
             className="asset-library-empty">
-            {keyword || sourceFilter !== 'all' ? <button type="button" className="btn btn-secondary" onClick={() => {
-              setKeyword(''); setKeywordDraft(''); setSourceFilter('all'); resetForFilterChange();
-            }}>清除搜索和来源筛选</button> : <Link href="/generate">去生成视频</Link>}
+            {hasBrowseFilters ? <button type="button" className="btn btn-secondary" onClick={clearBrowseFilters}>清除筛选</button> : <Link href="/generate">去生成视频</Link>}
           </ExperienceEmpty>
         )}
 

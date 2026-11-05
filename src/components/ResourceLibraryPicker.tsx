@@ -5,6 +5,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom';
 import { ChevronDown, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Folder, Grid2X2, ImageIcon, Maximize, Minimize, Music, Play, RotateCcw, Search, SlidersHorizontal, Upload, X, ZoomIn, Trash2 } from 'lucide-react';
 import { useResultPages } from '@/components/useResultPages';
+import { ExperienceEmpty, FilterSummary, type ExperienceFilter } from '@/components/experience/ExperienceParts';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import MediaPreview from '@/components/MediaPreview';
 import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
@@ -623,15 +624,18 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   const generatedLabel = prefs.view === 'favorites' ? '喜欢的生成' : prefs.view === 'recent' ? '最近用过的生成' : '全部生成';
   const generatedViewNotice = prefs.source === 'generated' && prefs.view !== 'library'
     ? prefs.view === 'favorites' ? '当前仅显示我喜欢的生成素材' : '当前仅显示本账号在本浏览器最近用过的生成素材' : '';
-  const filterSummary = [
-    scopes.find(([scope]) => scope === prefs.scope)?.[1],
-    prefs.album ? scopedAlbums.find(album => album.id === prefs.album)?.name || '所选图集暂不可用' : '',
-    prefs.project ? projects.find(project => project.id === prefs.project)?.name || '所选项目暂不可用' : '',
-    prefs.type !== 'all' ? labels[prefs.type as AssetType] : '',
-    prefs.source === 'template-image' && prefs.template ? templates.find(template => template.id === prefs.template)?.name || '所选模板暂不可用' : '',
-    prefs.sort === 'name' ? '按名称' : '',
-  ].filter(Boolean).join(' · ');
-  const activeFilterCount = Number(prefs.scope !== 'mine') + Number(Boolean(prefs.album || prefs.project)) + Number(prefs.type !== 'all') + Number(prefs.source === 'template-image' && Boolean(prefs.template)) + Number(prefs.sort !== 'newest');
+  const sourceLabels: Record<string, string> = { uploaded: '上传的', generated: generatedLabel, 'template-image': '模板生图', 'random-person': '随机人物', 'other-generated': '其他生成', 'multiview-output': '3D多视图' };
+  const filters: ExperienceFilter[] = [
+    ...(prefs.query ? [{ id: 'query', label: `搜索：${prefs.query}`, remove: () => { setQuery(''); change({ query: '' }); } }] : []),
+    ...(prefs.scope !== 'mine' ? [{ id: 'scope', label: scopes.find(([scope]) => scope === prefs.scope)?.[1] || '所选范围', remove: () => change({ scope: 'mine', album: '', project: '' }) }] : []),
+    ...(prefs.source !== 'all' ? [{ id: 'source', label: sourceLabels[prefs.source] || '所选来源', remove: () => changeSource('all') }] : []),
+    ...(prefs.album ? [{ id: 'album', label: scopedAlbums.find(album => album.id === prefs.album)?.name || '所选图集暂不可用', remove: () => change({ album: '' }) }] : []),
+    ...(prefs.project ? [{ id: 'project', label: projects.find(project => project.id === prefs.project)?.name || '所选项目暂不可用', remove: () => change({ project: '' }) }] : []),
+    ...(prefs.type !== 'all' ? [{ id: 'type', label: labels[prefs.type as AssetType], remove: () => change({ type: 'all' }) }] : []),
+    ...(prefs.source === 'template-image' && prefs.template ? [{ id: 'template', label: templates.find(template => template.id === prefs.template)?.name || '所选模板暂不可用', remove: () => change({ template: '' }) }] : []),
+    ...(prefs.sort !== 'newest' ? [{ id: 'sort', label: '按名称', remove: () => change({ sort: 'newest' }) }] : []),
+  ];
+  const activeFilterCount = filters.length;
   const selectionDetails = `${types.map(t => `${labels[t]} ${selectedCounts[t]}${typeLimits?.[t] !== undefined ? ` · 剩余 ${Math.max(0, typeLimits[t]! - selectedCounts[t])}` : ''}`).join(' / ')}${maxSelection !== undefined ? ` · 本次剩余 ${Math.max(0, maxSelection - selected.length)}` : ''} · 当前已添加 ${currentCount}`;
   const rememberScroll = (element: HTMLElement) => {
     if (!restoring.current && element === browseSurface()) setPrefs(p => ({ ...p, scroll: element.scrollTop }));
@@ -685,7 +689,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
           <button type="button" className={styles.refreshDirectory} disabled={busy || loading} onClick={() => refreshDirectory()}>刷新列表</button>
           <button type="button" className={styles.resetFilter} title="重置筛选和浏览位置" aria-label="重置筛选和浏览位置" disabled={busy} onClick={() => refreshDirectory(resetFilterPreferences())}><RotateCcw size={16} /><span className={styles.mobileResetLabel}>重置</span></button>
           </div>
-          {!prefs.filtersOpen && <p className={styles.filterSummary}>{filterSummary}</p>}
+          <FilterSummary filters={filters} disabled={busy} clear={() => refreshDirectory({ ...resetFilterPreferences(), view: prefs.view })} />
         </div>
         {generatedViewNotice && <div className={styles.generatedScope}><span>{generatedViewNotice}</span><button type="button" disabled={busy} onClick={showAllGenerated}>查看我的全部生成</button></div>}
         {uploadLabel && <UploadProgressIndicator busy label={progress?.label || '准备上传'} detail={uploadLabel} percent={progress?.percent} />}
@@ -713,7 +717,10 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
               <details className={styles.cardDetails}><summary>详情</summary><small className={styles.originalName}>{item.fileName}</small><small>{item.source === 'generated' ? '生成' : item.source === 'uploaded' ? '上传' : '图集'}{item.width && item.height ? ` · ${item.width} × ${item.height}` : ''} · <RelativeTime value={item.createdAt} /></small></details>
             </div>
           </article>; })}</div>
-          {loading && <div className={styles.empty} role="status">正在读取素材</div>}{!loading && !directoryError && !resultPages.navigationIssue && loadedFilter === filterKey && !items.length && <div className={styles.empty}>{prefs.view === 'recent' ? '本机还没有符合筛选的最近选用素材' : '没有符合筛选的可用素材'}</div>}
+          {loading && <div className={styles.empty} role="status">正在读取素材</div>}{!loading && !directoryError && !resultPages.navigationIssue && loadedFilter === filterKey && !items.length && <ExperienceEmpty className={styles.empty} title={prefs.view === 'recent' ? '还没有匹配的最近素材' : '没有符合条件的素材'} description={filters.length ? '可以移除筛选，已选素材会继续保留。' : '可以上传素材，或切换来源查看。'}>
+            {filters.length > 0 && <button type="button" disabled={busy} onClick={() => refreshDirectory({ ...resetFilterPreferences(), view: prefs.view })}>清除筛选</button>}
+            {prefs.view === 'recent' && <button type="button" disabled={busy} onClick={() => change({ view: 'library' })}>打开素材库</button>}
+          </ExperienceEmpty>}
           <div className={styles.more}><span>{loadedFilter === filterKey ? `${total} 个素材` : loading ? '正在读取目录' : '目录尚未读取成功'}</span><nav className={styles.pagination} aria-label="素材分页" onPointerDown={() => { browseRevision.current++; }} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") browseRevision.current++; }}>
             <button type="button" title="回到第一页" aria-label="回到第一页素材" disabled={loading || busy || (!resultPages.start && !resultPages.restoring)} onClick={resultPages.reset}><ChevronFirst size={17} /></button>
             <button type="button" title="上一页" aria-label="上一页素材" disabled={!resultPages.start || loading || busy || (resultPages.restoring && !directoryError && !resultPages.navigationIssue)} onClick={resultPages.previous}><ChevronLeft size={17} /></button>
