@@ -1,4 +1,5 @@
-import { RMB_INTEGER_ROUNDING, type PricingAdminFilter, type PricingAdminRow } from './admin-contract';
+import { PRICING_ADMIN_LIMITS, RMB_INTEGER_ROUNDING, type PricingAdminFilter, type PricingAdminRow } from './admin-contract';
+import { compareDecimal, multiplyDecimal, normalizeDecimal, PricingNumberError, roundDecimal, roundFixedPricingCredits } from './math';
 import { imageStudioQualityLabel } from '@/lib/image-studio/model-catalog';
 import type { ImageQualityRoutes } from '@/lib/image-studio/quality-routing';
 
@@ -44,6 +45,27 @@ export function canEditPricingBase(row: PricingAdminRow, globalRate: string | nu
 
 export function showPricingImageRow(row: PricingAdminRow, globalRate: string | null | undefined, includeAlternate: boolean) {
   return canEditPricingBase(row, globalRate) && (row.isDefault || includeAlternate);
+}
+
+export function pricingDisplaySecondCredits(
+  row: PricingAdminRow, quantity: string, draft?: { amount: string; rate: string | null | undefined; rounding: PricingAdminRow['rounding'] },
+) {
+  if (row.identity.unit !== 'second' || row.identity.billingMode !== 'fixed' || row.availability !== 'ready' || row.mode === 'free') return null;
+  try {
+    if (!draft && row.mode === 'legacy_fixed' && row.currentUnitCredits !== null) {
+      const exact = multiplyDecimal([row.currentUnitCredits, quantity]);
+      return row.legacyRounding === 'ceil_task' ? roundDecimal(exact, 0, 'ceil') : roundFixedPricingCredits(exact, row.rounding);
+    }
+    const amount = draft ? draft.amount : row.baseCny;
+    const rate = draft ? draft.rate : row.currentPointsPerCny;
+    if (!amount || !rate) return null;
+    normalizeDecimal(amount, { max: PRICING_ADMIN_LIMITS.baseMax, maxScale: PRICING_ADMIN_LIMITS.baseScale, allowZero: false });
+    const credits = roundFixedPricingCredits(multiplyDecimal([amount, rate, quantity]), draft ? draft.rounding : row.rounding);
+    return compareDecimal(credits, PRICING_ADMIN_LIMITS.maxTaskCredits) <= 0 ? credits : null;
+  } catch (error) {
+    if (error instanceof PricingNumberError) return null;
+    throw error;
+  }
 }
 
 export const allPricingFilters: PricingAdminFilter = { kind: 'all', difference: 'all', defaultsOnly: false, search: '', channelId: '', basisKind: undefined };

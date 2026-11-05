@@ -1,10 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '常用页面和操作更一致', outline: [
-  '统一列表、工作台、详情页的留白与操作区',
-  '打开详情后可回到原列表位置，筛选和批量选择一眼可见',
-  '对比、原请求查询和交付回执更好找',
-  '帮助页可按需查看素材和对比演示',
+const notice = { title: '后台视频费率显示修复', outline: [
+  '填写视频单价时直接看到 5 秒参考扣点',
+  '其他草稿待核对时，已生效的视频点数仍可查看',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

@@ -10,7 +10,7 @@ import type { PricingAdminAction, PricingAdminBasis, PricingAdminChanges, Pricin
 import { RMB_INTEGER_ROUNDING } from '@/lib/pricing/admin-contract';
 import { consumePricingAdminDraft, defaultPricingAdminView, filterPricingAdminRows, hasPricingAdminChanges, parsePricingAdminPending, parsePricingAdminWorkspace, patchPricingAdminRow, pricingAdminEnhanceGroup, pricingAdminPreviewForSource, pricingAdminPreviewKey, pricingAdminScenarioDifference, pricingAdminStorageKey, stagePricingAdminMemberExit, stagePricingAdminUnify, submittedPricingAdminDraft, validPricingAdminRate, validPricingEnhanceGroup, type PricingAdminDraft, type PricingAdminPending, type PricingAdminView } from '@/lib/pricing/admin-client-state';
 import { RECOMMENDED_POINTS_PER_CNY, stageGptImageReference, stageVideoPricingReferences, videoPricingReferenceStatus } from '@/lib/pricing/presets';
-import { allPricingFilters, canEditPricingBase, pricingActiveFilters, pricingDisplayName, pricingDisplayRounding, pricingDisplayScope, showPricingImageRow } from '@/lib/pricing/admin-display';
+import { allPricingFilters, canEditPricingBase, pricingActiveFilters, pricingDisplayName, pricingDisplayRounding, pricingDisplayScope, pricingDisplaySecondCredits, showPricingImageRow } from '@/lib/pricing/admin-display';
 import { isSeedanceVideoDuration } from '@/lib/provider/seedance-models';
 import type { PricingEnhanceGroup } from '@/lib/pricing/pricing-authoring-contract';
 import { multiplyDecimal, roundDecimal } from '@/lib/pricing/math';
@@ -418,7 +418,11 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
             const adoptsGlobal = !hasRate && Boolean(snapshot.authoring && globalRate);
             const editable = canEditPricingBase(row, globalRate);
             const amount = change?.base?.amount ?? projected?.after.baseCny ?? row.baseCny;
-            const points = projected || change ? scenario?.adjustedCredits : unit === '张' ? row.currentUnitCredits : scenario?.currentCredits;
+            const pendingPrice = Boolean(projected || change);
+            const serverPoints = pendingPrice ? scenario?.adjustedCredits : unit === '张' ? row.currentUnitCredits : scenario?.currentCredits;
+            const points = serverPoints ?? (unit === '秒' && !projected ? pricingDisplaySecondCredits(row, quantity, change?.base && {
+              amount: change.base.amount, rate: adoptsGlobal ? globalRate : row.currentPointsPerCny, rounding: change.rounding ?? row.rounding,
+            }) : null);
             const knownBase = amount !== null && amount !== '';
             const label = pricingDisplayName(row);
             const scope = pricingDisplayScope(row);
@@ -435,7 +439,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
               </label> : knownBase ? <>{amount} 元/{unit}{derived && <small>随关联单价更新</small>}</> : <>{'待确认'}{row.availability === 'ready' && !complexDraft && !hasRate && !adoptsGlobal && <small>尚未配置换算</small>}</>}
               {derived && editable && <small>{change ? '保存后单独定价' : '随关联价更新，手改后单独定价'}</small>}
               {rowFields.map(([key, value]) => <small key={key}>{value}</small>)}</td>
-              <td className={styles.moneyPoints}>{actual ? '按实结算' : free ? '0 点' : row.availability !== 'ready' ? '待确认' : points != null && (knownBase || unit === '张') ? <><strong>{points} 点</strong><small>{unit === '张' ? '每张' : `${quantity} 秒`}{change || projected ? ' · 待保存' : !knownBase ? ' · 原价' : ''}</small>{scenario?.roundedToZero && <small>按规则取整为 0</small>}</> : change ? '待核对' : !knownBase ? '待确认' : '待报价'}</td>
+              <td className={styles.moneyPoints}>{actual ? '按实结算' : free ? '0 点' : row.availability !== 'ready' ? '待确认' : points != null ? <><strong>{points} 点</strong><small>{unit === '张' ? '每张' : `${quantity} 秒`}{pendingPrice ? serverPoints == null ? ' · 待核对' : ' · 待保存' : !knownBase ? ' · 原价' : ''}</small>{(scenario?.roundedToZero || unit === '秒' && points === '0' && knownBase) && <small>按规则取整为 0</small>}</> : change ? unit === '秒' ? '单价无效或超出上限' : '待核对' : !knownBase ? '待确认' : '待报价'}</td>
             </tr>;
           })}</tbody>
         </table>
