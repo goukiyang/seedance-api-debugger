@@ -1,4 +1,4 @@
-export const TEMPLATE_MARK_WRITES_ENABLED = true;
+export const TEMPLATE_MARK_WRITES_ENABLED = false;
 
 /** One private template mark, reading both historical flags without migrating rows. */
 export function isTemplateContentKey(key: string) {
