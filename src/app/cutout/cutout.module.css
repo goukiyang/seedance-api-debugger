@@ -99,6 +99,7 @@
   .workspaceHeader h1 { font-size: 20px; }
   .workspaceHeader .quietButton { padding-left: 0; }
   .previewTools { align-items: flex-start; }
+  .compareSlider { order: 3; flex-basis: 100%; max-width: none; }
   .workspaceStage { height: 46dvh; min-height: 250px; }
   .historyDrawer { padding: 16px; }
   .workArea .sourceHint > span:first-child { max-width: 100%; }
