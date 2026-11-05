@@ -81,7 +81,7 @@ export default function PricingGuideClient({ actorId, isAdmin }: { actorId: stri
     </header>
     {wrongAccount ? <p className={styles.notice} role="status">账号已变化，请重新打开费率说明。</p> : <>
       <section className={styles.standard} aria-label="点数换算标准">
-        <h2>{pricing?.pointsPerCny ? <>1 元 <span>=</span> {pricing.pointsPerCny} 点</> : loading ? '正在读取换算标准' : '换算标准待确认'}</h2>
+        <h2>{pricing?.pointsPerCny ? <>1 元 <span>=</span> {pricing.pointsPerCny} 点</> : loading ? '正在读取换算标准' : error ? '换算标准读取失败' : '换算标准待确认'}</h2>
         <p>整笔费用换算后，最后四舍五入到整数点。批量任务分别计算后合计。</p>
       </section>
       <div className={styles.toolbar}>

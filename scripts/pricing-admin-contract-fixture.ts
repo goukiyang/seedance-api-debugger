@@ -113,6 +113,12 @@ async function run() {
       assert.equal(projectPricingGuide([{ ...guideRow, mode: 'legacy_fixed' }], '100', snapshot.updatedAt, true).items[0].baseCny, null);
       assert.equal(projectPricingGuide([{ ...guideRow, identity: { ...guideRow.identity,
         specifications: { ...guideRow.identity.specifications, referenceVideo: 'present' } } }], '100', snapshot.updatedAt, true).items.length, 0);
+      const resolutionRows = ['1080p', '480p', '720p'].map(resolution => ({ ...guideRow, id: `guide-${resolution}`,
+        label: `Seedance 2.0 ${resolution}`, identity: { ...guideRow.identity, channelId: 'seedance',
+          specifications: { resolution, referenceVideo: 'none', pricingPurpose: 'standard' } } }));
+      const resolutionGuide = projectPricingGuide(resolutionRows, '100', snapshot.updatedAt, true);
+      assert.deepEqual(resolutionGuide.items.map(item => item.specification), ['480P', '720P', '1080P']);
+      assert.ok(resolutionGuide.items.every(item => item.name === 'Seedance 2.0'), 'Resolution is displayed once, below the model name');
       evidence.push('Read-only guide: ordinary internal access, no configuration writes or private metadata, real adoption readback, full-task rounding and explicit free/unknown separation');
       const simulation = await previewAdminPricing(actorA, { ...input(snapshot, { kind: 'save', changes: { rows: [] } }),
         simulation: { rowId: rowA.id, quantity: '5' } }, tx);
