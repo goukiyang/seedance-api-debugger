@@ -21,3 +21,24 @@
 - 隔离合成SQLite金额检查：`node --import tsx scripts/usage-rate-accounting-engineering.ts`，禁止网络、应用库写入与真实生成，覆盖四档图片价、冻结优先、资产金额/用量、冲突/缺价/失败及两种汇总一致性。
 - 类型、lint、正式候选构建与必要发布健康检查按实际回执记录；功能由用户手动验收，不以工程检查冒充通过。
 - 本轮未改原价格、供应商实扣、余额、旧点数、在途请求或素材；共享功能、抠图及角色功能保持最新发布继承。
+
+## 最终交付（2026-11-05）
+
+- [x] 23项隔离金额检查通过，含四档图片人民币价格、视频资产金额/用量、冻结优先、不重复计费、失败/冲突/缺价、已知超分FPS、直接/流式汇总及负数CSV。真实检查时间为18:37:53Z，最终源相关字节一致；无网络、真实生成或应用库写入。
+- [x] 最终Linux候选的原生/价格门、Prisma generate、完整Next构建及内置类型/lint通过，构建完成19:04:53Z；没有db push或DDL。原生SSH与构建SSH在服务端成功退出后仍持有管道，核实成功文件与服务端进程已退出后仅关闭本人本机SSH，不伪造成功时间、不重跑。
+- [x] 聚焦代码已推送 `codex/ledger-rate-accounting-20261105`。应用源 `0b166d223a34c0725b857da837fcec7e1ad238d0` / v0.133.4 / BUILD `pwKGQBXWQ3e9wpOqTfwgG` 于19:09:56Z保护部署；继承当时实际7e92/v0.133.3及其前序UI、抠图与角色功能。此前候选未上线，保留原构建及首错记录。
+- [x] 7服务/4定时器、6启动门、2公网JS同SHA及2匿名401通过；一致数据库备份、原环境/持久链接与私有policy保留。价格两键全字段SHA仍 `194e8d3a2a9e009585ec005a488c9767c31b4fc1c6550abc378053f70eb259fe`，本批没有生产费率/账本/历史扣点写入。
+- [x] 相容guard继续使用 `1d452f9186053d3012f420d330f4dce93a33d7f2` / `0.133.0+body-pair-reader-guard.1` / BUILD `4THsI43mwKhhvzVsWliHk`，复用原16:46:20Z完整构建；恢复入口为本批 `attempt02/program-recovery.sh`，仅回程序/指针，不回数据库、媒体、账本或回执，未线上演练。
+- [ ] 用户手动验收：个人/项目/管理账本中，有可靠费率的视频和图片显示核算费用；资产管理视频金额能在账本复用；原确认实扣不重复相加；真正缺价/规格的记录仍如实待核。没有浏览器验收或收费回归。
+
+入口：[个人账本](https://sd2.youdooart.com/usage)、[管理费用](https://sd2.youdooart.com/admin/usage-costs)。正式根私有回执：`docs/materials/2026-11-05-ledger-rate-accounting/release/attempt02/`；服务器原证：`/data/video-api-debugger/release-staging/ledger-rate-accounting-20261105/attempt02/`，以 `public-deployed.json` 和 `source-pair-contract.json` 为入口。发布窗口已交还后续资产顶部批次；文档提交不冒运行源。
+
+本轮新发现的线索与问题：未新增范围外问题；原COST-LABEL历史线索保留，未顺手改账。发布前发现并修正新增CSV费用列的负数文本化，补入第23项检查，没有生产影响。
+
+## 费用缺口追加（2026-11-05）
+
+用户要求继续查清并补齐。19:15:56Z只读快照4195条叶子记录，451条无金额：97张成功图片已有当时保存的美元参考价、3条成功H3原响应明确free_local零API费，本批接入只读核算，新增参考金额¥43.372；不是实扣入账或补扣点。当前确认人民币价仍优先，负价/缺字段、原现金与冲突保护保持。31项隔离金额检查及完整TypeScript已通过，源码 `f306d0d2d` 已推送；等待承接资产顶部批次后做最终候选发布，尚不冒已上线。
+
+仍缺依据的351条分开处理：30张成功图片（27张Sunburst auto、2张Flare auto、1张旧通道Sunburst max），需原账单/可确认历史参考价；3条成功文字调用已存token但缺该通道输入/输出单价；4条历史Agent文字步骤未存token/原实扣，只能凭原账单恢复；242条失败/取消及72条执行或费用未知，沿原请求核对，不能按成功费率收费或因超时填0。30张图片不擅自将auto归到medium/max，不给Flare/旧Banana套新型号价格，不拿旧点数倒推金额。
+
+私有逐条清单：正式根 `docs/materials/2026-11-05-ledger-rate-accounting/release/followup-gap-audit/sd2-cost-gap-plan-20261105.csv`，汇总同名JSON；它是补算前快照和方案，不冒部署后当前金额。另发现旧failed_no_charge由未获任务号推定，缺少上游免单凭据；已登记D-20261105-NOCHARGE，不据此补0，也不修改旧原账。

@@ -64,7 +64,7 @@ async function rows(db: Db, from: Prisma.Sql, fields: Prisma.Sql, id: Prisma.Sql
 // JSON is reduced inside SQLite. Prompts, references, raw responses, and settings
 // blobs never cross the DB boundary into this reader.
 const imageFields = Prisma.sql`"id", "owner_id", "batch_id", "model", "quality", "output_size", "status", "billing_status",
-  "actual_credits", "unit_credits", "billing_settled_at", "tool_flow_run_id", "created_at", "updated_at", "finished_at",
+  "actual_credits", "unit_credits", "provider_cost_usd", "billing_settled_at", "tool_flow_run_id", "created_at", "updated_at", "finished_at",
   "billing_scope", "gateway_request_id", CASE WHEN "deleted_at" IS NOT NULL THEN 'user_deleted' ELSE 'active' END AS "retention",
   CASE WHEN "asset_id" IS NOT NULL AND "asset_id" <> '' THEN 1 ELSE 0 END AS "has_output",
   json_extract(CASE WHEN json_valid("snapshot_json") THEN "snapshot_json" ELSE '{}' END, '$.imageChannel.channelId') AS "channel_id",
@@ -291,6 +291,9 @@ export async function readUsageFacts(source: UsageDbSource, dataAsOf: string, op
     "billing_scope", "billing_account_id", "provider_cost_status", "provider_task_id", "provider_client_request_id", "template_studio_run_id",
     "duration", "is_draft", "provider_cost_currency", "provider_final_amount_micros", "provider_official_amount_micros",
     "provider_final_amount_minor", "provider_official_amount_minor",
+    json_extract(CASE WHEN json_valid("raw_status_response") THEN "raw_status_response" ELSE '{}' END, '$.billing.charged') AS "h3_billing_charged",
+    json_extract(CASE WHEN json_valid("raw_status_response") THEN "raw_status_response" ELSE '{}' END, '$.billing.cost') AS "h3_billing_cost",
+    json_extract(CASE WHEN json_valid("raw_status_response") THEN "raw_status_response" ELSE '{}' END, '$.billing.cost_model') AS "h3_billing_model",
     CASE WHEN "source_draft_task_id" IS NOT NULL OR "draft_upgrade_mode" = 'draft_upgrade' THEN 1 ELSE 0 END AS "is_upgrade",
     json_extract(CASE WHEN json_valid("pricing_snapshot") THEN "pricing_snapshot" ELSE '{}' END, '$.toolVersion') AS "tool_version",
     COALESCE(json_extract(CASE WHEN json_valid("pricing_snapshot") THEN "pricing_snapshot" ELSE '{}' END, '$.fps'),

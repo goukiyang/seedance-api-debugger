@@ -17,7 +17,9 @@
 
 ## 已确认问题
 
-尚无录入条目。
+| 编号 | 类别 / 优先级 | 事实、潜在影响与证据边界 | 来源与证据 | 状态 / 下一步 |
+| --- | --- | --- | --- | --- |
+| D-20261105-NOCHARGE | 已确认旧判定不等于原账证明 / P2 | taskCostFailureClassification仅按未获provider_task_id判failed_no_charge，理由本身写“暂按未收费”；旧界面部分将其写成“已确认未收费”。此次缺口中116条命中旧标记，不能证明供应商确未受理或免单，不应据此补0或解除未知请求保护。未证实际漏费。 | src/lib/costs/ledger.ts:210；src/app/admin/outputs/AdminOutputsClient.tsx:193；COST-CHECK01追加缺口清单 | 本批保留原账和原请求，不按旧标记补0；另行局部区分旧推定/上游明确未收费，缺上游凭证继续待核，不全量改历史。 |
 
 ## 结构性线索与方案
 

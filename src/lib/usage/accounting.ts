@@ -7,7 +7,7 @@ import { multiplyDecimal } from '@/lib/pricing/math';
 import { PricingRuleConflict, selectPricingRule } from '@/lib/pricing/resolve';
 import type { UsageDb } from './database';
 
-export type AccountingCost = { amountCnyMicros: string; source: 'asset' | 'asset_rate' | 'frozen_rate' | 'current_rate'; detail: string; revision: string | null };
+export type AccountingCost = { amountCnyMicros: string; source: 'asset' | 'asset_rate' | 'frozen_rate' | 'current_rate' | 'recorded_rate' | 'provider_response'; detail: string; revision: string | null };
 export type AccountingRow = Record<string, string | number | bigint | Date | boolean | null>;
 type Rule = { id: string; identity: PricingAdminIdentity; mode: string; baseCny: string | null };
 type Basis = { revision: string | null; rules: Rule[]; qualityRoutes: Record<string, Record<string, string>> };
@@ -134,6 +134,18 @@ export async function attachAccountingCosts(db: UsageDb, items: Array<{ fact: Us
       }
     }
     cost ||= calculateRateCost(fact, raw, basis);
+    if (!cost && fact.sourceKind === 'image_task') {
+      const usd = usageDecimalUnits(raw.provider_cost_usd, 6);
+      const amount = usd !== null && usd > BigInt(0) ? usageCnyMicros([{ currency: 'USD', amountMicros: usd.toString() }]) : null;
+      if (amount !== null) cost = { amountCnyMicros: amount, source: 'recorded_rate', revision: null,
+        detail: `历史任务保存的美元参考单价：US$${raw.provider_cost_usd}/张；按站内展示汇率折算，非供应商实扣` };
+    }
+    if (!cost && raw.provider === 'h3' && raw.h3_billing_model === 'free_local'
+      && (raw.h3_billing_charged === false || usageInteger(raw.h3_billing_charged) === BigInt(0))
+      && usageInteger(raw.h3_billing_cost) === BigInt(0)) {
+      cost = { amountCnyMicros: '0', source: 'provider_response', revision: null,
+        detail: '原H3响应明确本地免费：API费用¥0；不包含服务器、显卡和电费成本' };
+    }
     if (cost) { fact.accountingCost = cost; fact.costStatus = 'calculated'; }
   }
 }
