@@ -23,6 +23,7 @@ export async function verifyTemplateUsageCounts(db: PrismaClient, owner: string,
     { id: 'usage-run-a', owner_user_id: owner, draft_id: draftId, request_id: 'usage-request-a', request_fingerprint: 'synthetic', source: 'studio', mode: 'direct', snapshot_json: snapshot },
     { id: 'usage-run-preparation', owner_user_id: owner, draft_id: draftId, request_id: 'usage-request-plan', request_fingerprint: 'synthetic', source: 'studio', mode: 'llm', snapshot_json: snapshot },
     { id: 'usage-run-malformed', owner_user_id: owner, draft_id: draftId, request_id: 'usage-request-malformed', request_fingerprint: 'synthetic', source: 'studio', mode: 'direct', snapshot_json: '{broken' },
+    { id: 'usage-run-legacy', owner_user_id: owner, draft_id: draftId, request_id: 'usage-request-legacy', request_fingerprint: 'synthetic', source: 'studio', mode: 'direct', snapshot_json: JSON.stringify({ templateVersion: { templateId: 'usage-legacy', templateSource: 'legacy' } }) },
     { id: 'usage-run-other', owner_user_id: other, draft_id: otherDraft, request_id: 'usage-request-other', request_fingerprint: 'synthetic', source: 'blank', mode: 'direct', snapshot_json: '{}' },
   ] });
   await db.generationTemplate.create({ data: { id: 'usage-legacy', template_key: 'usage-legacy', name: 'Synthetic legacy', created_by: owner } });
@@ -31,7 +32,8 @@ export async function verifyTemplateUsageCounts(db: PrismaClient, owner: string,
     { id: 'usage-video-2', template_studio_run_id: 'usage-run-malformed' },
     { id: 'usage-video-other', template_studio_run_id: 'usage-run-other' },
     { id: 'usage-video-legacy-1', template_id: 'usage-legacy', local_status: 'failed' },
-    { id: 'usage-video-legacy-2', template_id: 'usage-legacy' },
+    { id: 'usage-video-legacy-2', template_id: 'usage-legacy', template_studio_run_id: 'usage-run-legacy' },
+    { id: 'usage-video-legacy-studio', template_studio_run_id: 'usage-run-legacy' },
   ].map(row => ({ provider: 'synthetic', model: 'synthetic', generation_mode: 'synthetic', prompt: 'synthetic', owner_user_id: owner, user_id: owner, ...row })) });
   const keys = [`image_template:${source}`, `image_module:${moduleId}`, 'image_module:other-private-module',
     'video_template:usage-studio-a', 'video_template:usage-studio-b', `video_draft:${draftId}`, `video_draft:${otherDraft}`, 'legacy_template:usage-legacy'];
@@ -40,7 +42,7 @@ export async function verifyTemplateUsageCounts(db: PrismaClient, owner: string,
   const countedDb = { $queryRaw: (query: any) => { readQueries++; return db.$queryRaw(query); } };
   const counts = await templateUsageCounts(countedDb as any, owner, keys);
   assert.equal(readQueries, 1);
-  assert.deepEqual(keys.map(key => counts.get(key)), [3, 2, 0, 1, 0, 2, 0, 2]);
+  assert.deepEqual(keys.map(key => counts.get(key)), [3, 2, 0, 1, 0, 4, 0, 3]);
   const repeat = await templateUsageCounts(db, owner, keys);
   assert.deepEqual(Array.from(repeat), Array.from(counts));
   assert.deepEqual([await db.imageStudioTask.count(), await db.videoTask.count(), await db.videoStudioRun.count()], before);
@@ -49,5 +51,6 @@ export async function verifyTemplateUsageCounts(db: PrismaClient, owner: string,
   assert.equal(queries, 1); assert.ok(Array.from(unavailable.values()).every(value => value === null));
   return { sharedBatchDeduplicated: true, privateOwnerIsolation: true, frozenVideoIdentity: true,
     preparationNotCounted: true, malformedSnapshotExcluded: true, hiddenAndFailedUseRetained: true,
+    legacyStudioHandoffCounted: true, legacyTaskDeduplicated: true,
     repeatedReadDoesNotWrite: true, oneBatchedQuery: true, unavailableIsNotZero: true };
 }
