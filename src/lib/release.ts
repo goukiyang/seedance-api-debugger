@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '角色生成状态与任务回执修正', outline: [
-  '候选区明确显示当前组号、宫格数和旧图来源',
-  '异步受理后优先保存原任务编号，便于继续查询结果',
+const notice = { title: '样片模式入口调整', outline: [
+  '样片模式移入下方生成参数栏',
+  '移除顶部冗长说明',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

@@ -121,6 +121,7 @@ interface Props {
   isSubmitting: boolean;
   onSubmit: () => void;
   submitAccessory?: React.ReactNode;
+  parameterAccessory?: React.ReactNode;
   settingsContent?: React.ReactNode;
   settingsOpen?: boolean;
   onSettingsOpenChange?: (open: boolean) => void;
@@ -163,6 +164,7 @@ export function ComposerActionBar({
   isSubmitting,
   onSubmit,
   submitAccessory,
+  parameterAccessory,
   settingsContent,
   settingsOpen = false,
   onSettingsOpenChange,
@@ -357,6 +359,7 @@ export function ComposerActionBar({
               options={RESOLUTION_OPTIONS.map(id => ({ id, label: id }))}
               onSelect={id => onResolutionChange(id as VideoResolution)} />}
         </div>
+      {parameterAccessory}
       {videoRedesign && settingsContent && <button ref={settingsTrigger} type="button" className="composer-chip video-settings-trigger"
         title="设置" aria-label="设置" aria-haspopup="dialog" aria-controls={settingsOpen ? settingsId : undefined} aria-expanded={settingsOpen}
         disabled={settingsDisabled} onClick={() => { setSettingsPosition(null); onSettingsOpenChange?.(!settingsOpen); }}><Settings2 size={16} /><span>设置</span></button>}
