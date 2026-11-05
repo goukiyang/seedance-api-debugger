@@ -2,7 +2,7 @@
 
 ## REWARD-DESIGN01 模板贡献奖励机制（2026-11-05）
 
-[正式机制稿](../../tasks/todo/2026-11-05-template-contribution-mechanism.md)，[可复算合成情景](../../tasks/todo/fixtures/template-contribution-scenarios.mjs)。40个离线情景运行完成，无断言失败；保留2类自动奖励风险、1项误批局限和1项工时假设。不启用奖励，不改费率或账本。正式根私有结果目录为 `2026-11-05-template-contribution/`，合成模型不代表线上防刷、权限、事务或到账验证。
+[长期机制v2/R02](../../tasks/todo/2026-11-05-template-contribution-mechanism.md)，[26项跨月差量试算](../../tasks/todo/fixtures/template-contribution-long-term-scenarios.mjs)。长期制度/按月预算，同模板每月真实新工作可再评；修正R01活动化、终身一次及审批负担，补跨月/原账/消费/资金混合。原[R01活动模型40项](../../tasks/todo/fixtures/template-contribution-scenarios.mjs)仅作历史证据。正式根私有结果目录`2026-11-05-template-contribution/`保留原结果，新增`long-term-r02-scenarios.json`；不启用奖励或改费率/余额/账本，离线模型不冒线上防刷、权限、并发或到账证明。
 
 <!-- TEMPLATE-MARK01-MATERIALS-20261104 -->
 ## TEMPLATE-MARK01 模板喜欢与收藏合并（2026-11-04）
