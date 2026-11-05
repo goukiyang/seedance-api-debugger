@@ -14,6 +14,8 @@ import { publicUsageCash, publicUsagePoints, publicUsageProject } from '../src/l
 import { summarizeUsageFacts } from '../src/lib/admin/usage-analytics';
 import type { UsageRecordDTO } from '../src/lib/usage/dto';
 import { attachAccountingCosts, calculateRateCost } from '../src/lib/usage/accounting';
+import { usageCsvChunks } from '../src/lib/usage/csv';
+import type { UsageExportSnapshot } from '../src/lib/usage/dto';
 
 async function main() {
   const directory = await mkdtemp(path.join(tmpdir(), 'usage-rate-accounting-'));
@@ -110,10 +112,17 @@ c.close()
       }
       assert.deepEqual(publicFold.value().cash, cash); assert.equal(cash.accountedCnyMicros, expected.accountedCostCnyMicros);
       assert.equal(cash.netCnyMicros, '1400000');
+      const exportRow: UsageRecordDTO = { id: 'negative-cost', sourceKind: 'video_task', type: 'video', occurredAt: '2026-11-05T10:00:00Z', status: 'succeeded', model: 'fixture',
+        project: { id: 'project', label: 'Fixture', available: true }, taskCount: 1, requestCount: 1, successfulCount: 1, outputCount: 1, availableCount: 1,
+        cash: { ...cash, calculatedCnyMicros: '0', accountedCnyMicros: '-1000000', calculatedCount: 1 }, points: publicUsagePoints([]), originalHref: null };
+      const exportSnapshot = { report: { schema: 1, scope: 'self', asOf: '2026-11-05T12:00:00Z', fingerprint: 'fixture', query: {},
+        range: { startUtc: '2026-11-01T00:00:00Z', endUtc: '2026-12-01T00:00:00Z', timeZone: 'UTC' }, coverage: [], restricted: false }, records: [exportRow] } as unknown as UsageExportSnapshot;
+      let csv = ''; for await (const chunk of usageCsvChunks(exportSnapshot)) csv += chunk;
+      assert.ok(csv.endsWith(',"0","-1000000","1"\r\n'), 'Calculated/accounted CSV amounts retain numeric negative values');
       const raw = await db.$queryRaw<Array<{ count: number }>>`SELECT count(*) AS count FROM CostLedger`;
       assert.equal(Number(raw[0].count), 1);
       assert.ok(snapshot.sourceFingerprintParts.some(part => part.includes('frozen-old')));
-      return { checks: 22, calculatedCount: expected.calculatedCount, accountedCnyMicros: expected.accountedCostCnyMicros, actualCnyMicros: cash.netCnyMicros };
+      return { checks: 23, calculatedCount: expected.calculatedCount, accountedCnyMicros: expected.accountedCostCnyMicros, actualCnyMicros: cash.netCnyMicros };
     }, { dataAsOf: '2026-11-05T12:00:00Z' });
     process.stdout.write(`${JSON.stringify({ ok: true, offlineFixture: true, ...result })}\n`);
   } finally {

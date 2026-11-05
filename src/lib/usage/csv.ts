@@ -31,7 +31,7 @@ export async function* usageCsvChunks(snapshot: UsageExportSnapshot): AsyncGener
         record.points.charged, record.points.refunded, record.points.net, record.points.reserved, record.points.released,
         JSON.stringify(record.points.personal), JSON.stringify(record.points.project), JSON.stringify(record.points.unclassified), record.originalHref,
         record.cash.calculatedCnyMicros, record.cash.accountedCnyMicros, record.cash.calculatedCount || 0];
-      chunk += `${values.map((value, index) => usageCsvCell(value, index >= 8 && index <= 12 || index >= 18 && index <= 25)).join(',')}\r\n`;
+      chunk += `${values.map((value, index) => usageCsvCell(value, index >= 8 && index <= 12 || index >= 18 && index <= 25 || index >= 30 && index <= 32)).join(',')}\r\n`;
       if (chunk.length >= 16 * 1024) { yield chunk; chunk = ''; }
     }
     if (chunk) yield chunk;
