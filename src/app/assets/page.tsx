@@ -1467,7 +1467,7 @@ function AssetsPageContent() {
 
   const handleSelectView = (nextView: AssetView) => {
     if (!assetViewTabs.some(tab => tab.id === nextView && (!tab.adminOnly || isAdmin))) return;
-    setError(''); setMessage(''); setDelivery(null);
+    if (nextView !== assetView) { setError(''); setMessage(''); setDelivery(null); }
     setAssetView(nextView);
     rememberReactionView(nextView);
     const location = new URL(window.location.href);

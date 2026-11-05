@@ -174,7 +174,7 @@
 .toolbarButton[aria-pressed="true"], .toolbarButton[aria-expanded="true"], .cardSizeChoices button[aria-pressed="true"] { background: var(--bg-hover, #2b3538); border-color: var(--text-secondary, #7d8a8e); }
 .primaryUpload.primaryUpload { flex: none; color: #e9f5f2; border-color: #48786c; background: #28594d; }
 .toolbarButton:hover, .batchEntry > button:hover, .toolbarPanel button:hover, .searchField button:hover { filter: brightness(1.12); }
-.toolbarButton:focus-visible, .batchEntry > button:focus-visible, .viewTabs button:focus-visible, .mediaTabs button:focus-visible,
+.toolbarPanel:focus-visible, .toolbarButton:focus-visible, .batchEntry > button:focus-visible, .viewTabs button:focus-visible, .mediaTabs button:focus-visible,
 .toolbarPanel :is(button, a, input, select, summary):focus-visible, .searchField:focus-within, .scopeField:focus-within { outline: 2px solid #79c8b5; outline-offset: 2px; }
 .toolbarPanel button:disabled { cursor: default; opacity: .5; filter: none; }
 .viewRow { gap: 16px; padding-block-end: 8px; border-block-end: 1px solid var(--border-color, #303b40); }
