@@ -1,9 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '账本费用核算补齐', outline: [
-  '视频复用资产管理费用，图片按已确认单价核算',
-  '个人与项目汇总同步显示费用，核算和实扣分开',
-  '保留历史点数和原账，不重复扣费',
+const notice = { title: '资产管理顶部更清楚', outline: [
+  '类型和搜索常显，筛选与显示按需打开',
+  '上传独立入口，保留批量操作与返回现场',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
