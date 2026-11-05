@@ -8,6 +8,14 @@
 
 # V1.2 剩余模块落地 Todo
 
+<!-- LEDGER-RATE-ACCOUNTING-20261105 -->
+## COST-CHECK01 账本费用核算接入（2026-11-05）
+
+已部署v0.133.4，待用户手动验收。视频复用资产管理的金额/用量核算，图片按冻结或当前已确认人民币费率；确认实扣优先，不重叠汇总，不补扣历史点数、不写原账、不改费率。个人/项目/管理账本、趋势、排序与CSV共用只读投影；缺可靠依据仍待核，不造零。23项隔离金额检查、最终完整原生/价格/Next/types/lint、6启动门、7服务4timer、2公网资源同SHA及2匿名401通过，无DDL/真实生成/浏览器验收。
+
+应用源 `0b166d223a34c0725b857da837fcec7e1ad238d0` / BUILD `pwKGQBXWQ3e9wpOqTfwgG`，19:09:56Z公网收口；相容guard沿1d452/4THsI43mwKhhvzVsWliHk，仅回程序不回业务数据。费率全字段保持原194e8d3a；窗口已释放。历史缺冻结价的当前费率核算并非不可变历史付款凭证，后续改价可改变该估算；原现金账不变。详情及手验项见[原单](todo/2026-11-05-ledger-rate-accounting.md)，私有发布原证见 `docs/materials/2026-11-05-ledger-rate-accounting/release/attempt02/`。
+<!-- /LEDGER-RATE-ACCOUNTING-20261105 -->
+
 <!-- TEMPLATE-USAGE01-20261105 -->
 ## TEMPLATE-USAGE01 模板使用次数统计与显示（2026-11-05）
 

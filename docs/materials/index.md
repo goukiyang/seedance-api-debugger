@@ -1,5 +1,11 @@
 # 项目资料索引
 
+<!-- LEDGER-RATE-ACCOUNTING-MATERIALS-20261105 -->
+## COST-CHECK01 账本费用核算接入（2026-11-05）
+
+[原单](../../tasks/todo/2026-11-05-ledger-rate-accounting.md)；正式根私有[发布原证](2026-11-05-ledger-rate-accounting/release/attempt02/public-deployed.json)及[源配对](2026-11-05-ledger-rate-accounting/release/attempt02/source-pair-contract.json)。v0.133.4 / 0b166d223a / BUILD pwKGQBXWQ3e9wpOqTfwgG于19:09:56Z保护部署，待用户手验。视频资产费用/图片确认人民币费率接入只读账本，原实扣优先，不改原价格/账本/扣点，无DDL；23项隔离检查和最终完整构建、服务/公网/数据保护通过。guard1d452原产物保持；此前候选未部署，旧证据时间保留。
+<!-- /LEDGER-RATE-ACCOUNTING-MATERIALS-20261105 -->
+
 <!-- TEMPLATE-MARK01-MATERIALS-20261104 -->
 ## TEMPLATE-MARK01 模板喜欢与收藏合并（2026-11-04）
 
