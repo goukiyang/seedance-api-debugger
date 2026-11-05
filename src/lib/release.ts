@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '超分人民币计价规格补齐', outline: [
-  '超分按三档帧率分别登记单价',
-  '新人民币规则按毫秒估算，最后统一换算点数',
-  '旧任务继续使用创建时的计费合同',
+const notice = { title: '模板使用次数一眼可见', outline: [
+  '封面与收藏列表显示已记录的使用次数',
+  '批量图片按提交去重，重复查询不增加',
+  '视频模板按实际生成提交统计',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
