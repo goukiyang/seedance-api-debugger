@@ -11,10 +11,12 @@ import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Profiler, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Profiler, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import * as Popper from '@radix-ui/react-popper';
 import PaginationControls from '@/components/PaginationControls';
 import { gridPageCapacity } from '@/components/useResultPages';
-import { CheckSquare, Download, Eye, FolderInput, FolderPlus, ImagePlus, Maximize2, RefreshCcw, Search, Sparkles, Upload, X } from 'lucide-react';
+import { CheckSquare, Download, Eye, FolderInput, FolderPlus, ImagePlus, Maximize2, RefreshCcw, Search, Sparkles, Upload, X, Filter, SlidersHorizontal, MoreHorizontal } from 'lucide-react';
 import {
   BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT,
 } from '@/lib/video/download-client';
@@ -266,6 +268,25 @@ const ASSET_SHOW_UPLOADS_STORAGE_KEY = 'asset_library_show_uploaded_assets';
 const ASSET_BULK_TARGET_STORAGE_KEY = 'asset_library_bulk_target';
 const ASSET_BULK_ALBUM_STORAGE_KEY = 'asset_library_bulk_album_id';
 const WORKSPACE_TAB_ID_KEY = 'workspace_tab_id';
+
+function AssetToolbarPanel({ label, triggerContent, scopeKey, children, primary = false }: {
+  label: string; triggerContent: ReactNode; scopeKey: string; children: ReactNode; primary?: boolean;
+}) {
+  const [open, setOpen] = useState(false), id = useId();
+  const trigger = useRef<HTMLButtonElement>(null), panel = useRef<HTMLDivElement>(null);
+  useEffect(() => setOpen(false), [scopeKey]);
+  useDialogDismiss({ open, dialogRef: panel, branchRefs: [trigger], modal: false, onDismiss: () => setOpen(false) });
+  return <Popper.Root><Popper.Anchor asChild><button ref={trigger} type="button" className={`${assetStyles.toolbarButton} ${primary ? assetStyles.primaryUpload : ''}`}
+    aria-label={label} title={label} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined} onClick={() => setOpen(value => !value)}>
+    {triggerContent}
+  </button></Popper.Anchor>
+    {open && createPortal(<Popper.Content ref={panel} id={id} role="dialog" aria-label={label} tabIndex={-1}
+      className={assetStyles.toolbarPanel} side="bottom" align="end" sideOffset={8} collisionPadding={12} sticky="always" hideWhenDetached>
+      <header className={assetStyles.panelHeading}><strong>{label}</strong><button type="button" aria-label={`关闭${label}`} onClick={() => setOpen(false)}><X size={16} /></button></header>
+      {children}
+    </Popper.Content>, trigger.current?.closest('dialog[open]') || document.body)}
+  </Popper.Root>;
+}
 
 function MultiviewAssetGroupCard({ item, cardSize, onOpenAsset }: { item: AssetLibraryItem; cardSize: AssetCardSize; onOpenAsset: (item: AssetLibraryItem) => void }) {
   const [open, setOpen] = useState(false);
@@ -1869,11 +1890,6 @@ function AssetsPageContent() {
 
   const updateShowUploadedAssets = (value: boolean) => {
     setShowUploadedAssets(value);
-    if (!value) {
-      setAssetUploadFile(null);
-      setAssetUploadProgress(null);
-      if (assetUploadInputRef.current) assetUploadInputRef.current.value = '';
-    }
     try {
       window.localStorage.setItem(ASSET_SHOW_UPLOADS_STORAGE_KEY, value ? 'true' : 'false');
     } catch {
@@ -1887,7 +1903,7 @@ function AssetsPageContent() {
     setAssetUploadFile(file);
     setAssetUploadProgress(null);
     setError('');
-    setMessage(file ? `已选择${assetUploadTypeLabel(file)}：${file.name}` : '');
+    setMessage('');
   };
 
   const handleAssetUpload = async () => {
@@ -2088,249 +2104,107 @@ function AssetsPageContent() {
     }
   };
 
+  const toolbarScope = `${user?.id || 'anonymous'}:${assetView}`;
+  const activeBrowseFilters = [
+    ...(keyword ? [{ id: 'keyword', label: `搜索：${keyword}`, remove: () => { setKeyword(''); setKeywordDraft(''); resetForFilterChange(); } }] : []),
+    ...(status !== 'all' ? [{ id: 'status', label: `状态：${statusOptions.find(option => option.id === status)?.label || status}`, remove: () => { setStatus('all'); resetForFilterChange(); } }] : []),
+    ...(scope === 'project' && projectId ? [{ id: 'project', label: `项目：${projects.find(project => project.id === projectId)?.name || '所选项目'}`, remove: () => { setProjectId(''); resetForFilterChange(); } }] : []),
+    ...(scope === 'user' && ownerUserId ? [{ id: 'owner', label: `归属人：${users.find(owner => owner.id === ownerUserId)?.name || '所选成员'}`, remove: () => { setOwnerUserId(''); resetForFilterChange(); } }] : []),
+    ...(!isEnhanceView && sourceFilter === 'multiview-output' ? [{ id: 'source', label: '仅3D多视图成品', remove: () => { setSourceFilter('all'); resetForFilterChange(); } }] : []),
+    ...(!isEnhanceView && showUploadedAssets ? [{ id: 'uploads', label: '包含上传素材', remove: () => updateShowUploadedAssets(false) }] : []),
+  ];
+  const clearExtraFilters = () => {
+    setKeyword(''); setKeywordDraft(''); setStatus('all');
+    if (scope === 'project') setProjectId('');
+    if (scope === 'user') setOwnerUserId('');
+    if (!isEnhanceView) { setSourceFilter('all'); updateShowUploadedAssets(false); }
+    else resetForFilterChange();
+  };
+
   return (
     <div className="asset-library-page exp-browse">
-      <header className="asset-library-header exp-heading">
-        <div>
-          <div className="asset-library-eyebrow">Asset Library</div>
+      <section className={assetStyles.topSection} aria-label="资产导航与操作">
+        <header className={assetStyles.topbar}>
           <h1>资产管理</h1>
-          <p>按生产历史、项目和用户查看视频资产，支持框选、多选、批量下载、加入工作区、加入图集和移动视频。</p>
+          <div className={assetStyles.topActions}>
+            <AssetToolbarPanel label="上传素材" scopeKey={toolbarScope} primary triggerContent={<><Upload size={15} /><span>{assetUploading ? '上传中…' : '上传素材'}</span></>}>
+              <section className={assetStyles.uploadContent} aria-label="上传素材到资产库" tabIndex={0} onPaste={event => {
+                if (assetUploading) return;
+                const image = Array.from(event.clipboardData.items).find(item => item.kind === 'file' && item.type.startsWith('image/'))?.getAsFile();
+                if (!image) return;
+                event.preventDefault(); setAssetUploadFile(image); setAssetUploadProgress(null); setError(''); setMessage('');
+              }}>
+                <input ref={assetUploadInputRef} type="file" accept="image/*,video/*,audio/*" className="asset-library-upload-input" onChange={handleAssetUploadFileChange} />
+                <p className={assetStyles.uploadFile}>{assetUploadFile ? `${assetUploadTypeLabel(assetUploadFile)} · ${assetUploadFile.name} · ${formatAssetUploadBytes(assetUploadFile.size)}` : '选择图片、视频、音频，或在这里粘贴图片。音频最大 15MB。'}</p>
+                {assetUploadProgress && <UploadProgressIndicator busy={assetUploading} label={assetUploadProgress.label} detail={assetUploadProgress.detail} percent={assetUploadProgress.percent} variant="dark" />}
+                <div className={assetStyles.panelActions}>
+                  <button type="button" onClick={() => assetUploadInputRef.current?.click()} disabled={assetUploading}>选择文件</button>
+                  <button type="button" className={assetStyles.primaryUpload} onClick={handleAssetUpload} disabled={assetUploading || !assetUploadFile}><Upload size={15} />{assetUploading ? '上传中…' : '开始上传'}</button>
+                </div>
+              </section>
+            </AssetToolbarPanel>
+            {!isReactionView && <button className={assetStyles.toolbarButton} type="button" aria-label={selectionMode ? '退出选择' : '选择资产'} aria-pressed={selectionMode} onClick={toggleSelectionMode}>
+              <CheckSquare size={15} /><span className={assetStyles.selectionLabel}>{selectionMode ? '退出选择' : '选择'}</span>
+            </button>}
+            <button className={assetStyles.toolbarButton} type="button" onClick={reloadItems} aria-label="刷新资产" title="刷新资产"><RefreshCcw size={16} /></button>
+            <AssetToolbarPanel label="工具与帮助" scopeKey={toolbarScope} triggerContent={<><MoreHorizontal size={17} /><span className={assetStyles.toolsLabel}>工具与帮助</span></>}>
+              <nav className={assetStyles.toolLinks} aria-label="相关工具"><Link href="/tasks">任务列表</Link><Link href="/multiview?view=generations">3D多视图工作台</Link></nav>
+              <GuidedDemo kind="reference" />
+            </AssetToolbarPanel>
+          </div>
+        </header>
+        <div className={assetStyles.viewRow}>
+          <nav className={assetStyles.viewTabs} aria-label="资产分类">
+            {assetViewTabs.filter(tab => !tab.adminOnly || isAdmin).map(tab => <button key={tab.id} type="button" aria-pressed={assetView === tab.id} onClick={() => handleSelectView(tab.id)}>
+              {tab.tone === 'enhance' && <Sparkles size={13} aria-hidden="true" />}{tab.label}
+            </button>)}
+          </nav>
+          {user && canUseCompanyTemplates({ ...user, account_type: user.account_type || '' }) && <div className={assetStyles.batchEntry}><StudioBatchHistory key={user.id} userId={user.id} initialId={params.get('imageBatchId') || undefined} /></div>}
         </div>
-        <div className="asset-library-header-actions">
-          <button className="asset-library-icon-button" type="button" onClick={reloadItems} aria-label="刷新资产">
-            <RefreshCcw size={16} />
-          </button>
-          <button
-            className={`asset-library-secondary-link asset-library-select-toggle ${selectionMode ? 'active' : ''}`}
-            type="button"
-            aria-pressed={selectionMode}
-            onClick={toggleSelectionMode}
-          >
-            <CheckSquare size={15} />
-            {selectionMode ? '退出选择' : '选择'}
-          </button>
-          <Link className="asset-library-secondary-link" href="/tasks">任务列表</Link>
-          <Link className="asset-library-secondary-link" href="/multiview?view=generations">3D多视图</Link>
-        </div>
-      </header>
-
-      <section className="asset-library-tabs" aria-label="资产分类">
-        {assetViewTabs.filter((tab) => !tab.adminOnly || isAdmin).map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            className={`${assetView === tab.id ? 'active' : ''} ${tab.tone === 'enhance' ? 'asset-library-tab-enhance' : ''}`.trim()}
-            onClick={() => handleSelectView(tab.id)}
-          >
-            {tab.tone === 'enhance' && <Sparkles size={13} aria-hidden="true" />}
-            {tab.label}
-          </button>
-        ))}
       </section>
 
       <ContentLookup />
       {isReactionView && <ContentCollections key={assetView} action={explicitView === 'likes' ? 'like' : 'favorite'} mediaClassName={assetStyles.collectionMedia} preferPreviewImageThumbnails restorePreviewOnMount={false} />}
       {!isReactionView && <>
-      <section className="asset-library-filter-bar exp-browse-toolbar">
-        {user && canUseCompanyTemplates({ ...user, account_type: user.account_type || '' }) && <StudioBatchHistory key={user.id} userId={user.id} initialId={params.get('imageBatchId') || undefined} />}
-        {isEnhanceView ? (
-          <div className="asset-library-view-chip">
-            <Sparkles size={14} aria-hidden="true" />
-            视频超分
-          </div>
-        ) : (
-          <div className="asset-library-type-tabs">
-            {typeTabs.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                className={type === tab.id ? 'active' : ''}
-                onClick={() => {
-                  setType(tab.id);
-                  resetForFilterChange();
-                }}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {!isEnhanceView && (
-          <button
-            type="button"
-            className={`asset-library-source-toggle ${showUploadedAssets ? 'active' : ''}`}
-            aria-pressed={showUploadedAssets}
-            title="打开后显示自己上传的图片、视频和音频素材"
-            onClick={() => updateShowUploadedAssets(!showUploadedAssets)}
-          >
-            <Upload size={14} aria-hidden="true" />
-            <span>上传素材</span>
-          </button>
-        )}
-
-        {!isEnhanceView && (
-          <button
-            type="button"
-            className={`asset-library-source-toggle ${sourceFilter === 'multiview-output' ? 'active' : ''}`}
-            aria-pressed={sourceFilter === 'multiview-output'}
-            title="只看本人已保存到素材库的3D多视图成品图"
-            onClick={() => {
-              setSourceFilter(current => current === 'multiview-output' ? 'all' : 'multiview-output');
-              setType('image');
-              resetForFilterChange();
-            }}
-          >
-            <span>3D多视图成品</span>
-          </button>
-        )}
-
-        <form
-          className="asset-library-search"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setKeyword(keywordDraft.trim());
-            resetForFilterChange();
-          }}
-        >
-          <Search size={15} />
-          <input
-            value={keywordDraft}
-            onChange={(event) => setKeywordDraft(event.target.value)}
-            placeholder="搜索 prompt、任务、项目或用户"
-          />
+      <section className={assetStyles.browseToolbar} aria-label="查找资产">
+        {!isEnhanceView && <div className={assetStyles.mediaTabs} role="group" aria-label="资产类型">
+          {typeTabs.map(tab => <button key={tab.id} type="button" aria-pressed={type === tab.id} onClick={() => { setType(tab.id); resetForFilterChange(); }}>{tab.label}</button>)}
+        </div>}
+        {scope === 'project' && <div className={assetStyles.scopeField}><ProjectSelector value={projectId} aria-label="选择项目" onChange={event => { setProjectId(event.target.value); resetForFilterChange(); }}>
+          <option value="">全部项目</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
+        </ProjectSelector></div>}
+        {scope === 'user' && isAdmin && <select className={assetStyles.scopeField} aria-label="选择用户" value={ownerUserId} onChange={event => { setOwnerUserId(event.target.value); resetForFilterChange(); }}>
+          <option value="">全部用户</option>{users.map(item => <option key={item.id} value={item.id}>{item.name || item.email || item.username}</option>)}
+        </select>}
+        <form className={assetStyles.searchField} onSubmit={event => { event.preventDefault(); setKeyword(keywordDraft.trim()); resetForFilterChange(); }}>
+          <Search size={15} aria-hidden="true" /><input type="search" aria-label="搜索资产" title="搜索提示词、任务、项目或用户" value={keywordDraft} onChange={event => setKeywordDraft(event.target.value)} placeholder="搜索资产" /><button type="submit">搜索</button>
         </form>
-
-        <div className="asset-library-size-toggle" role="group" aria-label="资产卡片尺寸">
-          <span>尺寸</span>
-          {cardSizeOptions.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              className={cardSize === option.id ? 'active' : ''}
-              title={option.title}
-              aria-pressed={cardSize === option.id}
-              onClick={() => updateCardSize(option.id)}
-            >
-              {option.label}
-            </button>
-          ))}
+        <div className={assetStyles.browseActions}>
+          <AssetToolbarPanel label="筛选资产" scopeKey={toolbarScope} triggerContent={<><Filter size={15} /><span>筛选</span>{activeBrowseFilters.length > 0 && <span className={assetStyles.filterCount}>{activeBrowseFilters.length}</span>}</>}>
+            <label className={assetStyles.panelField}>状态<select value={status} onChange={event => { setStatus(event.target.value as AssetStatus); resetForFilterChange(); }}>
+              {statusOptions.filter(option => !option.adminOnly || isAdmin).map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+            </select></label>
+            {!isEnhanceView && <div className={assetStyles.sourceChoices}>
+              <label><input type="checkbox" checked={showUploadedAssets} onChange={event => updateShowUploadedAssets(event.target.checked)} />包含上传素材</label>
+              <label title="只看本人已保存到素材库的3D多视图成品图"><input type="checkbox" checked={sourceFilter === 'multiview-output'} onChange={event => { setSourceFilter(event.target.checked ? 'multiview-output' : 'all'); setType('image'); resetForFilterChange(); }} />仅3D多视图成品</label>
+            </div>}
+            {activeBrowseFilters.length > 0 && <button className={assetStyles.clearFilters} type="button" onClick={clearExtraFilters}>清除额外筛选</button>}
+          </AssetToolbarPanel>
+          <AssetToolbarPanel label="显示设置" scopeKey={toolbarScope} triggerContent={<><SlidersHorizontal size={15} /><span>显示</span></>}>
+            <label className={assetStyles.panelField}>排序<select value={sort} onChange={event => { setSort(event.target.value as AssetSort); resetForFilterChange(); }}>
+              {sortOptions.filter(option => !option.adminOnly || isAdmin).map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+            </select></label>
+            <label className={assetStyles.panelField}>分组<select value={groupBy} onChange={event => { setGroupBy(event.target.value as AssetGroup); clearSelection(); }}>
+              {groupOptions.filter(option => !option.adminOnly || isAdmin).map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+            </select></label>
+            <div className={assetStyles.panelField}><span>卡片大小</span><div className={assetStyles.cardSizeChoices} role="group" aria-label="资产卡片尺寸">
+              {cardSizeOptions.map(option => <button key={option.id} type="button" title={option.title} aria-pressed={cardSize === option.id} onClick={() => updateCardSize(option.id)}>{option.label}</button>)}
+            </div></div>
+          </AssetToolbarPanel>
         </div>
-
-        <select
-          value={status}
-          onChange={(event) => {
-            setStatus(event.target.value as AssetStatus);
-            resetForFilterChange();
-          }}
-        >
-          {statusOptions.filter((option) => !option.adminOnly || isAdmin).map((option) => (
-            <option key={option.id} value={option.id}>{option.label}</option>
-          ))}
-        </select>
-
-        {scope === 'project' && (
-          <ProjectSelector
-            value={projectId}
-            onChange={(event) => {
-              setProjectId(event.target.value);
-              resetForFilterChange();
-            }}
-          >
-            <option value="">全部项目</option>
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>{project.name}</option>
-            ))}
-          </ProjectSelector>
-        )}
-
-        {scope === 'user' && isAdmin && (
-          <select
-            value={ownerUserId}
-            onChange={(event) => {
-              setOwnerUserId(event.target.value);
-              resetForFilterChange();
-            }}
-          >
-            <option value="">全部用户</option>
-            {users.map((item) => (
-              <option key={item.id} value={item.id}>{item.name || item.email || item.username}</option>
-            ))}
-          </select>
-        )}
-
-        <select
-          value={groupBy}
-          onChange={(event) => {
-            setGroupBy(event.target.value as AssetGroup);
-            clearSelection();
-          }}
-        >
-          {groupOptions.filter((option) => !option.adminOnly || isAdmin).map((option) => (
-            <option key={option.id} value={option.id}>{option.label}</option>
-          ))}
-        </select>
-
-        <select
-          value={sort}
-          onChange={(event) => {
-            setSort(event.target.value as AssetSort);
-            resetForFilterChange();
-          }}
-        >
-          {sortOptions.filter((option) => !option.adminOnly || isAdmin).map((option) => (
-            <option key={option.id} value={option.id}>{option.label}</option>
-          ))}
-        </select>
       </section>
 
-      {showUploadedAssets && (
-        <section className="asset-library-upload-panel" aria-label="上传素材到资产库" tabIndex={0} onPaste={event => {
-          if (assetUploading) return;
-          const image = Array.from(event.clipboardData.items).find(item => item.kind === 'file' && item.type.startsWith('image/'))?.getAsFile();
-          if (!image) return;
-          event.preventDefault(); setAssetUploadFile(image); setAssetUploadProgress(null); setError('');
-          setMessage(`已选择图片：${image.name}，点击开始上传加入资产库。`);
-        }}>
-          <input
-            ref={assetUploadInputRef}
-            type="file"
-            accept="image/*,video/*,audio/*"
-            className="asset-library-upload-input"
-            onChange={handleAssetUploadFileChange}
-          />
-          <div className="asset-library-upload-copy">
-            <strong>上传素材</strong>
-            <span>
-              {assetUploadFile
-                ? `${assetUploadTypeLabel(assetUploadFile)} · ${assetUploadFile.name} · ${formatAssetUploadBytes(assetUploadFile.size)}`
-                : '支持图片、视频、音频，也可在此粘贴图片；音频最大 15MB。生成前会按当前模型规则检查时长、格式和分辨率。'}
-            </span>
-          </div>
-          {assetUploadProgress && (
-            <UploadProgressIndicator
-              busy={assetUploading}
-              label={assetUploadProgress.label}
-              detail={assetUploadProgress.detail}
-              percent={assetUploadProgress.percent}
-              variant="dark"
-              className="asset-library-upload-progress"
-            />
-          )}
-          <div className="asset-library-upload-actions">
-            <button type="button" onClick={() => assetUploadInputRef.current?.click()} disabled={assetUploading}>
-              选择文件
-            </button>
-            <button type="button" className="primary" onClick={handleAssetUpload} disabled={assetUploading}>
-              <Upload size={15} aria-hidden="true" />
-              {assetUploading ? '上传中...' : assetUploadFile ? '开始上传' : '上传素材'}
-            </button>
-          </div>
-        </section>
-      )}
-
-      <GuidedDemo kind="reference" />
-      {(message || error) && <OperationReceipt className={`asset-library-notice ${error ? 'error' : 'success'}`} status={error || message}
+      {(message || error) && <OperationReceipt className={`asset-library-notice ${assetStyles.topNotice} ${error ? 'error' : 'success'}`} status={error || message}
         actions={<>
           {!error && delivery && delivery.owner === user?.id && delivery.message === message &&
             <Link href={delivery.href}>{delivery.label}</Link>}
@@ -2354,7 +2228,7 @@ function AssetsPageContent() {
       )}
 
       {selectedIds.length > 0 && (
-        <SelectionBar className="asset-library-bulkbar" count={selectedIds.length} summary={`可下载 ${downloadableTaskIds.length} 个，可移动视频 ${movableItemIds.length} 个，可加入参考 ${reusableImageItems.length} 个，涉及项目 ${new Set(selectedItems.map(item => item.project?.id || 'unassigned')).size} 个${isAdmin ? `，涉及用户 ${new Set(selectedItems.map(item => item.owner?.id || 'unknown')).size} 位` : ''}`}>
+        <SelectionBar className={`asset-library-bulkbar ${assetStyles.compactBulkbar}`} count={selectedIds.length} summary={`可下载 ${downloadableTaskIds.length} 个，可移动视频 ${movableItemIds.length} 个，可加入参考 ${reusableImageItems.length} 个，涉及项目 ${new Set(selectedItems.map(item => item.project?.id || 'unassigned')).size} 个${isAdmin ? `，涉及用户 ${new Set(selectedItems.map(item => item.owner?.id || 'unknown')).size} 位` : ''}`}>
 
             <button type="button" onClick={clearSelection}>取消选择</button>
             <button type="button" onClick={handleDownload} disabled={bulkDownloading || downloadableTaskIds.length === 0}>
@@ -2457,14 +2331,7 @@ function AssetsPageContent() {
         onPointerUp={handleGridPointerUp}
       >
         {returnUnavailable && <OperationReceipt status="原资产不在这一页，已返回素材列表。" />}
-        <FilterSummary filters={[
-          ...(keyword ? [{ id: 'keyword', label: `搜索：${keyword}`, remove: () => { setKeyword(''); setKeywordDraft(''); resetForFilterChange(); } }] : []),
-          ...(status !== 'all' ? [{ id: 'status', label: `状态：${statusOptions.find(option => option.id === status)?.label || status}`, remove: () => { setStatus('all'); resetForFilterChange(); } }] : []),
-          ...(!isEnhanceView && type !== 'all' ? [{ id: 'type', label: `类型：${type === 'image' ? '图片' : type === 'audio' ? '音频' : '视频'}`, remove: () => { setType('all'); resetForFilterChange(); } }] : []),
-          ...(projectId ? [{ id: 'project', label: `项目：${projects.find(project => project.id === projectId)?.name || '所选项目'}`, remove: () => { setProjectId(''); resetForFilterChange(); } }] : []),
-          ...(ownerUserId ? [{ id: 'owner', label: `归属人：${users.find(owner => owner.id === ownerUserId)?.name || '所选成员'}`, remove: () => { setOwnerUserId(''); resetForFilterChange(); } }] : []),
-          ...(!isEnhanceView && sourceFilter === 'multiview-output' ? [{ id: 'source', label: '3D多视图成品', remove: () => { setSourceFilter('all'); resetForFilterChange(); } }] : []),
-        ]} clear={clearBrowseFilters} />
+        <div className={assetStyles.activeFilters}><FilterSummary filters={activeBrowseFilters} clear={clearExtraFilters} /></div>
         <div ref={gridProbe} className={`asset-library-grid asset-library-grid-${cardSize}`} aria-hidden="true" style={{ height: 0, overflow: 'hidden', margin: 0 }} />
         {loading && (items.length ? <LoadingStatus>正在更新资产，暂时保留上次结果</LoadingStatus> : <LoadingSkeleton label="正在读取资产" grid cards />)}
 
