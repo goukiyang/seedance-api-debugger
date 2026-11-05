@@ -30,7 +30,7 @@ export const WORKS_SOURCES = [
   'src/lib/works/operations.ts', 'src/lib/works/interactions.ts', 'src/lib/works/collections.ts',
   'src/lib/works/rollout.server.ts', 'src/lib/navigation.ts', 'src/app/api/auth/me/route.ts',
   'src/app/works/page.tsx', 'src/app/api/works/project-audience/route.ts',
-  'src/components/works/ProjectWorkAudience.tsx', 'src/components/home/HomeWorkspace.tsx', 'src/lib/context/AppSessionContext.tsx',
+  'src/components/works/ProjectWorkAudience.tsx', 'src/components/home/HomeWorkspace.tsx', 'src/components/home/WorkspaceSidebar.tsx', 'src/lib/context/AppSessionContext.tsx',
   'src/lib/works/source-policy.ts', 'src/lib/works/ingestion.ts', 'src/lib/works/previews.ts', 'src/lib/works/preview-files.ts', 'src/lib/works/video-storage.ts',
   'src/lib/admin/usage-attribution.ts', 'src/lib/image-studio/batches.ts', 'src/lib/creation/intents.ts',
   'src/lib/video/multiview-works.ts', 'src/lib/video/multiview-output-access.server.ts',

@@ -4,6 +4,10 @@ import { Download, Monitor, Puzzle } from 'lucide-react';
 import { getSession } from '@/lib/auth/session';
 import { isExternalUser, externalFallbackPath } from '@/lib/access/external-role';
 import { readBridgeRelease, type BridgeRelease } from '@/lib/bridge/releases';
+import { canUseCompanyTemplates } from '@/lib/image-studio/access';
+import { canUseWorksPreview } from '@/lib/works/rollout.server';
+import WorkspaceSidebar from '@/components/home/WorkspaceSidebar';
+import homeStyles from '@/app/home.module.css';
 import styles from './page.module.css';
 
 export const dynamic = 'force-dynamic';
@@ -12,10 +16,13 @@ export default async function BridgeDownloadPage() {
   const user = await getSession();
   if (!user) redirect('/login?return_to=%2Ftools%2Fchrome-extension');
   if (user.account_type !== 'internal' || isExternalUser(user)) redirect(externalFallbackPath());
-  return <main className={styles.page}>
-    <header><p className={styles.eyebrow}>SD2 生产桥</p><h1>插件下载</h1><p>把浏览器里的创作工具与 SD2 任务连接起来。</p></header>
-    <Suspense fallback={<p role="status">正在读取最新安装包…</p>}><ReleaseDownloads /></Suspense>
-  </main>;
+  return <div className={homeStyles.page}>
+    <WorkspaceSidebar accountId={user.id} internal images={canUseCompanyTemplates(user)} worksEnabled={canUseWorksPreview(user)} />
+    <div className={styles.page}>
+      <header><p className={styles.eyebrow}>SD2 生产桥</p><h1>插件下载</h1><p>把浏览器里的创作工具与 SD2 任务连接起来。</p></header>
+      <Suspense fallback={<p role="status">正在读取最新安装包…</p>}><ReleaseDownloads /></Suspense>
+    </div>
+  </div>;
 }
 
 async function ReleaseDownloads() {
