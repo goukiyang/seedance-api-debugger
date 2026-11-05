@@ -761,6 +761,7 @@ function AssetsPageContent() {
     } catch {}
   }, [user?.id]);
   useEffect(() => {
+    setError(''); setMessage(''); setDelivery(null);
     if (!user?.id) { setAssetView('history'); return; }
     if (hasExplicitView) {
       const tab = assetViewTabs.find(item => item.id === (explicitView === 'likes' ? 'favorites' : explicitView) && (!item.adminOnly || user.role === 'admin'));
@@ -918,7 +919,6 @@ function AssetsPageContent() {
   const assetUploadOwner = useRef(user?.id); assetUploadOwner.current = user?.id;
   useEffect(() => {
     setAssetUploadReceipt(null); setAssetUploadFile(null); setAssetUploadProgress(null); setAssetUploading(false);
-    setError(''); setMessage(''); setDelivery(null);
   }, [user?.id]);
 
   const cardRefs = useRef(new Map<AssetLibraryItemId, HTMLDivElement>());
