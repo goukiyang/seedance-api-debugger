@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '后台视频费率显示修复', outline: [
+const notice = { title: '后台费率换算显示修复', outline: [
   '填写视频单价时直接看到 5 秒参考扣点',
-  '其他草稿待核对时，已生效的视频点数仍可查看',
+  '固定价按金额自动换点，未填写金额不显示旧点数',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

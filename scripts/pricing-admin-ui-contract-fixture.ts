@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { PricingAdminAction, PricingAdminChanges, PricingAdminRow, PricingAdminSaveInput } from '../src/lib/pricing/admin-contract';
-import { pricingDisplaySecondCredits, showPricingImageRow } from '../src/lib/pricing/admin-display';
+import { pricingDisplayFixedCredits, showPricingImageRow } from '../src/lib/pricing/admin-display';
 import {
   consumePricingAdminDraft, defaultPricingAdminView, filterPricingAdminRows,
   parsePricingAdminPending, parsePricingAdminWorkspace, patchPricingAdminRow,
@@ -47,14 +47,18 @@ export function runPricingAdminUiContractFixture() {
     identity: { ...saved.identity, kind: 'video', unit: 'second' },
     mode: 'custom', baseCny: '1.06270945', currentPointsPerCny: '100', currentUnitCredits: '106', rounding: 'half_up_integer',
   });
-  assert.equal(pricingDisplaySecondCredits(video, '5'), '531', 'Saved seconds do not require a draft preview or multiply rounded unit points');
-  assert.equal(pricingDisplaySecondCredits(video, '5', { amount: '1.065', rate: '100', rounding: 'half_up_integer' }), '533');
-  assert.equal(pricingDisplaySecondCredits(video, '5', { amount: '0.003', rate: '100', rounding: undefined }), '1.5');
-  assert.equal(pricingDisplaySecondCredits(video, '5', { amount: '0.0', rate: '100', rounding: 'half_up_integer' }), null);
-  assert.equal(pricingDisplaySecondCredits(video, '5', { amount: '0.123456789', rate: '100', rounding: 'half_up_integer' }), null);
-  assert.equal(pricingDisplaySecondCredits({ ...video, availability: 'needs_review' }, '5'), null);
-  assert.equal(pricingDisplaySecondCredits({ ...video, identity: { ...video.identity, billingMode: 'actual' } }, '5'), null);
-  assert.equal(pricingDisplaySecondCredits({ ...video, mode: 'legacy_fixed', baseCny: null, currentPointsPerCny: null, currentUnitCredits: '4.5', legacyRounding: 'ceil_task' }, '5'), '23');
+  assert.equal(pricingDisplayFixedCredits(video, '5'), '531', 'Saved seconds do not require a draft preview or multiply rounded unit points');
+  assert.equal(pricingDisplayFixedCredits(video, '5', { amount: '1.065', rate: '100', rounding: 'half_up_integer' }), '533');
+  assert.equal(pricingDisplayFixedCredits(video, '5', { amount: '0.003', rate: '100', rounding: undefined }), '1.5');
+  assert.equal(pricingDisplayFixedCredits(video, '5', { amount: '0.0', rate: '100', rounding: 'half_up_integer' }), null);
+  assert.equal(pricingDisplayFixedCredits(video, '5', { amount: '0.123456789', rate: '100', rounding: 'half_up_integer' }), null);
+  assert.equal(pricingDisplayFixedCredits({ ...video, availability: 'needs_review' }, '5'), null);
+  assert.equal(pricingDisplayFixedCredits(actual, '1'), null);
+  const legacyVideo = { ...video, mode: 'legacy_fixed' as const, baseCny: null, currentPointsPerCny: null, currentUnitCredits: '4.5' };
+  assert.equal(pricingDisplayFixedCredits(legacyVideo, '5'), null, 'Legacy points are not a confirmed RMB quote');
+  assert.equal(pricingDisplayFixedCredits(legacyVideo, '5', { amount: '1', rate: '100', rounding: 'half_up_integer' }), '500');
+  assert.equal(pricingDisplayFixedCredits(unknownBase, '1'), null);
+  assert.equal(pricingDisplayFixedCredits(saved, '1', { amount: '0.065', rate: '100', rounding: 'half_up_integer' }), '7');
 
   for (const value of ['0.1', '1', '15.5', '10000.0']) assert.equal(validPricingAdminRate(value), true, value);
   for (const value of ['', '0', '-1', '+1', '1e1', '0.01', '1.01', '10000.1', 'Infinity', 'NaN', '1,000', ' 1 ', '01']) assert.equal(validPricingAdminRate(value), false, value);
