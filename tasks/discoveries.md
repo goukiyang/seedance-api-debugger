@@ -47,4 +47,6 @@
 已确认：原计算进程在联合API发布前已掉线；恢复原应用进程后仍无真实心跳，API与RabbitMQ可达、无在途任务。launchctl遗留127.0.0.1代理让原HTTPX链ConnectError；仅在项目私有配置加抠图两域名与loopback的NO_PROXY后，同库public health变200，未改系统代理、原身份或权限。
 
 待核线索：心跳先读取模型状态，app包会连带导入FastAPI；只读独立诊断曾停在依赖元数据读取，尚不能证明实际worker死锁或确定全部根因。当前页面继续按真实worker能力拦住新增处理；没有创建测试图或伪造心跳。项目开放授权与API隔离已部署，不等同原生计算端已恢复。详细脱敏证据见docs/materials/2026-11-05-plugin-download-cover-sharing/worker-recovery.json。
+
+后续核对（2026-11-05T14:14:57.788619+00:00）：真实worker已恢复在线且空闲，device=mps，原worker身份保持。已确认剩余根因是继承的小写no_proxy覆盖项目NO_PROXY，HTTPX继续连接已关闭的127.0.0.1代理；正式本机native bootstrap d7bfcf7在客户端创建前同步大小写绕过设置后恢复。独立模型状态诊断最终完成mps/13项，不再把模型初始化列为未解决阻点。未伪造心跳、未生图、未改全局代理；实际抠图操作仍待手验。
 <!-- /CUTOUT-WORKER-OFFLINE-20261105 -->
