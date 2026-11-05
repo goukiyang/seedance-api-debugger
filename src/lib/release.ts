@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '插件页工作区导航统一', outline: [
-  '插件下载页与作品广场共用同一工作区侧栏',
-  '保留桌面常驻、独立滚动及手机工作区菜单',
+const notice = { title: '资产管理工作区导航统一', outline: [
+  '资产管理与作品广场共用同一工作区侧栏',
+  '保留资源筛选与管理，并突出当前导航位置',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
