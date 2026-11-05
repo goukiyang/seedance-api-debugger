@@ -204,9 +204,9 @@ export async function submitLab(user: SessionUser, body: Record<string, unknown>
   const plan = await readLabPlan(user.id, labId(body.planId, '生成'));
   const accepted = await prisma.imageStudioTask.findFirst({ where: { owner_id: user.id, batch_id: batchId(user.id, plan.id) }, select: { batch_id: true } });
   if (accepted) return { batchId: accepted.batch_id };
-  if (plan.operation === 'body-pair' && !CHARACTER_LAB_BODY_PAIRS_ENABLED) throw Object.assign(new StudioError('当前恢复版本暂不新建正背面任务，原有记录仍可查看和选用', 409), { submitted: false });
   const receipt = await prisma.platformSetting.findUnique({ where: { key: receiptKey(user.id, plan.id) } });
   if (!receipt || (JSON.parse(receipt.value_json) as Receipt).state !== 'prepared') throw new StudioError('原提交结果待确认或已结束，请查询原记录，不要重复生成', 409);
+  if (plan.operation === 'body-pair' && !CHARACTER_LAB_BODY_PAIRS_ENABLED) throw Object.assign(new StudioError('当前恢复版本暂不新建正背面任务，原有记录仍可查看和选用', 409), { submitted: false });
   const storedQuote = await prisma.platformSetting.findUnique({ where: { key: quoteKey(user.id, plan.id) } });
   if (!storedQuote) throw new StudioError('请先获取本次生成报价');
   const quote = JSON.parse(storedQuote.value_json) as CharacterLabQuote & { characterLabSourceVersion?: number };

@@ -322,6 +322,10 @@ async function main() {
       await assert.rejects(prepare('result', 'body-pair', { draft: pairInput }), /恢复版本暂不新建/);
       await assert.rejects(service.submitLab(user, { planId: pair.id }), /恢复版本暂不新建/);
       assert.equal(await db.imageStudioTask.count({ where: { batch_id: batchId(owner, pair.id) } }), 0);
+      const unknownPair = { ...pair, id: randomUUID() };
+      await createPlan(unknownPair, 'submitting');
+      await assert.rejects(service.submitLab(user, { planId: unknownPair.id }), (error: unknown) => error instanceof Error && /原提交结果待确认/.test(error.message) && (error as Error & { submitted?: boolean }).submitted !== false);
+      assert.equal(JSON.parse((await db.platformSetting.findUniqueOrThrow({ where: { key: receiptKey(unknownPair.id) } })).value_json).state, 'submitting');
     }
     await paint(pair, '#0000ff', '#ffff00');
     const media = await import('../src/lib/character-lab/media');
