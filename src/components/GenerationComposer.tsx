@@ -2660,29 +2660,6 @@ export function GenerationComposer({
           </label>
         )}
 
-        {videoSurface !== 'ip' && (selectedModel === SEEDANCE_2_5_MODEL_ID || videoRedesign && draftMode) && (
-          <label className="composer-resolution-approval" title={seedanceDraft.message}>
-            <input
-              type="checkbox"
-              checked={draftMode}
-              disabled={!draftMode && !seedanceDraft.createEnabled}
-              onChange={(event) => {
-                markStudioParameterCorrected('draft');
-                const checked = event.currentTarget.checked;
-                setDraftMode(checked);
-                if (checked) {
-                  markStudioParameterCorrected('resolution');
-                  setResolution(SEEDANCE_DRAFT_RESOLUTION);
-                }
-              }}
-            />
-            <span>
-              {SEEDANCE_DRAFT_RESOLUTION}样片 Draft
-              <small>{seedanceDraft.createEnabled ? `勾选会将本次清晰度切换为 ${SEEDANCE_DRAFT_RESOLUTION}；${seedanceDraft.message}` : seedanceDraft.message}</small>
-            </span>
-          </label>
-        )}
-
         {/* 入队提示：短暂展示，不阻塞下一次生成 */}
         {result && videoRedesign && <div className="video-composer-accepted" role="status">
           <span>已提交</span><a href={taskDetailHref(result.id, resultReturnTo)}>查看任务</a>
@@ -2754,6 +2731,25 @@ export function GenerationComposer({
           settingsOpen={settingsOpen}
           onSettingsOpenChange={onSettingsOpenChange}
           settingsDisabled={interactionLocked || isSubmitting}
+          parameterAccessory={videoSurface !== 'ip' && (selectedModel === SEEDANCE_2_5_MODEL_ID || videoRedesign && draftMode) && (
+            <label className="composer-chip" title={!seedanceDraft.createEnabled ? seedanceDraft.message : undefined}>
+              <input
+                type="checkbox"
+                checked={draftMode}
+                disabled={!draftMode && !seedanceDraft.createEnabled}
+                onChange={(event) => {
+                  markStudioParameterCorrected('draft');
+                  const checked = event.currentTarget.checked;
+                  setDraftMode(checked);
+                  if (checked) {
+                    markStudioParameterCorrected('resolution');
+                    setResolution(SEEDANCE_DRAFT_RESOLUTION);
+                  }
+                }}
+              />
+              <span>样片模式</span>
+            </label>
+          )}
           settingsContent={videoRedesign ? <fieldset className="video-composer-settings-fields" disabled={interactionLocked || isSubmitting}>
             <legend>生成设置</legend>
             <div className="video-composer-extra-fields">

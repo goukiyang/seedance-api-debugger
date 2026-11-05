@@ -6,7 +6,7 @@ import { useMaterialArrival } from '@/components/useMaterialArrival';
 import { ResourceLibraryPicker } from '@/components/ResourceLibraryPicker';
 import { ImageGenerationChannelSelect } from '@/components/ImageGenerationChannelSelect';
 import { ImageUsageProjectSelect } from '@/components/ImageUsageProjectSelect';
-import { ZoomableImagePreview } from '@/components/ZoomableImagePreview';
+import { CharacterLabImage as ReturnedImage, CharacterLabMediaProvider, CharacterLabPreview } from './images';
 import { RelativeTime } from '@/components/RelativeTime';
 import { ImageFeishuStatus } from '@/components/image-studio/ImageFeishuStatus';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
@@ -25,7 +25,7 @@ import { faceLabPrompt, labDefaultViewPrompts, labViewPrompt, labViewPromptField
 import { characterLabMediaUrl, characterLabSlot, characterLabStrength, sameLabReference, type CharacterLabOperation, type CharacterLabReference, type CharacterLabView, type CharacterLabBootstrap, type CharacterLabConfig, type CharacterLabDraft, type CharacterLabFace, type CharacterLabPlan, type CharacterLabPromptFields, type CharacterLabQuote, type CharacterLabStage, type CharacterLabTask, type CharacterLabWorkspace, type CharacterLabWorkspacePayload } from '@/lib/character-lab/types';
 import styles from './studio.module.css';
 
-const stages: Array<{ id: CharacterLabStage; label: string }> = [{ id: 'faces', label: '人脸生成' }, { id: 'selection', label: '方案选择' }, { id: 'result', label: '成品预览' }];
+const stages: Array<{ id: CharacterLabStage | 'body'; label: string }> = [{ id: 'faces', label: '人脸生成' }, { id: 'selection', label: '方案选择' }, { id: 'body', label: '全身正反面' }, { id: 'result', label: '成品预览' }];
 type PromptTarget = CharacterLabPlan['kind'] | CharacterLabOperation;
 type Refinement = { operation: 'refine-face' | 'refine-side'; target: CharacterLabReference; text: string; planId?: string };
 const viewTitles = { side: '侧脸', 'body-front': '正面全身', 'body-back': '背面全身' };
@@ -64,13 +64,7 @@ function fieldsOf(config: CharacterLabConfig): CharacterLabPromptFields {
   const { revision, updatedAt, ...fields } = config;
   return { ...labDefaultViewPrompts, ...fields };
 }
-function ReturnedImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
-  const [failed, setFailed] = useState('');
-  return failed === src ? <span className={styles.imageUnavailable}>图片暂不可读取<small>可打开预览重试</small></span>
-    : <img key={src} className={className} src={src} alt={alt} onError={() => setFailed(src)} />;
-}
-
-export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceId, initialPrompts }: { ownerId: string; isAdmin: boolean; initialWorkspaceId?: string; initialPrompts?: boolean }) {
+export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceId, initialPrompts, initialBody }: { ownerId: string; isAdmin: boolean; initialWorkspaceId?: string; initialPrompts?: boolean; initialBody?: boolean }) {
   const session = useAppSession();
   const { confirm, prompt: askName, productDialog } = useProductDialog();
   const [bootstrap, setBootstrap] = useState<CharacterLabBootstrap | null>(null);
@@ -86,6 +80,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
   const [pickerOpen, setPickerOpen] = useState(false), [uploading, setUploading] = useState(false), [historyOpen, setHistoryOpen] = useState(false), [advanced, setAdvanced] = useState(false);
   const [pendingPlanIds, setPendingPlanIds] = useState<string[]>([]);
   const [legacyResultOpen, setLegacyResultOpen] = useState(false);
+  const [bodyOpen, setBodyOpen] = useState(Boolean(initialBody));
   const [refinement, setRefinement] = useState<Refinement | null>(null);
   const [refineOpen, setRefineOpen] = useState(false);
   const refineDialog = useRef<HTMLDialogElement>(null);
@@ -142,6 +137,11 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
   function assertActive() { if (!active.current || isClientSessionBlocked()) throw new Error('请先确认当前账号，工作现场已保留'); }
   function updateDraft(patch: Partial<CharacterLabDraft>) {
     if (!active.current || busyRef.current) return;
+    if (patch.stage && patch.stage !== 'result') {
+      setBodyOpen(false);
+      const url = new URL(window.location.href);
+      if (url.searchParams.get('view') === 'body') { url.searchParams.delete('view'); window.history.replaceState(window.history.state, '', url); }
+    }
     setDraft(current => current ? { ...current, ...patch } : current); setSaveState('dirty'); setNotice('');
   }
   const writePending = useCallback((ids: string[], workspaceId: string) => {
@@ -159,6 +159,9 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
     savedSignature.current = JSON.stringify([value.workspace.name, input]);
     setWorkspace(value.workspace); setDraft(input); setPlans(value.plans); setTasks(value.taskByRequestId); setSource(value.sourceAsset); setSaveState('saved'); setSaveConflict(false);
     setLegacyResultOpen(Boolean(input.resultPlanId && !value.workspace.views));
+    const url = new URL(window.location.href);
+    setBodyOpen(url.searchParams.get('view') === 'body');
+    if (url.searchParams.get('view') === 'body') { url.searchParams.set('workspace', value.workspace.id); window.history.replaceState(window.history.state, '', url); }
     setRefineOpen(false); setRefinement(null);
     let remembered: string[] = [];
     try {
@@ -336,7 +339,8 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
       const current = workspaceRef.current!, input = { ...draftRef.current! }, capturedScope = scope.current;
       const { plan } = await labApi<{ plan: CharacterLabPlan }>({
         action: 'prepare', workspaceId: current.id, requestId: crypto.randomUUID(), workbench: operation || kind === 'faces' ? 2 : undefined,
-        kind, draft: input, operation, ...(refine ? { input: refine.target, description: refine.text } : {}),
+        kind, draft: input, operation, ...(refine ? { input: refine.target, description: refine.text }
+          : operation === 'body-front' || operation === 'body-back' ? { description: input.context } : {}),
       });
       assertActive(); if (capturedScope !== scope.current) return;
       const quote = await labApi<CharacterLabQuote>({ action: 'quote', planId: plan.id });
@@ -379,10 +383,10 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
   const facePlanNumber = facePlan ? facePlans.length - facePlans.indexOf(facePlan) : null;
   const shownFacePlanNumber = shownFacePlan ? facePlans.length - facePlans.indexOf(shownFacePlan) : null;
   const shownResultPlan = resultPlan && tasks[resultPlan.id]?.asset ? resultPlan : resultPlans.find(plan => plan.sourceAssetId === draft?.sourceAssetId && tasks[plan.id]?.asset);
-  const currentPlan = draft?.stage === 'result' ? (legacyResultOpen ? resultPlan : undefined) : facePlan;
+  const currentPlan = bodyOpen ? undefined : draft?.stage === 'result' ? (legacyResultOpen ? resultPlan : undefined) : facePlan;
   const currentTask = currentPlan ? tasks[currentPlan.id] : null;
   const resultTask = shownResultPlan ? tasks[shownResultPlan.id] : null;
-  const displayedOutputTask = draft?.stage === 'result' ? (legacyResultOpen ? resultTask : null) : shownFacePlan ? tasks[shownFacePlan.id] : null;
+  const displayedOutputTask = bodyOpen ? null : draft?.stage === 'result' ? (legacyResultOpen ? resultTask : null) : shownFacePlan ? tasks[shownFacePlan.id] : null;
   const sendPresentationLabel = draft?.stage === 'result' ? '当前生成原图' : `候选整图（完整${shownFacePlan?.count || 4}宫格）`;
   const selectedResult = workspace?.savedResults.find(item => item.planId === shownResultPlan?.id);
   const workName = draft?.resultName || '';
@@ -457,10 +461,11 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
     });
   }
   const locked = Boolean(busy) || uploading || loading || !sessionReady;
+  const currentStep = bodyOpen ? 'body' : draft?.stage;
   const shownMainFace = draft?.stage === 'result' && legacyResultOpen && shownResultPlan ? shownResultPlan.mainFace : draft?.mainFace;
-  const sourceId = draft?.stage === 'result' && legacyResultOpen && shownResultPlan ? shownResultPlan.sourceAssetId : draft?.stage === 'selection' && shownFacePlan ? shownFacePlan.sourceAssetId : draft?.sourceAssetId;
+  const sourceId = bodyOpen ? draft?.sourceAssetId : draft?.stage === 'result' && legacyResultOpen && shownResultPlan ? shownResultPlan.sourceAssetId : draft?.stage === 'selection' && shownFacePlan ? shownFacePlan.sourceAssetId : draft?.sourceAssetId;
   const faceSourceMismatch = Boolean(shownFacePlan && draft && shownFacePlan.sourceAssetId !== draft.sourceAssetId);
-  const sourceUrl = sourceId ? source && source.id === sourceId ? source.url : `/api/image-studio/assets/${encodeURIComponent(sourceId)}` : '';
+  const sourceUrl = sourceId ? `/api/image-studio/template-assets/${encodeURIComponent(sourceId)}` : '';
   const sourceLabel = source && source.id === sourceId ? source.fileName : '生成时原始素材';
   const selectedFaces = draft ? [...(draft.mainFace ? [draft.mainFace] : []), ...draft.auxiliaryFaces] : [];
   const unresolved = pendingPlanIds.length > 0;
@@ -490,7 +495,17 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
     setRefineOpen(true);
   }
   function showIndependentViews() {
+    setBodyOpen(false);
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('view') === 'body') { url.searchParams.delete('view'); window.history.replaceState(window.history.state, '', url); }
     setLegacyResultOpen(false);
+    updateDraft({ stage: 'result', views: draft?.views || {} });
+  }
+  function showBodyGeneration() {
+    setBodyOpen(true); setLegacyResultOpen(false);
+    const url = new URL(window.location.href); url.searchParams.set('view', 'body');
+    if (workspace) url.searchParams.set('workspace', workspace.id);
+    window.history.replaceState(window.history.state, '', url);
     updateDraft({ stage: 'result', views: draft?.views || {} });
   }
   function chooseView(slot: CharacterLabView, choice: CharacterLabReference) {
@@ -533,10 +548,10 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
     });
   }
 
-  return <main className={styles.root} aria-busy={loading}>
+  return <CharacterLabMediaProvider value={{ plans, tasks }}><main className={styles.root} aria-busy={loading}>
     <header className={styles.header}>
       <div className={styles.brand}><UserRound size={21} /><strong>CHARACTER LAB</strong><span>角色参考图工作台</span></div>
-      <nav className={styles.steps} aria-label="角色制作阶段">{stages.map((stage, index) => <button type="button" key={stage.id} aria-current={draft?.stage === stage.id ? 'step' : undefined} disabled={!draft || locked} onClick={() => updateDraft({ stage: stage.id })}><b>{draft && stages.findIndex(item => item.id === draft.stage) > index ? <Check size={15} /> : index + 1}</b><span>{stage.label}</span></button>)}</nav>
+      <nav className={styles.steps} aria-label="角色制作阶段">{stages.map((stage, index) => <button type="button" key={stage.id} aria-current={currentStep === stage.id ? 'step' : undefined} disabled={!draft || locked} onClick={() => stage.id === 'body' ? showBodyGeneration() : stage.id === 'result' ? showIndependentViews() : updateDraft({ stage: stage.id })}><b>{draft && stages.findIndex(item => item.id === currentStep) > index ? <Check size={15} /> : index + 1}</b><span>{stage.label}</span></button>)}</nav>
       <div className={styles.headerActions}>
         <label className={styles.workspaceLabel}><span className={styles.srOnly}>角色工作区</span><select value={workspace?.id || ''} disabled={locked || !bootstrap} onChange={event => void switchWorkspace(event.target.value)}><option value="" disabled>选择角色</option>{bootstrap?.workspaces.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         <button type="button" className={styles.iconButton} disabled={locked || !bootstrap} onClick={() => void createWorkspace()} title="新建角色" aria-label="新建角色"><Plus size={18} /></button>
@@ -554,18 +569,19 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
     {!sessionReady ? <div className={styles.welcome}><UserRound size={36} /><p>正在核对当前账号，工作现场已保留。</p></div> : loading && !workspace ? <div className={styles.loading}><div /><div /><div /><span>正在恢复角色工作区…</span></div> : !workspace || !draft ? <section className={styles.welcome}><ImagePlus size={44} /><h1>从一张角色原图开始</h1><p>探索不同的真人面孔，再制作完整的角色参考图。</p><button type="button" className={styles.primary} disabled={locked || !bootstrap} onClick={() => void createWorkspace()}><Plus size={17} />新建角色</button>{error && <button type="button" onClick={() => window.location.reload()}>重新读取</button>}</section> : <>
       {historyOpen && <section className={styles.historyPanel} aria-label="角色生成历史"><header><h2>历史记录</h2><button type="button" className={styles.iconButton} onClick={() => setHistoryOpen(false)} aria-label="关闭历史记录"><X size={17} /></button></header>{!plans.length && <p>尚未生成候选或成品。</p>}<div className={styles.historyRows}>{plans.map(plan => <article className={styles.historyItem} key={plan.id}><button type="button" disabled={locked} onClick={() => {
         if ((plan.operation === 'refine-face' || plan.operation === 'refine-side') && plan.input && plan.sourceAssetId === draft.sourceAssetId) openRefinement(plan.operation, plan.input, plan);
+        else if (plan.operation === 'body-front' || plan.operation === 'body-back') showBodyGeneration();
         else if (plan.operation) showIndependentViews();
         else if (plan.kind === 'faces') updateDraft({ facePlanId: plan.id, stage: 'selection' });
-        else { setLegacyResultOpen(true); updateDraft({ resultPlanId: plan.id, stage: 'result' }); }
+        else { showIndependentViews(); setLegacyResultOpen(true); updateDraft({ resultPlanId: plan.id, stage: 'result' }); }
         setHistoryOpen(false);
       }}>{tasks[plan.id]?.asset ? <ReturnedImage src={characterLabMediaUrl(plan.id)} alt={plan.kind === 'faces' ? '历史人脸候选' : '历史角色参考图'} /> : <span className={styles.historyPlaceholder}><Grid2X2 size={22} /></span>}<span><strong>{plan.operation ? promptTitles[plan.operation].replace('提示词', '') : plan.kind === 'faces' ? `${plan.count}宫格候选` : '旧版角色参考图'} · {taskState[tasks[plan.id]?.status || ''] || '尚未提交或待核对'}</strong></span></button><small><RelativeTime value={plan.createdAt} /> · 面部差异 {plan.diversity}%</small></article>)}</div></section>}
       <div className={styles.workbench}>
         <aside className={styles.materialRail}><section className={styles.materialSection}><h2>原始素材</h2>{sourceUrl ? <><button type="button" className={styles.sourceImage} data-material-arrived={draft.sourceAssetId && sourceArrival.arrived?.includes(draft.sourceAssetId) || undefined} onClick={() => setPreview({ src: sourceUrl, alt: '原始角色素材' })}><ReturnedImage src={sourceUrl} alt="原始角色素材" /></button><div className={styles.fileRow}><span title={sourceLabel}>{sourceLabel}</span></div></> : <button type="button" className={styles.uploadEmpty} disabled={locked} onClick={() => setPickerOpen(true)}><ImagePlus size={32} /><strong>添加原始素材</strong><span>上传或从素材库选择一张图片</span></button>}<button type="button" className={styles.outline} disabled={locked || unresolved} onClick={() => setPickerOpen(true)}><ImagePlus size={15} />{draft.sourceAssetId ? '更换原图' : '选择原图'}</button></section>
-          {draft.stage === 'result' && shownMainFace && <section className={styles.materialSection}><div className={styles.sectionTitle}><h2>主面部 · {String(shownMainFace!.cell + 1).padStart(2, '0')}</h2><button type="button" disabled={locked} onClick={() => updateDraft({ stage: 'selection' })}>更换方案<ArrowRight size={13} /></button></div><button type="button" className={styles.faceReference} onClick={() => setPreview({ src: characterLabMediaUrl(shownMainFace!.planId, shownMainFace!.cell), alt: '选定主面部' })}><ReturnedImage src={characterLabMediaUrl(shownMainFace!.planId, shownMainFace!.cell)} alt="选定主面部" /></button></section>}
-          {draft.stage !== 'result' && facePlans.length > 0 && <section className={styles.materialSection}><h2>历史候选</h2><div className={styles.batchList}>{facePlans.map((plan, index) => <button type="button" key={plan.id} aria-pressed={facePlan?.id === plan.id} disabled={locked} onClick={() => updateDraft({ facePlanId: plan.id })}>{tasks[plan.id]?.asset ? <ReturnedImage src={characterLabMediaUrl(plan.id)} alt={`第${facePlans.length - index}组人脸候选`} /> : <Grid2X2 size={22} />}<span>第{facePlans.length - index}组 · {plan.count}宫格<small>{taskState[tasks[plan.id]?.status || ''] || '未提交或待核对'}</small></span></button>)}</div></section>}
+          {!bodyOpen && draft.stage === 'result' && shownMainFace && <section className={styles.materialSection}><div className={styles.sectionTitle}><h2>主面部 · {String(shownMainFace!.cell + 1).padStart(2, '0')}</h2><button type="button" disabled={locked} onClick={() => updateDraft({ stage: 'selection' })}>更换方案<ArrowRight size={13} /></button></div><button type="button" className={styles.faceReference} onClick={() => setPreview({ src: characterLabMediaUrl(shownMainFace!.planId, shownMainFace!.cell), alt: '选定主面部' })}><ReturnedImage src={characterLabMediaUrl(shownMainFace!.planId, shownMainFace!.cell)} alt="选定主面部" /></button></section>}
+          {!bodyOpen && draft.stage !== 'result' && facePlans.length > 0 && <section className={styles.materialSection}><h2>历史候选</h2><div className={styles.batchList}>{facePlans.map((plan, index) => <button type="button" key={plan.id} aria-pressed={facePlan?.id === plan.id} disabled={locked} onClick={() => updateDraft({ facePlanId: plan.id })}>{tasks[plan.id]?.asset ? <ReturnedImage src={characterLabMediaUrl(plan.id)} alt={`第${facePlans.length - index}组人脸候选`} /> : <Grid2X2 size={22} />}<span>第{facePlans.length - index}组 · {plan.count}宫格<small>{taskState[tasks[plan.id]?.status || ''] || '未提交或待核对'}</small></span></button>)}</div></section>}
         </aside>
-        <section className={styles.canvasColumn} aria-label={draft.stage === 'result' ? '角色成品预览' : '人脸候选'}>
-          <div className={styles.canvasHeading}><h2>{draft.stage === 'result' ? '角色参考图' : draft.stage === 'selection' ? '选择喜欢的面部方案' : '生成结果'}{draft.stage !== 'result' && facePlan && <span> · 第{facePlanNumber}组 · {facePlan.count}宫格</span>}</h2><div className={styles.canvasActions}>{draft.stage !== 'result' && shownFacePlan && (
+        <section className={styles.canvasColumn} aria-label={bodyOpen ? '全身正反面生成' : draft.stage === 'result' ? '角色成品预览' : '人脸候选'}>
+          <div className={styles.canvasHeading}><h2>{bodyOpen ? '生成全身正反面' : draft.stage === 'result' ? '角色参考图' : draft.stage === 'selection' ? '选择喜欢的面部方案' : '生成结果'}{!bodyOpen && draft.stage !== 'result' && facePlan && <span> · 第{facePlanNumber}组 · {facePlan.count}宫格</span>}</h2><div className={styles.canvasActions}>{!bodyOpen && draft.stage !== 'result' && shownFacePlan && (
             <button type="button" onClick={() => setPreview({ src: characterLabMediaUrl(shownFacePlan.id), alt: '本批候选原图' })}><Maximize2 size={14} />查看整张宫格</button>
           )}{displayedOutputTask?.asset && <ImageFeishuStatus key={`${ownerId}:${displayedOutputTask.id}`} owner={ownerId} taskId={displayedOutputTask.id} presentationLabel={sendPresentationLabel} />}<button type="button" className={styles.iconButton} disabled={locked} onClick={() => void run('query', refreshTasks)} aria-label="查询生成状态" title="查询生成状态"><RefreshCw size={16} /></button></div></div>
           {currentPlan && !currentTask && <div className={styles.taskStatus}>{currentPlan.kind === 'faces' && <span>本次{currentPlan.count}宫格 · </span>}此计划尚未提交或提交结果待核对。下方已有结果保留。</div>}
@@ -574,18 +590,30 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
             <span>{currentPlan?.kind === 'faces' && <>第{facePlanNumber}组 · {currentPlan.count}宫格 · </>}{taskState[currentTask.status] || '状态待确认'}{currentTask.error && <> · {currentTask.error}</>}</span>
             {currentTask.resultDisposition && <span>图片已返回，请核对实际规格。</span>}
           </div>}
-          {draft.stage !== 'result' && facePlan && shownFacePlan && facePlan.id !== shownFacePlan.id && <div className={styles.previousOutput}>
+          {!bodyOpen && draft.stage !== 'result' && facePlan && shownFacePlan && facePlan.id !== shownFacePlan.id && <div className={styles.previousOutput}>
             <strong>当前显示第{shownFacePlanNumber}组 · {shownFacePlan.count}宫格旧图</strong>
             <span>第{facePlanNumber}组 · {facePlan.count}宫格尚无可显示的新图片。旧图生成于 <RelativeTime value={shownFacePlan.createdAt} />。</span>
           </div>}
-          {draft.stage === 'result' ? !legacyResultOpen ? renderViewBoard() : shownResultPlan && resultTask?.asset ? <><div className={styles.resultArea}><button type="button" className={styles.resultImage} onClick={() => setPreview({ src: characterLabMediaUrl(shownResultPlan.id), alt: '角色四格参考图' })}><ReturnedImage src={characterLabMediaUrl(shownResultPlan.id)} alt="角色四格参考图：正面特写、侧面特写、正面全身、背面全身" /></button></div><div className={styles.canvasTools}><span>成图比例 2:3{resultTask.asset.width && resultTask.asset.height ? ` · 实际 ${resultTask.asset.width}×${resultTask.asset.height}` : ''}</span><button type="button" onClick={() => setPreview({ src: characterLabMediaUrl(shownResultPlan.id), alt: '角色参考图' })}><Maximize2 size={15} />放大</button></div></> : <div className={styles.canvasEmpty}><Grid2X2 size={42} /><h3>{currentTask && ['queued', 'running'].includes(currentTask.status) ? '正在制作角色参考图' : '在这里预览角色参考图'}</h3><p>选定面部后，结合原图生成正面特写、侧面特写和正背全身。</p>{draft.mainFace && <button type="button" className={styles.primary} disabled={locked || unresolved} onClick={showIndependentViews}>制作角色参考图<ArrowRight size={16} /></button>}</div> : shownFacePlan ? <div className={styles.candidateGrid} style={{ gridTemplateColumns: `repeat(${shownFacePlan.count === 9 ? 3 : 2}, minmax(0, 1fr))` }}>{Array.from({ length: shownFacePlan.count }, (_, cell) => {
+          {bodyOpen && <p className={styles.bodyIntro}>以左侧原始角色图为参考，保留身材比例、服装和配件细节。分别生成正面与背面，选用满意的版本后进入成品预览。</p>}
+          {bodyOpen ? renderViewBoard(true) : draft.stage === 'result' ? !legacyResultOpen ? renderViewBoard() : shownResultPlan && resultTask?.asset ? <><div className={styles.resultArea}><button type="button" className={styles.resultImage} onClick={() => setPreview({ src: characterLabMediaUrl(shownResultPlan.id), alt: '角色四格参考图' })}><ReturnedImage src={characterLabMediaUrl(shownResultPlan.id)} alt="角色四格参考图：正面特写、侧面特写、正面全身、背面全身" /></button></div><div className={styles.canvasTools}><span>成图比例 2:3{resultTask.asset.width && resultTask.asset.height ? ` · 实际 ${resultTask.asset.width}×${resultTask.asset.height}` : ''}</span><button type="button" onClick={() => setPreview({ src: characterLabMediaUrl(shownResultPlan.id), alt: '角色参考图' })}><Maximize2 size={15} />放大</button></div></> : <div className={styles.canvasEmpty}><Grid2X2 size={42} /><h3>{currentTask && ['queued', 'running'].includes(currentTask.status) ? '正在制作角色参考图' : '在这里预览角色参考图'}</h3><p>选定面部后，结合原图生成正面特写、侧面特写和正背全身。</p>{draft.mainFace && <button type="button" className={styles.primary} disabled={locked || unresolved} onClick={showIndependentViews}>制作角色参考图<ArrowRight size={16} /></button>}</div> : shownFacePlan ? <div className={styles.candidateGrid} style={{ gridTemplateColumns: `repeat(${shownFacePlan.count === 9 ? 3 : 2}, minmax(0, 1fr))` }}>{Array.from({ length: shownFacePlan.count }, (_, cell) => {
             const face = { planId: shownFacePlan.id, cell }, main = sameFace(draft.mainFace, face), auxiliary = draft.auxiliaryFaces.some(item => sameFace(item, face));
             return <article key={cell} className={styles.candidate} data-main={main} data-auxiliary={auxiliary}><button type="button" className={styles.candidateImage} disabled={locked} aria-pressed={main} aria-label={`选择候选${cell + 1}作为主面部`} onClick={() => selectFace(face)}><ReturnedImage src={characterLabMediaUrl(shownFacePlan.id, cell)} alt={`真人面部候选${cell + 1}`} /><span className={styles.cellNumber}>{String(cell + 1).padStart(2, '0')}</span>{main && <span className={styles.mainBadge}><Check size={12} />主面部</span>}{auxiliary && <span className={styles.auxBadge}>辅助参考</span>}</button><div className={styles.cellActions}><button type="button" disabled={locked} onClick={() => setPreview({ src: characterLabMediaUrl(shownFacePlan.id, cell), alt: `候选${cell + 1}` })}><Maximize2 size={13} />放大</button><button type="button" disabled={locked || main} aria-pressed={auxiliary} onClick={() => toggleAuxiliary(face)}>{auxiliary ? '移除辅助' : '作为辅助'}</button></div></article>;
           })}</div> : <div className={styles.canvasEmpty}><UserRound size={46} /><h3>{currentTask && ['queued', 'running'].includes(currentTask.status) ? '正在探索不同的面部方案' : '探索适合角色的真人面孔'}</h3><p>添加一张角色原图，调整面部差异，生成4宫格或9宫格候选。</p>{!draft.sourceAssetId && <button type="button" className={styles.outline} disabled={locked} onClick={() => setPickerOpen(true)}><ImagePlus size={16} />添加原始素材</button>}</div>}
-          {draft.stage === 'result' && resultPlans.length > 0 && <div className={styles.versionStrip}><span>旧版整图</span>{resultPlans.map((plan, index) => <button type="button" key={plan.id} aria-pressed={shownResultPlan?.id === plan.id} disabled={locked} onClick={() => { setLegacyResultOpen(true); updateDraft({ resultPlanId: plan.id }); }}>{tasks[plan.id]?.asset ? <ReturnedImage src={characterLabMediaUrl(plan.id)} alt={`角色参考图v${resultPlans.length - index}`} /> : <Grid2X2 size={18} />}<span>v{resultPlans.length - index}</span></button>)}</div>}
+          {!bodyOpen && draft.stage === 'result' && resultPlans.length > 0 && <div className={styles.versionStrip}><span>旧版整图</span>{resultPlans.map((plan, index) => <button type="button" key={plan.id} aria-pressed={shownResultPlan?.id === plan.id} disabled={locked} onClick={() => { setLegacyResultOpen(true); updateDraft({ resultPlanId: plan.id }); }}>{tasks[plan.id]?.asset ? <ReturnedImage src={characterLabMediaUrl(plan.id)} alt={`角色参考图v${resultPlans.length - index}`} /> : <Grid2X2 size={18} />}<span>v{resultPlans.length - index}</span></button>)}</div>}
         </section>
         <aside className={styles.controls}>
-          {draft.stage === 'result' && !legacyResultOpen ? <>
+          {bodyOpen ? <>
+            <section><h2>正反面生成设置</h2>
+              <label className={styles.field}><span>角色补充要求</span><textarea rows={5} maxLength={3000} value={draft.context} disabled={locked} onChange={event => updateDraft({ context: event.target.value })} placeholder="例如：保持原图头身比、腰带和靴子细节，双手自然下垂" /></label>
+              <p className={styles.hint}>这些要求用于下一次正面或背面生成。每一面的提示词可在对应区域查看。</p>
+              {renderGenerationSettings()}
+            </section>
+            <section><h2>已选用 {Number(viewReady('body-front')) + Number(viewReady('body-back'))} / 2</h2>
+              <p className={styles.hint}>生成后点击“选用这张”，两面会直接带入成品预览。</p>
+              <button type="button" className={styles.primary} disabled={locked || !viewReady('body-front') || !viewReady('body-back')} onClick={showIndependentViews}>确认并进入成品预览<ArrowRight size={16} /></button>
+            </section>
+            <button type="button" disabled={locked} onClick={() => updateDraft({ stage: 'selection' })}><ArrowLeft size={15} />返回选脸</button>
+          </> : draft.stage === 'result' && !legacyResultOpen ? <>
             <section><h2>合成与交付</h2>
               <p className={styles.hint}>四格选齐即可保存或复制。全身以原始角色图为准。</p>
               <label className={styles.field}><span>作品名称</span><input value={workName} placeholder={workspace.name} maxLength={80} disabled={locked} onChange={event => updateDraft({ resultName: event.target.value })} /></label>
@@ -603,7 +631,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
               <ReturnedImage src={characterLabMediaUrl(draft.mainFace.planId, draft.mainFace.cell)} alt="选定正脸" />
               <div><h2>选定正脸</h2><button type="button" className={styles.outline} disabled={locked} onClick={() => openRefinement('refine-face', draft.mainFace!)}>微调这张脸</button></div>
             </section>}
-            <div className={styles.mainActions}>{draft.stage === 'faces' ? <><button type="button" className={shownFacePlan ? styles.outline : styles.primary} disabled={locked || facePending || !draft.sourceAssetId} onClick={() => void generate('faces')}><RefreshCw size={15} />{shownFacePlan ? '重新生成' : '生成人脸候选'}</button><button type="button" className={shownFacePlan ? styles.primary : ''} disabled={locked || !shownFacePlan} onClick={() => updateDraft({ stage: 'selection' })}>选择方案<ArrowRight size={16} /></button></> : <><button type="button" className={styles.outline} disabled={locked || facePending || !draft.sourceAssetId} onClick={() => void generate('faces')}><RefreshCw size={15} />生成另一组</button><button type="button" className={styles.primary} disabled={locked || !frontReady} onClick={showIndependentViews}>制作角色参考图<ArrowRight size={16} /></button><button type="button" disabled={locked} onClick={() => updateDraft({ stage: 'faces' })}><ArrowLeft size={15} />返回生成</button></>}</div>
+            <div className={styles.mainActions}>{draft.stage === 'faces' ? <><button type="button" className={shownFacePlan ? styles.outline : styles.primary} disabled={locked || facePending || !draft.sourceAssetId} onClick={() => void generate('faces')}><RefreshCw size={15} />{shownFacePlan ? '重新生成' : '生成人脸候选'}</button><button type="button" className={shownFacePlan ? styles.primary : ''} disabled={locked || !shownFacePlan} onClick={() => updateDraft({ stage: 'selection' })}>选择方案<ArrowRight size={16} /></button></> : <><button type="button" className={styles.outline} disabled={locked || facePending || !draft.sourceAssetId} onClick={() => void generate('faces')}><RefreshCw size={15} />生成另一组</button><button type="button" className={styles.primary} disabled={locked || !frontReady} onClick={showBodyGeneration}>生成全身正反面<ArrowRight size={16} /></button><button type="button" disabled={locked} onClick={() => updateDraft({ stage: 'faces' })}><ArrowLeft size={15} />返回生成</button></>}</div>
           </>}
         </aside>
       </div>
@@ -616,8 +644,8 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
         })}</div>
       </section>}
     </>}
-    <ResourceLibraryPicker open={pickerOpen} imageOnly target="image-studio" purpose="character-lab-source" contextKey={`${ownerId}:character-lab:${workspace?.id || 'draft'}`} title="选择角色原始素材" confirmLabel="使用这张原图" maxSelection={1} currentCount={0} currentAssetIds={[]} onClose={() => setPickerOpen(false)} onUploadFile={async (file: File, onProgress?: UploadProgressHandler) => { assertActive(); const capturedScope = scope.current; setUploading(true); try { const asset = await uploadFileAsAsset(file, { onProgress, ownerId }); if (capturedScope !== scope.current || !active.current) throw new Error('当前角色或账号已变化，图片没有替换到当前工作区'); return asset; } finally { if (alive.current) setUploading(false); } }} onConfirm={async (ids, assets) => { assertActive(); if (!draftRef.current || !ids[0] || busyRef.current) return false; const asset = assets?.find(item => item.id === ids[0]); setSource({ id: ids[0], url: asset?.originalUrl || `/api/image-studio/assets/${encodeURIComponent(ids[0])}`, thumbnailUrl: asset?.thumbnailUrl || '', fileName: asset?.fileName || '角色原始素材' }); updateDraft({ sourceAssetId: ids[0], facePlanId: null, resultPlanId: null, mainFace: null, auxiliaryFaces: [], views: {}, stage: 'faces' }); sourceArrival.mark([ids[0]]); return true; }} />
-    {preview && sessionReady && <ZoomableImagePreview src={preview.src} alt={preview.alt} fileName="character-reference.png" imageSharing={false} onClose={() => setPreview(null)} />}
+    <ResourceLibraryPicker open={pickerOpen} imageOnly target="image-studio" purpose="character-lab-source" contextKey={`${ownerId}:character-lab:${workspace?.id || 'draft'}`} title="选择角色原始素材" confirmLabel="使用这张原图" maxSelection={1} currentCount={0} currentAssetIds={[]} onClose={() => setPickerOpen(false)} onUploadFile={async (file: File, onProgress?: UploadProgressHandler) => { assertActive(); const capturedScope = scope.current; setUploading(true); try { const asset = await uploadFileAsAsset(file, { onProgress, ownerId }); if (capturedScope !== scope.current || !active.current) throw new Error('当前角色或账号已变化，图片没有替换到当前工作区'); return asset; } finally { if (alive.current) setUploading(false); } }} onConfirm={async (ids, assets) => { assertActive(); if (!draftRef.current || !ids[0] || busyRef.current) return false; const asset = assets?.find(item => item.id === ids[0]); setSource({ id: ids[0], url: asset?.originalUrl || `/api/image-studio/assets/${encodeURIComponent(ids[0])}`, thumbnailUrl: asset?.thumbnailUrl || '', fileName: asset?.fileName || '角色原始素材' }); updateDraft({ sourceAssetId: ids[0], facePlanId: null, resultPlanId: null, mainFace: null, auxiliaryFaces: [], views: {}, stage: bodyOpen ? 'result' : 'faces' }); sourceArrival.mark([ids[0]]); return true; }} />
+    {preview && sessionReady && <CharacterLabPreview src={preview.src} alt={preview.alt} onClose={() => setPreview(null)} />}
     {refinementVisible && refinement && renderRefinement(refinement)}
     {promptOpen && activePromptTarget && bootstrap && configDraft && (
       <dialog ref={promptDialog} className={styles.promptDialog} aria-labelledby="character-lab-prompt-title">
@@ -649,7 +677,8 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
             <summary>查看本次规则预览</summary>
             <pre>{activePromptTarget === 'faces'
               ? faceLabPrompt(bootstrap.config, draft)
-              : labViewPrompt(bootstrap.config, activePromptTarget, refinement?.operation === activePromptTarget ? refinement.text : '')}</pre>
+              : labViewPrompt(bootstrap.config, activePromptTarget, refinement?.operation === activePromptTarget ? refinement.text
+                : activePromptTarget === 'body-front' || activePromptTarget === 'body-back' ? draft?.context || '' : '')}</pre>
           </details>}
           {activePromptFields.map(([field, title, placeholder]) => (
             <label className={styles.field} key={field}>
@@ -673,7 +702,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
       </dialog>
     )}
     {productDialog}
-  </main>;
+  </main></CharacterLabMediaProvider>;
 
   function renderPromptButton(target: PromptTarget) {
     if (!isAdmin) return null;
@@ -682,10 +711,11 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
     </button>;
   }
 
-  function renderViewBoard() {
+  function renderViewBoard(bodyOnly = false) {
     const front = draft?.mainFace;
-    return <div className={styles.viewBoard}>
-      <article className={styles.viewSlot}>
+    const slots = bodyOnly ? (['body-front', 'body-back'] as const) : viewSlots;
+    return <div className={styles.viewBoard} data-body-only={bodyOnly}>
+      {!bodyOnly && <article className={styles.viewSlot}>
         <div className={styles.settingsHeading}><h2>正脸</h2>{frontReady && <small>已选用</small>}</div>
         {frontReady && front ? <>
           <button type="button" className={styles.viewImage} onClick={() => setPreview({ src: characterLabMediaUrl(front.planId, front.cell), alt: '选定正脸' })}>
@@ -693,8 +723,8 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
           </button>
           <div className={styles.viewActions}><button type="button" className={styles.outline} disabled={locked} onClick={() => openRefinement('refine-face', front)}>微调这张脸</button></div>
         </> : <div className={styles.viewEmpty}>先选定一张正脸</div>}
-      </article>
-      {viewSlots.map(slot => {
+      </article>}
+      {slots.map(slot => {
         const title = viewTitles[slot], selected = viewSelection(slot);
         const options = plans.filter(plan => plan.operation === slot && plan.sourceAssetId === draft?.sourceAssetId
           && (slot !== 'side' || sameLabReference(plan.mainFace, draft?.mainFace)));
