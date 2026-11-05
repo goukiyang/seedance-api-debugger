@@ -49,7 +49,7 @@ export function runPricingAdminUiContractFixture() {
   });
   assert.equal(pricingDisplaySecondCredits(video, '5'), '531', 'Saved seconds do not require a draft preview or multiply rounded unit points');
   assert.equal(pricingDisplaySecondCredits(video, '5', { amount: '1.065', rate: '100', rounding: 'half_up_integer' }), '533');
-  assert.equal(pricingDisplaySecondCredits(video, '5', { amount: '0.003', rate: '100', rounding: 'half_up_tenth' }), '1.5');
+  assert.equal(pricingDisplaySecondCredits(video, '5', { amount: '0.003', rate: '100', rounding: undefined }), '1.5');
   assert.equal(pricingDisplaySecondCredits(video, '5', { amount: '0.0', rate: '100', rounding: 'half_up_integer' }), null);
   assert.equal(pricingDisplaySecondCredits(video, '5', { amount: '0.123456789', rate: '100', rounding: 'half_up_integer' }), null);
   assert.equal(pricingDisplaySecondCredits({ ...video, availability: 'needs_review' }, '5'), null);
