@@ -71,7 +71,7 @@ export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
   }, [hasExpanded, shouldRender]);
 
   const pricing = useVideoPricing({ provider: 'volcengine_mediakit', model: 'enhance-video', duration: task.duration || 0,
-    resolution, toolVersion, fps: fps === 'none' ? null : Number(fps) }, shouldRender && hasExpanded && configured === true);
+    resolution, toolVersion, fps: fps === 'none' ? null : Number(fps), sourceTaskId: task.id }, shouldRender && hasExpanded && configured === true);
   const estimatedCost = pricing.quote?.estimatedCost ?? null;
   const [destination, setDestination] = useState(task.project_id || '');
   const [destinationConfirmed, setDestinationConfirmed] = useState(Boolean(task.project_id));

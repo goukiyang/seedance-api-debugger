@@ -1,3 +1,4 @@
+import { templateUsageCounts } from '@/lib/template-studio/usage-counts';
 import 'server-only';
 import { createHash } from 'crypto';
 import { Prisma } from '@prisma/client';
@@ -146,10 +147,11 @@ export async function listReactions(user: SessionUser, params: URLSearchParams):
   }
   const after = matches.filter(({ row }) => !cursor || markedAt(row) < cursor.time || (markedAt(row) === cursor.time && row.id < cursor.id));
   const page = after.slice(0, limit);
+  const usage = await templateUsageCounts(prisma, user.id, page.flatMap(({ resolved }) => resolved?.summary.category === 'template' ? [resolved.summary.key] : []));
   const items: ReactionListResponse['items'] = [];
   for (const { row, resolved } of page) {
     const entry = personal ? favoriteEntry(personal.library, row.content_key) : null;
-    items.push({ key: row.content_key as ContentKey, category: row.category as ContentCategory, markedAt: markedAt(row), state: await getReactionState(user, row.content_key as ContentKey, Boolean(resolved)), content: resolved?.summary || null,
+    items.push({ key: row.content_key as ContentKey, category: row.category as ContentCategory, markedAt: markedAt(row), state: await getReactionState(user, row.content_key as ContentKey, Boolean(resolved)), content: resolved ? { ...resolved.summary, ...(resolved.summary.category === 'template' ? { usageCount: usage.get(resolved.summary.key) ?? null } : {}) } : null,
       ...(entry ? { personalAlias: entry.alias, groupId: entry.groupId } : {}) });
   }
   const last = page.at(-1)?.row;

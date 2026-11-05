@@ -1,3 +1,5 @@
+import { prisma } from '@/lib/prisma';
+import { templateUsageCounts } from '@/lib/template-studio/usage-counts';
 import { NextRequest, NextResponse } from 'next/server';
 import { withStudioRoute, readStudioJson } from '@/lib/template-studio/common';
 import { getStudioTemplate, patchStudioTemplate } from '@/lib/template-studio/templates';
@@ -16,8 +18,10 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     if (mode === 'private-save-status' || mode === 'private-draft-status') return NextResponse.json(
       await privateTemplateEditorStatus(user, params.id, request.nextUrl.searchParams.get('requestId') || '', mode === 'private-draft-status'), { headers });
     const source = request.nextUrl.searchParams.get('source') === 'legacy' ? 'legacy' : 'studio';
-    return NextResponse.json(await getStudioTemplate(user, params.id, source, request.nextUrl.searchParams.get('private') === '1'),
-      { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
+    const detail = await getStudioTemplate(user, params.id, source, request.nextUrl.searchParams.get('private') === '1');
+    const key = `${source === 'legacy' ? 'legacy_template' : 'video_template'}:${detail.template.id}`;
+    const usage = await templateUsageCounts(prisma, user.id, [key]);
+    return NextResponse.json({ ...detail, template: { ...detail.template, usageCount: usage.get(key) ?? null } }, { headers });
   });
 }
 

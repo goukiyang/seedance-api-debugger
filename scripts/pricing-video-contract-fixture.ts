@@ -26,7 +26,7 @@ async function run() {
     const { getAdminPricingSnapshot, previewAdminPricing, saveAdminPricing } = await import('@/lib/pricing/policy');
     const { frozenPricingCredits } = await import('@/lib/pricing/charge');
     const { calculateEstimatedCost, calculateH3EstimatedCost, calculateEnhanceVideoEstimatedCost } = await import('@/lib/pricing');
-    const { normalizeEnhanceVideoCreateBody } = await import('@/lib/tasks/enhance-video-create');
+    const { normalizeEnhanceVideoCreateBody, enhanceVideoSourcePricing } = await import('@/lib/tasks/enhance-video-create');
     const { validateRequestCostCeiling } = await import('@/lib/provider/seedance-video-edit');
     const { buildMultiviewGenerationRequest, defaultMultiviewGenerationDraft } = await import('@/lib/video/multiview-generation-contract');
     await fixture.$transaction(async tx => {
@@ -114,6 +114,50 @@ async function run() {
       assert.equal((await quoteVideoPricing(scopedNormal, tx)).pricing.estimatedCost, 1.5);
       assert.deepEqual(calculateEstimatedCost('720p', 5, normal.model), legacy.pricing, 'synchronous legacy function remains unchanged');
       evidence.push('G13/G21: changed current revision rejects stale creation while the accepted frozen contract remains unchanged');
+      const oldEnhance = (await quoteVideoPricing(enhance, tx)).charge!;
+      assert.equal(oldEnhance.quantity, '3', 'Previously adopted tenth-point contracts retain ceil-second metering');
+      await assert.rejects(() => quoteVideoPricing({ ...enhance, fps: null, sourceFps: 60, sourceDuration: 2.2 }, tx),
+        { code: 'pricing_scope_unmatched' }, 'New source facts must not bypass an unmatched partially adopted scope');
+      const enhanceRows = snapshot.rows.filter(row => row.identity.kind === 'enhance');
+      assert.equal(enhanceRows.length, 30, 'All five resolutions, two versions and three frame-rate tiers have independent identities');
+      const perSecond: Record<string, string[]> = {
+        standard: ['0.0125', '0.0125', '0.025', '0.05', '0.1'],
+        professional: ['0.125', '0.125', '0.25', '0.5', '1'],
+      };
+      const { multiplyDecimal } = await import('@/lib/pricing/math');
+      await save({ kind: 'save', changes: { rows: enhanceRows.map(row => {
+        const specs = row.identity.specifications;
+        const amount = multiplyDecimal([perSecond[specs.toolVersion][['480p', '720p', '1080p', '2k', '4k'].indexOf(specs.resolution)],
+          specs.fpsTier === 'gt60' ? '4' : specs.fpsTier === 'gt30' ? '2' : '1']);
+        return { id: row.id, mode: 'custom', customPointsPerCny: '100', rounding: 'half_up_integer',
+          base: { currency: 'CNY', amount, unit: 'second', source: {
+            type: 'admin_defined', reference: 'https://docs.volcengine.com/docs/intelligent-processing/video-tool-billing?lang=zh',
+            note: 'Synthetic adoption of the public list, not an actual account bill',
+          } } };
+      }) } });
+      const estimateInput = { ...enhance, resolution: '1080p', toolVersion: 'standard', fps: 30, duration: 2.2 };
+      const exactEnhance = await quoteVideoPricing(estimateInput, tx);
+      assert.equal(exactEnhance.quantity, '2.2');
+      assert.equal(exactEnhance.pricing.duration, 2.2);
+      assert.equal(exactEnhance.pricing.estimatedCost, 6, '2.2 seconds x 0.025 CNY x100 rounds once, not after each second');
+      assert.equal((await quoteVideoPricing({ ...estimateInput, duration: 2.2004 }, tx)).pricing.estimatedCost, 6);
+      assert.equal((await quoteVideoPricing({ ...estimateInput, fps: 60 }, tx)).pricing.estimatedCost, 11);
+      assert.equal((await quoteVideoPricing({ ...estimateInput, fps: 61 }, tx)).pricing.estimatedCost, 22);
+      assert.equal((await quoteVideoPricing({ ...estimateInput, fps: 120 }, tx)).pricing.estimatedCost, 22);
+      const sourceFacts = enhanceVideoSourcePricing({ raw_status_response: JSON.stringify({ result: { fps: 30.168, duration: 2.2004 } }) });
+      assert.deepEqual(sourceFacts, { sourceFps: 30.168, sourceDuration: 2.2004 });
+      assert.equal((await quoteVideoPricing({ ...estimateInput, ...sourceFacts, fps: null, duration: 3 }, tx)).pricing.estimatedCost, 11,
+        'No interpolation inherits the saved source FPS tier and precise duration without forcing output FPS');
+      assert.equal((await quoteVideoPricing({ ...estimateInput, ...sourceFacts, fps: 30, duration: 3 }, tx)).pricing.estimatedCost, 6,
+        'Explicit output FPS overrides source FPS, not the source duration');
+      assert.deepEqual(enhanceVideoSourcePricing({ raw_status_response: '{' }), { sourceDuration: undefined, sourceFps: undefined });
+      await assert.rejects(() => quoteVideoPricing({ ...estimateInput, fps: null }, tx), /帧率尚未确认/);
+      assert.equal(frozenPricingCredits(oldEnhance).credits, 0.5, 'Adopting public RMB prices never recharges a prior frozen task');
+      const preview = await previewAdminPricing(actor, { expectedRevision: snapshot.revision,
+        catalogFingerprint: snapshot.catalogFingerprint, action: { kind: 'save', changes: { rows: [] } },
+        scenarios: [{ rowId: exactEnhance.charge!.ruleId, quantity: '2.2' }] }, tx);
+      assert.equal(preview.scenarios?.[0].currentCredits, '6', 'Admin preview and accepted task use the same metering');
+      evidence.push('Public enhancement adoption: thirty scopes, millisecond estimates and final integer rounding agree with the admin preview; prior frozen contracts remain unchanged');
       completed = true; throw rolledBack;
     }, { maxWait: 10000, timeout: 120000 });
   } catch (error) { if (error !== rolledBack) throw error; }

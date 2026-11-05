@@ -21,6 +21,7 @@ import { resolveMultiviewActionVideoInput } from '@/lib/video/multiview-action-v
 import { StudioError } from '@/lib/template-studio/errors';
 import { PrivatePromptError } from '@/lib/security/private-prompts.server';
 import { assertVideoPromptGroupSurface, VideoPromptGroupError } from '@/lib/video/prompt-groups';
+import { enhanceVideoSourcePricing, assertEnhanceVideoSourceTaskAllowed } from '@/lib/tasks/enhance-video-create';
 
 export async function GET(request: NextRequest) {
   return estimate(request);
@@ -43,8 +44,8 @@ export async function POST(request: NextRequest) {
     const body = JSON.parse(raw);
     if (!body || typeof body !== 'object' || Array.isArray(body)) return errorJson('报价输入无效', 400);
     const url = new URL(request.url);
-    for (const field of ['provider', 'model', 'resolution', 'duration', 'tool_version', 'fps', 'multiview_preset_version']) {
-      if (body[field] !== undefined) url.searchParams.set(field, String(body[field]));
+    for (const field of ['provider', 'model', 'resolution', 'duration', 'tool_version', 'fps', 'multiview_preset_version', 'source_task_id']) {
+      if (body[field] !== undefined && body[field] !== null) url.searchParams.set(field, String(body[field]));
     }
     return estimate(new NextRequest(url, { headers: request.headers }), body);
   } catch (error) {
@@ -143,8 +144,19 @@ async function estimate(request: NextRequest, body?: Record<string, unknown>) {
     const context = provider !== 'volcengine_ip' && body && (body.project_id || body.video_card_id) ? await resolveVideoPricingContext(user, {
       ...body, provider, model: parsedModel.model, resolution, duration,
     }) : undefined;
+    let sourceFacts: Partial<ReturnType<typeof enhanceVideoSourcePricing>> = {};
+    if (provider === 'volcengine_mediakit' && searchParams.get('source_task_id')) {
+      const source = await prisma.videoTask.findUnique({ where: { id: searchParams.get('source_task_id')! },
+        select: { id: true, user_id: true, owner_user_id: true, project_id: true, retention_status: true, local_status: true,
+          provider: true, generation_mode: true, raw_status_response: true } });
+      if (!source) throw new AuthError('源任务不存在', 404);
+      await assertCanViewTask(user, source);
+      if (source.local_status !== 'succeeded') throw new AuthError('源任务还没有成功产出视频', 409);
+      assertEnhanceVideoSourceTaskAllowed(source);
+      sourceFacts = enhanceVideoSourcePricing(source);
+    }
     const quote = await quoteVideoPricing({ provider: provider as VideoPricingInput['provider'], model: parsedModel.model,
-      resolution, duration, toolVersion, fps, context });
+      resolution, duration, toolVersion, fps, context, ...sourceFacts });
     if (multiviewSettings && multiviewPresetVersion !== null) await resolveMultiviewGenerationSettings(user, multiviewPresetVersion, multiviewSettings);
     return NextResponse.json({ ...publicVideoPricing(quote), provider, modelId: parsedModel.model,
     ...(canvasInput ? { canvas_references: canvasInput.references } : {}),

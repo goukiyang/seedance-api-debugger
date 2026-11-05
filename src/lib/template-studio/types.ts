@@ -46,6 +46,7 @@ export type StudioTemplateVersionSummary = {
 };
 
 export type StudioTemplateDto = {
+  usageCount?: number | null;
   privateRecipe?: boolean;
   id: string;
   source: StudioTemplateSource;

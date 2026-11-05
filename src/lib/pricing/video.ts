@@ -1,25 +1,28 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { calculateEstimatedCost, calculateH3EstimatedCost, calculateEnhanceVideoEstimatedCost, type PricingSnapshot } from '@/lib/pricing';
-import { quotePricingCharge, assertNewPricingCharge, PricingChargeError, type FrozenPricingCharge } from './charge';
-import { normalizeDecimal, multiplyDecimal } from './math';
+import { quotePricingCharge, assertNewPricingCharge, frozenPricingCredits, PricingChargeError, type FrozenPricingCharge } from './charge';
+import { normalizeDecimal, multiplyDecimal, roundDecimal } from './math';
 import { normalizeCredits } from '@/lib/credits/precision';
 import { isSeedanceVideoDuration } from '@/lib/provider/seedance-models';
 import type { PricingAdminIdentity } from './admin-contract';
+import { RMB_INTEGER_ROUNDING } from './admin-contract';
 import { videoPricingRequiresContext, VideoPricingContextError, type VideoPricingContext } from './video-context';
 import type { PricingReferenceVideo, PricingVideoPurpose } from './pricing-authoring-contract';
 
 type Client = Prisma.TransactionClient | typeof prisma;
 export type VideoPricingInput = { provider: 'seedance' | 'volcengine_ip' | 'volcengine_ark' | 'h3' | 'volcengine_mediakit';
   model: string; resolution: string; duration: number; toolVersion?: string; fps?: number | null;
+  sourceFps?: number; sourceDuration?: number;
   referenceVideo?: PricingReferenceVideo; pricingPurpose?: PricingVideoPurpose; context?: VideoPricingContext };
 export type VideoPricingQuote = { identity: PricingAdminIdentity; quantity: string; pricing: PricingSnapshot;
   revision: string | null; charge: FrozenPricingCharge | null };
 
 export function videoPricingIdentity(input: VideoPricingInput): PricingAdminIdentity {
+  const fps = input.fps ?? input.sourceFps;
   if (input.provider === 'volcengine_mediakit') return { kind: 'enhance', channelId: 'volcengine_mediakit', modelId: 'enhance-video',
     billingMode: 'fixed', unit: 'second', specifications: { resolution: ['240p', '360p', '480p', '540p'].includes(input.resolution) ? '480p' : input.resolution,
-      toolVersion: input.toolVersion || 'standard', fpsTier: input.fps && input.fps > 30 ? 'gt30' : 'lte30' } };
+      toolVersion: input.toolVersion || 'standard', fpsTier: fps && fps > 60 ? 'gt60' : fps && fps > 30 ? 'gt30' : 'lte30' } };
   if (input.provider === 'h3') return { kind: 'h3', channelId: 'h3', modelId: input.model, billingMode: 'fixed', unit: 'second', specifications: {} };
   return { kind: 'video', channelId: input.provider === 'volcengine_ip' ? 'volcengine_ark' : input.provider,
     modelId: input.model, billingMode: 'fixed', unit: 'second', specifications: { resolution: input.resolution,
@@ -33,19 +36,31 @@ export async function quoteVideoPricing(input: VideoPricingInput, client: Client
     resolution: input.resolution, toolVersion: input.toolVersion || 'standard', fps: input.fps })
     : input.provider === 'h3' ? calculateH3EstimatedCost(input.duration, input.model)
       : calculateEstimatedCost(input.resolution, input.duration, input.model);
-  const identity = videoPricingIdentity(input);
+  let identity = videoPricingIdentity({ ...input, sourceFps: undefined });
   if (identity.kind === 'video' && (identity.specifications.referenceVideo === 'unknown' || identity.specifications.pricingPurpose === 'unknown')
     && await videoPricingRequiresContext(input.model, identity.channelId, client)) throw new VideoPricingContextError('需要新版完整报价，请保留素材更新报价', 409, 'pricing_context_required');
-  const quantity = normalizeDecimal(String(identity.kind === 'enhance' || identity.kind === 'h3' ? Math.max(1, Math.ceil(input.duration)) : input.duration),
+  let quantity = normalizeDecimal(String(identity.kind === 'enhance' || identity.kind === 'h3' ? Math.max(1, Math.ceil(input.duration)) : input.duration),
     { maxScale: 8, min: '0', max: '3600', allowZero: false });
-  const current = await quotePricingCharge(identity, quantity, client);
+  let current = await quotePricingCharge(identity, quantity, client);
   if (!current) return { identity, quantity, pricing: legacy, revision: null, charge: null };
+  if (identity.kind === 'enhance' && current.charge.rounding === RMB_INTEGER_ROUNDING) {
+    if (!(input.fps ?? input.sourceFps)) throw new PricingChargeError('源视频帧率尚未确认，请选择输出帧率后重新报价；原视频和参数已保留');
+    const preciseIdentity = videoPricingIdentity(input);
+    if (preciseIdentity.specifications.fpsTier !== identity.specifications.fpsTier) {
+      identity = preciseIdentity;
+      current = await quotePricingCharge(identity, quantity, client);
+      if (!current || current.charge.rounding !== RMB_INTEGER_ROUNDING) throw new PricingChargeError('源视频对应帧率的人民币计价尚未登记，请先确认该档单价');
+    }
+    quantity = normalizeDecimal(roundDecimal(String(input.sourceDuration ?? input.duration), 3, 'half_up'), { maxScale: 3, max: '3600', allowZero: false });
+    const charge = { ...current.charge, quantity };
+    current = { charge, ...frozenPricingCredits(charge) };
+  }
   if (current.credits === null) throw new PricingChargeError('视频固定收费合同缺少明确金额，未受理');
   const amount = normalizeCredits(current.credits);
   const unitPoints = current.charge.mode === 'free' ? 0
     : Number(current.charge.mode === 'legacy_fixed' ? current.charge.legacyUnitCredits
       : multiplyDecimal([current.charge.baseCny!, current.charge.pointsPerCny!]));
-  const pricing: PricingSnapshot = { ...legacy, estimatedCost: amount, baseCostPerSecond: unitPoints,
+  const pricing: PricingSnapshot = { ...legacy, duration: Number(quantity), estimatedCost: amount, baseCostPerSecond: unitPoints,
     internalMultiplier: 1, finalCostPerSecond: unitPoints,
     formula: current.charge.mode === 'free' ? 'explicit_free = 0' : `${current.exactCredits} → ${amount}`,
     pricingRuleId: current.charge.ruleId, pricingRuleVersion: 1, pricingPolicyRevision: current.charge.revision, pricingCharge: current.charge };

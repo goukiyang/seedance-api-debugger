@@ -1516,7 +1516,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       const onReadError = () => setGalleryReadErrors(current => new Set(Array.from(current).concat(entry.key)));
       return { key: entry.key, id: entry.id, name: entry.name, groupName: entry.groupName, mine: entry.mine, shared: entry.shared,
         lastOpenedAt: galleryLastUsed[entry.key], unread: attention.unread.has(entry.id),
-        author: entry.author, reactions: entry.reaction && <GalleryReactionButtons key={`${userId}:${entry.key}`} userId={userId} initial={entry.reaction} enabled={!pool.error && pool.data?.capabilities.independentReactions === true} />,
+        usageCount: pageItem?.usageCount, author: entry.author, reactions: entry.reaction && <GalleryReactionButtons key={`${userId}:${entry.key}`} userId={userId} initial={entry.reaction} enabled={!pool.error && pool.data?.capabilities.independentReactions === true} />,
         loading: !pageItem && pool.loading, error: galleryReadErrors.has(entry.key),
         visual: pageItem?.fixedCover ? <FixedCoverVisual key={coverRetry} cover={pageItem.fixedCover} name={entry.name} onReadError={onReadError} />
           : <span className={styles.coverVisual} data-cover-source="模板素材">

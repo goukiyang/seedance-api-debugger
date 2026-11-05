@@ -299,8 +299,12 @@ export async function runPricingVideoScopeClientFixture() {
     assert.ok(captured[2].url.startsWith('/api/tasks/estimate?'));
     assert.equal(captured[2].init?.body, undefined);
     assert.equal(captured[2].url.includes('template_studio'), false);
-    await requestVideoPricing({ provider: 'volcengine_mediakit', model: 'enhance-video', resolution: '2k', duration: 5, toolVersion: 'professional', fps: 60 });
+    await requestVideoPricing({ provider: 'volcengine_mediakit', model: 'enhance-video', resolution: '2k', duration: 5, toolVersion: 'professional', fps: 60, sourceTaskId: 'fixture-enhance-source' });
     assert.equal(new URL(captured[3].url, 'https://fixture.invalid').searchParams.get('fps'), '60');
+    assert.equal(new URL(captured[3].url, 'https://fixture.invalid').searchParams.get('source_task_id'), 'fixture-enhance-source');
+    await requestVideoPricing({ provider: 'volcengine_mediakit', model: 'enhance-video', resolution: '1080p', duration: 5,
+      fps: null, context: { source_task_id: 'fixture-context-source' } });
+    assert.equal(JSON.parse(String(captured[4].init?.body)).source_task_id, 'fixture-context-source', 'The optional helper field must not erase the original source in a POST context');
     globalThis.fetch = (async () => Response.json({ ...quote, pricing_quote_token: '' })) as typeof fetch;
     await assert.rejects(() => requestVideoPricing(input));
   } finally { globalThis.fetch = originalFetch; }

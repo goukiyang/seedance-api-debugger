@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } fr
 import { MoreHorizontal, RefreshCw, Search, UserRound, X } from 'lucide-react';
 import type { GalleryAuthor, GalleryScope, GallerySort } from '@/lib/image-studio/gallery-types';
 import styles from './ModuleGallery.module.css';
+import TemplateUsageCount from '@/components/template-studio/TemplateUsageCount';
 
 export type ModuleGalleryItem = {
   key: string;
@@ -15,6 +16,7 @@ export type ModuleGalleryItem = {
   badge?: string;
   mine: boolean;
   lastOpenedAt?: number | null;
+  usageCount?: number | null;
   visual: ReactNode;
   loading?: boolean;
   error?: boolean;
@@ -163,6 +165,7 @@ export function ModuleGallery({ items, total, filteredTotal, query, onQueryChang
                 aria-label={`设置封面：${item.name}`} title="设置封面" onClick={item.onEditCover}><MoreHorizontal size={20} aria-hidden="true" /></button>}
             </div>
           </div>
+          {item.usageCount !== undefined && <div className={styles.usage}><TemplateUsageCount count={item.usageCount} /></div>}
         </article>;
       })}
     </div>

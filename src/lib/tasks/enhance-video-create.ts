@@ -37,6 +37,16 @@ export type EnhanceVideoSourceTaskGuardInput = {
   generation_mode?: string | null;
 };
 
+export function enhanceVideoSourcePricing(source: { raw_status_response?: string | null }) {
+  let raw: Record<string, unknown> = {};
+  try { raw = JSON.parse(source.raw_status_response || '{}'); } catch { /* Missing metadata remains unknown. */ }
+  const data = raw && typeof raw === 'object' ? raw.data as Record<string, unknown> | undefined : undefined;
+  const records = [raw, raw?.result, raw?.output, data, data?.result].filter(value => value && typeof value === 'object') as Record<string, unknown>[];
+  const read = (keys: string[], max: number) => records.flatMap(record => keys.map(key => record[key]))
+    .find(value => typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= max) as number | undefined;
+  return { sourceDuration: read(['duration'], 3600), sourceFps: read(['framespersecond', 'frames_per_second', 'fps'], 120) };
+}
+
 function cleanString(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }

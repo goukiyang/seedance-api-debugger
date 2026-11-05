@@ -62,14 +62,14 @@ async function run() {
       assert.equal(await tx.platformSetting.count(), before, 'first open must not write defaults');
       assert.equal(snapshot.revision, 'unconfigured');
       assert.deepEqual(snapshot.standards, { site_base_cny: null, supplier_cost_cny: null });
-      assert.equal(snapshot.rows.filter(row => row.identity.kind === 'enhance').length, 20);
+      assert.equal(snapshot.rows.filter(row => row.identity.kind === 'enhance').length, 30);
       assert.ok(snapshot.rows.filter(row => row.identity.kind === 'h3').every(row => row.currentUnitCredits === '0' && row.mode === 'free'));
       const rowA = snapshot.rows.find(row => row.identity.channelId === 'volcengine_ark' && row.isDefault)!;
       const rowB = snapshot.rows.find(row => row.identity.channelId === 'volcengine_ark' && row.id !== rowA.id)!;
       assert.ok(rowA && rowB); assert.equal(rowA.baseCny, null); assert.equal(rowA.confirmation, 'unconfirmed');
       assert.equal(await resolvePricingCharge(rowA.identity, tx), null);
       await assert.rejects(() => resolvePricingCharge({ ...rowA.identity, modelId: 'unregistered-model' }, tx));
-      evidence.push('G05/G12: real catalog, 20 enhancement scopes, no first-open write, no missing-scope fallback');
+      evidence.push('G05/G12: real catalog, 30 enhancement scopes, no first-open write, no missing-scope fallback');
 
       const baseline = await persist(tx, snapshot, { kind: 'save', changes: { standards: { site_base_cny: '1.0' }, rows: [] } });
       snapshot = baseline.snapshot;
