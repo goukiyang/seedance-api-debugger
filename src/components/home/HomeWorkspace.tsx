@@ -4,9 +4,9 @@ import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, Clapperboard, Film, Folder, Image as ImageIcon, LayoutTemplate, ListTodo, Menu, Network, Plus, RefreshCw, RotateCcw, RotateCw, Scissors, UserRound } from 'lucide-react';
+import { ArrowRight, Clapperboard, Film, Folder, Image as ImageIcon, ListTodo, Network, Plus, RefreshCw, RotateCw, Scissors, UserRound } from 'lucide-react';
 import { RelativeTime } from '@/components/RelativeTime';
-import { useDialogDismiss } from '@/components/useDialogDismiss';
+import WorkspaceSidebar from './WorkspaceSidebar';
 import LikeButton from '@/components/content-reactions/LikeButton';
 import { cachedReactionState, watchReactionChanges, writeReaction } from '@/components/content-reactions/ContentReactions';
 import { useAppSession } from '@/lib/context/AppSessionContext';
@@ -56,37 +56,19 @@ export default function HomeWorkspace({ accountId, internal, images, admin, work
   const [templateLoaded, setTemplateLoaded] = useState(false);
   const [templateError, setTemplateError] = useState('');
   const [needed, setNeeded] = useState(false);
-  const [open, setOpen] = useState(false);
   const [preferencesReady, setPreferencesReady] = useState(false);
   const [writeErrors, setWriteErrors] = useState<Record<string, string>>({});
   const [busyKeys, setBusyKeys] = useState<string[]>([]);
-  const workspaceOpen = Boolean(identity && preferencesReady && open);
   const accountDataReady = Boolean(identity && loadedIdentity === identity);
   const writing = useRef(new Set<string>());
   const projectsRequest = useRef<AbortController | null>(null);
   const templatesRequest = useRef<AbortController | null>(null);
   const templateSection = useRef<HTMLElement>(null);
-  const workspace = useRef<HTMLDivElement>(null);
-  const menuButton = useRef<HTMLButtonElement>(null);
-  useDialogDismiss({ open: workspaceOpen, dialogRef: workspace, branchRefs: [menuButton], modal: false, onDismiss: () => setOpen(false) });
   const resetScroll = useRememberedScroll(`home:${identity}`, Boolean(overviewIdentity && preferencesReady && (!internal || projectLoaded)), { localFallback: true });
 
   useEffect(() => {
     if (hasLoadedUser && user?.id !== accountId) router.refresh();
   }, [accountId, hasLoadedUser, router, user?.id]);
-
-  useEffect(() => {
-    setPreferencesReady(false);
-    setOpen(false);
-    if (!identity) return;
-    try { setOpen(localStorage.getItem(`sd2-home-workspace:${identity}`) === 'open'); } catch { /* Keep the in-memory default. */ }
-    setPreferencesReady(true);
-  }, [identity]);
-
-  useEffect(() => {
-    if (!identity || !preferencesReady) return;
-    try { localStorage.setItem(`sd2-home-workspace:${identity}`, open ? 'open' : 'closed'); } catch { /* The workspace remains usable without storage. */ }
-  }, [identity, open, preferencesReady]);
 
   useEffect(() => {
     const section = templateSection.current;
@@ -264,15 +246,6 @@ export default function HomeWorkspace({ accountId, internal, images, admin, work
     }
   }
 
-  const links = [
-    { title: '作品广场', href: '/', icon: LayoutTemplate, visible: worksEnabled && authorized, current: showWorks },
-    { title: '创作概览', href: '/?view=overview', icon: Network, visible: worksEnabled && authorized, current: !showWorks },
-    { title: '新建项目', href: '/projects#create-project', icon: Plus, visible: internal },
-    { title: '我的项目', href: '/projects', icon: Folder, visible: internal },
-    { title: '资产管理', href: '/assets', icon: ImageIcon, visible: true },
-    { title: '模板工作台', href: '/template-studio', icon: LayoutTemplate, visible: internal || images },
-    { title: '我的任务', href: '/tasks', icon: ListTodo, visible: true },
-  ];
   const entries = [
     { title: '普通视频', href: '/generate', icon: Clapperboard, visible: internal, tone: 'blue' },
     { title: 'IP视频', href: '/generate/ip', icon: Film, visible: internal, tone: 'yellow' },
@@ -285,22 +258,8 @@ export default function HomeWorkspace({ accountId, internal, images, admin, work
   ];
 
   return <div className={styles.page}>
-    <aside className={styles.sidebar} data-sidebar-scroll="page">
-      <button ref={menuButton} type="button" className={styles.workspaceToggle} aria-expanded={workspaceOpen} aria-controls="home-workspace-links" onClick={() => setOpen(value => !value)}>
-        <Menu size={18} aria-hidden="true" />工作区
-      </button>
-      <div ref={workspace} id="home-workspace-links" className={styles.workspaceLinks} data-open={workspaceOpen ? 'true' : 'false'}>
-        <h1>工作区</h1>
-        <nav aria-label="工作区">
-          {links.filter(link => link.visible).map(link => <Link key={link.href} href={link.href} aria-current={link.current ? 'page' : undefined} className={link.icon === Plus ? styles.createLink : styles.sideLink} onClick={() => setOpen(false)}>
-            <link.icon size={18} aria-hidden="true" /><span>{link.title}</span>
-          </Link>)}
-        </nav>
-        {!showWorks && <button type="button" className={styles.reset} onClick={() => { setOpen(false); resetScroll(); }} title="重置首页位置" aria-label="重置首页位置">
-          <RotateCcw size={15} aria-hidden="true" />重置位置
-        </button>}
-      </div>
-    </aside>
+    <WorkspaceSidebar accountId={accountId} internal={internal} images={images} worksEnabled={worksEnabled}
+      activeView={showWorks ? 'works' : 'overview'} onReset={showWorks ? undefined : resetScroll} onReadyChange={setPreferencesReady} />
 
     {showWorks ? <div className={styles.gallery}><Suspense fallback={<div className="container" role="status">正在读取作品…</div>}><WorksWorkspace /></Suspense></div> : <div className={styles.content}>
       {internal && <section className={styles.canvasSection} aria-labelledby="home-canvas-title">
