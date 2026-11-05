@@ -57,6 +57,7 @@ export interface UsageFact {
   updatedAt: string;
   ownerUserId: string | null;
   ownerLabel: string;
+  ownerAvatarUrl?: string | null;
   actorUserId: string | null;
   billingSubject: string | null;
   projectId: string | null;
@@ -120,6 +121,7 @@ export interface UsageCoverage {
 export interface UsageDistribution {
   id: string | null;
   label: string;
+  avatarUrl?: string | null;
   summary: UsageSummary;
 }
 

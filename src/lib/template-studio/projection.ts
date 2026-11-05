@@ -51,7 +51,7 @@ export function visibleRunPrompt(row: { id: string; draft_id: string; prompt: st
   return prompt && !containsPrivateContext(prompt, snapshot) ? prompt : null;
 }
 
-export function publicRunSnapshot(snapshot: StudioRunSnapshot): StudioRunSnapshot {
+export function publicRunSnapshot(snapshot: StudioRunSnapshot, currentOwner?: { id: string; avatar_url?: string | null; feishu?: { user_id: string | null; open_id: string | null } }): StudioRunSnapshot {
   return {
     ...(snapshot.llmModel ? { llmModel: snapshot.llmModel } : {}),
     input: { name: snapshot.input.name, groupName: snapshot.input.groupName,
@@ -65,7 +65,8 @@ export function publicRunSnapshot(snapshot: StudioRunSnapshot): StudioRunSnapsho
     parameters: snapshot.parameters,
     assets: snapshot.assets.map(asset => ({ assetId: asset.assetId, role: asset.role, type: asset.type, slotKey: asset.slotKey })),
     owner: { userId: snapshot.owner.userId, username: snapshot.owner.username, displayName: snapshot.owner.displayName,
-      avatarUrl: snapshot.owner.avatarUrl, accountType: snapshot.owner.accountType },
+      avatarUrl: currentOwner?.id === snapshot.owner.userId && (currentOwner.feishu?.user_id || currentOwner.feishu?.open_id)
+        ? currentOwner.avatar_url || null : snapshot.owner.avatarUrl, accountType: snapshot.owner.accountType },
     ...(snapshot.sourceRunId ? { sourceRunId: snapshot.sourceRunId } : {}),
   };
 }

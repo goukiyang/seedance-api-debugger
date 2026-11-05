@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import { defaultPersonalProjectName, projectDisplayName } from './display';
 import { AuthError } from '@/lib/auth/session';
 import type { SessionUser } from '@/lib/auth/session';
 import type { Prisma } from '@prisma/client';
@@ -54,6 +55,7 @@ export async function ensureDefaultProjectForUser(userId: string) {
       status: { not: DELETED_PROJECT_STATUS },
     },
     orderBy: { created_at: 'asc' },
+    include: { owner: { select: { id: true, name: true, username: true, email: true } } },
   });
 
   if (existing) {
@@ -67,13 +69,14 @@ export async function ensureDefaultProjectForUser(userId: string) {
         joined_by: userId,
       },
     });
-    return existing;
+    return { ...existing, name: projectDisplayName(existing) };
   }
 
+  const owner = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true, username: true, email: true } });
   const project = await prisma.$transaction(async (tx) => {
     const created = await tx.project.create({
       data: {
-        name: '我的默认项目',
+        name: defaultPersonalProjectName(owner),
         description: '系统自动创建的个人默认项目',
         type: 'personal',
         visibility: 'private',

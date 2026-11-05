@@ -1,4 +1,5 @@
 'use client';
+import { projectDisplayName } from '@/lib/projects/display';
 import { ProjectSelector } from '@/components/ProjectSelector';
 import DraftUpgradeAction from '@/components/creation/DraftUpgradeAction';
 import { isResolvedCreationIntent, useCreationContext } from '@/lib/hooks/use-creation-context';
@@ -478,11 +479,6 @@ function writeLocalGenerationDefaults(userId: string, settings: GenerationDefaul
   } catch {
     // 偏好缓存失败不影响生成。
   }
-}
-
-function projectDisplayName(project: ProjectOption): string {
-  if (project.type === 'personal') return '个人空间';
-  return project.name;
 }
 
 function projectOwnerUser(project: ProjectOption) {

@@ -1,4 +1,5 @@
 'use client';
+import { projectDisplayName } from '@/lib/projects/display';
 import { ProjectWorkAudience } from '@/components/works/ProjectWorkAudience';
 
 import { forwardRef, Suspense, useEffect, useId, useImperativeHandle, useRef, useState, type FormEvent } from 'react';
@@ -220,11 +221,6 @@ function canManageProject(project: ProjectItem): boolean {
 
 function canShowDeleteProjectAction(project: ProjectItem): boolean {
   return project.type === 'team';
-}
-
-function projectDisplayName(project: ProjectItem): string {
-  if (project.type === 'personal') return '个人空间';
-  return project.name;
 }
 
 function projectOwnerUser(project: ProjectItem) {
@@ -907,7 +903,7 @@ function ProjectsPageContent() {
       <header className={styles.header}>
         <h1>我的项目</h1>
           <div className={styles.actions}>
-            {visiblePersonalProject && <Link id={`project-card-${visiblePersonalProject.id}`} className="link" href={projectDetailHref(visiblePersonalProject.id, currentPreferences)}>个人空间{visiblePersonalProject.status === 'locked' ? '（只读）' : ''} →</Link>}
+            {visiblePersonalProject && <Link id={`project-card-${visiblePersonalProject.id}`} className="link" href={projectDetailHref(visiblePersonalProject.id, currentPreferences)}>{projectDisplayName(visiblePersonalProject)}{visiblePersonalProject.status === 'locked' ? '（只读）' : ''} →</Link>}
             <Link className="link" href="/usage">我的用量</Link>
             {canCreate && <button id="create-project" className="btn btn-primary" type="button" title="新建项目" aria-label="新建项目" onClick={openCreateDialog}>
               <Plus size={16} aria-hidden="true" />新建项目

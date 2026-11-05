@@ -467,9 +467,32 @@ export async function getUsageAnalyticsSnapshot(query: UsageQuery, signal?: Abor
   } finally { await spool.dispose(); }
 }
 
+/** Current display photos are separate from the frozen financial snapshot and bounded to the returned page. */
+async function currentUsageAvatars(ids: Array<string | null | undefined>) {
+  const selected = Array.from(new Set(ids.filter((id): id is string => !!id)));
+  if (!selected.length) return new Map<string, string | null>();
+  try {
+    const people = await prisma.user.findMany({ where: { id: { in: selected } }, select: { id: true, avatar_url: true } });
+    return new Map(people.map(person => [person.id, person.avatar_url]));
+  } catch (error) {
+    // A failed optional photo read must not discard an already captured financial report.
+    console.warn('[UsageAvatars] Current photos unavailable:', error instanceof Error ? error.message : String(error));
+    return new Map<string, string | null>();
+  }
+}
+
 export async function getUsageAnalytics(query: UsageQuery, signal?: AbortSignal): Promise<UsageReport> {
   const snapshot = await getUsageAnalyticsSnapshot(query, signal);
-  try { return snapshot.report; } finally { await snapshot.dispose?.(); }
+  try {
+    const report = snapshot.report;
+    const avatars = await currentUsageAvatars([...report.members.rows.map(row => row.id), ...report.memberDirectory.rows.map(row => row.id),
+      report.selectedMember?.id, ...report.records.rows.map(row => row.ownerUserId)]);
+    const member = (row: UsageDistribution) => ({ ...row, avatarUrl: row.id ? avatars.get(row.id) || null : null });
+    return { ...report, members: { ...report.members, rows: report.members.rows.map(member) },
+      memberDirectory: { ...report.memberDirectory, rows: report.memberDirectory.rows.map(member) },
+      selectedMember: report.selectedMember ? { ...report.selectedMember, ...member(report.selectedMember) } : null,
+      records: { ...report.records, rows: report.records.rows.map(row => ({ ...row, ownerAvatarUrl: row.ownerUserId ? avatars.get(row.ownerUserId) || null : null })) } };
+  } finally { await snapshot.dispose?.(); }
 }
 
 async function exactUsageFact(db: UsageDbSource, kind: UsageSourceKind, id: string, asOf: string) {
@@ -504,7 +527,9 @@ export async function getUsageRecordPage(kind: UsageSourceKind, id: string, requ
         await sorted.add(batch);
         const children = await sorted.finish(), page = Math.min(Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1, Math.max(1, Math.ceil(children.length / 30)));
         const items: UsageFact[] = []; for await (const child of children.values((page - 1) * 30, 30)) items.push(child);
-        return { asOf: captured.asOf, record: captured.record, parents: captured.parent ? [captured.parent] : [], children: items, total: children.length, page };
+        const avatars = await currentUsageAvatars([captured.record.ownerUserId]);
+        return { asOf: captured.asOf, record: { ...captured.record, ownerAvatarUrl: captured.record.ownerUserId ? avatars.get(captured.record.ownerUserId) || null : null },
+          parents: captured.parent ? [captured.parent] : [], children: items, total: children.length, page };
       } finally { await sorted.dispose(); }
     });
   } finally { await spool.dispose(); }

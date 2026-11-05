@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { projectDisplayName } from '@/lib/projects/display';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
 import { assertCanManageProject, assertCanViewProject, compareAndSetProject, getProjectDeletionBlockers, logProjectActionInTransaction, projectStatusVersion, ProjectVersionConflictError, readProjectOperationProjection } from '@/lib/projects/permissions';
@@ -130,6 +131,7 @@ async function getProjectSection(
   const common = {
     project: {
       ...project,
+      name: projectDisplayName(project),
       status_version: projectStatusVersion(access.project!),
       members: membersSection ? project.members : [],
       invites: canReturnInvites ? project.invites : [],
@@ -446,7 +448,9 @@ export async function GET(
       const project = access.project!;
       const canManage = isFeatureAllowed(user, 'team_project_manage') && access.canManageProject;
       const operations = await readProjectOperationProjection(prisma, project, canManage);
-      return NextResponse.json({ project: { id: project.id, name: project.name, description: project.description,
+      const owner = project.owner_user_id === user.id ? user : project.type === 'personal'
+        ? await prisma.user.findUnique({ where: { id: project.owner_user_id }, select: { id: true, name: true, username: true, email: true } }) : null;
+      return NextResponse.json({ project: { id: project.id, name: projectDisplayName({ ...project, owner }), description: project.description,
         type: project.type, work_audience: project.work_audience, status: project.status, updated_at: project.updated_at, status_version: projectStatusVersion(project) },
         permission: { can_manage_project: canManage, can_delete: operations.can_delete, can_archive: operations.can_archive } },
       { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
@@ -794,7 +798,7 @@ export async function GET(
     };
 
     return NextResponse.json({
-      project: project ? { ...project, status_version: projectStatusVersion(project) } : null,
+      project: project ? { ...project, name: projectDisplayName(project), status_version: projectStatusVersion(project) } : null,
       reference_albums: referenceAlbums,
       video_cards: videoCards.map((card) => {
         const summary = videoCardSummaryMap.get(card.id);

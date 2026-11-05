@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { projectDisplayName } from '@/lib/projects/display';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { getProjectAccess } from '@/lib/projects/permissions';
 import { canGenerateInVideoCardStatus } from '@/lib/video-cards/permissions';
@@ -49,7 +50,7 @@ export async function readCreationContext(user: SessionUser, projectId: string |
   }
   const payer: CreationPayer = shouldBillProjectBudget(access.project)
     ? { kind: 'project', id: projectId, label: '使用项目预算' } : { kind: 'user', id: user.id, label: '使用我的点数' };
-  return { project: { id: projectId, name: access.project.name, type: access.project.type }, payer, legacyCard,
+  return { project: { id: projectId, name: projectDisplayName({ ...access.project, owner: access.project.owner_user_id === user.id ? user : undefined }), type: access.project.type }, payer, legacyCard,
     contextRevision: pricingFingerprint({ actor: user.id, project: projectId, status: access.project.status, payer, legacyCard }),
     capabilities: [VIDEO_CREATION_CAPABILITY], v2Available: process.env.VIDEO_CREATION_FLOW_V2_ENABLED === '1' && await videoCreationSchemaReady(db) };
 }

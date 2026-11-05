@@ -126,7 +126,7 @@ export async function reportBinding(me: Actor, input: unknown) {
       sites: previous?.sites ?? Object.fromEntries(BRIDGE_TOOLS.map(tool => [tool, {
         loggedIn: binding.tools[tool].login === 'ok', ...(binding.tools[tool].account ? { account: binding.tools[tool].account } : {}),
       }])),
-      ...previous, ...binding, lastSeen: new Date(now).toISOString(),
+      ...previous, ...binding, editedByUserId: takeEdits ? me.id : previous?.editedByUserId, lastSeen: new Date(now).toISOString(),
     };
     const next = [record, ...list.filter(d => d.deviceId !== report.deviceId)];
     await writeBridgeDevices(tx, me.id, next);
@@ -163,7 +163,7 @@ export async function adoptBinding(me: Actor, input: unknown) {
     else binding.tools.midjourney.dailyCap = before.tools.midjourney.dailyCap;
     binding.editedAt = Date.now();
     binding.editedBy = displayUserName(me);
-    await writeBridgeDevices(tx, me.id, list.map(d => d.deviceId === deviceId ? { ...d, ...binding }
+    await writeBridgeDevices(tx, me.id, list.map(d => d.deviceId === deviceId ? { ...d, ...binding, editedByUserId: me.id }
       : d.deviceId === fromDeviceId ? { ...d, archived: true } : d));
     return binding;
   });
@@ -177,9 +177,18 @@ export async function listBindings(me: Actor, scope = 'mine', includeArchived = 
     select: { value_json: true, user: { select: { id: true, name: true, username: true, avatar_url: true } } },
   });
   const now = Date.now();
-  return rows.flatMap(row => decodeBridgeDevices(row.value_json).filter(d => includeArchived || !d.archived).map(d => {
+  const decoded = rows.map(row => ({ ...row, devices: decodeBridgeDevices(row.value_json).filter(d => includeArchived || !d.archived) }));
+  const editorIds = Array.from(new Set(decoded.flatMap(row => row.devices.flatMap(device => device.editedByUserId ? [device.editedByUserId] : []))));
+  const editors = editorIds.length ? await prisma.user.findMany({ where: { id: { in: editorIds } },
+    select: { id: true, name: true, username: true, avatar_url: true } }).catch(error => {
+    console.warn('[BridgeBinding] Editor photos unavailable:', error instanceof Error ? error.message : String(error));
+    return [];
+  }) : [];
+  const editorById = new Map(editors.map(editor => [editor.id, { id: editor.id, name: displayUserName(editor), avatar_url: editor.avatar_url }]));
+  return decoded.flatMap(row => row.devices.map(d => {
     const binding = presentBinding(d);
     return { ...binding, owner: { id: row.user.id, name: displayUserName(row.user), avatar_url: row.user.avatar_url },
+      ...(d.editedByUserId && editorById.has(d.editedByUserId) ? { editor: editorById.get(d.editedByUserId)! } : {}),
       online: binding.lastSeenAt > 0 && now - binding.lastSeenAt < BRIDGE_DEVICE_STALE_MS };
   })).sort((a, b) => b.lastSeenAt - a.lastSeenAt || a.deviceId.localeCompare(b.deviceId));
 }
@@ -230,7 +239,7 @@ export async function patchBinding(me: Actor, rawId: string, input: unknown) {
     const { tools, ownerUserId = source.userId, ...fields } = patch;
     Object.assign(binding, fields, { editedAt: Date.now(), editedBy: displayUserName(me) });
     for (const tool of BRIDGE_TOOLS) if (tools?.[tool]) Object.assign(binding.tools[tool], tools[tool]);
-    const updated = { ...device, ...binding };
+    const updated = { ...device, ...binding, editedByUserId: me.id };
     if (ownerUserId !== source.userId) {
       const owner = await tx.user.findUnique({ where: { id: ownerUserId }, select: { status: true } });
       if (!owner || owner.status === 'deleted') throw new BridgeDeviceError('归属用户不存在', 400);

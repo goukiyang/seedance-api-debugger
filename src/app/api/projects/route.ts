@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { projectDisplayName } from '@/lib/projects/display';
 import { getSession } from '@/lib/auth/session';
 import { AuthError } from '@/lib/auth/session';
 import { ensureDefaultProjectForUser, getTaskWhereForUser, readProjectOperationProjection } from '@/lib/projects/permissions';
@@ -33,7 +34,7 @@ export async function GET(request: NextRequest) {
       if (user.role !== 'admin') return NextResponse.json({ error: '权限不足' }, { status: 403 });
       const result = await readAdminProjectPage(prisma, request.nextUrl.searchParams, managementAllowed);
       return NextResponse.json({ ...result, viewerId: user.id, capabilities, projects: await Promise.all(result.projects.map(async project => ({
-        ...project, ...await readProjectOperationProjection(prisma, project, managementAllowed),
+        ...project, name: projectDisplayName(project), ...await readProjectOperationProjection(prisma, project, managementAllowed),
       }))) }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
     }
 
@@ -60,14 +61,15 @@ export async function GET(request: NextRequest) {
 
     if (home) {
       const projects = await prisma.project.findMany({ where, take: 4,
-        orderBy: [{ updated_at: 'desc' }, { id: 'desc' }], select: { id: true, name: true, updated_at: true } });
+        orderBy: [{ updated_at: 'desc' }, { id: 'desc' }], select: { id: true, name: true, type: true, updated_at: true } });
       const items = [];
       for (const project of projects) {
         const taskWhere = await getTaskWhereForUser(user, project.id);
         const task = await prisma.videoTask.findFirst({ where: { AND: [taskWhere, { local_status: 'succeeded' }] },
           orderBy: [{ updated_at: 'desc' }, { id: 'desc' }], select: { id: true, local_status: true, public_video_url: true,
             local_video_path: true, result_video_url: true, result_last_frame_url: true, delivery_status: true } });
-        items.push({ ...project, thumbnailUrl: task ? taskThumbnailProjection(task).thumbnail_url : null });
+        items.push({ id: project.id, name: projectDisplayName({ ...project, owner: user }), updated_at: project.updated_at,
+          thumbnailUrl: task ? taskThumbnailProjection(task).thumbnail_url : null });
       }
       return NextResponse.json({ projects: items, capabilities }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
     }
@@ -80,6 +82,7 @@ export async function GET(request: NextRequest) {
         status: string;
         owner_user_id: string;
         work_audience: string | null;
+        owner: { id: string; name: string; username: string; email: string } | null;
         members?: Array<{ role: string; status: string }>;
       };
 
@@ -94,6 +97,7 @@ export async function GET(request: NextRequest) {
               status: true,
               owner_user_id: true,
               work_audience: true,
+              owner: { select: { id: true, name: true, username: true, email: true } },
             },
           })
         : await prisma.project.findMany({
@@ -106,6 +110,7 @@ export async function GET(request: NextRequest) {
               status: true,
               owner_user_id: true,
               work_audience: true,
+              owner: { select: { id: true, name: true, username: true, email: true } },
               members: { where: { user_id: user.id }, select: { role: true, status: true } },
             },
           })) as LiteProject[];
@@ -120,7 +125,7 @@ export async function GET(request: NextRequest) {
           const isActiveNonSystem = project.status === 'active' && project.type !== 'system';
           return {
             id: project.id,
-            name: project.name,
+            name: projectDisplayName(project),
             type: project.type,
             status: project.status,
             owner_user_id: project.owner_user_id,
@@ -247,6 +252,7 @@ export async function GET(request: NextRequest) {
         const isActiveNonSystem = project.status === 'active' && project.type !== 'system';
         return {
           ...project,
+          name: projectDisplayName(project),
           ...operationFields,
           my_role: myRole,
           can_generate: isActiveNonSystem && myRole !== null && myRole !== 'viewer',
@@ -268,6 +274,7 @@ export async function GET(request: NextRequest) {
         const memberRole = personalProject.members[0]?.role || null;
         personalItem = {
           ...personalProject,
+          name: projectDisplayName(personalProject),
           my_role: personalProject.owner_user_id === user.id ? 'project_owner' : memberRole,
         };
       }
@@ -329,6 +336,7 @@ export async function GET(request: NextRequest) {
         const isActiveNonSystem = project.status === 'active' && project.type !== 'system';
         return {
           ...project,
+          name: projectDisplayName(project),
           ...operationFields,
           my_role: myRole,
           can_generate: isActiveNonSystem && myRole !== null && myRole !== 'viewer',

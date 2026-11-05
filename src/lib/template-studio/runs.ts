@@ -37,13 +37,13 @@ import type {
 
 type RunWithOwner = Prisma.VideoStudioRunGetPayload<{ include: { owner: { select: { id: true; username: true; name: true; account_type: true } } } }>;
 
-function dto(row: { id: string; draft_id: string; request_id: string; source: string; mode: string; model?: string | null; status: string; prompt: string | null; snapshot_json: string; error_message: string | null; created_at: Date; updated_at: Date }, projection: { thumbnailUrl?: string | null; taskCount?: number } = {}): StudioRunDto {
+function dto(row: { id: string; draft_id: string; request_id: string; source: string; mode: string; model?: string | null; status: string; prompt: string | null; snapshot_json: string; error_message: string | null; created_at: Date; updated_at: Date }, user: SessionUser, projection: { thumbnailUrl?: string | null; taskCount?: number } = {}): StudioRunDto {
   // This response exposes metadata and media, never an execution-ready private snapshot.
   const snapshot = JSON.parse(row.snapshot_json) as StudioRunSnapshot;
   const owner = snapshot.owner;
   return {
     llmModel: snapshot.llmModel || row.model || null,
-    owner: { displayName: owner.displayName, avatarUrl: owner.avatarUrl || null },
+    owner: { displayName: owner.displayName, avatarUrl: owner.userId === user.id && (user.feishu?.user_id || user.feishu?.open_id) ? user.avatar_url || null : owner.avatarUrl || null },
     id: row.id,
     draftId: row.draft_id,
     requestId: row.request_id,
@@ -216,7 +216,7 @@ export async function createStudioRun(user: SessionUser, input: CreateStudioRunR
   const existingBeforeValidation = await prisma.videoStudioRun.findUnique({ where: { owner_user_id_request_id: { owner_user_id: user.id, request_id: requestId } } });
   if (existingBeforeValidation) {
     assertIdempotentSemantics(existingBeforeValidation, { ...input, requestId });
-    return { run: dto(existingBeforeValidation), status: responseStatus(existingBeforeValidation) };
+    return { run: dto(existingBeforeValidation, user), status: responseStatus(existingBeforeValidation) };
   }
   const draft = await prisma.videoStudioDraft.findFirst({ where: { id: input.draftId, owner_user_id: user.id, purpose: 'studio' } });
   if (!draft) throw new StudioError('草稿不存在或无权访问', 404, 'NOT_FOUND');
@@ -294,13 +294,13 @@ export async function createStudioRun(user: SessionUser, input: CreateStudioRunR
         projectId, occurredAt: result.created_at, contextOrigin: projectId ? 'studio-explicit-project' : 'studio-unassigned' });
       return result;
     });
-    return { run: dto(run), status: responseStatus(run) };
+    return { run: dto(run, user), status: responseStatus(run) };
   } catch (error) {
     if (!isUniqueConflict(error)) throw error;
     const existing = await prisma.videoStudioRun.findUnique({ where: { owner_user_id_request_id: { owner_user_id: user.id, request_id: requestId } } });
     if (!existing) throw error;
     assertIdempotentSemantics(existing, { ...input, requestId });
-    return { run: dto(existing), status: responseStatus(existing) };
+    return { run: dto(existing, user), status: responseStatus(existing) };
   }
 }
 
@@ -328,7 +328,7 @@ export async function listStudioRuns(user: SessionUser, query: StudioRunListQuer
   const projected = await projectRunList(page, user.id);
   const last = page.at(-1);
   return {
-    items: page.map((row) => dto(row, projected.get(row.id))),
+    items: page.map((row) => dto(row, user, projected.get(row.id))),
     nextCursor: rows.length > 30 && last ? encodeCursor(`${last.created_at.toISOString()}|${last.id}`) : null,
   };
 }
@@ -356,7 +356,7 @@ export async function getStudioRun(user: SessionUser, id: string): Promise<Studi
     };
   }));
   const thumbnails = await projectRunList([{ id: row.id }], user.id);
-  return { run: dto(row, thumbnails.get(row.id)), snapshot: publicRunSnapshot(snapshot), tasks: runTasks };
+  return { run: dto(row, user, thumbnails.get(row.id)), snapshot: publicRunSnapshot(snapshot, user), tasks: runTasks };
 }
 
 export async function cancelStudioRun(user: SessionUser, id: string) {
@@ -370,7 +370,7 @@ export async function cancelStudioRun(user: SessionUser, id: string) {
     throw new StudioError('当前状态不能取消；已投递任务会保留查询，不会重复提交', 409, 'CONFLICT');
   }
   const row = await prisma.videoStudioRun.findUniqueOrThrow({ where: { id } });
-  return dto(row);
+  return dto(row, user);
 }
 
 export async function loadQueuedStudioRun(id: string): Promise<RunWithOwner | null> {

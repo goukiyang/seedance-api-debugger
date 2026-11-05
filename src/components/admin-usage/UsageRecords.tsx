@@ -27,7 +27,7 @@ function RecordDetails({ record, href, expanded, toggle }: { record: UsageFact; 
       <div><dt>原记录</dt><dd>{SOURCE_LABELS[record.sourceKind] || '来源待确认'} · {record.sourceId}</dd></div>
       {record.parentSourceId && <div><dt>所属任务群</dt><dd>{record.parentSourceId}</dd></div>}
       <div><dt>归属依据</dt><dd>{ATTRIBUTION_LABELS[record.attribution] || record.attribution} · {record.attributionDetail}</dd></div>
-      <div><dt>消费归属成员</dt><dd>{record.ownerUserId ? <UserIdentityBadge user={{ id: record.ownerUserId, name: record.ownerLabel }} size="sm" /> : record.ownerLabel}{record.ownerUserId ? `（${record.ownerUserId}）` : ''}</dd></div>
+      <div><dt>消费归属成员</dt><dd>{record.ownerUserId ? <UserIdentityBadge user={{ id: record.ownerUserId, name: record.ownerLabel, avatar_url: record.ownerAvatarUrl }} size="sm" /> : record.ownerLabel}{record.ownerUserId ? `（${record.ownerUserId}）` : ''}</dd></div>
       <div><dt>操作者 / 付费主体</dt><dd>{record.actorUserId || '未记录'} / {record.billingSubject || '未记录'}</dd></div>
       <div><dt>原使用项目 / 当前管理项目</dt><dd>{record.projectLabel} / {record.currentProjectId || '未归属或未记录'}</dd></div>
       {record.currentOwnerUserId !== record.ownerUserId && <div><dt>当前管理成员</dt><dd>{record.currentOwnerUserId || '未记录'}</dd></div>}
@@ -64,7 +64,7 @@ export default function UsageRecords({ page, search, view, busy, update, expande
         const href = originalHref(record, returnTo);
         return <tr key={key} data-usage-anchor={key}>
           <td><RelativeTime value={record.occurredAt} /></td>
-          <td><div className="au-cell-stack">{record.ownerUserId ? <Link className="au-name-link" href={usageHref('members', search, { owner_user_id: record.ownerUserId, records_page: 1, page: 1 })}><UserIdentityBadge user={{ id: record.ownerUserId, name: record.ownerLabel }} size="sm" /></Link> : <span>{record.ownerLabel}</span>}{record.projectId ? <Link className="au-quiet-link" href={usageHref('projects', search, { project_id: record.projectId, records_page: 1, page: 1 })}>{record.projectLabel}</Link> : <small>{record.projectLabel}</small>}</div></td>
+          <td><div className="au-cell-stack">{record.ownerUserId ? <Link className="au-name-link" href={usageHref('members', search, { owner_user_id: record.ownerUserId, records_page: 1, page: 1 })}><UserIdentityBadge user={{ id: record.ownerUserId, name: record.ownerLabel, avatar_url: record.ownerAvatarUrl }} size="sm" /></Link> : <span>{record.ownerLabel}</span>}{record.projectId ? <Link className="au-quiet-link" href={usageHref('projects', search, { project_id: record.projectId, records_page: 1, page: 1 })}>{record.projectLabel}</Link> : <small>{record.projectLabel}</small>}</div></td>
           <td><div className="au-cell-stack"><span>{KIND_LABELS[record.kind] || record.kind}{!record.leaf ? '（流程分组）' : ''}</span><small>{SOURCE_LABELS[record.sourceKind] || '来源待确认'}</small><small>{record.model || '型号未记录'}</small></div></td>
           <td className="au-numeric"><div className="au-cell-stack"><span title={record.accountingCost?.detail}>{record.accountingCost ? money(record.accountingCost.amountCnyMicros) : record.confirmedCostCnyMicros !== null ? money(record.confirmedCostCnyMicros) : record.confirmedCost.length ? originalMoney(record.confirmedCost) : COST_LABELS[record.costStatus] || '待核'}</span><small>{COST_LABELS[record.costStatus]}</small></div></td>
           <td className="au-numeric"><div className="au-cell-stack"><span>{points(record.chargedPoints)}</span><small>预留 {points(record.reservedPoints)}</small></div></td>
