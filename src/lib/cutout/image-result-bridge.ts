@@ -11,4 +11,4 @@ async function request(receiptId: string, body?: unknown, signal?: AbortSignal):
 }
 export const getImageResultCutoutHandoff = (receiptId: string, signal?: AbortSignal) => request(receiptId, undefined, signal);
 export const prepareImageResultCutoutHandoff = (receiptId: string) => request(receiptId, { action: 'prepare' });
-export const startImageResultCutoutHandoff = (receiptId: string, options: { settings: CutoutSettings; confirmUnknownPrice: boolean }) => request(receiptId, { action: 'start', ...options });
+export const startImageResultCutoutHandoff = (receiptId: string, options: { settings: CutoutSettings }) => request(receiptId, { action: 'start', ...options });

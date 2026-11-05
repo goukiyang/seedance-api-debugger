@@ -1,8 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '资产管理工作区导航统一', outline: [
-  '资产管理与作品广场共用同一工作区侧栏',
-  '保留资源筛选与管理，并突出当前导航位置',
+const notice = { title: '抠图重做与操作区优化', outline: [
+  '本机抠图免费，处理完成后可以直接重新制作',
+  '新增新建快捷操作，精简图片周围的信息与按钮',
+  '最近任务不再遮黑画面，单击图片即可放大查看',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

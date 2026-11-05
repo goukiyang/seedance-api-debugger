@@ -10,7 +10,7 @@ export async function POST(request: Request, { params }: { params: { receiptId: 
     const user = await imageNextUser(request), body = await imageNextBody(request);
     if (Object.keys(body).some(key => !['action', 'settings', 'confirmUnknownPrice'].includes(key))) throw new ImageResultNextError('处理内容无效');
     if (body.action === 'prepare') return imageNextJson(await prepareCutoutImageHandoff(request, user, params.receiptId));
-    if (body.action === 'start') return imageNextJson(await startCutoutImageHandoff(request, user, params.receiptId, body.settings, body.confirmUnknownPrice === true));
+    if (body.action === 'start') return imageNextJson(await startCutoutImageHandoff(request, user, params.receiptId, body.settings));
     throw new ImageResultNextError('处理方式无效');
   } catch (error) { return imageNextError(error); }
 }
