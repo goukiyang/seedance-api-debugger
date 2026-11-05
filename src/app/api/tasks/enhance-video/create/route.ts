@@ -42,6 +42,7 @@ import {
 } from '@/lib/integrations/aimediakit';
 import {
   assertEnhanceVideoSourceTaskAllowed,
+  enhanceVideoSourcePricing,
   buildEnhanceVideoProviderInput,
   normalizeEnhanceVideoCreateBody,
   validateEnhanceVideoUrl,
@@ -62,6 +63,7 @@ type SourceTask = Pick<VideoTask,
   | 'result_video_url'
   | 'local_video_path'
   | 'duration'
+  | 'raw_status_response'
   | 'resolution'
   | 'ratio'
   | 'project_id'
@@ -292,6 +294,7 @@ export async function POST(request: NextRequest) {
         result_video_url: true,
         local_video_path: true,
         duration: true,
+        raw_status_response: true,
         resolution: true,
         ratio: true,
         project_id: true,
@@ -387,7 +390,8 @@ export async function POST(request: NextRequest) {
   let priceQuote: VideoPricingQuote;
   try {
     priceQuote = await quoteVideoPricing({ provider: 'volcengine_mediakit', model: 'enhance-video', duration,
-      resolution: body.resolution, toolVersion: body.toolVersion, fps: body.fps });
+      resolution: body.resolution, toolVersion: body.toolVersion, fps: body.fps,
+      ...(sourceTask ? enhanceVideoSourcePricing(sourceTask) : {}) });
     requireVideoPricingRevision(priceQuote, body.pricingRevision);
   } catch (error) {
     const failure = videoPricingError(error);
