@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '抠图重做与操作区优化', outline: [
-  '本机抠图免费，处理完成后可以直接重新制作',
-  '新增新建快捷操作，精简图片周围的信息与按钮',
-  '最近任务不再遮黑画面，单击图片即可放大查看',
+const notice = { title: '账本费用核算补齐', outline: [
+  '视频复用资产管理费用，图片按已确认单价核算',
+  '个人与项目汇总同步显示费用，核算和实扣分开',
+  '保留历史点数和原账，不重复扣费',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
