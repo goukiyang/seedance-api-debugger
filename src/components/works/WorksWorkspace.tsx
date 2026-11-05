@@ -183,12 +183,35 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
     catch (cause) { if (alive.current) { setNotice(cause instanceof Error ? cause.message : '操作未完成'); if (cause instanceof WorksClientError && cause.status === 409 && (key.startsWith('work:') || key.startsWith('method:'))) { setDetailRevision(value => value + 1); void worksRead<{ viewerId: string; work: WorkCard }>(`/api/works/${encodeURIComponent(key.slice(key.indexOf(':') + 1))}`, viewerId).then(data => { if (alive.current) updateWork(data.work); }).catch(() => {}); } } return null; }
     finally { operationLocks.current.delete(key); if (alive.current) { setBusy(old => old.filter(item => item !== key)); setPending(pendingWorkOperations(viewerId)); } }
   }, [viewerId, applyResult, updateWork]);
-  async function reconcile(operation: PendingWorkOperation) {
+  const reconcile = useCallback(async (operation: PendingWorkOperation, quiet = false) => {
     if (operationLocks.current.has(operation.key)) return; operationLocks.current.add(operation.key); setBusy(old => [...old, operation.key]);
     try { const result = await queryWorkOperation(viewerId, operation); if (alive.current) { await applyResult(result, operation.key); if (result.kind !== 'work-state' || result.action !== 'like') setNotice('原操作已确认保存'); } }
-    catch (cause) { if (alive.current) setNotice(cause instanceof Error ? cause.message : '原操作尚未确认'); }
+    catch (cause) { if (alive.current && !quiet) setNotice(cause instanceof Error ? cause.message : '原操作尚未确认'); }
     finally { operationLocks.current.delete(operation.key); if (alive.current) { setBusy(old => old.filter(item => item !== operation.key)); setPending(pendingWorkOperations(viewerId)); } }
-  }
+  }, [viewerId, applyResult]);
+  useEffect(() => {
+    if (!ready) return;
+    let cancelled = false, checking = false;
+    const checkPending = async () => {
+      if (cancelled || checking) return;
+      checking = true;
+      try {
+        for (const operation of pendingWorkOperations(viewerId)) {
+          if (cancelled) break;
+          await reconcile(operation, true);
+        }
+      } finally { checking = false; }
+    };
+    const resume = () => { if (document.visibilityState === 'visible') void checkPending(); };
+    void checkPending();
+    window.addEventListener('focus', resume);
+    document.addEventListener('visibilitychange', resume);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', resume);
+      document.removeEventListener('visibilitychange', resume);
+    };
+  }, [ready, viewerId, reconcile]);
   useEffect(() => { if (ready && pagesRef.current.length && loadedQueryRef.current === queryKey) remember(); }, [workId, queryKey, ready, remember]);
   const onRestored = useCallback((generation: number) => { restoringList.current = false; setRestore(old => old?.generation === generation ? null : old); }, []), first = pages[0], last = pages[pages.length - 1];
   const clearFilters = () => updateQuery({ medium: 'all', q: undefined, author: undefined, project: undefined, collection: undefined });

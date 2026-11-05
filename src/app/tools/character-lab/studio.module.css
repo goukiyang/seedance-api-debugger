@@ -251,3 +251,7 @@
 .historyText { min-width: 0; }
 .historyItem > small { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; padding-inline: 8px; color: var(--lab-muted); font-size: 10px; }
 .historyItem > small button { font-size: 10px; min-height: 26px; padding: 1px; }
+
+.bodyPair { display: flex; flex-direction: column; gap: 12px; }
+
+.root .viewVersion { width: auto; min-height: 32px; padding: 4px 8px; }

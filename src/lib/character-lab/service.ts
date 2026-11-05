@@ -21,8 +21,11 @@ import { QueueCapacityError, QueueMaintenanceError } from '@/lib/image-studio/qu
 import { ownedLabAsset, persistLabFace, labOutput, readLabReference } from './media';
 import { faceLabPrompt, resultLabPrompt, labViewPrompt } from './prompts';
 import { labConfig, labConfigVersions, labId, labReference, labText, listLabWorkspaces, parseLabDraft, planKey, readLabPlan, readLabWorkspace, receiptKey, workspaceKey } from './store';
-import { characterLabOperations, characterLabSlot, sameLabReference, type CharacterLabOperation } from './types';
+import { characterLabOperations, characterLabSlotsOverlap, sameLabReference, type CharacterLabOperation } from './types';
 import type { CharacterLabBootstrap, CharacterLabPlan, CharacterLabQuote, CharacterLabTask, CharacterLabWorkspace, CharacterLabWorkspacePayload } from './types';
+
+// The compatible recovery build keeps paired results readable while closing fresh generation.
+export const CHARACTER_LAB_BODY_PAIRS_ENABLED = true;
 
 type StoredPlan = CharacterLabPlan & { inputFingerprint: string };
 type Receipt = { state: 'prepared' | 'submitting' | 'accepted' | 'rejected'; error?: string };
@@ -91,7 +94,7 @@ async function assertLabSlotClear(db: Pick<Prisma.TransactionClient, 'platformSe
     select: { value_json: true },
   });
   const batches = records.map(row => JSON.parse(row.value_json) as CharacterLabPlan).filter(other =>
-    other.workspaceId === plan.workspaceId && (!plan.slotScoped || !other.slotScoped || characterLabSlot(other) === characterLabSlot(plan)))
+    other.workspaceId === plan.workspaceId && (!plan.slotScoped || !other.slotScoped || characterLabSlotsOverlap(other, plan)))
     .map(other => batchId(userId, other.id));
   if (!batches.length) return;
   const accepted = await db.imageStudioTask.findMany({
@@ -105,13 +108,14 @@ export async function prepareLab(user: SessionUser, body: Record<string, unknown
   const kind = body.kind;
   if (body.operation !== undefined && !characterLabOperations.includes(body.operation as CharacterLabOperation)) throw new StudioError('生成用途无效');
   const operation = body.operation as CharacterLabOperation | undefined;
+  if (operation === 'body-pair' && !CHARACTER_LAB_BODY_PAIRS_ENABLED) throw new StudioError('当前恢复版本暂不新建正背面任务，原有记录仍可查看和选用', 409);
   const refinement = operation === 'refine-face' || operation === 'refine-side';
   if (operation && kind !== (refinement ? 'faces' : 'result')) throw new StudioError('生成用途与输出不匹配');
   const slotScoped = operation !== undefined || body.workbench === 2 ? true as const : undefined;
   const draft = parseLabDraft(body.draft);
   delete draft.views;
   const input = refinement ? labReference(body.input) : null;
-  const description = refinement ? labText(body.description, 3000, '微调描述') : '';
+  const description = refinement || operation?.startsWith('body-') ? labText(body.description ?? (refinement ? '' : draft.context), 3000, refinement ? '微调描述' : '角色补充') : '';
   if (refinement && (!input || !description)) throw new StudioError('请选择要微调的图片并填写修改要求');
   await readLabWorkspace(user.id, workspaceId);
   const inputFingerprint = createHash('sha256').update(JSON.stringify({ workspaceId, kind, draft, operation, slotScoped, ...(operation ? { input, description } : {}) })).digest('hex');
@@ -169,7 +173,7 @@ export async function prepareLab(user: SessionUser, body: Record<string, unknown
     auxiliaryFaces: !operation && kind === 'result' ? draft.auxiliaryFaces : [], auxiliaryFeatures: draft.auxiliaryFeatures,
     adjustment: operation ? description : kind === 'result' ? draft.adjustment : '', adjustmentCell: !operation && kind === 'result' ? draft.adjustmentCell : null,
     previousResultPlanId, configRevision: config.revision, prompt, model: draft.model, channelId: draft.channelId,
-    quality, resolution, aspectRatio: kind === 'faces' || operation === 'side' ? '1:1' : '2:3', settingsRevision: settings.revision,
+    quality, resolution, aspectRatio: kind === 'faces' || operation === 'side' || operation === 'body-pair' ? '1:1' : '2:3', settingsRevision: settings.revision,
     referenceIds: references, projectId: draft.projectId, ...(imageChannel ? { imageChannel } : {}),
     ...(operation ? { operation } : {}), ...(input ? { input } : {}), ...(slotScoped ? { slotScoped } : {}), inputFingerprint };
   await prisma.$transaction(async tx => {
@@ -200,6 +204,7 @@ export async function submitLab(user: SessionUser, body: Record<string, unknown>
   const plan = await readLabPlan(user.id, labId(body.planId, '生成'));
   const accepted = await prisma.imageStudioTask.findFirst({ where: { owner_id: user.id, batch_id: batchId(user.id, plan.id) }, select: { batch_id: true } });
   if (accepted) return { batchId: accepted.batch_id };
+  if (plan.operation === 'body-pair' && !CHARACTER_LAB_BODY_PAIRS_ENABLED) throw Object.assign(new StudioError('当前恢复版本暂不新建正背面任务，原有记录仍可查看和选用', 409), { submitted: false });
   const receipt = await prisma.platformSetting.findUnique({ where: { key: receiptKey(user.id, plan.id) } });
   if (!receipt || (JSON.parse(receipt.value_json) as Receipt).state !== 'prepared') throw new StudioError('原提交结果待确认或已结束，请查询原记录，不要重复生成', 409);
   const storedQuote = await prisma.platformSetting.findUnique({ where: { key: quoteKey(user.id, plan.id) } });
