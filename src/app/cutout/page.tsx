@@ -1113,7 +1113,7 @@ export default function CutoutPage() {
     setSplitEntries([]); setSelectedEntryKeys([]); setZoom(null); setHistoryOpen(false);
     leaveHandoff();
     const url = new URL(window.location.href);
-    url.searchParams.delete('job');
+    url.searchParams.delete('jobId');
     window.history.replaceState(window.history.state, '', url);
     saveCutoutPreferences(accountId, { settings, mode, advancedOpen, selectedJobId: null, historyOffset });
   }, [acceptFile, accountId, advancedOpen, chooseJob, handoffBusy, historyOffset, leaveHandoff, mode, settings]);
