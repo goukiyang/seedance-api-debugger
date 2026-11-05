@@ -1,10 +1,6 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '费率说明', outline: [
-  '统一查看换算比例、基础费率和扣点规则',
-  '费率说明自动读取已保存价格',
-  '管理员编辑入口和原有计费保持不变',
-] };
+const notice = {title:'相容恢复运行',outline:['原账号抠图历史与独立业务身份保留','成员抠图入口暂时关闭，现有任务沿原请求核对']};
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
   summary: notice.title };

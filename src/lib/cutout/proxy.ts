@@ -1,4 +1,6 @@
-type User = { id: string; role: string };
+import { canUseCutout } from './access';
+import type { AccountScopedUser } from '@/lib/access/external-role';
+type User = AccountScopedUser & { id: string };
 type Environment = Record<string, string | undefined>;
 const PRIVATE = { 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' };
 const KINDS = new Set(['cutout', 'characters', 'crop', 'split_preview', 'split_region', 'split_merge', 'split_export']);
@@ -11,16 +13,30 @@ export function cutoutServiceBase(env: Environment): string {
   if (url.username || url.password || url.search || url.hash || url.pathname !== '/' || !(url.protocol === 'https:' || (local && url.protocol === 'http:'))) throw new Error('Invalid service configuration');
   return url.origin;
 }
-// 上游没有业务身份查询接口；仅接受一个已授权SD2绑定，避免不同密钥共用owner串号。
-export function cutoutBusinessCredential(env: Environment, id: string): string | null {
+export type CutoutBusinessBinding = { key: string; expectedOwnerId: string | null };
+export function cutoutBusinessBinding(env: Environment, id: string): CutoutBusinessBinding | null {
   try {
-    const bindings: unknown = JSON.parse(env.CUTOUT_BUSINESS_KEYS || 'null');
-    if (!bindings || typeof bindings !== 'object' || Array.isArray(bindings) || !Object.prototype.hasOwnProperty.call(bindings, id)) return null;
-    const record = bindings as Record<string, unknown>, key = record[id];
-    if (Object.keys(record).length !== 1) return null;
-    if (typeof key !== 'string' || key.length < 16 || key.length > 2048 || /\s/.test(key) || Object.values(record).filter(value => value === key).length !== 1) return null;
-    return key;
+    const input: unknown = JSON.parse(env.CUTOUT_BUSINESS_KEYS || 'null');
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+    const entries = Object.entries(input), keys = new Set<string>(), owners = new Set<string>();
+    const bindings = new Map<string, CutoutBusinessBinding>();
+    for (const [userId, value] of entries) {
+      const legacy = typeof value === 'string';
+      if (legacy && entries.length !== 1) return null;
+      if (!legacy && (!value || typeof value !== 'object' || Array.isArray(value))) return null;
+      const row = value as { key?: unknown; expectedOwnerId?: unknown };
+      const key = legacy ? value : row.key, owner = legacy ? null : row.expectedOwnerId;
+      if (typeof key !== 'string' || key.length < 16 || key.length > 2048 || /\s/.test(key) || keys.has(key)
+        || !legacy && (typeof owner !== 'string' || !owner || owner.length > 128 || owners.has(owner))) return null;
+      keys.add(key);
+      if (typeof owner === 'string') owners.add(owner);
+      bindings.set(userId, { key, expectedOwnerId: typeof owner === 'string' ? owner : null });
+    }
+    return bindings.get(id) || null;
   } catch { return null; }
+}
+export function cutoutBusinessCredential(env: Environment, id: string): string | null {
+  return cutoutBusinessBinding(env, id)?.key || null;
 }
 function safeSegment(v: string) { return v.length > 0 && v.length <= 255 && v !== '.' && v !== '..' && !/[\/\\\u0000-\u001f\u007f?#%]/.test(v); }
 export function cutoutRoute(path: string[], method: string): string | null {
@@ -79,7 +95,7 @@ const fetchUpstream = (fetcher: typeof fetch, url: string, init: RequestInit, ti
 
 export async function proxyCutout(request: Request, path: string[], user: User | null, env: Environment = process.env, fetcher: typeof fetch = fetch): Promise<Response> {
   if (!user) return failure('UNAUTHENTICATED', '未登录', 401);
-  if (user.role !== 'admin') return failure('FORBIDDEN', 'AI 抠图工具暂时只对管理员开放', 403);
+  if (!canUseCutout(user)) return failure('FORBIDDEN', '当前账户不能使用AI抠图，请使用已获准的内部账号', 403);
   if (!['GET', 'HEAD'].includes(request.method)) {
     const origin = request.headers.get('origin'), host = request.headers.get('host') || new URL(request.url).host;
     try { if (!origin || new URL(origin).host !== host) return failure('ORIGIN_REJECTED', '请在本站操作', 403); }
@@ -89,17 +105,26 @@ export async function proxyCutout(request: Request, path: string[], user: User |
   if (!targetPath) return failure('NOT_FOUND', '不支持的抠图操作', 404);
   let base: string;
   try { base = cutoutServiceBase(env); } catch { return failure('CUTOUT_CONFIGURATION_INVALID', '抠图连接配置无效，请联系管理员；没有提交任务', 503); }
-  const key = cutoutBusinessCredential(env, user.id);
+  const binding=cutoutBusinessBinding(env,user.id),key=binding?.key;
+  let authorized=false;
+  if(binding){
+    try {
+      const response=await fetchUpstream(fetcher,`${base}/api/v1/identity`,{headers:{'X-API-Key':binding.key}});
+      if(response.ok){
+        const identity=await response.json();
+        authorized=identity.success===true&&['external','legacy_api'].includes(identity.kind)
+          &&typeof identity.owner_id==='string'&&Boolean(identity.owner_id)&&Array.isArray(identity.scopes)&&identity.scopes.includes('business')
+          &&(identity.kind!=='external'||typeof identity.credential_id==='string'&&Boolean(identity.credential_id))
+          &&(binding.expectedOwnerId===null||identity.owner_id===binding.expectedOwnerId);
+      }else await response.body?.cancel();
+    }catch{ /* Read-only identity failure cannot submit a new task. */ }
+  }
+  if(targetPath!=='/api/v1/capabilities'&&binding&&!authorized)return failure('CUTOUT_IDENTITY_UNCONFIRMED','当前抠图业务身份与账户未核对通过，原请求保留；没有上传或提交任务',503);
   try {
     if (targetPath === '/api/v1/capabilities') {
       const response = await fetchUpstream(fetcher, `${base}${targetPath}`, { method: 'GET' });
       if (!response.ok) return upstreamFailure(response);
       const payload = await response.json();
-      let authorized = false;
-      if (key) {
-        const probe = await fetchUpstream(fetcher, `${base}/api/v1/jobs/history?limit=1&offset=0`, { headers: { 'X-API-Key': key } });
-        authorized = probe.ok; await probe.body?.cancel();
-      }
       const worker = payload.worker, ready = authorized && worker?.online === true && worker?.paused !== true && payload.dispatch?.available === true;
       const models = Array.isArray(worker?.models) ? worker.models.filter((v: unknown) => v && typeof v === 'object').map((v: { id: string; available?: boolean }) => ({ id: v.id, label: v.id === 'birefnet' ? 'BiRefNet' : v.id === 'fallback' ? '基础模型' : v.id, available: v.available === true })) : [];
       const message = !key ? '抠图服务已连接，但当前账户尚未绑定业务授权，不能提交任务；请联系管理员完成接入'
