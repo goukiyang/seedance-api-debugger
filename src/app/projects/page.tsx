@@ -7,6 +7,8 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Download, FolderKanban, MoreHorizontal, Plus, RotateCcw, Search } from 'lucide-react';
 import ProjectFilters from '@/components/projects/ProjectFilters';
 import PaginationControls from '@/components/PaginationControls';
+import { ExperienceEmpty, FilterSummary } from '@/components/experience/ExperienceParts';
+import { LoadingSkeleton, LoadingStatus } from '@/components/LoadingState';
 import ProjectActionConfirmModal from '@/components/ProjectActionConfirmModal';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useProductDialog } from '@/components/useProductDialog';
@@ -896,7 +898,7 @@ function ProjectsPageContent() {
   const downloadLimit = BULK_VIDEO_DOWNLOAD_CLIENT_LIMIT;
 
   return (
-    <div className={styles.page}>
+    <div className={`${styles.page} exp-browse`}>
       <header className={styles.header}>
         <h1>我的项目</h1>
           <div className={styles.actions}>
@@ -959,6 +961,11 @@ function ProjectsPageContent() {
         <div style={{ alignItems: 'center', color: 'var(--text-secondary)', display: 'flex', flexWrap: 'wrap', fontSize: 13, gap: 10, justifyContent: 'space-between' }}>
           <span>{hasCurrentList ? `共 ${pagination.total} 个项目` : '正在读取项目'}</span>
         </div>
+        <FilterSummary filters={[
+          ...(search.trim() ? [{ id: 'search', label: `搜索：${search}`, remove: () => applyPreferences({ search: '', page: 1 }) }] : []),
+          ...(scope !== 'all' ? [{ id: 'scope', label: scope === 'owned' ? '我创建或负责' : '我参与', remove: () => applyPreferences({ scope: 'all', page: 1 }) }] : []),
+          ...(sort !== 'updated' ? [{ id: 'sort', label: '按项目名称排序', remove: () => applyPreferences({ sort: 'updated', page: 1 }) }] : []),
+        ]} clear={resetPreferences} />
         {storageUnavailable && <p role="status" className="text-gray" style={{ margin: 0 }}>浏览器未能保存列表偏好，本次仍可正常使用。</p>}
       </section>
 
@@ -976,20 +983,19 @@ function ProjectsPageContent() {
         <div className="card" role="status" style={{ color: 'var(--text-secondary)' }}>正在应用搜索…</div>
       )}
       {loading && !hasCurrentList && !showListError && search === appliedSearch && (
-        <div className="card" role="status" style={{ color: 'var(--text-secondary)' }}>正在读取项目…</div>
+        <LoadingSkeleton label="正在读取项目" cards className={styles.grid} />
       )}
-      {loading && hasCurrentList && <p className="text-gray" role="status">正在更新项目列表…</p>}
+      {loading && hasCurrentList && <LoadingStatus>正在更新项目列表…</LoadingStatus>}
 
       {!loading && !showListError && hasCurrentList && pagination.total === 0 && (
-        <div className="card" style={{ textAlign: 'center' }}>
-          <h2 style={{ marginTop: 0 }}>{search.trim() ? '没有找到匹配的项目' : activeTab === 'active' ? '还没有使用中的项目' : '还没有归档项目'}</h2>
-          <p className="text-gray">{search.trim() ? '试试缩短关键词，或重置筛选后再找。' : activeTab === 'active' ? '创建协作项目后，可以在这里继续生成和查看结果。' : '归档的项目会保留在这里，方便之后恢复查看。'}</p>
-          {search.trim() ? (
+        <ExperienceEmpty className="card" title={search.trim() || scope !== 'all' ? '没有找到匹配的项目' : activeTab === 'active' ? '还没有使用中的项目' : '还没有归档项目'}
+          description={search.trim() || scope !== 'all' ? '试试清除筛选后再找。' : activeTab === 'active' ? '创建协作项目后，可以在这里继续生成和查看结果。' : '归档的项目会保留在这里，方便之后恢复查看。'}>
+          {search.trim() || scope !== 'all' ? (
             <button className="btn btn-secondary" type="button" onClick={resetPreferences}>重置筛选</button>
           ) : activeTab === 'active' && canCreate && (
             <button className="btn btn-primary" type="button" onClick={openCreateDialog}><Plus size={16} aria-hidden="true" />新建项目</button>
           )}
-        </div>
+        </ExperienceEmpty>
       )}
 
       <div ref={gridRef} className={styles.grid} aria-busy={loading}>

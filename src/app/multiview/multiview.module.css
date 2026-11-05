@@ -1,4 +1,4 @@
-.page { --bg-secondary: var(--bg-panel); --bg-tertiary: var(--bg-input); --primary: #3b82f6; --primary-light: var(--tone-info-bg); max-width: 1600px; margin: 0 auto; padding: 24px; color: var(--text-primary, #18222e); }
+.page { --bg-secondary: var(--bg-panel); --bg-tertiary: var(--bg-input); --primary: #3b82f6; --primary-light: var(--tone-info-bg); padding: var(--exp-edge); color: var(--text-primary, #18222e); }
 .page button, .page select, .page input { font: inherit; }
 .page button, .page select { min-height: 36px; border: 1px solid var(--border-color, #d8dee5); border-radius: 7px; background: var(--bg-secondary, #fff); color: inherit; padding: 7px 11px; }
 .page button { cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
@@ -168,9 +168,9 @@
 .footnote summary { cursor: pointer; min-height: 32px; }
 .footnote .videoArea { max-width: 600px; }
 .footnote p { flex-basis: 100%; }
-@media (max-width: 1000px) { .page { padding: 18px; } .stages { gap: 14px; } }
+@media (max-width: 1000px) { .stages { gap: 14px; } }
 @media (max-width: 760px) {
-  .page { padding: 14px; } .stages { gap: 7px; justify-content: space-between; font-size: 11px; } .stages li { gap: 4px; } .stages li > span { width: 20px; height: 20px; }
+  .stages { gap: 7px; justify-content: space-between; font-size: 11px; } .stages li { gap: 4px; } .stages li > span { width: 20px; height: 20px; }
   .workbench { gap: 18px; } .resultMain, .tools { width: 100%; }
   .collageViewport { padding: 0; } .exportBar { gap: 8px; } .exportActions { width: 100%; } .exportActions button { flex: 1 1 auto; min-height: 40px; padding-inline: 8px; }
   .toolBody { padding: 12px; } .editorStage { height: clamp(120px, 27dvh, 230px); }

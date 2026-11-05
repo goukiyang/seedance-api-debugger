@@ -14,6 +14,7 @@ import type { ImageBillingView } from '@/lib/image-studio/billing-contract';
 import { ImageGenerationWaiting, type ImageGenerationWait } from './ImageGenerationWaiting';
 import { useImageGenerationWaitDisplay } from './useImageGenerationWaitDisplay';
 import type { ImageGenerationWaitDisplay } from '@/lib/image-studio/wait-display';
+import { ExperienceActions } from '@/components/experience/ExperienceParts';
 import { ImageResultNextActions, ImageResultNextActionFeedback } from './ImageResultNextActions';
 import { useImageResultNextActions } from './useImageResultNextActions';
 import { ResultImageContextMenu, type ResultImageContextMenuItem } from './ResultImageContextMenu';
@@ -212,7 +213,7 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
     </div>
     {contextActionsEnabled ? <ImageResultNextActionFeedback controller={controller} className={`${styles.feedback} ${styles.nextFeedback}`} /> : item.media?.contentKey && nextSourceSet.has(item.media.contentKey) && <ImageResultNextActions sourceKey={item.media.contentKey} resultId={item.id} className={styles.nextActions} />}
     {renderMetadata ? renderMetadata(item) : <div className={styles.heading}><strong title={item.label}>{item.label}</strong><span>{item.status}</span></div>}
-    {primaryActions && <div className={styles.actions} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>{primaryActions}</div>}
+    {primaryActions && <ExperienceActions label="继续使用结果" className={styles.actions} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>{primaryActions}</ExperienceActions>}
     {feedback?.id === item.id && (compactInformation ? <ImageResultOperationFeedback feedback={feedback} anchorRef={feedbackAnchor} onDismiss={dismissFeedback}
       onRetry={feedback.phase === 'error' ? () => void operate(item, feedback.action === '复制' ? 'copy' : 'download') : undefined} /> : <p className={styles.feedback} role="status">{feedback.message}</p>)}
     {!compactInformation && item.notice && <TaskNotice kind="status" className={styles.notice}>{item.notice}</TaskNotice>}

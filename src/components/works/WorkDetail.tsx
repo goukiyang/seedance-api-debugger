@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { ArrowLeft, ChevronDown, ChevronUp, Plus, Download, Maximize2 } from 'lucide-react';
+import { GuidedDemo } from '@/components/experience/demo/GuidedDemo';
+import { ExperienceActions, OperationReceipt } from '@/components/experience/ExperienceParts';
 import { RelativeTime } from '@/components/RelativeTime';
 import { WorkActions, reuseWorkTemplate, type WorkOperate } from './WorkActions';
 import { worksRead, WorksClientError, workWorkspaceTabId } from '@/lib/works/client';
@@ -183,11 +185,12 @@ export function WorkDetail({ id, viewerId, preparation, revision, likesRevision,
           <div className={styles.detailInfo}>
             <div className={styles.detailByline}><WorkAuthor author={work.author} onClick={() => onFilter('author', work.author.id)} /><RelativeTime value={work.completedAt} /><WorkActions work={work} busy={blocked} operate={operate} onClassify={onClassify} /></div>
             <h1 ref={heading} tabIndex={-1} id="work-detail-title" className={styles.sourceTitle}>{source ? <a href={source.href}>{source.label}</a> : '作品详情'}</h1>
-            <div className={styles.detailSource}>
+            <ExperienceActions label="继续使用作品" className={styles.detailSource}>
               {work.provenance?.template && <a href={work.provenance.tool.href}>{work.provenance.tool.label}</a>}
               {work.provenance?.template && <button type="button" className={styles.primary} disabled={blocked || methodReading || context?.method?.action.kind !== 'template'} title={context?.method?.action.reason} onClick={() => void applyMethod()}>{methodReading ? '正在准备…' : '一键参考'}</button>}
-            </div>
-            {notice && <p className={styles.notice} role="status">{notice}{notice.startsWith('已加入') && <a href="/generate" className={styles.textAction}>打开生成工作区</a>}</p>}
+            </ExperienceActions>
+            {notice && <OperationReceipt className={styles.notice} status={notice}
+              actions={notice.startsWith('已加入') && <a href="/generate" className={styles.textAction}>打开生成工作区</a>} />}
             <WorkLearning work={work} viewerId={viewerId} disabled={blocked || comparing} onSeek={work.medium === 'video' && !comparing ? seek : undefined} />
             <details className={styles.metadata}><summary>作品信息与操作</summary>
               {work.title && <p>{work.title}</p>}
@@ -206,6 +209,7 @@ export function WorkDetail({ id, viewerId, preparation, revision, likesRevision,
               {work.withdrawn && <p>已撤回分享</p>}{!work.discoverable && <p>已移出广场</p>}
             </details>
             <details open={compareOpen} onToggle={event => setCompareOpen(event.currentTarget.open)} className={styles.metadata}><summary>比较作品</summary><div ref={compareArea} className={styles.compareArea}>
+              {compareOpen && <GuidedDemo kind="compare" />}
               {groups.length > 1 && <label className={styles.compareScope}>比较范围<select value={compareGroup} disabled={comparing} onChange={event => setCompareGroup(event.target.value)}><option value="">全部相关作品</option>{groups.map(group => <option key={group.id} value={group.id}>{group.label}</option>)}</select></label>}
               {compareOpen && <WorkCompare work={work} viewerId={viewerId} playback={playback} candidates={compareCandidates} disabled={blocked} onActiveChange={onCompareActive} />}
             </div></details>

@@ -9,6 +9,8 @@ import type { VideoPromptGroupRef } from '@/lib/video/prompt-groups';
 
 import { MultiviewEntry } from '@/components/MultiviewEntry';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
+import { CopyTextButton, InlineActionFeedback, useInlineActionFeedback } from '@/components/InlineActionFeedback';
+import { ExperienceActions, OperationReceipt } from '@/components/experience/ExperienceParts';
 import MediaPreview from '@/components/MediaPreview';
 import { VideoLoopButton } from '@/components/VideoLoopButton';
 import { useMediaPreviewState, useVideoLoopState } from '@/lib/hooks/use-media-preview-state';
@@ -897,10 +899,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
 
   // 视频预览错误状态
   const [videoError, setVideoError] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [promptCopied, setPromptCopied] = useState(false);
-  const [taskIdCopyStatus, setTaskIdCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
-  const taskIdCopyResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { feedback: copyLinkFeedback, setFeedback: setCopyLinkFeedback } = useInlineActionFeedback();
   const [openingVideo, setOpeningVideo] = useState(false);
   const [copyingLink, setCopyingLink] = useState(false);
   const [browserDownloading, setBrowserDownloading] = useState(false);
@@ -1432,6 +1431,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
   const handleCopyUrl = async () => {
     if (!task) return;
     setCopyingLink(true);
+    setCopyLinkFeedback(null);
     setOpenError(null);
 
     try {
@@ -1439,21 +1439,22 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
       if (!hasUsableLink) {
         const localVideoPath = await downloadVideoToLocal(task);
         if (!localVideoPath) {
-          setOpenError('无法生成可复制的视频链接，Provider 外链可能已过期。');
+          setCopyLinkFeedback({ text: '视频链接不可用，请刷新后重试', failed: true });
           return;
         }
         hasUsableLink = true;
       }
 
       if (!hasUsableLink) {
-        setOpenError('视频链接暂不可用，请刷新结果后重试。');
+        setCopyLinkFeedback({ text: '视频链接暂不可用，请刷新后重试', failed: true });
         return;
       }
 
       if (!activePageRef.current) return;
       await navigator.clipboard.writeText(taskPlaybackUrl(task));
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      if (activePageRef.current) setCopyLinkFeedback({ text: '已复制链接' });
+    } catch {
+      if (activePageRef.current) setCopyLinkFeedback({ text: '复制未完成，请重试', failed: true });
     } finally {
       setCopyingLink(false);
     }
@@ -1519,30 +1520,6 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
       anchor.remove();
     } finally {
       setBrowserDownloading(false);
-    }
-  };
-
-  const handleCopyPrompt = async () => {
-    if (!task?.prompt) return;
-    await navigator.clipboard.writeText(task.prompt);
-    setPromptCopied(true);
-    setTimeout(() => setPromptCopied(false), 2000);
-  };
-
-  const handleCopyTaskId = async () => {
-    if (!task) return;
-    if (taskIdCopyResetTimer.current) clearTimeout(taskIdCopyResetTimer.current);
-    setTaskIdCopyStatus('idle');
-    try {
-      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
-      await navigator.clipboard.writeText(task.id);
-      if (!activePageRef.current) return;
-      setTaskIdCopyStatus('copied');
-      taskIdCopyResetTimer.current = setTimeout(() => {
-        if (activePageRef.current) setTaskIdCopyStatus('idle');
-      }, 2000);
-    } catch {
-      if (activePageRef.current) setTaskIdCopyStatus('failed');
     }
   };
 
@@ -1914,7 +1891,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
   const agentRunHref = isAdmin && task.agent_run_id ? `/admin/agent-runs/${task.agent_run_id}` : null;
 
   return (
-    <div className={`task-detail-page ${resultStyles.page}`}>
+    <div className={`task-detail-page exp-detail ${resultStyles.page}`}>
       <SafeRetryStatus kind="video" id={task.id} />
       {taskLoadError && <div className="alert alert-warning" role="alert">最新状态读取失败：{taskLoadError}。可以重新刷新状态，现有结果仍保留。</div>}
       {openError && <div className="alert alert-warning" role="alert">{openError}</div>}
@@ -1966,12 +1943,12 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
 
               <div
                 ref={compareStageRef}
-                className={`task-result-stage ${showEnhanceCompare ? `task-result-compare-stage ${loopStyles.compareStage}` : ''} ${hasResultVideo && !showEnhanceCompare ? 'is-single-media' : ''} ${isCompareFullscreen ? 'is-compare-fullscreen' : ''}`}
+                className={`task-result-stage ${showEnhanceCompare ? `task-result-compare-stage ${loopStyles.compareStage}` : ''} ${!showEnhanceCompare ? 'is-single-media' : ''} ${isCompareFullscreen ? 'is-compare-fullscreen' : ''}`}
               >
                 {hasResultVideo ? (
                   showEnhanceCompare ? (
                     <>
-                      <div className={loopStyles.compareToolbar}>
+                      <div className={`${loopStyles.compareToolbar} exp-actions`} role="group" aria-label="超分对比操作">
                       <VideoLoopButton synchronized enabled={synchronizedLoop.enabled} onToggle={synchronizedLoop.toggle} disabled={!synchronizedLoop.ready} storageUnavailable={synchronizedLoop.storageUnavailable} />
                       <button
                         type="button"
@@ -2043,6 +2020,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
                       playsInline
                       preload="metadata"
                       src={videoSrc}
+                      poster={task.result_last_frame_url || undefined}
                       onLoadedMetadata={(event) => restorePlaybackPosition(event.currentTarget)}
                       onTimeUpdate={(event) => savePlaybackPosition(event.currentTarget)}
                       onError={() => setVideoError(true)}
@@ -2128,12 +2106,14 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
                 </details>
               )}
 
-              <div className="task-result-actions">
+              <ExperienceActions label="继续使用结果" className="task-result-actions">
                 {hasResultVideo && <MultiviewEntry contentKey={`video_task:${task.id}`} />}
-                {shouldShowRefresh && (
-                  <button className="btn btn-secondary" onClick={queryStatus} disabled={querying}>
-                    <RefreshCcw size={16} aria-hidden="true" />
-                    {querying ? '查询中...' : isSubmissionUnknown ? '查询原请求' : '刷新结果'}
+                {isSubmissionUnknown ? <OperationReceipt status="提交结果待确认" busy={querying}
+                  actions={<button type="button" className="btn btn-secondary" onClick={queryStatus} disabled={querying}>
+                    <RefreshCcw size={16} aria-hidden="true" />{querying ? '查询中…' : '查询原请求'}
+                  </button>} /> : shouldShowRefresh && (
+                  <button type="button" className="btn btn-secondary" onClick={queryStatus} disabled={querying}>
+                    <RefreshCcw size={16} aria-hidden="true" />{querying ? '查询中…' : '刷新结果'}
                   </button>
                 )}
                 {canUseVideoActions && <details className={resultStyles.more}>
@@ -2152,10 +2132,12 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
                   </button>
                 )}
                 {canUseVideoActions && (
-                  <button className="btn btn-secondary" onClick={() => void handleCopyUrl()} disabled={copyingLink || downloading}>
-                    <Copy size={16} aria-hidden="true" />
-                    {copyingLink ? '复制中...' : copied ? '已复制' : hasPublicVideo || hasProtectedPlayback ? '复制播放链接' : '复制备用链接'}
-                  </button>
+                  <InlineActionFeedback feedback={copyLinkFeedback}>
+                    <button className="btn btn-secondary" onClick={() => void handleCopyUrl()} disabled={copyingLink || downloading} aria-busy={copyingLink}>
+                      <Copy size={16} aria-hidden="true" />
+                      {hasPublicVideo || hasProtectedPlayback ? '复制播放链接' : '复制备用链接'}
+                    </button>
+                  </InlineActionFeedback>
                 )}
                   </div>
                 </details>}
@@ -2209,7 +2191,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
                     </div>
                   </label>
                 )}
-              </div>
+              </ExperienceActions>
 
               {(downloading || downloadProgress) && (
                 <div className="task-download-state sd2-loading-surface" data-busy={downloadPhase === 'preparing' && (downloading || querying || autoPoll || publicDeliveryPollStartedAt !== null)} role="status">
@@ -2245,19 +2227,9 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
                   <span>任务编号</span>
                   <strong className={resultStyles.taskIdValue}>
                     <code className={resultStyles.taskIdText}>{task.id}</code>
-                    <button
-                      type="button"
-                      className={`btn btn-secondary ${resultStyles.taskIdCopy}`}
-                      aria-label="复制任务编号"
-                      onClick={() => void handleCopyTaskId()}
-                    >
-                      <Copy size={14} aria-hidden="true" />
-                      {taskIdCopyStatus === 'copied' ? '已复制' : '复制'}
-                    </button>
+                    <CopyTextButton key={task.id} text={task.id} label="复制任务编号" iconOnly
+                      className={`btn btn-secondary ${resultStyles.taskIdCopy}`} errorMessage="复制失败，可选中编号复制" />
                   </strong>
-                  {taskIdCopyStatus === 'failed' && (
-                    <small className={resultStyles.taskIdCopyError} role="status">复制失败，可选中编号复制</small>
-                  )}
                 </div>
                 <div><span>模型</span><strong>{task.model || task.provider}</strong></div>
                 <div><span>视频规格</span><strong>{[task.duration ? `${task.duration}秒` : null, task.ratio, task.resolution].filter(Boolean).join(' · ') || '待同步'}</strong></div>
@@ -2303,10 +2275,8 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
               <div className="task-action-row">
                 {task.local_status === 'succeeded' && <ContentReactions contentKey={`video_task:${task.id}`} />}
                 {task.prompt && (
-                  <button className="btn btn-secondary" type="button" onClick={handleCopyPrompt}>
-                    <Copy size={16} aria-hidden="true" />
-                    {promptCopied ? '已复制' : task.video_prompt_groups?.length ? '复制个人描述' : '复制提示词'}
-                  </button>
+                  <CopyTextButton key={task.id} text={task.prompt} className="btn btn-secondary"
+                    label={task.video_prompt_groups?.length ? '复制个人描述' : '复制提示词'} />
                 )}
                 {taskActionHref ? <Link href={taskActionHref} className="btn btn-secondary" onClick={isEnhanceTask ? undefined : handleTaskReuseClick}>
                   <RotateCcw size={16} aria-hidden="true" />

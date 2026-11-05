@@ -100,9 +100,10 @@ export default function ReleaseNotice() {
         {risk?.busy.length ? <p className={styles.status} role="status">{risk.busy.join('、')}。完成后再刷新，不会中断当前操作。</p>
           : risk?.unsaved.length ? <p className={styles.status}>{risk.unsaved.join('、')}尚未保存，刷新会丢失这些修改。</p>
           : <p className={styles.status}>新版本已就绪，可刷新后使用。</p>}
+        {user?.account_type === 'internal' && <a href="/help" target="_blank" rel="noopener noreferrer">查看操作演示</a>}
         {refreshError && <p role="alert" className={styles.error}>{refreshError}</p>}
       </div>
-      <footer className={styles.actions}><button className="btn btn-primary" disabled={refreshing || Boolean(risk?.busy.length)} onClick={update}>
+      <footer className={`${styles.actions} exp-dialog-actions`}><button className="btn btn-primary" disabled={refreshing || Boolean(risk?.busy.length)} onClick={update}>
           {refreshing ? '刷新中…' : risk?.unsaved.length ? '放弃修改并刷新' : '立即刷新'}
         </button><button ref={returnButton} className="btn btn-secondary" onClick={later}>{risk?.unsaved.length && !risk.busy.length ? '返回编辑' : '稍后'}</button></footer>
     </dialog>, document.body)}

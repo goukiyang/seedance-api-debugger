@@ -1316,7 +1316,7 @@ export default function ProjectDetailPage() {
   const generatorHref = `/generate?${generatorQuery.toString()}`;
 
   return (
-    <div className={styles.page}>
+    <div className={`${styles.page} exp-detail`}>
       <header className={styles.header}>
         <div><Link className="link" href={projectListReturnTo}>返回项目</Link><h1>{projectDisplayName(project)}</h1>
           <p className="text-gray text-sm">{project.description || '项目生成与协作'} · {statusLabel(project.status)} · {roleLabel(permissions.role)}</p>

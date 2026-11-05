@@ -1,29 +1,39 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { OctagonX } from 'lucide-react';
+import { OperationReceipt } from '@/components/experience/ExperienceParts';
 import { RelativeTime } from '@/components/RelativeTime';
 import type { publicRetry } from '@/lib/generation-retry/store';
 type View = NonNullable<ReturnType<typeof publicRetry>>;
 const states: Record<string, string> = { prepared: '等待发送', sent: '已发送', accepted: '已受理', free_failed: '明确失败且不收费', succeeded: '成功', failed: '失败，费用沿原合同', unknown: '原请求待核对' };
 export default function SafeRetryStatus({ kind, id, initial, onChanged }: { kind: 'image' | 'video'; id: string; initial?: View | null; onChanged?: () => void }) {
   const [value, setValue] = useState<View | null>(initial || null), [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const [readRevision, setReadRevision] = useState(0);
+  const [checking, setChecking] = useState(false);
   useEffect(() => {
     let live = true;
     let timer: ReturnType<typeof setInterval> | undefined;
     const read = async () => {
       const response = await fetch(`/api/generation-retry/${kind}/${id}`, { cache: 'no-store' });
       if (response.status === 404 && timer) clearInterval(timer);
-      if (response.ok) { const result = await response.json(); if (live) setValue(result.retry);
-        if (['succeeded', 'failed'].includes(result.retry?.state) && timer) clearInterval(timer); }
+      if (!response.ok) throw new Error('暂时无法读取原请求，请稍后再查询');
+      const result = await response.json();
+      if (live) setValue(result.retry);
+      if (['succeeded', 'failed'].includes(result.retry?.state) && timer) clearInterval(timer);
     };
-    if (!initial) void read().catch(() => {});
+    if (!initial || readRevision) void read().catch(cause => {
+      if (live && readRevision) setError(cause instanceof Error ? cause.message : '暂时无法读取原请求');
+    }).finally(() => { if (live) setChecking(false); });
     timer = setInterval(() => void read().catch(() => {}), 10000);
     return () => { live = false; clearInterval(timer); };
-  }, [kind, id, initial]);
+  }, [kind, id, initial, readRevision]);
   if (!value) return null;
   return <div>
     {value.state === 'wait' && <p role="status">自动重试 {value.retries + 1}/3，等待发送</p>}
-    {value.state === 'unknown' && <p role="status">原请求待核对</p>}
+    {value.state === 'unknown' && <OperationReceipt status={checking ? '正在读取原请求' : '原请求待核对'} busy={checking}
+      actions={<button type="button" className="btn btn-secondary" disabled={checking} onClick={() => {
+        setError(''); setChecking(true); setReadRevision(value => value + 1);
+      }}>查询原请求</button>} />}
     {value.retries > 0 && value.state === 'active' && <p role="status">自动重试 {value.retries}/3</p>}
     {value.canStop && <button type="button" className="btn btn-secondary" disabled={busy} title="停止后续重试" onClick={async () => {
       setBusy(true); setError('');
@@ -35,7 +45,7 @@ export default function SafeRetryStatus({ kind, id, initial, onChanged }: { kind
       finally { setBusy(false); }
     }}><OctagonX size={15} />停止后续重试</button>}
     {value.stopped && <p role="status">后续重试已停止</p>}
-    {error && <p role="alert">{error}</p>}
+    {error && <OperationReceipt status={error} />}
     <details><summary>尝试记录（{value.attempts.length}/4）</summary>
       {value.attempts.map(a => <p key={a.ordinal}>第 {a.ordinal + 1} 次：{states[a.state] || a.state}{a.code ? ` / ${a.code}` : ''}<br />
         <small><RelativeTime value={a.startedAt} /> · {a.fee === 'confirmed_no_charge' ? '已确认本次不收费' : a.state === 'unknown' ? '费用待核对' : '费用沿原任务合同'}

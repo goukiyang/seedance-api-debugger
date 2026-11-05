@@ -170,7 +170,7 @@ function Trend({ report, view }: { report: UsageReportDTO; view: ReturnType<type
         </BarChart>
       </ResponsiveContainer>
     </div>
-    <details className={styles.trendValues}><summary>查看每月数值</summary><table className="table"><thead><tr><th>月份</th><th>视频</th><th>图片</th></tr></thead><tbody>
+    <details className={styles.trendValues}><summary>查看每月数值</summary><table className="table exp-data-table"><thead><tr><th>月份</th><th>视频</th><th>图片</th></tr></thead><tbody>
       {report.trend.items.map((item) => <tr key={item.month}><th scope="row">{item.month}</th>{(['video', 'image'] as const).map((type) => <td key={type}>{metric === 'cash' ? formatUsageMoney(item[type].cash.netCnyMicros) : point(item[type].points.net)}</td>)}</tr>)}
     </tbody></table></details>
   </details>;
@@ -298,7 +298,7 @@ export default function UsageWorkspace({ ownerId, projectId }: { ownerId: string
       {report.records.updated && <p role="status" className={styles.muted}>记录已更新，已显示有效页。</p>}
       {report.query.type === 'other' && <p>{report.summary.other.cash.netCnyMicros === null ? '其他业务实际费用待核' : `其他业务已确认 ${formatUsageMoney(report.summary.other.cash.netCnyMicros)}`} · 运行 {count(report.summary.other.taskCount)} 次</p>}
       {report.records.items.length === 0 ? <p className={styles.muted}>当前范围没有可读记录。{report.restricted ? '部分来源受限。' : ''}</p>
-        : projectId ? <div className={styles.projectTable}><table className="table"><thead><tr><th>时间</th><th>类型 / 模型</th><th>生成状态</th><th>确认人民币</th><th>净扣点数</th><th>原记录与明细</th></tr></thead>
+        : projectId ? <div className={styles.projectTable}><table className="table exp-data-table"><thead><tr><th>时间</th><th>类型 / 模型</th><th>生成状态</th><th>确认人民币</th><th>净扣点数</th><th>原记录与明细</th></tr></thead>
           {report.query.type === 'image' ? Array.from(groups, ([id, records]) => <tbody key={id}><tr><th colSpan={6} scope="rowgroup">{records[0].groupId ? '原批次' : '原请求'} · 当前页 {records.length} 条 · 费用保留原请求口径</th></tr>{records.map((record) => <ProjectUsageRow key={record.id} record={record} onNavigate={onNavigate} onPreview={setPreview} />)}</tbody>)
             : <tbody>{report.records.items.map((record) => <ProjectUsageRow key={record.id} record={record} onNavigate={onNavigate} onPreview={setPreview} />)}</tbody>}
         </table></div>

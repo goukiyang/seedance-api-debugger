@@ -31,6 +31,7 @@ import { parseVideoPromptGroupRefs, type VideoPromptGroupRef } from '@/lib/video
 import './generate/generate-redesign.css';
 import type { ReferenceAlbumSelection } from '@/components/ReferenceAlbumPicker';
 import type { PickerItem } from '@/lib/assets/picker-types';
+import { useMaterialArrival } from '@/components/useMaterialArrival';
 import { UploadedImagePicker, type UploadedAssetSelection } from '@/components/UploadedImagePicker';
 import MediaPreview from '@/components/MediaPreview';
 import { useVideoPricing } from '@/lib/pricing/use-video-pricing';
@@ -658,6 +659,7 @@ export function GenerationComposer({
 
   // Composer 内部状态（受控于参数 props 透传）
   const [generationMode, setGenerationMode] = useState<GenerationMode>(DEFAULT_GENERATION_MODE);
+  const referenceArrival = useMaterialArrival(`${workspace.workspace?.id || ''}:${generationMode}`);
   const [prompt, setPrompt] = useState('');
   const [promptAttempted, setPromptAttempted] = useState(false);
   const [videoPromptGroups, setVideoPromptGroups] = useState<VideoPromptGroupRef[]>([]);
@@ -2524,6 +2526,7 @@ export function GenerationComposer({
               accessibleOrdering={videoRedesign}
               model={selectedModel}
               assets={workspace.assets}
+              arrivedIds={referenceArrival.arrived}
               uploadStatuses={workspace.uploadStatuses}
               onUpload={(file, onProgress) => runWorkspaceOperation(() => workspace.uploadAsset(file, onProgress))}
               onRemove={handleRemove}
@@ -2560,6 +2563,7 @@ export function GenerationComposer({
               addLabel={videoRedesign ? '素材' : undefined}
               model={selectedModel}
               assets={workspace.assets}
+              arrivedIds={referenceArrival.arrived}
               uploadStatuses={workspace.uploadStatuses}
               onUpload={(file, onProgress) => runWorkspaceOperation(() => workspace.uploadAsset(file, onProgress))}
               onRemove={handleRemove}
@@ -2842,6 +2846,7 @@ export function GenerationComposer({
           const nextId = items[0]?.assetId;
           if (items.length !== 1 || !nextId) return { success: false, message: '请选择一项素材' };
           await runWorkspaceOperation(async () => { await workspace.replaceAssetWithLibrary(replaceTargetId, nextId); await refreshReferenceAlbums(); });
+          referenceArrival.mark([items[0].referenceImageId || nextId]);
           setReplaceTargetId(null);
           return { success: true };
         }} />}
@@ -2875,6 +2880,7 @@ export function GenerationComposer({
           const next = appendReferenceMarkers(prompt, labelList);
           if (next.length > MAX_GENERATION_PROMPT_CHARS) throw new Error(`${GENERATION_PROMPT_LIMIT_MESSAGE}，无法自动插入 @图片 标记`);
           await runWorkspaceOperation(() => workspace.addLibrarySelection(newItems.map(item => item.referenceImageId ? { referenceImageId: item.referenceImageId } : { assetId: item.assetId })));
+          referenceArrival.mark(newItems.map(item => item.referenceImageId || item.assetId).filter((id): id is string => Boolean(id)));
           if (pendingMentionRequestRef.current) resolvePendingMentionRequest(formatReferenceTokens(labelList) || null);
           else setPrompt(current => appendReferenceMarkers(current, labelList));
         }}

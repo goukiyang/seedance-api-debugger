@@ -1,9 +1,10 @@
 'use client';
+import { FilterSummary } from '@/components/experience/ExperienceParts';
 import { ProjectSelector } from '@/components/ProjectSelector';
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { Filter, RotateCcw, X } from 'lucide-react';
+import { Filter, RotateCcw } from 'lucide-react';
 import type { UsageReport } from '@/lib/admin/usage-types';
 import { ATTRIBUTION_LABELS, COST_LABELS, KIND_LABELS, RESULT_LABELS, RETENTION_LABELS, SOURCE_LABELS, STATUS_LABELS } from './format';
 import { actualRangeLabel, defaultUsageSearch, usageHref, type QueryPatch, type UsageView } from './query';
@@ -45,7 +46,7 @@ export default function UsageFilters({ search, view, report, busy, stale, update
   const tagged = Object.keys(FILTER_NAMES).filter(key => params.has(key));
 
   return <section className="au-filters" aria-label="使用分析范围">
-    <div className="au-filter-main">
+    <div className="au-filter-main exp-browse-toolbar">
       <form className="au-period" onSubmit={event => { event.preventDefault(); applyPeriod(); }}>
         <label><span>时间范围</span><select className="input" value={period} onChange={event => { const defaults = defaultUsageSearch(); setDraft(current => ({ year: defaults.get('year')!, month: defaults.get('month')!, quarter: String(Math.ceil(Number(defaults.get('month')) / 3)), half: Number(defaults.get('month')) <= 6 ? '1' : '2', ...current, range: event.target.value })); }}><SelectOptions value={period} values={RANGES as Array<[string, string]>} /></select></label>
         {['month', 'quarter', 'half', 'year'].includes(period) && <label className="au-year"><span>年份</span><input className="input" type="number" min="1" max="9998" required value={draft.year ?? report?.query.year ?? ''} onChange={event => edit('year', event.target.value)} placeholder="年份" /></label>}
@@ -82,12 +83,12 @@ export default function UsageFilters({ search, view, report, busy, stale, update
       <form className="au-inline-form" onSubmit={event => { event.preventDefault(); update({ time_zone: draft.time_zone }); }}><label><span>统计时区</span><input className="input" required value={draft.time_zone || ''} onChange={event => edit('time_zone', event.target.value)} placeholder="IANA 时区" /></label><button className="btn btn-secondary" type="submit">应用</button></form>
       <label><span>每页数量</span><select className="input" value={params.get('page_size') || '30'} onChange={event => update({ page_size: event.target.value })}><SelectOptions value={params.get('page_size') || '30'} values={['20', '30', '50', '100'].map(value => [value, `${value}条`])} /></select></label>
     </div>}
-    {tagged.length > 0 && <div className="au-filter-tags" aria-label="当前条件">{tagged.map(key => {
+    <FilterSummary filters={tagged.map(key => {
       const raw = params.get(key)!;
       const labels: Record<string, Record<string, string>> = { kind: KIND_LABELS, source_kind: SOURCE_LABELS, result_ready: RESULT_LABELS, retention_status: RETENTION_LABELS, cost_status: COST_LABELS, attribution: ATTRIBUTION_LABELS, status: STATUS_LABELS };
       const label = key === 'owner_user_id' ? ownerOptions.find(([id]) => id === raw)?.[1] || (raw === 'unassigned' ? '成员未归属' : raw) : key === 'project_id' ? projectOptions.find(([id]) => id === raw)?.[1] || (raw === 'unassigned' ? '未归属项目' : raw) : labels[key]?.[raw] || raw;
-      return <button key={key} className="au-filter-tag" type="button" onClick={() => update({ [key]: null })} aria-label={`移除${FILTER_NAMES[key]}：${label}`}>{FILTER_NAMES[key]}：{label}<X size={13} /></button>;
-    })}</div>}
+      return { id: key, label: `${FILTER_NAMES[key]}：${label}`, remove: () => update({ [key]: null }) };
+    })} />
     {busy && report && <span className="au-sr-only" role="status">正在更新，以下仍为上次读取结果。</span>}
   </section>;
 }

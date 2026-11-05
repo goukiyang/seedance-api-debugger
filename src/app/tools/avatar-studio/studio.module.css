@@ -1,4 +1,4 @@
-.page { padding: 16px 20px; color: var(--text-primary); min-width: 0; }
+.page { padding: var(--exp-section-gap) var(--exp-edge); color: var(--text-primary); min-width: 0; }
 .heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 .heading h1 { font-size: 22px; margin: 0; }
 .layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 320px); align-items: start; gap: 24px; border:0; padding:0; margin:0; min-width:0; }

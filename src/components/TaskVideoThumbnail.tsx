@@ -114,11 +114,12 @@ export function TaskVideoThumbnail({
       src={view.imageSrc}
       alt="视频截图"
       loading="lazy"
+      decoding="async"
       onError={() => setFailed(true)}
       onLoad={() => setFailed(false)}
     />
   ) : (
-    <span className="task-video-thumbnail-placeholder">{view.placeholderText}</span>
+    <span className="task-video-thumbnail-placeholder" role="status">{view.placeholderText}</span>
   );
   const shouldShowEnhanceBadge = isEnhanceTask
     ?? (generationMode === 'enhance_video' || provider === 'volcengine_mediakit');

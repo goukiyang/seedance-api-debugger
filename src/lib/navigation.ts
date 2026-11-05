@@ -23,6 +23,7 @@ export const shellRoutes = [
   '/',
   '/workbench',
   '/account',
+  '/help',
   '/points',
   '/image-studio',
   '/template-studio',
