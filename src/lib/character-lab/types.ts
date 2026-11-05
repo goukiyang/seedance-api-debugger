@@ -2,7 +2,7 @@ import type { ImageBillingView } from '@/lib/image-studio/billing-contract';
 
 export type CharacterLabStage = 'faces' | 'selection' | 'result';
 export type CharacterLabFace = { planId: string; cell: number };
-export const characterLabOperations = ['refine-face', 'side', 'refine-side', 'body-front', 'body-back'] as const;
+export const characterLabOperations = ['refine-face', 'side', 'refine-side', 'body-front', 'body-back', 'body-pair'] as const;
 export type CharacterLabOperation = typeof characterLabOperations[number];
 export type CharacterLabView = 'side' | 'body-front' | 'body-back';
 export type CharacterLabReference = { planId: string; cell?: number };
@@ -10,9 +10,20 @@ export type CharacterLabViews = Partial<Record<CharacterLabView, CharacterLabRef
 export type CharacterLabComposition = { id: string; name: string; savedAt: string };
 
 export function characterLabSlot(plan: Pick<CharacterLabPlan, 'operation' | 'kind'>) {
+  if (plan.operation === 'body-pair') return 'body-pair';
   if (plan.operation === 'side' || plan.operation === 'refine-side') return 'side';
   if (plan.operation === 'body-front' || plan.operation === 'body-back') return plan.operation;
   return plan.kind === 'faces' ? 'faces' : 'legacy';
+}
+
+export function characterLabSlotsOverlap(first: Pick<CharacterLabPlan, 'operation' | 'kind'>, second: Pick<CharacterLabPlan, 'operation' | 'kind'>) {
+  const a = characterLabSlot(first), b = characterLabSlot(second);
+  return a === b || a === 'body-pair' && (b === 'body-front' || b === 'body-back')
+    || b === 'body-pair' && (a === 'body-front' || a === 'body-back');
+}
+export function characterLabReferenceSlot(plan: Pick<CharacterLabPlan, 'operation' | 'kind'>, reference: CharacterLabReference) {
+  if (plan.operation === 'body-pair') return reference.cell === 0 ? 'body-front' : reference.cell === 1 ? 'body-back' : 'invalid';
+  return characterLabSlot(plan);
 }
 
 export function characterLabStrength(value: number) {
@@ -58,6 +69,7 @@ export type CharacterLabPromptFields = {
   refineSidePrompt?: string;
   bodyFrontPrompt?: string;
   bodyBackPrompt?: string;
+  bodyPairPrompt?: string;
 };
 export type CharacterLabConfig = CharacterLabPromptFields & { revision: number; updatedAt: string | null };
 export type CharacterLabPlan = {

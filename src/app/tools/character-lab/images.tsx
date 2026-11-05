@@ -23,11 +23,12 @@ function resolveImage(source: string, plans: CharacterLabPlan[], tasks: Record<s
     if (!plan || !asset) return { src: '' };
     const value = url.searchParams.get('cell');
     if (value === null) return { src: asset.url };
-    const cell = Number(value), count = plan.kind === 'faces' ? plan.count : 4;
+    const pair = plan.operation === 'body-pair';
+    const cell = Number(value), count = pair ? 2 : plan.kind === 'faces' ? plan.count : 4;
     if (!Number.isInteger(cell) || cell < 0 || cell >= count) return { src: '' };
     const columns = count === 9 ? 3 : 2, row = Math.floor(cell / columns);
-    const crop = { x: cell % columns / columns, y: plan.kind === 'result' ? row === 0 ? 0 : 0.42 : row / columns,
-      width: 1 / columns, height: plan.kind === 'result' ? row === 0 ? 0.42 : 0.58 : 1 / columns };
+    const crop = { x: cell % columns / columns, y: pair ? 0 : plan.kind === 'result' ? row === 0 ? 0 : 0.42 : row / columns,
+      width: 1 / columns, height: pair ? 1 : plan.kind === 'result' ? row === 0 ? 0.42 : 0.58 : 1 / columns };
     return { src: asset.url, crop, aspectRatio: asset.width && asset.height ? asset.width * crop.width / (asset.height * crop.height) : 1 };
   }
   if (url.pathname === '/api/character-lab/compose') {

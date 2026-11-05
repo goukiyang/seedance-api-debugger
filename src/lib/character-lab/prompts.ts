@@ -40,9 +40,11 @@ export const labViewPromptFields = {
   'refine-side': 'refineSidePrompt',
   'body-front': 'bodyFrontPrompt',
   'body-back': 'bodyBackPrompt',
+  'body-pair': 'bodyPairPrompt',
 } as const satisfies Record<CharacterLabOperation, keyof CharacterLabPromptFields>;
 
 export const labDefaultViewPrompts = {
+  bodyPairPrompt: '同一角色的正背面成对呈现，保留原角色头身比、身材轮廓、服装层次、材质、颜色、配饰和鞋。正背面服装和配件位置相互对应，人物高度、站姿、镜头和光线一致。',
   refineFacePrompt: '保留这张正脸的年龄感、骨相、发型与辨识特征，四个方案只在指定细节上做小幅变化。',
   sidePrompt: '保持正脸的年龄感、鼻唇轮廓、下颌、发型、眼镜和配饰。背景与正脸协调。',
   refineSidePrompt: '保留同一个人的身份和侧脸方向，只细调指定部分，四个版本的变化应小而可辨。',
@@ -58,6 +60,8 @@ export function labOperationRules(operation: CharacterLabOperation) {
       return '唯一参考图是选定正脸。输出一张同一人的90°纯侧面头肩照，面向画面左侧，视线水平、保留头顶。仅输出单张侧脸。';
     case 'refine-side':
       return '参考图1是锁定身份的正脸，参考图2是待细调的侧脸。输出一张正方形2×2等分宫格，四格都是同一人同方向的90°纯侧面头肩照。只微调指定细节。';
+    case 'body-pair':
+      return '仅用原始角色设计图作为参考，不根据头像重构身体。只输出一张1:1正方形正背面全身对照图，左右两个等宽、全高区域。左半区严格正面站姿，右半区严格背面站姿且不回头；两面必须是同一个角色，站在相同地面高度，头顶和鞋底完整入画。两面共同还原原设计的身体比例、服装和配饰，不添加文字或其他视图。';
     case 'body-front':
       return '仅用原始角色设计图作为参考。输出一张严格朝正前方的全身站姿照，头、双脚和鞋完整入画。身体比例、服装与配饰以原设计为准。';
     case 'body-back':
@@ -68,7 +72,7 @@ export function labOperationRules(operation: CharacterLabOperation) {
 export function labViewPrompt(config: CharacterLabPromptFields, operation: CharacterLabOperation, description: string) {
   const field = labViewPromptFields[operation];
   return [labOperationRules(operation), config[field] || labDefaultViewPrompts[field], config.styleConstraints,
-    description ? `本次局部调整：${description}` : '',
+    description ? `${operation.startsWith('body-') ? '本次角色补充' : '本次局部调整'}：${description}` : '',
     '保持自然摄影、平视和一致背景。遵守上述身份、参考来源与构图约束。'].filter(Boolean).join('\n\n');
 }
 export function resultLabPrompt(config: CharacterLabConfig, draft: CharacterLabDraft, hasPrevious: boolean) {
