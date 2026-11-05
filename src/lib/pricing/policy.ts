@@ -404,7 +404,9 @@ function simulationPrice(row: PricingAdminRow, quantity: string, example?: strin
     if (compareDecimal(perTask, PRICING_ADMIN_LIMITS.maxImageCredits) > 0) fail('单个账单示例超过图片原授权边界');
     return { exact: multiplyDecimal([exact, quantity]), credits: multiplyDecimal([perTask, quantity]) };
   }
-  const measured = row.identity.kind === 'enhance' || row.identity.kind === 'h3' ? roundDecimal(quantity, 0, 'ceil') : quantity;
+  const measured = row.identity.kind === 'enhance' && row.rounding === RMB_INTEGER_ROUNDING && ['follow', 'custom'].includes(row.mode)
+    ? roundDecimal(quantity, 3, 'half_up')
+    : row.identity.kind === 'enhance' || row.identity.kind === 'h3' ? roundDecimal(quantity, 0, 'ceil') : quantity;
   const exact = row.mode === 'legacy_fixed' && row.currentUnitCredits !== null ? multiplyDecimal([row.currentUnitCredits, measured])
     : row.baseCny && row.currentPointsPerCny ? multiplyDecimal([row.baseCny, row.currentPointsPerCny, measured]) : null;
   if (exact === null) return null;

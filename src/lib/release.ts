@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '模板喜欢与收藏合并', outline: [
-  '模板统一使用一个爱心和我的收藏',
-  '已有喜欢、收藏和个人分组继续保留',
-  '封面与工作台的收藏状态保持一致',
+const notice = { title: '超分人民币计价规格补齐', outline: [
+  '超分按三档帧率分别登记单价',
+  '新人民币规则按毫秒估算，最后统一换算点数',
+  '旧任务继续使用创建时的计费合同',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

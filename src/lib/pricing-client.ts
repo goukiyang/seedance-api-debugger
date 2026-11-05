@@ -1,7 +1,7 @@
 import { seedanceVideoModelInternalMultiplier } from './provider/seedance-models';
 import { normalizeCredits } from './credits/precision';
 
-export type VideoPricingRequest = { provider: string; model: string; resolution: string; duration: number; toolVersion?: string; fps?: number | null; context?: Record<string, unknown> };
+export type VideoPricingRequest = { provider: string; model: string; resolution: string; duration: number; toolVersion?: string; fps?: number | null; sourceTaskId?: string; context?: Record<string, unknown> };
 export type PublicVideoPricing = { estimatedCost: number; pricing_revision: string | null; pricing_quote_token?: string; policyApplied: boolean };
 export function videoPricingRequestKey(input: VideoPricingRequest, actorId?: string): string {
   return JSON.stringify({ owner: actorId, input });
@@ -24,8 +24,10 @@ export async function requestVideoPricing(input: VideoPricingRequest, signal?: A
   const params = new URLSearchParams({ provider: input.provider, model: input.model, resolution: input.resolution, duration: String(input.duration) });
   if (input.toolVersion) params.set('tool_version', input.toolVersion);
   if (input.fps !== undefined && input.fps !== null) params.set('fps', String(input.fps));
+  if (input.sourceTaskId) params.set('source_task_id', input.sourceTaskId);
   const response = await fetch(input.context ? '/api/tasks/estimate' : `/api/tasks/estimate?${params}`, { cache: 'no-store', signal,
-    ...(input.context ? { method: 'POST', body: JSON.stringify({ ...input.context, provider: input.provider, model: input.model, resolution: input.resolution, duration: input.duration, tool_version: input.toolVersion, fps: input.fps }) } : {}),
+    ...(input.context ? { method: 'POST', body: JSON.stringify({ ...input.context, provider: input.provider, model: input.model, resolution: input.resolution, duration: input.duration, tool_version: input.toolVersion, fps: input.fps,
+      ...(input.sourceTaskId ? { source_task_id: input.sourceTaskId } : {}) }) } : {}),
     headers: { ...(input.context ? { 'Content-Type': 'application/json' } : {}), ...(actorId ? { 'x-app-session-user': actorId } : {}) } });
   const data = await response.json();
   if (!response.ok || !validVideoPricingAmount(data.estimatedCost)

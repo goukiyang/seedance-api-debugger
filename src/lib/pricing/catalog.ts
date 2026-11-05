@@ -89,7 +89,7 @@ export async function assertPricingCatalogIdentity(identity: PricingAdminIdentit
     if (identity.channelId !== 'volcengine_mediakit' || identity.modelId !== 'enhance-video'
       || Object.keys(specifications).some(key => !['resolution', 'toolVersion', 'fpsTier'].includes(key))
       || !['480p', '720p', '1080p', '2k', '4k'].includes(specifications.resolution)
-      || !['standard', 'professional'].includes(specifications.toolVersion) || !['lte30', 'gt30'].includes(specifications.fpsTier)
+      || !['standard', 'professional'].includes(specifications.toolVersion) || !['lte30', 'gt30', 'gt60'].includes(specifications.fpsTier)
       || !isAiMediaKitApiReady(await getAiMediaKitApiSettings(client, menu?.inputs.enhance))) reject();
     return;
   }
@@ -208,11 +208,11 @@ export async function getPricingCatalog(client: PricingClient = prisma, menu?: P
   'IP 视频接口未就绪', [model.detail, 'IP 视频'], model.id === ip.default_model), ipBinding);
   const enhance = await getAiMediaKitApiSettings(client, menu?.inputs.enhance);
   const enhanceBinding = binding('volcengine_mediakit', enhance, enhance.api_key, sources.get(AIMEDIAKIT_API_SETTING_KEY) || 'legacy-default');
-  for (const resolution of ['480p', '720p', '1080p', '2k', '4k']) for (const toolVersion of ['standard', 'professional']) for (const fpsTier of ['lte30', 'gt30']) {
-    const price = calculateEnhanceVideoEstimatedCost({ duration: 1, resolution, toolVersion, fps: fpsTier === 'gt30' ? 60 : 30 }).finalCostPerSecond;
+  for (const resolution of ['480p', '720p', '1080p', '2k', '4k']) for (const toolVersion of ['standard', 'professional']) for (const fpsTier of ['lte30', 'gt30', 'gt60']) {
+    const price = calculateEnhanceVideoEstimatedCost({ duration: 1, resolution, toolVersion, fps: fpsTier === 'lte30' ? 30 : fpsTier === 'gt30' ? 60 : 120 }).finalCostPerSecond;
     add(row({ kind: 'enhance', channelId: 'volcengine_mediakit', modelId: 'enhance-video', billingMode: 'fixed', unit: 'second',
-      specifications: { resolution, toolVersion, fpsTier } }, `视频增强 ${resolution} · ${toolVersion === 'professional' ? '专业' : '普通'} · ${fpsTier === 'gt30' ? '>30fps' : '≤30fps'}`,
-    'AI MediaKit', enhance.enabled, isAiMediaKitApiReady(enhance), price, '增强视频接口未就绪', ['时长向上取整秒',
+      specifications: { resolution, toolVersion, fpsTier } }, `视频增强 ${resolution} · ${toolVersion === 'professional' ? '专业' : '普通'} · ${fpsTier === 'gt60' ? '>60且≤120fps' : fpsTier === 'gt30' ? '>30且≤60fps' : '≤30fps'}`,
+    'AI MediaKit', enhance.enabled, isAiMediaKitApiReady(enhance), price, '增强视频接口未就绪', ['人民币整点规则按毫秒估算，旧合同保留原整秒计量',
       ...(resolution === '480p' ? ['含原 240p / 360p / 540p 同价档，不改变请求输出尺寸'] : [])], true), enhanceBinding);
   }
   const h3 = await getH3ApiSettings(client, menu?.inputs.h3);
