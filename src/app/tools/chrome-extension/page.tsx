@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { redirect } from 'next/navigation';
 import { Download, Monitor, Puzzle } from 'lucide-react';
 import { getSession } from '@/lib/auth/session';
@@ -11,10 +12,16 @@ export default async function BridgeDownloadPage() {
   const user = await getSession();
   if (!user) redirect('/login?return_to=%2Ftools%2Fchrome-extension');
   if (user.account_type !== 'internal' || isExternalUser(user)) redirect(externalFallbackPath());
-  let release: BridgeRelease | null = null;
-  try { release = await readBridgeRelease(); } catch { /* Keep unverified download links unavailable. */ }
   return <main className={styles.page}>
     <header><p className={styles.eyebrow}>SD2 生产桥</p><h1>插件下载</h1><p>把浏览器里的创作工具与 SD2 任务连接起来。</p></header>
+    <Suspense fallback={<p role="status">正在读取最新安装包…</p>}><ReleaseDownloads /></Suspense>
+  </main>;
+}
+
+async function ReleaseDownloads() {
+  let release: BridgeRelease | null = null;
+  try { release = await readBridgeRelease(); } catch { /* Keep unverified download links unavailable. */ }
+  return <>
     {!release ? <p className={styles.error} role="alert">最新安装包暂时无法读取。<a href="/tools/chrome-extension">重新读取</a></p> : <>
       <div className={styles.release}><span>最新版本 {release.version}</span><p>{release.notes}</p></div>
       <section className={styles.product} aria-labelledby="desktop-title">
@@ -34,5 +41,5 @@ export default async function BridgeDownloadPage() {
         </div>
       </section>
     </>}
-  </main>;
+  </>;
 }
