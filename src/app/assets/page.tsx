@@ -276,8 +276,13 @@ function AssetToolbarPanel({ label, triggerContent, scopeKey, children, primary 
   const trigger = useRef<HTMLButtonElement>(null), panel = useRef<HTMLDivElement>(null);
   useEffect(() => setOpen(false), [scopeKey]);
   useDialogDismiss({ open, dialogRef: panel, branchRefs: [trigger], modal: false, onDismiss: () => setOpen(false) });
+  useEffect(() => {
+    if (!open) return;
+    const frame = requestAnimationFrame(() => panel.current?.focus({ preventScroll: true }));
+    return () => cancelAnimationFrame(frame);
+  }, [open]);
   return <Popper.Root><Popper.Anchor asChild><button ref={trigger} type="button" className={`${assetStyles.toolbarButton} ${primary ? assetStyles.primaryUpload : ''}`}
-    aria-label={label} title={label} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined} onClick={() => setOpen(value => !value)}>
+    aria-label={label} title={label} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined} onClick={event => { event.currentTarget.focus({ preventScroll: true }); setOpen(value => !value); }}>
     {triggerContent}
   </button></Popper.Anchor>
     {open && createPortal(<Popper.Content ref={panel} id={id} role="dialog" aria-label={label} tabIndex={-1}
@@ -913,6 +918,7 @@ function AssetsPageContent() {
   const assetUploadOwner = useRef(user?.id); assetUploadOwner.current = user?.id;
   useEffect(() => {
     setAssetUploadReceipt(null); setAssetUploadFile(null); setAssetUploadProgress(null); setAssetUploading(false);
+    setError(''); setMessage(''); setDelivery(null);
   }, [user?.id]);
 
   const cardRefs = useRef(new Map<AssetLibraryItemId, HTMLDivElement>());
@@ -1227,7 +1233,7 @@ function AssetsPageContent() {
   }, [user, movePanelOpen, bulkTarget]);
 
   useEffect(() => {
-    if (!user || restoredPageScope !== pageScope || restoredFiltersOwner !== user.id) return;
+    if (!user || isReactionView || restoredPageScope !== pageScope || restoredFiltersOwner !== user.id) return;
     let cancelled = false;
     const abort = new AbortController();
     const normalizedKeyword = keyword.trim();
@@ -1347,7 +1353,7 @@ function AssetsPageContent() {
       cancelled = true;
       abort.abort();
     };
-  }, [user, assetView, scope, requestType, enhanceFilter, showUploadedAssets, sourceFilter, status, sort, groupBy, projectId, ownerUserId, keyword, page, pageCapacity, pageScope, restoredPageScope, restoredFiltersOwner, reloadToken]);
+  }, [user, assetView, isReactionView, isEnhanceView, scope, requestType, enhanceFilter, showUploadedAssets, sourceFilter, status, sort, groupBy, projectId, ownerUserId, keyword, page, pageCapacity, pageScope, restoredPageScope, restoredFiltersOwner, reloadToken]);
 
   useEffect(() => {
     if (!user?.id || hasExplicitContent || isReactionView || loading || showingCachedAssets || activeItem
@@ -1461,6 +1467,7 @@ function AssetsPageContent() {
 
   const handleSelectView = (nextView: AssetView) => {
     if (!assetViewTabs.some(tab => tab.id === nextView && (!tab.adminOnly || isAdmin))) return;
+    setError(''); setMessage(''); setDelivery(null);
     setAssetView(nextView);
     rememberReactionView(nextView);
     const location = new URL(window.location.href);
@@ -2163,6 +2170,13 @@ function AssetsPageContent() {
         </div>
       </section>
 
+      {(message || error) && <OperationReceipt className={`asset-library-notice ${assetStyles.topNotice} ${error ? 'error' : 'success'}`} status={error || message}
+        actions={<>
+          {!error && delivery && delivery.owner === user?.id && delivery.message === message &&
+            <Link href={delivery.href}>{delivery.label}</Link>}
+          <button type="button" onClick={() => { setError(''); setMessage(''); setDelivery(null); }} aria-label="关闭提示"><X size={14} /></button>
+        </>} />}
+
       <ContentLookup />
       {isReactionView && <ContentCollections key={assetView} action={explicitView === 'likes' ? 'like' : 'favorite'} mediaClassName={assetStyles.collectionMedia} preferPreviewImageThumbnails restorePreviewOnMount={false} />}
       {!isReactionView && <>
@@ -2203,13 +2217,6 @@ function AssetsPageContent() {
           </AssetToolbarPanel>
         </div>
       </section>
-
-      {(message || error) && <OperationReceipt className={`asset-library-notice ${assetStyles.topNotice} ${error ? 'error' : 'success'}`} status={error || message}
-        actions={<>
-          {!error && delivery && delivery.owner === user?.id && delivery.message === message &&
-            <Link href={delivery.href}>{delivery.label}</Link>}
-          <button type="button" onClick={() => { setError(''); setMessage(''); setDelivery(null); }} aria-label="关闭提示"><X size={14} /></button>
-        </>} />}
 
       {showUploadedAssets && assetUploadReceipt && assetUploadReceipt.ownerId === user?.id && assetUploadReceipt.assets.length > 0 && <UploadSimilarityReview
         key={`${assetUploadReceipt.ownerId}:${assetUploadReceipt.assets[0].upload?.requestId || assetUploadReceipt.assets[0].id}`}
