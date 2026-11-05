@@ -34,3 +34,11 @@
 入口：[个人账本](https://sd2.youdooart.com/usage)、[管理费用](https://sd2.youdooart.com/admin/usage-costs)。正式根私有回执：`docs/materials/2026-11-05-ledger-rate-accounting/release/attempt02/`；服务器原证：`/data/video-api-debugger/release-staging/ledger-rate-accounting-20261105/attempt02/`，以 `public-deployed.json` 和 `source-pair-contract.json` 为入口。发布窗口已交还后续资产顶部批次；文档提交不冒运行源。
 
 本轮新发现的线索与问题：未新增范围外问题；原COST-LABEL历史线索保留，未顺手改账。发布前发现并修正新增CSV费用列的负数文本化，补入第23项检查，没有生产影响。
+
+## 费用缺口追加（2026-11-05）
+
+用户要求继续查清并补齐。19:15:56Z只读快照4195条叶子记录，451条无金额：97张成功图片已有当时保存的美元参考价、3条成功H3原响应明确free_local零API费，本批接入只读核算，新增参考金额¥43.372；不是实扣入账或补扣点。当前确认人民币价仍优先，负价/缺字段、原现金与冲突保护保持。31项隔离金额检查及完整TypeScript已通过，源码 `f306d0d2d` 已推送；等待承接资产顶部批次后做最终候选发布，尚不冒已上线。
+
+仍缺依据的351条分开处理：30张成功图片（27张Sunburst auto、2张Flare auto、1张旧通道Sunburst max），需原账单/可确认历史参考价；3条成功文字调用已存token但缺该通道输入/输出单价；4条历史Agent文字步骤未存token/原实扣，只能凭原账单恢复；242条失败/取消及72条执行或费用未知，沿原请求核对，不能按成功费率收费或因超时填0。30张图片不擅自将auto归到medium/max，不给Flare/旧Banana套新型号价格，不拿旧点数倒推金额。
+
+私有逐条清单：正式根 `docs/materials/2026-11-05-ledger-rate-accounting/release/followup-gap-audit/sd2-cost-gap-plan-20261105.csv`，汇总同名JSON；它是补算前快照和方案，不冒部署后当前金额。另发现旧failed_no_charge由未获任务号推定，缺少上游免单凭据；已登记D-20261105-NOCHARGE，不据此补0，也不修改旧原账。
