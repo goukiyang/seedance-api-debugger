@@ -23,13 +23,15 @@ export function usageCsvCell(value: CsvValue): string {
 
 const summaryColumns = ['usage_count', 'output_count', 'flow_count', 'active_member_count', 'project_count', 'confirmed_cost_original_micros_json',
   'confirmed_cost_cny_micros', 'confirmed_cost_cny_display', 'charged_points', 'current_reserved_points', 'released_reserve_points', 'actual_refunded_points',
-  'pending_cost_count', 'conflict_count', 'unknown_cost_count', 'unassigned_count', 'failed_count', 'result_not_ready_count'];
+  'pending_cost_count', 'conflict_count', 'unknown_cost_count', 'unassigned_count', 'failed_count', 'result_not_ready_count',
+  'calculated_cost_cny_micros', 'accounted_cost_cny_micros', 'calculated_count'];
 
 function summaryCells(value: UsageSummary): CsvValue[] {
   return [value.usageCount, value.outputCount, value.flowCount, value.activeMemberCount, value.projectCount,
     JSON.stringify(value.confirmedCost), numeric(value.confirmedCostCnyMicros), numeric(usageCnyDisplay(value.confirmedCostCnyMicros)), numeric(value.chargedPoints), numeric(value.reservedPoints),
     numeric(value.releasedPoints), numeric(value.refundedPoints), value.pendingCount, value.conflictCount, value.unknownCostCount,
-    value.unassignedCount, value.failedCount, value.resultNotReadyCount];
+    value.unassignedCount, value.failedCount, value.resultNotReadyCount,
+    numeric(value.calculatedCostCnyMicros), numeric(value.accountedCostCnyMicros), value.calculatedCount || 0];
 }
 
 function recordCells(fact: UsageFact): CsvValue[] {
@@ -38,7 +40,8 @@ function recordCells(fact: UsageFact): CsvValue[] {
     fact.currentOwnerUserId, fact.currentProjectId, fact.attribution, fact.attributionDetail, fact.model, fact.provider,
     fact.resolution, fact.status, fact.retentionStatus, fact.outputCount, fact.resultReady, fact.costStatus,
     JSON.stringify(fact.confirmedCost), numeric(fact.confirmedCostCnyMicros), numeric(usageCnyDisplay(fact.confirmedCostCnyMicros)), numeric(fact.chargedPoints), numeric(fact.reservedPoints),
-    numeric(fact.releasedPoints), numeric(fact.refundedPoints), JSON.stringify(fact.ledgerIds), fact.href];
+    numeric(fact.releasedPoints), numeric(fact.refundedPoints), JSON.stringify(fact.ledgerIds), fact.href,
+    numeric(fact.accountingCost?.amountCnyMicros), JSON.stringify(fact.accountingCost || null)];
 }
 
 async function* csvRows(snapshot: UsageAnalyticsSnapshot, type: 'summary' | 'records'): AsyncGenerator<CsvRow> {
@@ -58,6 +61,7 @@ async function* csvRows(snapshot: UsageAnalyticsSnapshot, type: 'summary' | 'rec
   yield ['metadata', 'exchange_rate_source', report.exchangeRate.source];
   yield ['metadata', 'cash_precision', 'Integer micros; minor compatibility multiplied by 10000; original currencies never mixed. CNY conversion is display only.'];
   yield ['metadata', 'cash_semantics', 'Confirmed official cash events only; confirmed refunds/reversals negative. Unproven duplicate groups excluded, original rows retained. Partial known amounts do not mean unknown costs are zero.'];
+  yield ['metadata', 'accounting_semantics', 'Accounted total = original confirmed cash plus non-overlapping calculated leaf costs. Video asset amount/rate, then frozen CNY rate, then currently approved pricing policy; calculated costs are not supplier bills. Current-rate historical calculations can change with current policy; frozen rate revisions and original ledgers remain unchanged.'];
   yield ['metadata', 'point_semantics', 'Original point debits, current reserve, reservation release and actual spend refunds are separate. Parent/child mirrors are not added. Empty is unknown, not zero.'];
   yield ['metadata', 'released_reserve_semantics', 'Reservation release ends frozen liability, including expiry closure; it is not a promise that expired points returned to usable balance, nor an actual spend refund.'];
   yield ['metadata', 'cohort_semantics', 'First source occurrence; later known bills linked to that same cohort as of this snapshot. Unlinked bills use their own bill occurrence time and remain separate.'];
@@ -74,7 +78,8 @@ async function* csvRows(snapshot: UsageAnalyticsSnapshot, type: 'summary' | 'rec
       'consumption_owner_id', 'consumption_owner', 'actor_id', 'billing_subject', 'original_project_id', 'original_project',
       'current_owner_id', 'current_project_id', 'attribution_basis', 'attribution_detail', 'model', 'provider', 'resolution',
       'execution_status', 'retention_status', 'output_count', 'result_ready', 'cost_status', 'confirmed_cost_original_micros_json',
-      'confirmed_cost_cny_micros', 'confirmed_cost_cny_display', 'charged_points', 'current_reserved_points', 'released_reserve_points', 'actual_refunded_points', 'ledger_ids_json', 'original_entry'];
+      'confirmed_cost_cny_micros', 'confirmed_cost_cny_display', 'charged_points', 'current_reserved_points', 'released_reserve_points', 'actual_refunded_points', 'ledger_ids_json', 'original_entry',
+      'calculated_cost_cny_micros', 'accounting_basis_json'];
     for await (const fact of Array.isArray(snapshot.records) ? snapshot.records : snapshot.records.values()) yield ['record', ...recordCells(fact)];
   }
   yield ['coverage', 'source', 'label', 'status', 'matched_records', 'frozen', 'legacy', 'detail'];

@@ -19,10 +19,15 @@ export class PublicUsageSummaryFold {
   private confirmed = false;
   private charges = new Map<string, bigint>();
   private refunds = new Map<string, bigint>();
+  private calculated = BigInt(0);
+  private calculatedCount = 0;
   private points = new Map<string, bigint>();
   add(fact: UsageFact, record: UsageRecordDTO, events: UsageCashEvent[]) {
     if (!fact.leaf) return;
     this.leaves++;
+    if (fact.costStatus === 'calculated' && fact.accountingCost) {
+      this.calculated += BigInt(fact.accountingCost.amountCnyMicros); this.calculatedCount++;
+    }
     for (const field of fields) this.counts.set(field, this.counts.get(field) === null || record[field] === null ? null : this.counts.get(field)! + record[field]!);
     this.pending += Number(['pending', 'unconnected'].includes(fact.costStatus));
     this.pendingCost ||= fact.costStatus === 'pending';
@@ -59,9 +64,12 @@ export class PublicUsageSummaryFold {
         reserved: amount('reservedPoints'), released: amount('releasedPoints') };
     };
     const side = (values: typeof chargeOriginal) => values.length ? usageCnyMicros(values) : this.confirmed && basis !== 'UNAVAILABLE' ? '0' : null;
+    const netCnyMicros = usageCnyMicros(netOriginal);
     return { taskCount: this.counts.get('taskCount')!, requestCount: this.leaves ? this.counts.get('requestCount')! : null,
       successfulCount: this.counts.get('successfulCount')!, outputCount: this.counts.get('outputCount')!, availableCount: this.counts.get('availableCount')!,
-      cash: { chargeOriginal, refundOriginal, netOriginal, chargeCnyMicros: side(chargeOriginal), refundCnyMicros: side(refundOriginal), netCnyMicros: usageCnyMicros(netOriginal), basis,
+      cash: { chargeOriginal, refundOriginal, netOriginal, chargeCnyMicros: side(chargeOriginal), refundCnyMicros: side(refundOriginal), netCnyMicros, basis,
+        calculatedCnyMicros: this.calculatedCount ? this.calculated.toString() : null, calculatedCount: this.calculatedCount,
+        accountedCnyMicros: netCnyMicros === null && !this.calculatedCount ? null : (BigInt(netCnyMicros || '0') + this.calculated).toString(),
         state: this.conflicts || this.selectedConflict ? 'conflict' : this.confirmed ? this.unknown || this.selectedUnknown || basis === 'UNAVAILABLE' ? 'partial' : 'confirmed'
           : this.pendingCost ? 'pending' : 'unavailable' },
       points: { ...part('all'), personal: part('personal'), project: part('project'), unclassified: part('unclassified') },

@@ -66,7 +66,7 @@ function safeCoverage(source: UsageFactSnapshot, scope: PublicUsageScope): Usage
 
 function compareRecords(a: UsageRecordDTO, b: UsageRecordDTO, sort: UsagePublicQuery['sort']) {
   if (sort === 'cost') {
-    const aa = usageInteger(a.cash.netCnyMicros), bb = usageInteger(b.cash.netCnyMicros);
+    const aa = usageInteger(a.cash.accountedCnyMicros ?? a.cash.netCnyMicros), bb = usageInteger(b.cash.accountedCnyMicros ?? b.cash.netCnyMicros);
     if (aa === null && bb !== null) return 1;
     if (aa !== null && bb === null) return -1;
     if (aa !== null && bb !== null && aa !== bb) return aa > bb ? -1 : 1;

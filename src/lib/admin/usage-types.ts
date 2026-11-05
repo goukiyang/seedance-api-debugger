@@ -2,7 +2,7 @@ export type UsageSourceKind = 'video_task' | 'image_task' | 'video_studio_run' |
 export type UsageKind = 'video' | 'image' | 'text' | 'flow' | 'cutout';
 export type UsageRange = 'month' | 'quarter' | 'half' | 'year' | 'recent6m' | 'all' | 'custom' | '7d' | '30d';
 export type UsageAttributionBasis = 'frozen' | 'legacy_current' | 'legacy_snapshot' | 'unassigned' | 'conflict';
-export type UsageCostStatus = 'confirmed' | 'pending' | 'conflict' | 'unconnected';
+export type UsageCostStatus = 'confirmed' | 'calculated' | 'pending' | 'conflict' | 'unconnected';
 
 export interface UsageQuery {
   range: UsageRange;
@@ -75,6 +75,7 @@ export interface UsageFact {
   costStatus: UsageCostStatus;
   confirmedCost: UsageMoney[];
   confirmedCostCnyMicros: string | null;
+  accountingCost?: import('@/lib/usage/accounting').AccountingCost;
   chargedPoints: string | null;
   reservedPoints: string | null;
   releasedPoints: string | null;
@@ -84,6 +85,9 @@ export interface UsageFact {
 }
 
 export interface UsageSummary {
+  calculatedCostCnyMicros?: string | null;
+  accountedCostCnyMicros?: string | null;
+  calculatedCount?: number;
   usageCount: number;
   outputCount: number;
   flowCount: number;

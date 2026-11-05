@@ -11,6 +11,8 @@ export class UsageSummaryFold {
   private members = new Set<string>();
   private projects = new Set<string>();
   private money = new Map<string, bigint>();
+  private calculated = BigInt(0);
+  private calculatedCount = 0;
   private points = new Map<typeof pointFields[number], bigint>();
   add(fact: UsageFact) {
     if (fact.ownerUserId) this.members.add(fact.ownerUserId);
@@ -20,7 +22,10 @@ export class UsageSummaryFold {
     if (!fact.leaf) { this.counts.flowCount++; return; }
     this.counts.usageCount++; this.counts.outputCount += fact.outputCount;
     if (fact.costStatus === 'pending') this.counts.pendingCount++;
-    if (fact.costStatus !== 'confirmed') this.counts.unknownCostCount++;
+    if (!['confirmed', 'calculated'].includes(fact.costStatus)) this.counts.unknownCostCount++;
+    if (fact.costStatus === 'calculated' && fact.accountingCost) {
+      this.calculated += BigInt(fact.accountingCost.amountCnyMicros); this.calculatedCount++;
+    }
     if (failed.has(fact.status)) this.counts.failedCount++;
     if (fact.resultReady === false) this.counts.resultNotReadyCount++;
     for (const amount of fact.confirmedCost) {
@@ -36,9 +41,12 @@ export class UsageSummaryFold {
   }
   value(): UsageSummary {
     const confirmedCost = usageMoneyTotals(Array.from(this.money, ([currency, amount]) => ({ currency, amountMicros: amount.toString() })));
+    const confirmedCny = this.counts.usageCount ? usageCnyMicros(confirmedCost) : '0';
     const points = Object.fromEntries(pointFields.map(field => [field, this.points.has(field) ? usageUnitsText(this.points.get(field)!) : this.counts.usageCount ? null : '0'])) as Pick<UsageSummary, typeof pointFields[number]>;
     return { ...this.counts, ...points, confirmedCost,
-      confirmedCostCnyMicros: this.counts.usageCount ? usageCnyMicros(confirmedCost) : '0',
+      confirmedCostCnyMicros: confirmedCny, calculatedCount: this.calculatedCount,
+      calculatedCostCnyMicros: this.calculatedCount ? this.calculated.toString() : null,
+      accountedCostCnyMicros: confirmedCny === null && !this.calculatedCount ? null : (BigInt(confirmedCny || '0') + this.calculated).toString(),
       activeMemberCount: this.members.size, projectCount: this.projects.size };
   }
 }

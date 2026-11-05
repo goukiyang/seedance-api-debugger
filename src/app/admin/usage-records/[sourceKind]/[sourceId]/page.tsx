@@ -57,6 +57,7 @@ export default async function UsageRecordPage({ params, searchParams }: {
       <div><dt>模型 / 供应商 / 规格</dt><dd>{record.model || '未记录'} / {record.provider || '未记录'} / {record.resolution || '未记录'}</dd></div>
       <div><dt>执行 / 结果文件</dt><dd>{STATUS_LABELS[record.status] || record.status} / {record.resultReady === null ? '文件状态未接入' : record.resultReady ? '文件已登记' : '文件未就绪'}</dd></div>
       <div><dt>供应商成本</dt><dd>{COST_LABELS[record.costStatus]} · {originalMoney(record.confirmedCost)}{record.confirmedCostCnyMicros !== null ? `（展示折算 ${money(record.confirmedCostCnyMicros)}）` : ''}</dd></div>
+      {record.accountingCost && <div><dt>核算费用</dt><dd>{money(record.accountingCost.amountCnyMicros)} · {record.accountingCost.detail}</dd></div>}
       <div><dt>点数</dt><dd>已实扣 {points(record.chargedPoints)} · 仍预留 {points(record.reservedPoints)} · 已释放预留 {points(record.releasedPoints)} · 已退还实扣 {points(record.refundedPoints)}</dd></div>
       <div><dt>原账务凭据</dt><dd>{record.ledgerIds.length ? record.ledgerIds.map(id => {
         const href = usageCashLedgerHref(id);
