@@ -88,6 +88,8 @@ export function calculateRateCost(fact: UsageFact, row: AccountingRow, basis: Ba
   const historicalChannel = typeof row.channel_id === 'string' ? row.channel_id : null;
   const channel = image ? historicalChannel || basis.qualityRoutes[model]?.[quality] : String(row.provider);
   const kind = image ? 'image' : row.provider === 'volcengine_mediakit' ? 'enhance' : 'video';
+  if (kind === 'enhance' && (!Number.isFinite(Number(row.fps)) || Number(row.fps) <= 0
+    || !['standard', 'professional'].includes(String(row.tool_version)))) return null;
   const specifications: Record<string, string> = image ? { quality, resolution: String(row.output_size || '') } : {
     resolution: String(row.resolution || ''), referenceVideo: row.reference_video_urls ? 'present' : 'none', pricingPurpose: 'standard',
     toolVersion: String(row.tool_version || ''), fpsTier: Number(row.fps) > 60 ? 'gt60' : Number(row.fps) > 30 ? 'gt30' : 'lte30',

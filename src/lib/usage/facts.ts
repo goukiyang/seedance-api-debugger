@@ -293,7 +293,9 @@ export async function readUsageFacts(source: UsageDbSource, dataAsOf: string, op
     "provider_final_amount_minor", "provider_official_amount_minor",
     CASE WHEN "source_draft_task_id" IS NOT NULL OR "draft_upgrade_mode" = 'draft_upgrade' THEN 1 ELSE 0 END AS "is_upgrade",
     json_extract(CASE WHEN json_valid("pricing_snapshot") THEN "pricing_snapshot" ELSE '{}' END, '$.toolVersion') AS "tool_version",
-    json_extract(CASE WHEN json_valid("pricing_snapshot") THEN "pricing_snapshot" ELSE '{}' END, '$.fps') AS "fps",
+    COALESCE(json_extract(CASE WHEN json_valid("pricing_snapshot") THEN "pricing_snapshot" ELSE '{}' END, '$.fps'),
+      json_extract(CASE WHEN json_valid("raw_status_response") THEN "raw_status_response" ELSE '{}' END, '$.result.fps'),
+      json_extract(CASE WHEN json_valid("raw_status_response") THEN "raw_status_response" ELSE '{}' END, '$.data.result.fps')) AS "fps",
     CASE WHEN json_valid("reference_video_urls") THEN CASE WHEN json_array_length("reference_video_urls") > 0 THEN '["reference"]' ELSE NULL END
       WHEN "reference_video_urls" IS NULL OR trim("reference_video_urls") = '' THEN NULL ELSE 'invalid' END AS "reference_video_urls",
     json_object('completion_tokens', json_extract(CASE WHEN json_valid("provider_usage_snapshot") THEN "provider_usage_snapshot" ELSE '{}' END, '$.completion_tokens')) AS "provider_usage_snapshot",

@@ -89,6 +89,13 @@ c.close()
       await attachAccountingCosts(db, [{ fact: conflicted, raw: {} }]); assert.equal(conflicted.accountingCost, undefined);
       const ambiguous = { revision: 'conflict', qualityRoutes: {}, rules: [rules[0], { ...rules[0], id: 'duplicate', baseCny: '0.09' }] };
       assert.equal(calculateRateCost(byId.get('image-current')!, { channel_id: 'channel' }, ambiguous as Parameters<typeof calculateRateCost>[2]), null);
+      const enhanceFact = { ...byId.get('video-rate')!, model: 'enhance-video' };
+      const enhanceBasis = { revision: 'enhance', qualityRoutes: {}, rules: [{ id: 'enhance', mode: 'custom', baseCny: '0.04',
+        identity: { kind: 'enhance', channelId: 'volcengine_mediakit', modelId: 'enhance-video', billingMode: 'fixed', unit: 'second',
+          specifications: { resolution: '720p', toolVersion: 'standard', fpsTier: 'lte30' } } }] } as Parameters<typeof calculateRateCost>[2];
+      const enhanceRow = { provider: 'volcengine_mediakit', duration: 5, resolution: '720p', tool_version: 'standard', fps: null };
+      assert.equal(calculateRateCost(enhanceFact, enhanceRow, enhanceBasis), null);
+      assert.equal(calculateRateCost(enhanceFact, { ...enhanceRow, fps: 24 }, enhanceBasis)?.amountCnyMicros, '200000');
       const expected = summarizeUsageFacts(snapshot.facts), fold = new UsageSummaryFold();
       for (const fact of snapshot.facts) fold.add(fact);
       assert.deepEqual(fold.value(), expected);
@@ -106,7 +113,7 @@ c.close()
       const raw = await db.$queryRaw<Array<{ count: number }>>`SELECT count(*) AS count FROM CostLedger`;
       assert.equal(Number(raw[0].count), 1);
       assert.ok(snapshot.sourceFingerprintParts.some(part => part.includes('frozen-old')));
-      return { checks: 20, calculatedCount: expected.calculatedCount, accountedCnyMicros: expected.accountedCostCnyMicros, actualCnyMicros: cash.netCnyMicros };
+      return { checks: 22, calculatedCount: expected.calculatedCount, accountedCnyMicros: expected.accountedCostCnyMicros, actualCnyMicros: cash.netCnyMicros };
     }, { dataAsOf: '2026-11-05T12:00:00Z' });
     process.stdout.write(`${JSON.stringify({ ok: true, offlineFixture: true, ...result })}\n`);
   } finally {
