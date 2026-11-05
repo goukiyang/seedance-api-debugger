@@ -17,6 +17,7 @@ import { multiplyDecimal, roundDecimal } from '@/lib/pricing/math';
 import PricingSourceEditor from './PricingSourceEditor';
 import PricingHistory from './PricingHistory';
 import styles from './pricing.module.css';
+import PricingPageNav from '@/components/pricing/PricingPageNav';
 
 const endpoint = '/api/admin/pricing';
 const moneySource = '费率页录入';
@@ -391,6 +392,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
     const affected = Array.from(new Set([...hiddenChanges, ...derivedChanges]));
     return <>{!identityVerified && <div className={styles.identityCheck} role="status">{readError || '正在核对当前账号'}{readError && <button type="button" className="btn btn-secondary" onClick={() => void load()}>重新读取</button>}</div>}
       <main className={styles.page} style={{ visibility: identityVerified ? undefined : 'hidden' }} aria-hidden={!identityVerified}>
+        <PricingPageNav active="settings" isAdmin />
         <header className={styles.header}><h1>点数与费率</h1>{globalRate && <span className={styles.muted}>统一换算：1 元 = {globalRate} 点</span>}</header>
         {(readError || message || storageFailed || conflict || pending || operationStorageFailed || complexDraft || pendingRows.length > 0) &&
           <div className={styles.notice} role="status">
@@ -461,6 +463,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
   }
   const editEnhance = (next: PricingEnhanceGroup) => updateChanges(changes => ({ ...changes, authoring: { ...changes.authoring, enhanceGroup: next } }));
   return <>{!identityVerified && <div className={styles.identityCheck} role="status">{readError || '正在核对当前账号'}{readError && <button type="button" className="btn btn-secondary" onClick={() => void load()}>重新读取</button>}</div>}<main className={styles.page} style={{ visibility: identityVerified ? undefined : 'hidden' }} aria-hidden={!identityVerified}>
+    <PricingPageNav active="settings" isAdmin />
     <header className={styles.header}><h1>点数与费率</h1><div className={styles.tools}>
       <button type="button" onClick={() => { setRestore(null); setRecoveringDraft(false); }}>返回单价表</button>
       <button type="button" onClick={exportCsv}><Download size={17} />导出费率</button>

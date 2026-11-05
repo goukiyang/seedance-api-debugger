@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '工作区侧栏滚动统一', outline: [
-  '桌面侧栏保持常驻，超长目录可独立滚动',
-  '侧栏高度随窗口和顶部导航调整',
-  '首页、作品广场和模板等工作区沿用同一滚动规则',
+const notice = { title: '费率说明', outline: [
+  '统一查看换算比例、基础费率和扣点规则',
+  '费率说明自动读取已保存价格',
+  '管理员编辑入口和原有计费保持不变',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

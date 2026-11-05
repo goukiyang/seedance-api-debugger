@@ -1,7 +1,10 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { PricingMenuSources } from './image-menu-inputs';
 import { prisma } from '@/lib/prisma';
-import { AuthError } from '@/lib/auth/session';
+import { AuthError, type SessionUser } from '@/lib/auth/session';
+import { assertInternalOnly } from '@/lib/access/feature-guard';
+import { canUseCompanyTemplates } from '@/lib/image-studio/access';
+import { projectPricingGuide } from './guide';
 import { PricingItemUnavailableError } from './item-unavailable';
 import { isSeedanceVideoDuration } from '@/lib/provider/seedance-models';
 import { assertPricingImageConsumerReady, pricingImageConsumerState } from './runtime';
@@ -364,6 +367,15 @@ async function snapshot(actor: PricingAdminActor, state: State, client: PricingC
 export async function getAdminPricingSnapshot(actor: Actor, client: PricingClient = prisma): Promise<PricingAdminSnapshot> {
   if (client === prisma) return prisma.$transaction(tx => getAdminPricingSnapshot(actor, tx), { maxWait: 10000, timeout: 30000 });
   const admin = await freshActor(actor, client); return snapshot(admin, await readState(client), client);
+}
+export async function getPricingGuideSnapshot(user: SessionUser, client: PricingClient = prisma) {
+  if (user.status !== 'active') throw new AuthError('账号当前不可访问', 401);
+  if (user.account_type !== 'internal') throw new AuthError('费率说明仅供内部账号查看', 403);
+  assertInternalOnly(user, '费率说明仅供内部账号查看');
+  // Reuse the captured menu so public reads do not hold a long SQLite transaction.
+  const menu = client === prisma ? await (await import('./image')).capturePricingImageMenu() : undefined;
+  const state = await readState(client, menu);
+  return projectPricingGuide(state.rows, state.authoring.globalPointsPerCny, state.policy.updatedAt, canUseCompanyTemplates(user));
 }
 function view(value: PricingAdminRow): PricingAdminPriceView {
   const { mode, baseCny, basisKind, currentPointsPerCny, currentUnitCredits, relativeMultiplier, differencePercent,

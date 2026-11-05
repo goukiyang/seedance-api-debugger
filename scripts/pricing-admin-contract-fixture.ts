@@ -5,7 +5,9 @@ import path from 'node:path';
 import { createHmac, randomUUID } from 'node:crypto';
 import { PrismaClient, type Prisma } from '@prisma/client';
 import { getAdminPricingSnapshot, previewAdminPricing, saveAdminPricing, getAdminPricingOperation,
-  getAdminPricingHistory, exportAdminPricingCsv, resolvePricingCharge } from '@/lib/pricing/policy';
+  getAdminPricingHistory, exportAdminPricingCsv, resolvePricingCharge, getPricingGuideSnapshot } from '@/lib/pricing/policy';
+import type { SessionUser } from '@/lib/auth/session';
+import { projectPricingGuide, pricingGuideMoney } from '@/lib/pricing/guide';
 import { getPricingCatalog, pricingCanonical } from '@/lib/pricing/catalog';
 import { PRICING_POLICY_KEY, PRICING_OPERATION_PREFIX, PRICING_REVISION_PREFIX, type PricingAdminAction,
   type PricingAdminSnapshot, type PricingAdminPreviewInput, type PricingAdminSaveInput } from '@/lib/pricing/admin-contract';
@@ -63,6 +65,22 @@ async function run() {
       assert.equal(snapshot.revision, 'unconfigured');
       assert.deepEqual(snapshot.standards, { site_base_cny: null, supplier_cost_cny: null });
       assert.equal(snapshot.rows.filter(row => row.identity.kind === 'enhance').length, 30);
+      const ordinary: SessionUser = { id: randomUUID(), name: 'Internal reader', username: 'reader', email: 'reader@fixture.invalid',
+        role: 'user', account_type: 'internal', user_profile: 'other', feature_profile_id: 'internal_email_authorized', status: 'active', expires_at: null };
+      const settingsBeforeGuide = await tx.platformSetting.findMany({ orderBy: { key: 'asc' } });
+      const guide = await getPricingGuideSnapshot(ordinary, tx);
+      assert.ok(guide.items.some(item => item.specification.includes('IP生成')));
+      assert.equal(guide.pointsPerCny, null, 'An unconfigured conversion must not invent 100');
+      assert.ok(guide.items.every(item => item.credits === null || item.free));
+      const forbiddenGuideFields = ['billingPrincipalId', 'credentialVersion', 'configFingerprint', 'binding', 'confirmedBy', 'sourceKind', 'fixture-key-not-valid', 'fixture.invalid/api'];
+      for (const field of forbiddenGuideFields) assert.equal(JSON.stringify(guide).includes(field), false, field);
+      assert.deepEqual(await tx.platformSetting.findMany({ orderBy: { key: 'asc' } }), settingsBeforeGuide, 'Ordinary guide reads do not seed or write settings');
+      await assert.rejects(() => getPricingGuideSnapshot({ ...ordinary, status: 'disabled' }, tx), { status: 401 });
+      await assert.rejects(() => getPricingGuideSnapshot({ ...ordinary, account_type: 'external' }, tx), { status: 403 });
+      await assert.rejects(() => getPricingGuideSnapshot({ ...ordinary, feature_profile_id: null }, tx), { status: 403 });
+      assert.equal(pricingGuideMoney('0.0125'), '¥0.0125');
+      assert.equal(pricingGuideMoney('0.48251143'), '约 ¥0.4825');
+      assert.equal(pricingGuideMoney('0.000001'), '¥0.000001', 'Display never turns a positive fee into free');
       assert.ok(snapshot.rows.filter(row => row.identity.kind === 'h3').every(row => row.currentUnitCredits === '0' && row.mode === 'free'));
       const rowA = snapshot.rows.find(row => row.identity.channelId === 'volcengine_ark' && row.isDefault)!;
       const rowB = snapshot.rows.find(row => row.identity.channelId === 'volcengine_ark' && row.id !== rowA.id)!;
@@ -82,6 +100,20 @@ async function run() {
       const adoptedRevision = snapshot.revision;
       assert.equal(snapshot.rows.find(row => row.id === rowA.id)!.currentUnitCredits, '0.2');
       assert.equal(snapshot.rows.find(row => row.id === rowB.id)!.currentUnitCredits, '1');
+      const adoptedGuide = await getPricingGuideSnapshot(ordinary, tx);
+      assert.equal(adoptedGuide.items.find(item => item.id === rowA.id)!.credits, '0.8', 'Guide reuses full five-second legacy precision, not rounded per-second points');
+      const guideRow = { ...snapshot.rows.find(row => row.id === rowA.id)!, baseCny: '0.025', currentPointsPerCny: '100', rounding: 'half_up_integer' as const };
+      assert.equal(projectPricingGuide([guideRow], '100', snapshot.updatedAt, true).items[0].credits, '13');
+      assert.equal(projectPricingGuide([{ ...guideRow, mode: 'free' }], '100', snapshot.updatedAt, true).items[0].credits, '0');
+      assert.equal(projectPricingGuide([{ ...guideRow, availability: 'needs_review' }], '100', snapshot.updatedAt, true).items.length, 0);
+      const imageGuideRow = { ...guideRow, identity: { ...guideRow.identity, kind: 'image' as const, unit: 'image' as const }, isDefault: true, baseCny: '0.05' };
+      assert.equal(projectPricingGuide([imageGuideRow], '100', snapshot.updatedAt, true).items[0].credits, '5');
+      assert.equal(projectPricingGuide([imageGuideRow], '100', snapshot.updatedAt, false).items.length, 0);
+      assert.equal(projectPricingGuide([{ ...imageGuideRow, isDefault: false }], '100', snapshot.updatedAt, true).items.length, 0);
+      assert.equal(projectPricingGuide([{ ...guideRow, mode: 'legacy_fixed' }], '100', snapshot.updatedAt, true).items[0].baseCny, null);
+      assert.equal(projectPricingGuide([{ ...guideRow, identity: { ...guideRow.identity,
+        specifications: { ...guideRow.identity.specifications, referenceVideo: 'present' } } }], '100', snapshot.updatedAt, true).items.length, 0);
+      evidence.push('Read-only guide: ordinary internal access, no configuration writes or private metadata, real adoption readback, full-task rounding and explicit free/unknown separation');
       const simulation = await previewAdminPricing(actorA, { ...input(snapshot, { kind: 'save', changes: { rows: [] } }),
         simulation: { rowId: rowA.id, quantity: '5' } }, tx);
       assert.equal(simulation.simulation!.adjustedCredits, '0.8');
