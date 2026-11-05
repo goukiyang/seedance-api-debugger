@@ -1,9 +1,16 @@
 <!-- PLUGIN-COVER01-20261105 -->
-## PLUGIN-COVER01 插件下载页与模板封面共享（2026-11-05）
+## PLUGIN-COVER01 / CUT-OPEN01 插件下载、封面共享与成员抠图（2026-11-05）
 
-实施中，网站 v0.131.7 候选；已继承费率说明 0.131.6 首候选，等待同批最终源。工具菜单 Chrome 插件入口、签名发布清单自动版本/平台下载、名称旁复用共享开关及默认编号共享修复；原请求/CAS/权限保留，未发布须显式保存才生效，不新增表。26 项离线/隔离工程检查已通过，最终构建/部署未完成，功能待用户手验。原工单抠图跨项目开放尚待范围明确，不冒联合完成。
+已部署，待用户手动验收。主源6bc35e893b01a893f780eadd358ba8f32deb4dc2，v0.132.0，BUILD IypmpFaIXw0yioR3NJuhS，2026-11-05T13:13:58Z公网收口；继承71a2/v0.131.6费用说明与使用统计。新guard d2d8f22405e5f0f93d0d4184a6baffd8aac64380/v0.132.0+cutout-reader-guard.1，BUILD clzBn6edeiJmirGZEgieU，保25独立绑定、关闭普通成员抠图入口。
 
-正式工单：[实施追加](todo/2026-11-05-template-sharing-cutout-open-preflight.md#10-本次实施追加插件下载页与模板封面共享开关2026-11-05plugin-cover01)。生产桥 MJ-SAFE01 仍待其 0.6.11 所有者交付基线后接续，未改该批应用输入。
+- 工具菜单Chrome插件入口 /tools/chrome-extension，复用签名五包清单自动版本/下载，安装说明折叠；封面与模板内部共用共享开关、原回执和CAS，默认编号模板可主动共享，未发布仍本人保存才生效。悬停/聚焦预留槽位、触屏常显；不新建表或回填历史。
+- /cutout导航、页面、代理与结果原图handoff统一内部权限，业务请求先核真实owner/scope/credential。25获准内部账号独立绑定，新增24个business key；原账号key/owner不变，私有密钥只在服务器，沿既有限额。原图导入不自动处理，未知只查原号。
+- 工程：8清单+6共享原号+12隔离SQLite复用，60代理及控制器/导航、本地类型/lint通过；主/guard各32项实际私有reader检查。上游7身份函数、2种HTTP模式、22原API复用，另1项A/B临时SQLite读/取消/下载隔离通过。双完整Linux原生/价格/Next/types/lint、6启动门、7同源服务/4timer、公网4资源SHA/4匿名401通过。两价格键全字段SHA194e8d3a2a9e009585ec005a488c9767c31b4fc1c6550abc378053f70eb259fe保持。
+- 上游7e28858/v0.5.0已部署，原身份/历史200且指纹一致；新identity拒绝guest/worker/admin。两次早期切换失败及自动程序恢复原证保留。SD2在writer排空/一致DB备份和6门通过后仅原子更新绑定行，保其余env及uid/gid/mode。恢复只回新reader，保上游附加接口、身份、DB/媒体/账务/原请求。
+- 原Mac计算端：既有0.3 App自然停止后按原身份重启；已证继承失效127.0.0.1:7898代理，同HTTPX对照ConnectError，进程限定NO_PROXY后health200。只给项目私有.env.worker追加原抠图域名/loopback直连，不改电脑代理、原URL/token/ID、模型或数据路径；真实心跳接续中。未上传用户图片或创建真实处理任务，无收费生成或浏览器验收。
+- 用户手验：入口/最新安装包、封面与内部共享同步/未发布状态/标题稳定/键盘触屏、本人和另一账号上传—显式开始—原号历史—原尺寸结果、原图handoff及保存导出。
+
+正式工单及私有发布原证见原单§11和docs/materials/2026-11-05-plugin-download-cover-sharing/release/attempt01。0.131.7/beecd仅中间构建未上线。生产桥MJ-SAFE01仍独立接续：38隔离检查通过，W4/W5、兼容/整合/提交打包未完成，不冒已发布。
 <!-- /PLUGIN-COVER01-20261105 -->
 
 # V1.2 剩余模块落地 Todo
