@@ -10,9 +10,9 @@ const pending = new Map<string, StudioPinMutation>();
 export function StudioResultPinnedIndicator() {
   return <span className={pinStyles.readonly} data-studio-pin-readonly role="img" aria-label="已置顶" title="同一模板的用户可查看和点赞；只有生成者可取消置顶"><Pin size={16} className={pinStyles.pinIcon} aria-hidden="true" /></span>;
 }
-export function StudioResultPinButton({ userId, moduleId, taskId, assetId, state, onSaved }: {
+export function StudioResultPinButton({ userId, moduleId, taskId, assetId, state, onSaved, onPublish }: {
   userId: string; moduleId: string; taskId: string; assetId: string; state: StudioPinState | null;
-  onSaved: () => void;
+  onSaved: () => void; onPublish?: () => void;
 }) {
   const identity = `${userId}:${moduleId}:${assetId}`;
   const current = useRef(identity); current.current = identity;
@@ -22,7 +22,8 @@ export function StudioResultPinButton({ userId, moduleId, taskId, assetId, state
   const uncertain = pending.has(identity);
   const active = Boolean(state?.assetIds.includes(assetId));
   const reason = state?.disabledReason || (!state ? '正在读取置顶状态' : '');
-  const label = uncertain ? '重试原置顶操作' : active ? '取消置顶' : '置顶给本模板用户';
+  const needsPublication = Boolean(onPublish && state && !state.presetId && !uncertain);
+  const label = needsPublication ? '保存并共享模板后置顶' : uncertain ? '重试原置顶操作' : active ? '取消置顶' : '置顶给本模板用户';
   async function save() {
     if (!state?.presetId || lock.current) return;
     lock.current = true; setBusy(true); setError('');
@@ -53,8 +54,8 @@ export function StudioResultPinButton({ userId, moduleId, taskId, assetId, state
     onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}
     onKeyDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}>
     <button type="button" className={pinStyles.button} data-studio-result-pin aria-pressed={active} aria-busy={busy}
-      title={reason || (active ? '取消本模板置顶；原公共分享保留' : '置顶后，同一模板的用户可查看和点赞这张结果图')}
-      aria-label={label} disabled={busy || Boolean(reason)} onClick={() => void save()}>
+      title={needsPublication ? '先保存并共享模板，再置顶给同事；点击打开模板设置' : reason || (active ? '取消本模板置顶；原公共分享保留' : '置顶后，同一模板的用户可查看和点赞这张结果图')}
+      aria-label={label} disabled={busy || Boolean(reason) && !needsPublication} onClick={() => { if (needsPublication) onPublish?.(); else void save(); }}>
       {busy ? <RefreshCw size={16} className={styles.busyIcon} aria-hidden="true" /> : <Pin size={16} className={pinStyles.pinIcon} aria-hidden="true" />}
     </button>
     {(error || uncertain && !busy) && <span className={`${styles.error} ${pinStyles.feedback}`} role="status">{error || '上次置顶尚未确认，请点置顶重试'}</span>}

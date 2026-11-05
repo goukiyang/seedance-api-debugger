@@ -2608,6 +2608,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       revisionRef.current = result.revision; setModuleRevision(result.revision);
       // The parent merges sharing metadata only; current unsaved inputs remain intact.
       setSaveStatus(result.sharingPreference?.enabled ? '已选择共享，保存模板后生效' : '已设为仅自己可见，内容保持不变');
+      if (result.sharingPreference?.enabled) openModuleDialog();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '共享选择保存未确认，请重试原操作');
     } finally { moduleSaveLock.current = false; setSharingPreferenceSaving(false); }
@@ -3985,6 +3986,14 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const resultBusy = likedResults.liked ? likedResults.loading : loadingTasks || templateWorkbench && taskReadAction !== 'idle';
   const resultCursor = likedResults.liked ? likedResults.nextCursor : nextCursor;
   const refreshResults = () => { if (likedResults.liked) likedResults.refresh(); else void loadTasks(); };
+  const refreshPinAccess = useRef(refreshResults); refreshPinAccess.current = refreshResults;
+  const previousPinSharing = useRef({ scope: taskReadScope, presetId: module.sourcePresetId, shared: module.sourcePresetShared });
+  useEffect(() => {
+    const previous = previousPinSharing.current;
+    previousPinSharing.current = { scope: taskReadScope, presetId: module.sourcePresetId, shared: module.sourcePresetShared };
+    if (previous.scope === taskReadScope
+      && (previous.presetId !== module.sourcePresetId || previous.shared !== module.sourcePresetShared)) refreshPinAccess.current();
+  }, [taskReadScope, module.sourcePresetId, module.sourcePresetShared]);
   const previewableTasks = resultTasks.filter(task => studioTaskHasViewableImage(task) && Boolean(task.asset.id));
   const readNextResultPage = useCallback(async () => {
     if (likedResults.liked) await likedResults.more();
@@ -4226,7 +4235,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     {sharingPending && <button type="button" disabled={Boolean(sharingId)} onClick={() => void onQuerySharing()}>查询共享结果</button>}
   </>;
   const templateSharingAttributes = templateWorkbench && (canManageTemplateSharing || sharingPending)
-    ? <div className={styles.counts} aria-label="模板属性"><span>共享给同事</span>{sharingControls}</div> : undefined;
+    ? <div className={styles.counts} aria-label="模板属性"><span>{unpublishedSharing ? '待发布 · 保存后共享' : '共享给同事'}</span>{sharingControls}</div> : undefined;
   function activateDraft() {
     onActivate();
     if (draftRestoring || !draftLoaded) beginCurrentInput();
@@ -4474,7 +4483,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           }}
           onQuickUse={item => { if (item.task) void replaceMainFromResult(item.task.id); }}
           renderReactionAction={templateWorkbench ? item => item.task?.asset?.id
-            ? <StudioResultPinButton userId={userId} moduleId={module.id} taskId={item.task.id} assetId={item.task.asset.id} state={visibleFeed?.pinState || null} onSaved={refreshResults} />
+            ? <StudioResultPinButton userId={userId} moduleId={module.id} taskId={item.task.id} assetId={item.task.asset.id} state={visibleFeed?.pinState || null} onSaved={refreshResults}
+              onPublish={unpublishedSharing && module.canChooseSharing ? () => openModuleDialog() : undefined} />
             : item.sharedPin ? <StudioResultPinnedIndicator /> : null : undefined}
           paginationSlot={templateWorkbench ? resultPaginationSlot : undefined}
           navigationIntent={completionNavigation}
