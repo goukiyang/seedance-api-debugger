@@ -431,9 +431,9 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
     setStorageWarning(cleared ? '' : '筛选已重置，但浏览器未允许清除全部保存记录。');
   }
   if (!preferencesReady) return <p role="status">正在读取…</p>;
-  return <section aria-label="我的喜欢">
+  return <section aria-label={category === 'template' ? '我的收藏' : '我的喜欢'}>
     {category === 'template' && <div className={styles.toolbar}><label>对象<select aria-label="模板对象" value={templateKind} onChange={event => setTemplateKind(event.target.value)}><option value="">全部</option><option value="definition">模板</option><option value="workpage">我的工作页</option></select></label><label>用途<select aria-label="模板用途" value={templateMedium} onChange={event => setTemplateMedium(event.target.value)}><option value="">全部</option><option value="image">图片</option><option value="video">视频</option></select></label></div>}
-    <div className={styles.toolbar}><div className={styles.tabs}>{categories.map(([id, label]) => <button key={id} type="button" aria-pressed={category === id} onClick={() => setCategory(id)}>{label} {counts[id]}</button>)}</div><input type="search" aria-label="搜索喜欢的内容" placeholder="搜索内容" maxLength={160} value={query} onChange={event => setQuery(event.target.value)} /><span className={styles.muted}>最近喜欢 · {total} 项</span><button className={styles.command} type="button" aria-label="刷新列表" title="刷新列表" disabled={loading} onClick={() => { void load(); void revalidatePreview(); }}><RefreshCw size={16} /></button><button className={styles.command} type="button" aria-label="重置筛选和浏览位置（保留喜欢）" title="重置筛选和浏览位置（保留喜欢）" onClick={resetPreferences}><RotateCcw size={16} /></button></div>
+    <div className={styles.toolbar}><div className={styles.tabs}>{categories.map(([id, label]) => <button key={id} type="button" aria-pressed={category === id} onClick={() => setCategory(id)}>{label} {counts[id]}</button>)}</div><input type="search" aria-label="搜索喜欢的内容" placeholder="搜索内容" maxLength={160} value={query} onChange={event => setQuery(event.target.value)} /><span className={styles.muted}>{category === 'template' ? '最近收藏' : '最近喜欢'} · {total} 项</span><button className={styles.command} type="button" aria-label="刷新列表" title="刷新列表" disabled={loading} onClick={() => { void load(); void revalidatePreview(); }}><RefreshCw size={16} /></button><button className={styles.command} type="button" aria-label="重置筛选和浏览位置（保留喜欢）" title="重置筛选和浏览位置（保留喜欢）" onClick={resetPreferences}><RotateCcw size={16} /></button></div>
     {error && <p role="alert">{error}<button className={styles.command} type="button" onClick={() => void load(cursor || undefined)}>重试</button></p>}
     {storageWarning && <p role="status">{storageWarning}</p>}
     {message && <p role="status">{message}</p>}
@@ -443,7 +443,7 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
         {['image', 'video', 'audio'].includes(item.category) && <ContentReactions contentKey={item.key} initialState={item.state} overlay onChange={(state, act, active, previous) => changed(item, state, act, active, previous)} />}
       </div>
       <div className={styles.body}>{item.category === 'template' ? <TemplateFavoriteTitle contentKey={item.key} initialState={item.state} onChange={(state, act, active, previous) => changed(item, state, act, active, previous)}><h3 className={styles.title} title={item.content?.title || '内容已不可用'}>{item.content?.title || '内容已不可用'}</h3></TemplateFavoriteTitle> : <h3 className={styles.title}>{item.content?.title || '内容已不可用'}</h3>}{item.content?.owner && <UserIdentityBadge size="sm" user={item.content.owner} />}
-        <span className={styles.muted}>喜欢于 <RelativeTime value={item.markedAt} /></span>
+        <span className={styles.muted}>{item.category === 'template' ? '收藏于' : '喜欢于'} <RelativeTime value={item.markedAt} /></span>
         {item.content?.versionLabel && <span className={styles.muted}>{/^\d{4}-\d{2}-\d{2}T/.test(item.content.versionLabel) ? <>{item.category === 'prompt' ? '生成于' : '更新于'} <RelativeTime value={item.content.versionLabel} /></> : <>版本：{item.content.versionLabel}</>}</span>}
         {item.content?.templateKind && <span className={styles.muted}>{item.content.templateKind === 'workpage' ? '我的工作页' : '模板'} · {item.content.templateMedium === 'image' ? '图片' : '视频'}</span>}
         {item.content?.generationOrigin && <span className={styles.muted}>{item.content.generationOrigin.label}{item.content.generationOrigin.templateName ? ` · ${item.content.generationOrigin.templateName}` : ''}</span>}
@@ -457,7 +457,7 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
     </article>)}</div>
     {!loading && loaded && !items.length && !error && <p className={styles.status}>暂无符合条件的内容</p>}
     <div ref={sentinel} className={styles.status}>{loading ? '正在读取…' : cursor ? <button className={styles.command} type="button" onClick={() => void load(cursor)}>加载更多</button> : loaded && items.length ? '已显示全部' : null}</div>
-    {undo && <div className={styles.undo} role="status">已取消喜欢<button className={styles.command} type="button" onClick={async () => { const current = currentOperation(); try {
+    {undo && <div className={styles.undo} role="status">{undo.item.category === 'template' ? '已取消收藏' : '已取消喜欢'}<button className={styles.command} type="button" onClick={async () => { const current = currentOperation(); try {
       const response = await fetch('/api/content-reactions/state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keys: [undo.item.key] }) });
       const data = await response.json();
       if (!current()) return;

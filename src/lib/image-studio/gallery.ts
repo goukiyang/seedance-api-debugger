@@ -145,7 +145,7 @@ export async function queryStudioGallery(user: ImageStudioIdentity, raw: unknown
     if (input.catalogRevision && input.catalogRevision !== revision) throw new StudioSharingError('封面目录已变化，请重新读取', 409, 'state-conflict');
     const search = input.query?.trim().toLocaleLowerCase() || '';
     const matches = entries.filter(entry => (!input.scope || input.scope === 'all' || input.scope === 'mine' && entry.mine
-      || input.scope === 'shared' && entry.shared || input.scope === 'favorites' && entry.reaction?.favorited === true)
+      || input.scope === 'shared' && entry.shared || input.scope === 'favorites' && Boolean(entry.reaction?.liked || entry.reaction?.favorited))
       && (!input.authorKey || entry.author.known && entry.author.key === input.authorKey)
       && (!search || [entry.name, entry.groupName, entry.author.known ? entry.author.displayName : ''].some(text => text.toLocaleLowerCase().includes(search))));
     const sort = input.sort || 'created';

@@ -1,10 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '找素材和交付成品更顺手', outline: [
-  '筛选条件可逐项移除，空列表提供下一步入口',
-  '抠图与多视图显示实际导出结果和原任务核对入口',
-  '手机批量操作和弹层按钮更好找，返回列表保留位置',
-  '帮助页新增模板参考、换帧导出和原请求查询演示',
+const notice = { title: '模板喜欢与收藏合并', outline: [
+  '模板统一使用一个爱心和我的收藏',
+  '已有喜欢、收藏和个人分组继续保留',
+  '封面与工作台的收藏状态保持一致',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

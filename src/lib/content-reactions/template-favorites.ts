@@ -35,7 +35,7 @@ export async function readTemplateFavoriteLibrary(ownerId: string, client: Reade
         || !(entry.groupId === null || typeof entry.groupId === 'string' && ids.has(entry.groupId))) throw new Error();
     }
     return { row, library };
-  } catch { throw new ReactionError('个人分组暂时无法读取，原喜欢仍保留，请稍后重试', 503); }
+  } catch { throw new ReactionError('个人分组暂时无法读取，原收藏仍保留，请稍后重试', 503); }
 }
 
 export async function favoriteOrganization(library: Library, client: Reader = prisma): Promise<TemplateFavoriteOrganization> {
@@ -55,7 +55,7 @@ export async function getTemplateFavoriteOrganization(user: SessionUser) {
 }
 
 export async function changeTemplateFavorites(user: SessionUser, input: TemplateFavoriteMutation) {
-  if (!input || input.viewerId !== user.id) throw new ReactionError('账号已变化，请重新打开我的喜欢', 409);
+  if (!input || input.viewerId !== user.id) throw new ReactionError('账号已变化，请重新打开我的收藏', 409);
   if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0 || typeof input.requestId !== 'string' || !uuid.test(input.requestId)) throw new ReactionError('保存版本无效');
   const action = input.action;
   if (!['create-group', 'rename-group', 'delete-group', 'move', 'rename'].includes(action)) throw new ReactionError('管理操作无效');
@@ -66,7 +66,7 @@ export async function changeTemplateFavorites(user: SessionUser, input: Template
   if (['create-group', 'rename-group'].includes(action) && (!name || name.length > 60)) throw new ReactionError('分组名称需为1至60字');
   if (action === 'rename' && !(input.name === null || typeof input.name === 'string' && name && name.length <= 120)) throw new ReactionError('显示名称需为1至120字，重置请使用原名');
   const contentKey = 'key' in input ? input.key : null;
-  if (['move', 'rename'].includes(action) && (typeof contentKey !== 'string' || !contentKey || contentKey.length > 5000)) throw new ReactionError('喜欢编号无效');
+  if (['move', 'rename'].includes(action) && (typeof contentKey !== 'string' || !contentKey || contentKey.length > 5000)) throw new ReactionError('收藏编号无效');
   const fingerprint = createHash('sha256').update(JSON.stringify([user.id, action, groupId, name, contentKey, input.expectedRevision])).digest('hex');
   const receiptKey = `template_favorites_request_v1:${user.id}:${input.requestId}`;
   try {
@@ -83,7 +83,7 @@ export async function changeTemplateFavorites(user: SessionUser, input: Template
       if (library.revision !== input.expectedRevision) throw conflict();
       if (contentKey !== null) {
         const mark = await tx.contentReaction.findUnique({ where: { user_id_content_key: { user_id: user.id, content_key: contentKey } } });
-        if (!mark || mark.category !== 'template' || !(mark.liked || mark.favorited)) throw new ReactionError('这条喜欢已取消，请刷新列表', 409);
+        if (!mark || mark.category !== 'template' || !(mark.liked || mark.favorited)) throw new ReactionError('这条收藏已取消，请刷新列表', 409);
       }
       const group = library.groups.find(item => item.id === groupId);
       if (action === 'create-group') {

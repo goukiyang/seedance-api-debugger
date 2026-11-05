@@ -50,7 +50,7 @@ export function useTemplateFavorites(userId: string, open: boolean) {
       if (next) params.set('cursor', next);
       const response = await fetch(`/api/content-reactions?${params}`, { cache: 'no-store', signal: request.signal });
       const data: ReactionListResponse & { error?: string } = await response.json();
-      if (!response.ok) throw new Error(data.error || '喜欢模板读取失败，请重试');
+      if (!response.ok) throw new Error(data.error || '收藏模板读取失败，请重试');
       if (request.signal.aborted || serial !== sequence.current || currentScope.current !== scope || currentGroup.current !== group) return;
       if (!data.organization || data.organization.ownerId !== scope) throw new Error('账号已变化，请重新读取');
       if (revision.current.owner === scope && data.organization.revision < revision.current.value) { setEpoch(value => value + 1); return; }
@@ -61,7 +61,7 @@ export function useTemplateFavorites(userId: string, open: boolean) {
       setItems(current => next ? [...current, ...data.items.filter(item => !current.some(old => old.key === item.key))] : data.items);
       setCursor(data.nextCursor); setLoaded(true);
     } catch (cause) {
-      if (!request.signal.aborted && serial === sequence.current && currentScope.current === scope) setError(cause instanceof Error ? cause.message : '喜欢模板读取失败，请重试');
+      if (!request.signal.aborted && serial === sequence.current && currentScope.current === scope) setError(cause instanceof Error ? cause.message : '收藏模板读取失败，请重试');
     } finally { if (serial === sequence.current && currentScope.current === scope) setLoading(false); }
   }, [scope, group, ready, changeGroup]);
   useEffect(() => {
@@ -91,7 +91,7 @@ export function useTemplateFavorites(userId: string, open: boolean) {
   }, [userId, open]);
   const announce = () => notifyTemplateFavoritesChanged(userId);
   async function manage(command: TemplateFavoriteCommand) {
-    if (!scope || currentScope.current !== scope || organization?.ownerId !== scope) throw new Error('请先读取当前账号的喜欢');
+    if (!scope || currentScope.current !== scope || organization?.ownerId !== scope) throw new Error('请先读取当前账号的收藏');
     if (writeLock.current) throw new Error('上一项正在保存，请稍等');
     const previous = pending.current;
     if (previous && JSON.stringify(command) !== JSON.stringify(commandOf(previous))) throw new Error('上一项保存结果尚未确认，请先重试该项');
@@ -101,7 +101,7 @@ export function useTemplateFavorites(userId: string, open: boolean) {
     try {
       const response = await fetch('/api/content-reactions/template-favorites', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await response.json();
-      if (currentScope.current !== scope || account.current.generation !== generation) throw new Error('账号已变化，请重新打开我的喜欢');
+      if (currentScope.current !== scope || account.current.generation !== generation) throw new Error('账号已变化，请重新打开我的收藏');
       if (!response.ok) {
         if (response.status < 500) { pending.current = null; setUnconfirmed(false); if (response.status === 409) setEpoch(value => value + 1); }
         throw new Error(data.error || '保存未确认，请重试');
@@ -117,16 +117,16 @@ export function useTemplateFavorites(userId: string, open: boolean) {
     } finally { writeLock.current = false; if (currentScope.current === scope && account.current.generation === generation) setWriting(false); }
   }
   async function cancelLike(item: ReactionListItem) {
-    if (!scope || currentScope.current !== scope) throw new Error('账号已变化，请重新打开我的喜欢');
+    if (!scope || currentScope.current !== scope) throw new Error('账号已变化，请重新打开我的收藏');
     if (writeLock.current || pending.current) throw new Error('请先完成上一项保存');
     const generation = account.current.generation;
     writeLock.current = true; setWriting(true); setWriteError('');
     try {
       const state = cachedReactionState(scope, item.key) || item.state;
       const unfinished = pendingReactionMutation(scope, item.key);
-      const result = await writeReaction(scope, item.key, 'like', false, state);
-      if (currentScope.current !== scope || account.current.generation !== generation) throw new Error('账号已变化，请重新打开我的喜欢');
-      if (!result || result.liked || result.favorited) throw new Error(unfinished ? '上一项喜欢已确认，仍保留此条；再次确认可取消' : '取消结果未确认，请重试');
+      const result = await writeReaction(scope, item.key, 'favorite', false, state);
+      if (currentScope.current !== scope || account.current.generation !== generation) throw new Error('账号已变化，请重新打开我的收藏');
+      if (!result || result.liked || result.favorited) throw new Error(unfinished ? '上一项收藏已确认，仍保留此条；再次确认可取消' : '取消结果未确认，请重试');
       setItems(current => current.filter(row => row.key !== item.key)); announce();
     } catch (cause) {
       if (currentScope.current === scope && account.current.generation === generation) {
@@ -150,7 +150,7 @@ export function TemplateFavoritesList(props: { data: ReturnType<typeof useTempla
 function FavoriteList({ data, selected, busy, onSelect }: { data: ReturnType<typeof useTemplateFavorites>; selected: string; busy: boolean; onSelect: (item: ReactionListItem) => void }) {
   const { confirm, prompt, productDialog } = useProductDialog();
   const [namingDirty, setNamingDirty] = useState(false);
-  usePageExitRisk({ unsaved: namingDirty ? ['我的喜欢尚未保存的名称'] : [], busy: data.writing || data.unconfirmed ? ['我的喜欢保存结果待确认'] : [], revision: String(namingDirty) });
+  usePageExitRisk({ unsaved: namingDirty ? ['我的收藏尚未保存的名称'] : [], busy: data.writing || data.unconfirmed ? ['我的收藏保存结果待确认'] : [], revision: String(namingDirty) });
   const [menu, setMenu] = useState<string | null>(null);
   const menuId = useId();
   const menuPanel = useRef<HTMLDivElement>(null), menuTrigger = useRef<HTMLButtonElement | null>(null);
@@ -169,9 +169,9 @@ function FavoriteList({ data, selected, busy, onSelect }: { data: ReturnType<typ
     setMenu(null);
     await prompt('分组名称', group.name, { title: '改名', confirmLabel: '保存', maxLength: 60, onDraftChange: setNamingDirty, onSubmit: value => data.manage({ action: 'rename-group', groupId: group.id, name: value }) });
   }
-  return <div className={styles.list} data-template-favorites aria-label="喜欢的模板" aria-busy={data.loading || data.writing || busy}>
+  return <div className={styles.list} data-template-favorites aria-label="收藏的模板" aria-busy={data.loading || data.writing || busy}>
     {data.allowed && <div className={styles.toolbar}>
-      <select aria-label="喜欢分组" value={data.group} disabled={busy || data.writing} onChange={event => { setMenu(null); data.changeGroup(event.target.value); }}>
+      <select aria-label="收藏分组" value={data.group} disabled={busy || data.writing} onChange={event => { setMenu(null); data.changeGroup(event.target.value); }}>
         <option value="all">全部 · {data.organization?.total ?? '—'}</option><option value="ungrouped">未分组 · {data.organization?.ungroupedCount ?? '—'}</option>
         {data.organization?.groups.map(item => <option key={item.id} value={item.id}>{item.name} · {item.count}</option>)}
       </select>
@@ -179,22 +179,22 @@ function FavoriteList({ data, selected, busy, onSelect }: { data: ReturnType<typ
       {group && <div className={styles.menuHost}><Popper.Root><Popper.Anchor asChild><button type="button" title="管理分组" aria-label="管理分组"
         aria-haspopup="dialog" aria-controls={`${menuId}-group`} aria-expanded={menu === 'group'} disabled={disabled || data.unconfirmed}
         onClick={event => { menuTrigger.current = event.currentTarget; setMenu(menu === 'group' ? null : 'group'); }}><MoreHorizontal size={16} /></button></Popper.Anchor>
-        {menu === 'group' && createPortal(<Popper.Content ref={menuPanel} id={`${menuId}-group`} role="dialog" aria-label="管理喜欢分组"
+        {menu === 'group' && createPortal(<Popper.Content ref={menuPanel} id={`${menuId}-group`} role="dialog" aria-label="管理收藏分组"
           side="bottom" align="end" sideOffset={4} collisionPadding={8} avoidCollisions sticky="always" hideWhenDetached className={styles.menu}>
           <button type="button" onClick={() => void renameGroup()}><Pencil size={14} />改名</button>
-          <button type="button" onClick={() => { setMenu(null); void confirm(`删除“${group.name}”？其中的模板将回到未分组，喜欢仍保留。`, { title: '删除分组', confirmLabel: '删除分组', danger: true, onSubmit: () => data.manage({ action: 'delete-group', groupId: group.id }) }); }}><Trash2 size={14} />删除分组</button>
+          <button type="button" onClick={() => { setMenu(null); void confirm(`删除“${group.name}”？其中的模板将回到未分组，收藏仍保留。`, { title: '删除分组', confirmLabel: '删除分组', danger: true, onSubmit: () => data.manage({ action: 'delete-group', groupId: group.id }) }); }}><Trash2 size={14} />删除分组</button>
         </Popper.Content>, document.body)}
       </Popper.Root></div>}
     </div>}
-    {data.loading && <p role="status">正在读取喜欢模板</p>}
-    {!data.loading && !data.allowed && <p role="status">请登录当前账号后查看喜欢模板</p>}
+    {data.loading && <p role="status">正在读取收藏模板</p>}
+    {!data.loading && !data.allowed && <p role="status">请登录当前账号后查看收藏模板</p>}
     {data.error && <p role="alert">{data.error}<button type="button" title="重试读取" aria-label="重试读取" disabled={data.loading} onClick={data.refresh}><RefreshCw size={15} /></button></p>}
     {data.writeError && <p role="alert">{data.writeError}{data.unconfirmed && <button type="button" disabled={data.writing} onClick={() => void data.retry().catch(() => undefined)}>重试保存</button>}</p>}
     {data.items.map(item => <div key={item.key} className={styles.row}>
       <button type="button" className={styles.item} disabled={busy || !item.content || !item.state.available} aria-pressed={selected === item.key} title={name(item)} onClick={() => onSelect(item)}>
-        <span>{name(item)}</span><small>{item.content ? item.key.startsWith('image_') ? '图片' : '视频' : '不可用 · 喜欢保留'}</small>
+        <span>{name(item)}</span><small>{item.content ? item.key.startsWith('image_') ? '图片' : '视频' : '不可用 · 收藏保留'}</small>
       </button>
-      <div className={styles.menuHost}><Popper.Root><Popper.Anchor asChild><button type="button" className={styles.rowAction} title="管理这条喜欢" aria-label={`管理${name(item)}`}
+      <div className={styles.menuHost}><Popper.Root><Popper.Anchor asChild><button type="button" className={styles.rowAction} title="管理这条收藏" aria-label={`管理${name(item)}`}
         disabled={disabled || data.unconfirmed} aria-haspopup="dialog" aria-controls={`${menuId}-${item.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
         aria-expanded={menu === item.key} onClick={event => { menuTrigger.current = event.currentTarget; setMenu(menu === item.key ? null : item.key); }}><MoreHorizontal size={16} /></button></Popper.Anchor>
         {menu === item.key && createPortal(<Popper.Content ref={menuPanel} id={`${menuId}-${item.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
@@ -205,9 +205,9 @@ function FavoriteList({ data, selected, busy, onSelect }: { data: ReturnType<typ
           {item.personalAlias && <button type="button" onClick={() => void data.manage({ action: 'rename', key: item.key, name: null }).then(() => setMenu(null)).catch(() => undefined)}><RotateCcw size={14} />恢复原名</button>}
         </Popper.Content>, document.body)}
       </Popper.Root></div>
-      <button type="button" className={styles.heart} title="取消喜欢" aria-label={`取消喜欢${name(item)}`} disabled={busy || data.writing || data.unconfirmed} onClick={() => { setMenu(null); void data.cancelLike(item).catch(() => undefined); }}><Heart size={17} /></button>
+      <button type="button" className={styles.heart} title="取消收藏" aria-label={`取消收藏${name(item)}`} disabled={busy || data.writing || data.unconfirmed} onClick={() => { setMenu(null); void data.cancelLike(item).catch(() => undefined); }}><Heart size={17} /></button>
     </div>)}
-    {data.allowed && data.loaded && !data.loading && !data.error && !data.items.length && <p role="status">{data.group === 'all' ? '还没有喜欢的模板' : '这个分组还没有模板'}</p>}
+    {data.allowed && data.loaded && !data.loading && !data.error && !data.items.length && <p role="status">{data.group === 'all' ? '还没有收藏的模板' : '这个分组还没有模板'}</p>}
     {data.cursor && <button type="button" className={styles.more} disabled={data.loading || busy} onClick={data.more}>加载更多</button>}
     {productDialog}
   </div>;

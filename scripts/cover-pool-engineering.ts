@@ -36,6 +36,11 @@ const fixtureRequire = (name: string) => {
   if (name === 'server-only') return {};
   if (name === 'node:crypto') return { createHash };
   if (name === '@/lib/prisma') return { prisma: db };
+  if (name === './template-mark') {
+    const exported: any = {};
+    vm.runInNewContext(ts.transpileModule(readFileSync(path.join(root, 'src/lib/content-reactions/template-mark.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { exports: exported });
+    return exported;
+  }
   if (name === './content') return { ReactionError: Rejection };
   if (name === './key') return { tryContentKeyParts: (key: unknown) => typeof key === 'string' && /^(image_template|image_module):[a-z0-9-]+$/.test(key)
     ? { key, type: key.split(':')[0], id: key.split(':')[1] } : null };
@@ -86,6 +91,20 @@ async function main() {
   await assert.rejects(api.setIndependentReaction(actor, operation('wrong-key-request', { key: 'image_module:module-a' })), { status: 404 });
   await assert.rejects(api.setIndependentReaction(actor, operation('wrong-actor-request', { viewerId: 'owner-b' })), { status: 409 });
   checks.push('fresh_transaction_actor_source_revocation_and_bound_module_key_guards');
+  bound = false;
+  for (const [liked, favorited] of [[true, false], [false, true], [true, true], [false, false]]) {
+    rows.set(`${actor.id}/${key}`, { id: 'unified-history', content_key: key, user_id: actor.id, liked, favorited, liked_at: liked ? new Date(1000) : null, favorited_at: favorited ? new Date(2000) : null, version: 20 });
+    const remove = operation(`unified-remove-${liked}-${favorited}`, { protocol: 3, action: 'favorite', active: false, expectedVersion: 20 });
+    const removed = await api.setIndependentReaction(actor, remove);
+    assert.equal(removed.state.liked || removed.state.favorited, false);
+    const replayWrites = writes;
+    await api.setIndependentReaction(actor, remove); assert.equal(writes, replayWrites);
+    assert.equal((await api.readIndependentReaction(actor, { key, requestId: remove.requestId })).protocol, 3);
+    const added = await api.setIndependentReaction(actor, operation(`unified-add-${liked}-${favorited}`, { protocol: 3, action: 'favorite', expectedVersion: 21 }));
+    assert.equal(added.state.favorited, true); assert.equal(added.state.liked, false); assert.equal(added.state.likeCount, 0);
+  }
+  await assert.rejects(api.setIndependentReaction(actor, operation('unified-invalid-like', { protocol: 3, expectedVersion: 22 })), { status: 400 });
+  checks.push('unified_v3_all_historical_flags_remove_once_replay_and_readd_privately');
   const studioFile = 'src/app/image-studio/studio.tsx';
   const studioAst = ts.createSourceFile(studioFile, readFileSync(path.join(root, studioFile), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   let projection: ts.Expression | undefined;
@@ -119,7 +138,7 @@ async function main() {
   assert.equal(navigation.find((item: any) => item.id === 'history-a').fixedCover.available, false);
   assert.equal(JSON.stringify([directory, modules]), beforeNavigation);
   checks.push('actual_sidebar_projection_keeps_authorized_sources_copies_history_virtuals_without_heavy_catalog_or_writes');
-  const files = ['scripts/cover-pool-engineering.ts', source, 'src/lib/image-studio/gallery.ts', 'src/lib/image-studio/gallery-context.ts',
+  const files = ['scripts/cover-pool-engineering.ts', source, 'src/lib/content-reactions/template-mark.ts', 'src/lib/image-studio/gallery.ts', 'src/lib/image-studio/gallery-context.ts',
     'src/lib/image-studio/gallery-types.ts', 'src/lib/image-studio/shared-contract.ts', 'src/app/api/content-reactions/independent/route.ts',
     'src/app/api/image-studio/gallery/query/route.ts', 'src/components/content-reactions/GalleryReactionButtons.tsx',
     'src/app/image-studio/module-gallery-state.ts', 'src/app/image-studio/useModuleGalleryState.ts', 'src/app/image-studio/useGalleryCatalog.ts', studioFile];

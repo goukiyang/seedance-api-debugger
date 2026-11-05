@@ -10,8 +10,11 @@ import type { GalleryReactionKey } from '@/lib/image-studio/gallery-types';
 import { assertStudioActor, sharedStudioAvailability, studioSharedBinding, StudioSharingError } from '@/lib/image-studio/shared-contract';
 import { readStudioWorkspaceDeletion } from '@/lib/image-studio/workspace-deletion';
 
-export type IndependentReactionMutation = ReactionMutation & { protocol: 2 };
+import { TEMPLATE_MARK_WRITES_ENABLED, templateMarkData } from './template-mark';
+
+export type IndependentReactionMutation = ReactionMutation & { protocol: 2 | 3 };
 const namespace = 'independent-v2:';
+const unifiedNamespace = 'template-mark-v3:';
 function keyOf(value: unknown): GalleryReactionKey {
   const parsed = tryContentKeyParts(value);
   if (!parsed || !['image_template', 'image_module'].includes(parsed.type)) throw new ReactionError('封面互动编号无效');
@@ -48,36 +51,37 @@ export async function readIndependentReaction(user: SessionUser, input: { key: u
   return prisma.$transaction(async tx => {
     const available = await availableTo(user, key, tx);
     const event = requestId ? await tx.contentReactionEvent.findUnique({ where: { user_id_request_id: { user_id: user.id, request_id: requestId } } }) : null;
-    if (event && (event.content_key !== key || !event.fingerprint.startsWith(namespace))) throw new ReactionError('原请求内容或协议不一致', 409);
-    return { protocol: 2 as const, status: requestId ? event ? 'committed' as const : 'unknown' as const : 'current' as const,
+    if (event && (event.content_key !== key || !event.fingerprint.startsWith(namespace) && !event.fingerprint.startsWith(unifiedNamespace))) throw new ReactionError('原请求内容或协议不一致', 409);
+    return { protocol: event?.fingerprint.startsWith(unifiedNamespace) ? 3 as const : 2 as const, status: requestId ? event ? 'committed' as const : 'unknown' as const : 'current' as const,
       requestId, state: await stateFor(user, key, available, tx) };
   }, { timeout: 15000 });
 }
 export async function setIndependentReaction(user: SessionUser, input: IndependentReactionMutation) {
-  if (input?.protocol !== 2 || input.viewerId !== user.id) throw new ReactionError('互动协议或账号已变化', 409);
+  if (![2, 3].includes(input?.protocol) || input.viewerId !== user.id) throw new ReactionError('互动协议或账号已变化', 409);
   const key = keyOf(input.key), requestId = requestOf(input.requestId);
-  if (!['like', 'favorite'].includes(input.action) || typeof input.active !== 'boolean'
+  if (!(input.protocol === 3 ? input.action === 'favorite' : ['like', 'favorite'].includes(input.action)) || typeof input.active !== 'boolean'
     || !Number.isSafeInteger(input.expectedVersion) || input.expectedVersion < 0) throw new ReactionError('互动参数无效');
-  const fingerprint = namespace + createHash('sha256').update(JSON.stringify(['independent-v2', key, input.action, input.active, input.expectedVersion])).digest('hex');
+  const fingerprint = (input.protocol === 3 ? unifiedNamespace : namespace) + createHash('sha256').update(JSON.stringify([input.protocol === 3 ? 'template-mark-v3' : 'independent-v2', key, input.action, input.active, input.expectedVersion])).digest('hex');
   return prisma.$transaction(async tx => {
     const available = await availableTo(user, key, tx);
     const previous = await tx.contentReactionEvent.findUnique({ where: { user_id_request_id: { user_id: user.id, request_id: requestId } } });
     if (previous) {
       if (previous.fingerprint !== fingerprint || previous.content_key !== key) throw new ReactionError('重复请求内容或协议不一致', 409);
-      return { protocol: 2 as const, status: 'committed' as const, requestId, state: await stateFor(user, key, available, tx) };
+      return { protocol: input.protocol, status: 'committed' as const, requestId, state: await stateFor(user, key, available, tx) };
     }
+    if (input.protocol === 3 && !TEMPLATE_MARK_WRITES_ENABLED) throw new ReactionError('收藏暂时不能更改，原操作仍保留', 503);
     const current = await tx.contentReaction.findUnique({ where: { user_id_content_key: { user_id: user.id, content_key: key } } });
     if (input.active && !available) throw new ReactionError('封面已不可用或你已无权访问', 404);
     if (!current && !available) throw new ReactionError('标记不存在', 404);
     if ((current?.version || 0) !== input.expectedVersion) throw new ReactionError('状态已变化，请按最新状态重试', 409);
     const now = new Date();
-    const data = input.action === 'like' ? { liked: input.active, liked_at: input.active ? current?.liked_at || now : null }
+    const data = input.protocol === 3 ? templateMarkData(current, input.active, now) : input.action === 'like' ? { liked: input.active, liked_at: input.active ? current?.liked_at || now : null }
       : { favorited: input.active, favorited_at: input.active ? current?.favorited_at || now : null };
     if (current) {
       const changed = await tx.contentReaction.updateMany({ where: { id: current.id, version: input.expectedVersion }, data: { ...data, version: { increment: 1 } } });
       if (changed.count !== 1) throw new ReactionError('状态已变化，请按最新状态重试', 409);
     } else await tx.contentReaction.create({ data: { user_id: user.id, content_key: key, category: 'template', ...data } });
     await tx.contentReactionEvent.create({ data: { user_id: user.id, content_key: key, request_id: requestId, fingerprint, action: input.action, active: input.active } });
-    return { protocol: 2 as const, status: 'committed' as const, requestId, state: await stateFor(user, key, available, tx) };
+    return { protocol: input.protocol, status: 'committed' as const, requestId, state: await stateFor(user, key, available, tx) };
   }, { timeout: 15000 });
 }

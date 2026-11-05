@@ -7,6 +7,7 @@ import { ReactionError, resolveContent } from './content';
 import type { ContentCategory, ContentKey, ReactionListResponse, ReactionMutation, ReactionState } from './types';
 import { createCutoutContentContext, type CutoutContentContext } from './cutout-content';
 import { tryContentKeyParts } from './key';
+import { TEMPLATE_MARK_WRITES_ENABLED, isTemplateContentKey, templateMarkData } from './template-mark';
 import { favoriteEntry, favoriteOrganization, readTemplateFavoriteLibrary } from './template-favorites';
 
 async function resolveReactionContent(user: SessionUser, key: ContentKey, context?: CutoutContentContext) {
@@ -57,12 +58,14 @@ export async function setReaction(user: SessionUser, input: ReactionMutation) {
   const requested = input.key as ContentKey;
   const resolved = parsed ? await resolveReactionContent(user, requested) : null;
   const key = resolved?.summary.key || requested;
-  const fingerprint = createHash('sha256').update(JSON.stringify([requested, input.action, input.active, input.expectedVersion])).digest('hex');
+  if (input.templateMark !== undefined && (input.templateMark !== true || input.action !== 'favorite' || !isTemplateContentKey(key))) throw new ReactionError('模板收藏参数无效');
+  const fingerprint = createHash('sha256').update(JSON.stringify([requested, input.action, input.active, input.expectedVersion, ...(input.templateMark ? ['template-mark-v3'] : [])])).digest('hex');
   const previous = await prisma.contentReactionEvent.findUnique({ where: { user_id_request_id: { user_id: user.id, request_id: input.requestId } } });
   if (previous) {
     if (previous.fingerprint !== fingerprint) throw new ReactionError('重复请求内容不一致', 409);
     return { state: await getReactionState(user, previous.content_key as ContentKey, Boolean(resolved)) };
   }
+  if (input.templateMark && !TEMPLATE_MARK_WRITES_ENABLED) throw new ReactionError('收藏暂时不能更改，原操作仍保留', 503);
   if (input.active && !resolved) throw new ReactionError('内容已不可用或你已无权访问', 404);
   try {
     await prisma.$transaction(async tx => {
@@ -75,7 +78,7 @@ export async function setReaction(user: SessionUser, input: ReactionMutation) {
       if (!current && !resolved) throw new ReactionError('标记不存在', 404);
       // New likes switch both fields. A cached legacy bookmark must remain private.
       const now = new Date();
-      const data = input.action === 'favorite' ? {
+      const data = input.templateMark === true ? templateMarkData(current, input.active, now) : input.action === 'favorite' ? {
         favorited: input.active,
         favorited_at: input.active ? (current?.favorited_at || now) : null,
       } : {

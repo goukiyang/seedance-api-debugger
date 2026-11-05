@@ -7,6 +7,7 @@ import type { ContentKey, ReactionAction, ReactionMutation, ReactionState } from
 import styles from './reactions.module.css';
 import ImageShareButton from './ImageShareButton';
 import LikeButton from './LikeButton';
+import { isTemplateContentKey } from '@/lib/content-reactions/template-mark';
 import { InlineActionFeedback } from '@/components/InlineActionFeedback';
 
 type Entry = { state?: ReactionState; error?: string; busy?: boolean };
@@ -111,7 +112,7 @@ export async function writeReaction(userId: string, key: ContentKey, action: Rea
   let body = pending.get(id);
   // Preserve the original request after an uncertain network result; never silently invert it.
   if (!body) {
-    body = { key: state.key, action, active, expectedVersion: state.version, requestId: crypto.randomUUID(), viewerId: userId };
+    body = { ...(isTemplateContentKey(state.key) && action === 'favorite' ? { templateMark: true as const } : {}), key: state.key, action, active, expectedVersion: state.version, requestId: crypto.randomUUID(), viewerId: userId };
     pending.set(id, body);
   }
   update(userId, key, { state, busy: true }); entries.set(id, { state, busy: true });
@@ -168,24 +169,25 @@ export default function ContentReactions({ contentKey, initialState, onChange, d
   if (!userId) return null;
   const entry = entries.get(cacheKey(userId, contentKey)) || {};
   const state = entry.state;
+  const templateMark = isTemplateContentKey(contentKey);
   const canLike = Boolean(state && (state.available || state.liked || state.favorited));
   const uncertain = Boolean(state && pending.has(cacheKey(userId, state.key)));
   function confirmed(next: ReactionState, active: boolean) {
     if (!mounted.current || currentIdentity.current !== identity) return;
     if (active === Boolean(next.liked || next.favorited)) setPulse({ identity, version: next.version, beat: next.version, active, count: next.likeCount });
     else setPulse(null);
-    onChange?.(next, 'like', active, state);
+    onChange?.(next, templateMark ? 'favorite' : 'like', active, state);
   }
   async function act() {
     if (!state || !userId) return;
     const active = !(state.liked || state.favorited);
-    try { const next = await writeReaction(userId, contentKey, 'like', active, state); if (next) confirmed(next, active); } catch { /* Error is retained with a retry action. */ }
+    try { const next = await writeReaction(userId, contentKey, templateMark ? 'favorite' : 'like', active, state); if (next) confirmed(next, active); } catch { /* Error is retained with a retry action. */ }
   }
   return <span className={`${styles.controls} ${overlay ? parentControlled ? styles.parentOverlayControls : styles.overlayControls : ''} ${favoriteOnly ? styles.favoriteOnly : ''}`} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} data-content-reactions data-overlay={overlay || undefined} aria-busy={entry.busy || undefined}>
     <span className={styles.reactionActions}>
     {/* Sibling keys must include the control type, not just the content identity. */}
     {canLike && <InlineActionFeedback feedback={pulse?.identity === identity && pulse.version === state?.version
-      ? { text: pulse.active ? '已喜欢' : '已取消喜欢' } : null}><LikeButton key={`like:${identity}`} active={Boolean(state?.liked || state?.favorited)} count={favoriteOnly ? undefined : state?.likeCount} showCount={!favoriteOnly}
+      ? { text: pulse.active ? templateMark ? '已收藏' : '已喜欢' : templateMark ? '已取消收藏' : '已取消喜欢' } : null}><LikeButton key={`like:${identity}`} active={Boolean(state?.liked || state?.favorited)} count={favoriteOnly || templateMark ? undefined : state?.likeCount} showCount={!favoriteOnly && !templateMark} templateMark={templateMark}
       disabled={Boolean(disabled || entry.busy || uncertain || !state || (!state.available && !(state.liked || state.favorited)))}
       animateCount={Boolean(pulse?.identity === identity && pulse.version === state?.version && pulse.count === state?.likeCount)}
       bloom={pulse?.identity === identity && pulse.version === state?.version && pulse.active ? pulse.beat : 0} parentControlled={overlay && parentControlled} onClick={() => void act()} /></InlineActionFeedback>}

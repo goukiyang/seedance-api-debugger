@@ -265,7 +265,7 @@ export default function TemplateStudioShell({
         <div className={styles.headerActions}>
           {activeType === 'video' && (
             <button type="button" className={styles.quietButton} onClick={() => setVideoFavoritesOpen(current => !current)} aria-expanded={videoFavoritesOpen}>
-              <Heart size={16} />我的喜欢
+              <Heart size={16} />我的收藏
             </button>
           )}
           {hasRememberedLocation && (

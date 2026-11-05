@@ -31,8 +31,8 @@ function Roll({ value, animate }: { value: number; animate: boolean }) {
   })}</span>;
 }
 
-export default function LikeButton({ active, count, showCount, animateCount, disabled, bloom, parentControlled = false, onClick }: {
-  active: boolean; count?: number | null; showCount: boolean; animateCount: boolean; disabled: boolean; bloom: number; parentControlled?: boolean; onClick: () => void;
+export default function LikeButton({ active, count, showCount, animateCount, disabled, bloom, parentControlled = false, templateMark = false, onClick }: {
+  active: boolean; count?: number | null; showCount: boolean; animateCount: boolean; disabled: boolean; bloom: number; parentControlled?: boolean; templateMark?: boolean; onClick: () => void;
 }) {
   const [settledBloom, setSettledBloom] = useState(0);
   const [animationBloom, setAnimationBloom] = useState(0);
@@ -52,8 +52,8 @@ export default function LikeButton({ active, count, showCount, animateCount, dis
     return () => clearTimeout(timer);
   }, [animationBloom]);
   const bursting = animationBloom > 0 && settledBloom !== animationBloom && !reducedMotion;
-  const label = active ? '取消喜欢' : '喜欢';
-  const hint = active ? '取消喜欢，从我的喜欢移除' : '喜欢，加入我的喜欢';
+  const label = templateMark ? active ? '取消收藏' : '收藏模板' : active ? '取消喜欢' : '喜欢';
+  const hint = templateMark ? active ? '取消收藏，从我的收藏移除' : '收藏模板，加入我的收藏' : active ? '取消喜欢，从我的喜欢移除' : '喜欢，加入我的喜欢';
   return <button className="sd2-like" type="button" data-reaction-action="like" data-bloom={bursting ? animationBloom : undefined} data-result-secondary={parentControlled && !active && !bursting || undefined}
     title={count == null ? hint : `${hint} · 公开喜欢人数 ${format(count)}`} aria-label={count == null ? label : `${label}，公开喜欢人数 ${format(count)}`} aria-pressed={active} disabled={disabled} onClick={onClick}>
     <span className="lk-heart"><span className="lk-glyph lk-static-glyph"><Heart size={19} strokeWidth={2.3} fill={active ? 'currentColor' : 'none'} /></span>

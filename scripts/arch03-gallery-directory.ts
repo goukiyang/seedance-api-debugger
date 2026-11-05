@@ -24,6 +24,18 @@ export async function verifyGalleryDirectory(db: PrismaClient) {
   await db.platformSetting.create({ data: { key: `studio_shared_binding_v1:${second}`, value_json: JSON.stringify({ protocol: 'shared-live-v1', ownerId: owner, mode: 'live', presetId: 'gallery-preset-1' }) } });
   await db.platformSetting.create({ data: { key: 'studio_preset_archived_v1:gallery-preset-2', value_json: '{}' } });
   await db.contentReaction.create({ data: { user_id: owner, content_key: 'image_template:gallery-preset-5', category: 'image_template', liked: true, favorited: true } });
+  await db.contentReaction.createMany({ data: [
+    { user_id: owner, content_key: 'image_template:gallery-preset-6', category: 'template', liked: true, favorited: false },
+    { user_id: owner, content_key: 'image_template:gallery-preset-7', category: 'template', liked: false, favorited: true },
+    { user_id: owner, content_key: 'image_template:gallery-preset-8', category: 'template', liked: false, favorited: false },
+    { user_id: other, content_key: 'image_template:gallery-preset-9', category: 'template', liked: true, favorited: true },
+  ] });
+  const expectedFavorites = ['image_template:gallery-preset-5', 'image_template:gallery-preset-6', 'image_template:gallery-preset-7'].sort();
+  const unionQuery = { scope: 'favorites' as const, pageSize: 24, navigationOnly: true };
+  const unionReference = await queryStudioGallery(actor, unionQuery);
+  const unionSql = await galleryDirectorySql(db, actor, unionQuery);
+  assert.deepEqual(unionReference.matches.map(row => row.key).sort(), expectedFavorites);
+  assert.deepEqual((await unionSql.rows(1, 24)).map(row => row.key).sort(), expectedFavorites);
   let comparisons = 0;
   for (const sort of ['created', 'updated', 'likes', 'recent', 'directory'] as const) for (const scope of ['all', 'mine', 'shared', 'favorites'] as const) {
     const query = { sort, scope, page: 2, pageSize: 12, navigationOnly: true,
@@ -45,5 +57,5 @@ export async function verifyGalleryDirectory(db: PrismaClient) {
   assert.deepEqual(page.items, reference.items);
   await db.user.update({ where: { id: other }, data: { name: 'Updated Publisher' } });
   await assert.rejects(readGalleryPage(db, actor, { sort: 'created', page: 2, pageSize: 12, catalogRevision: page.catalogRevision }), /目录已变化/);
-  return { comparisons, exactCounts: true, canonicalDuplicateWinner: true, authorSearch: true, maximumPage: 24, realPageProjection: true, revisionInvalidatedByUser: true };
+  return { comparisons, historicalTemplateMarksUnion: true, accountIsolatedMarks: true, exactCounts: true, canonicalDuplicateWinner: true, authorSearch: true, maximumPage: 24, realPageProjection: true, revisionInvalidatedByUser: true };
 }

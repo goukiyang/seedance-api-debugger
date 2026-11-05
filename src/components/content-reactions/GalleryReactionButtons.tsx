@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { Bookmark, Heart, RefreshCw, RotateCw } from 'lucide-react';
+import { Heart, RefreshCw, RotateCw } from 'lucide-react';
 import type { ReactionState } from '@/lib/content-reactions/types';
 import type { IndependentReactionMutation } from '@/lib/content-reactions/independent';
 import { invalidateReaction } from './ContentReactions';
@@ -18,7 +18,7 @@ export function GalleryReactionButtons({ userId, initial, enabled }: { userId: s
   const lock = useRef(false);
   const pendingRef = useRef<IndependentReactionMutation | null>(null);
   useEffect(() => { setValue(previous => previous.key === initial.key && previous.version > initial.version ? previous : initial); }, [initial]);
-  const validOperation = (saved: IndependentReactionMutation | null) => saved?.protocol === 2 && saved.viewerId === userId && saved.key === initial.key
+  const validOperation = (saved: IndependentReactionMutation | null) => (saved?.protocol === 2 || saved?.protocol === 3) && saved.viewerId === userId && saved.key === initial.key
     && ['like', 'favorite'].includes(saved.action) && typeof saved.active === 'boolean' && Number.isSafeInteger(saved.expectedVersion)
     && saved.expectedVersion >= 0 && typeof saved.requestId === 'string' && /^[a-zA-Z0-9_-]{8,100}$/.test(saved.requestId);
   const stored = (): IndependentReactionMutation | null => {
@@ -52,7 +52,7 @@ export function GalleryReactionButtons({ userId, initial, enabled }: { userId: s
     const response = await fetch(`/api/content-reactions/independent?key=${encodeURIComponent(initial.key)}${operation ? `&requestId=${encodeURIComponent(operation.requestId)}` : ''}`, { cache: 'no-store', headers: { 'x-app-session-user': userId } });
     const result = await response.json();
     if (current.current !== owner || isClientSessionBlocked()) return;
-    if (!response.ok || result.protocol !== 2) throw new Error(result.error || '互动状态未能读取');
+    if (!response.ok || ![2, 3].includes(result.protocol)) throw new Error(result.error || '互动状态未能读取');
     if (result.state?.key === initial.key) setValue(previous => previous.version > result.state.version ? previous : result.state);
     if (operation && result.status === 'committed') { store(null, operation); setError(''); invalidateReaction(userId, initial.key); }
     else if (operation && pendingRef.current?.requestId === operation.requestId) setError('原操作待确认');
@@ -80,7 +80,7 @@ export function GalleryReactionButtons({ userId, initial, enabled }: { userId: s
       if (current.current !== owner || isClientSessionBlocked()) return;
       if (result.code === 'account-changed') { setError('账号已变化，原操作仍保留'); return; }
       if (response.status === 409) { store(null, operation); await read(); setError('状态已变化，请重新选择'); return; }
-      if (!response.ok || result.protocol !== 2 || result.status !== 'committed') {
+      if (!response.ok || ![2, 3].includes(result.protocol) || result.status !== 'committed') {
         // Auth/content denial cannot disprove an earlier acceptance of this original id.
         throw new Error(result.error || '原操作待确认');
       }
@@ -88,18 +88,16 @@ export function GalleryReactionButtons({ userId, initial, enabled }: { userId: s
     } catch (cause) { if (current.current === owner) setError(cause instanceof Error ? cause.message : '原操作待确认'); }
     finally { if (current.current === owner) { lock.current = false; setBusy(false); } }
   };
-  const act = (action: 'like' | 'favorite') => {
+  const act = () => {
     const unresolved = pendingRef.current || stored();
     if (unresolved) { pendingRef.current = unresolved; setPending(unresolved); return; }
-    void submit({ protocol: 2, viewerId: userId, key: initial.key, action, active: action === 'like' ? !value.liked : !value.favorited,
+    void submit({ protocol: 3, viewerId: userId, key: initial.key, action: 'favorite', active: !(value.liked || value.favorited),
       expectedVersion: value.version, requestId: crypto.randomUUID() });
   };
   if (renderOwner !== identity || sessionChanged || isClientSessionBlocked()) return null;
   return <div className={styles.actions} data-active={value.liked || value.favorited || Boolean(pending)} onClick={event => event.stopPropagation()}>
-    <button type="button" title={value.liked ? '取消点赞' : '点赞'} aria-label={value.liked ? '取消点赞' : '点赞'} aria-pressed={value.liked}
-      data-like disabled={!enabled || busy || Boolean(pending) || !value.available && !value.liked} onClick={() => act('like')}><Heart size={17} fill={value.liked ? 'currentColor' : 'none'} />{value.likeCount !== null && <span>{value.likeCount}</span>}</button>
-    <button type="button" title={value.favorited ? '取消收藏' : '收藏'} aria-label={value.favorited ? '取消收藏' : '收藏'} aria-pressed={value.favorited}
-      disabled={!enabled || busy || Boolean(pending) || !value.available && !value.favorited} onClick={() => act('favorite')}><Bookmark size={17} fill={value.favorited ? 'currentColor' : 'none'} /></button>
+    <button type="button" title={value.liked || value.favorited ? '取消收藏' : '收藏模板'} aria-label={value.liked || value.favorited ? '取消收藏' : '收藏模板'} aria-pressed={value.liked || value.favorited}
+      data-like disabled={!enabled || busy || Boolean(pending) || !value.available && !(value.liked || value.favorited)} onClick={act}><Heart size={17} fill={value.liked || value.favorited ? 'currentColor' : 'none'} /></button>
     {pending && <><button type="button" aria-label="核对原操作" title="核对原操作" disabled={busy} onClick={() => void read(pending).catch(() => setError('原操作待确认'))}><RefreshCw size={16} /></button>
       <button type="button" aria-label="重试同一原操作" title="重试同一原操作，不另建请求" disabled={busy} onClick={() => void submit(pending)}><RotateCw size={16} /></button></>}
     {error && <span role="status" className={styles.message} title={error}>{error}</span>}

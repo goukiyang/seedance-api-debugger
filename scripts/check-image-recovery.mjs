@@ -164,7 +164,7 @@ const usageSources = [usageGate, 'scripts/admin-usage-migration-engineering.py',
   'ops/sd2-usage-role-start.mjs', 'scripts/canvas-role-coordinator.ts'];
 const publicUsageFixtures = [
   { file: 'scripts/cover-pool-engineering.ts', schema: 'cover-pool-engineering.v1', databaseFlag: 'applicationDatabaseOpened', sources: [
-    'scripts/cover-pool-engineering.ts', 'src/lib/content-reactions/independent.ts', 'src/lib/image-studio/gallery.ts',
+    'scripts/cover-pool-engineering.ts', 'src/lib/content-reactions/independent.ts', 'src/lib/content-reactions/template-mark.ts', 'src/lib/image-studio/gallery.ts',
     'src/lib/image-studio/gallery-context.ts', 'src/lib/image-studio/gallery-types.ts', 'src/lib/image-studio/shared-contract.ts',
     'src/app/api/content-reactions/independent/route.ts', 'src/app/api/image-studio/gallery/query/route.ts',
     'src/components/content-reactions/GalleryReactionButtons.tsx', 'src/app/image-studio/module-gallery-state.ts',

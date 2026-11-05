@@ -910,7 +910,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       const requested = requestedPresetId || new URLSearchParams(window.location.search).get('presetId');
       const sorted = [...result.presets].sort((a, b) => Number(b.id === requested) - Number(a.id === requested));
       setPresets(sorted);
-      if (requested && !sorted.some(item => item.id === requested)) setPresetsError('喜欢的模板已不可用或不再共享');
+      if (requested && !sorted.some(item => item.id === requested)) setPresetsError('收藏的模板已不可用或不再共享');
     }
     catch (e) { setPresetsError(e instanceof Error ? e.message : '模板读取失败'); }
     finally { setPresetsLoading(false); }
@@ -1375,7 +1375,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       {templateWorkbench ? <>
         <div className={styles.moduleRailTitle}>模板工作台</div>
         <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-current={coverView ? 'page' : undefined} onClick={navigateToCovers}>全部封面<small>{directoryPaging.total}项</small></button>
-        <button type="button" className={styles.moduleRailMajorLink} aria-expanded={favoritesExpanded} aria-controls="template-favorites-desktop" onClick={() => setFavoritesExpanded(current => !current)}><Heart size={16} /><span>我的喜欢</span>{favoritesExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}</button>
+        <button type="button" className={styles.moduleRailMajorLink} aria-expanded={favoritesExpanded} aria-controls="template-favorites-desktop" onClick={() => setFavoritesExpanded(current => !current)}><Heart size={16} /><span>我的收藏</span>{favoritesExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}</button>
         <div id="template-favorites-desktop" hidden={!favoritesExpanded}><TemplateFavoritesList data={favorites} selected={selectedFavorite} busy={favoriteSelecting || loading} onSelect={item => void selectFavorite(item)} /></div>
         <section className={styles.moduleRailMajor} aria-label="图片生成">
           <div className={styles.moduleRailMajorHeader}>
@@ -1438,7 +1438,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     {templateWorkbench && <nav ref={mobileModuleNavRef} className={styles.mobileModuleNav} aria-label="图片模块导航">
       <div className={styles.mobileMajorLinks}>
         <button type="button" className={styles.mobileMajorLink} aria-expanded={imageSectionOpen} aria-controls="template-mobile-image-groups" onClick={toggleImageSection}><ImagePlus size={16} /><span>图片生成</span>{hasAnyUnread && <span className={styles.unreadDot} role="img" aria-label="有未读结果" />}{imageSectionOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button>
-        <button type="button" className={styles.mobileMajorLink} aria-expanded={favoritesExpanded} aria-controls="template-favorites-mobile" onClick={() => setFavoritesExpanded(current => !current)}><Heart size={16} /><span>我的喜欢</span>{favoritesExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}</button>
+        <button type="button" className={styles.mobileMajorLink} aria-expanded={favoritesExpanded} aria-controls="template-favorites-mobile" onClick={() => setFavoritesExpanded(current => !current)}><Heart size={16} /><span>我的收藏</span>{favoritesExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}</button>
       </div>
       <div id="template-favorites-mobile" className={styles.mobileFavoriteList} hidden={!favoritesExpanded}><TemplateFavoritesList data={favorites} selected={selectedFavorite} busy={favoriteSelecting || loading} onSelect={item => void selectFavorite(item)} /></div>
       <div id="template-mobile-image-groups" className={styles.mobileImageGroups} hidden={!imageSectionOpen}>

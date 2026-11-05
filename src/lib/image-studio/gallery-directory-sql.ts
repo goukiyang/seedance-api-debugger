@@ -151,7 +151,7 @@ export async function galleryDirectorySql(db: Prisma.TransactionClient, actor: I
     ), decorated AS MATERIALIZED (
       SELECT e.*, CASE WHEN u."account_type" = 'internal' THEN e.authorId ELSE NULL END AS knownAuthor,
         CASE WHEN u."account_type" = 'internal' THEN ${display} ELSE '' END AS authorName,
-        COALESCE(own."favorited", 0) AS favorited,
+        (COALESCE(own."liked", 0) = 1 OR COALESCE(own."favorited", 0) = 1) AS favorited,
         CASE WHEN e.available = 1 THEN (SELECT count(*) FROM "ContentReaction" r WHERE r."content_key" = e.key AND r."liked" = 1) ELSE -1 END AS likes,
         COALESCE((SELECT min(CAST(g.key AS INTEGER)) FROM json_each(${JSON.stringify(input.directoryOrder?.groups || [])}) g WHERE g.value = e.groupName), 2147483647) AS groupRank,
         COALESCE((SELECT min(CAST(o.key AS INTEGER)) FROM json_each(${JSON.stringify(input.directoryOrder?.entries || [])}) o WHERE o.value IN (e.key, e.targetId,

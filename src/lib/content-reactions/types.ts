@@ -53,6 +53,7 @@ export type ReactionListResponse = {
 };
 
 export type ReactionMutation = {
+  templateMark?: true;
   key: ContentKey;
   action: ReactionAction;
   active: boolean;
