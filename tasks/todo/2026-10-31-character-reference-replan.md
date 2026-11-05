@@ -188,3 +188,35 @@ v1.0.0/R01；2026-10-31 America/Los_Angeles。用户要求查根因并重新规�
 - 保护切换完成11个writer自然退出、旧源进程归零且无强杀、一致SQLite备份、配置恢复点、六项实际启动检查和12个消费者源绑定。七服务、四timer、公网角色页面JS精确SHA、两匿名401及health ok=true均通过；原环境、持久链接、私有策略与费率全字段保持，无业务数据回退或收费生成，也没有执行浏览器功能验收。
 - 本次原证在服务器/data/video-api-debugger/release-staging/character-body-hd-20261105/attempt01，主要入口为public-deployed.json、main-build-success.json、source-pair-contract.json、startup-pair-checks.json、writers-stopped.json、database-protected.json及cutover.log。program-recovery.sh加release-input.json已绑定本次主/回退源，程序恢复不恢复业务数据。本轮未执行真实回退演练。
 - 用户手验范围为直达与阶段切换、两面生成/补充要求/选用/历史、高清显示及放大、九格各格位置、四格合成保存与复制。原第五组未知请求与10点预留未改，供应商历史响应缺口仍沿§7处理。本轮未新增范围外问题。
+
+## 9. 正背面同次生成纠正（2026-11-05）
+
+用户明确正背面必须一起生成，替代§8将两面拆成独立请求的实现解释。
+
+- 本次改为单一body-pair计划、单一报价及上游count=1，在同一张正方形图左正面、右背面，两个等宽全高区域，只有原角色设计参考。页面一个生成入口，选用时在一次工作区更新里同时绑定两个现有成品槽；旧单面任务/成品和未知请求保持，不自动重发。
+- 共享影响判断。新增可选bodyPairPrompt和body-pair操作属于角色JSON记录格式，不变DB schema或通用生图/计费合同；媒体、合成和HD客户端须识别左右裁区及槽绑定。成对槽与旧单面未知请求互斥，现有CAS/原回执保护沿用。已有代码仅refinement读取description，导致上轮UI全身补充未进prompt，本次一并修正所有全身用途的冻结描述，不改已受理prompt。
+- 相容回退须同步body-pair读者后才能开放新记录，回退关闭新建而保读取/选用/合成；不能直接使用原d2d8为新增数据回退。沿既有隔离工程补成对单图、裁区、源引用/描述、成品顺序、旧记录和未知槽保护的检查，保用户手验，无浏览器/收费生成验收。基线暂为4b679e4c0/v0.132.3，后续鲜核并承接同项目已授权修复；实际实施与发布另记。
+
+### 9.1 最终源码与工程准备（2026-11-05）
+
+- 最终主255eb58760561401089c2a2d63b8e6a0bf1077da/v0.133.0，相容guard82a42ef37136efcc5eb1214d3e20a706e85dded4/v0.133.0+body-pair-reader-guard.1。精确保留93 Works GET回执修复、b87插件侧栏及41资产侧栏。原attempt01只用于同源核心隔离检查，无完整构建或生产切换；最终attempt02两份源码已冻结，主完整构建已启动，guard先准备、完整构建等主成功后串行进行。
+- 主/guard核心11组隔离工程均已通过，实际执行cf4a6989f和32d80c304的日志在attempt01/{main,guard}-body-pair-reader-root.log。核一次实际quote/submit只建1图像任务、单图报价与幂等账本、原图/描述、左右裁区及错槽拒绝、旧单面读取、双向未知槽互斥和原合成像素顺序。最终两源码全部相关后端及测试脚本SHA与执行源相同，attempt02/{main,guard}-body-pair-reader.json明确记实际执行源和未变输入复用，不冒新源重跑。
+- Mac夹具在合成SQLite schema初始化120秒超时，未跑到业务断言。Linux首次以应用账号跑独立fixture因候选根.role-tests目录权限EACCES退出，未改权限；随后沿隔离root夹具检查通过，实际DB/文件均位于专用.role-tests，无production.env、网络调用、生产写或收费生成。上述未通过原件保留，不将其改记通过。
+- 按刚确认的生成图片信息位置规则，body生成/整组选用/放大在图上工具栏，历史在设置区原生选择，必要状态复用既有栏。相关四视图去图下状态和历史堆叠，旧整图目录归到设置区；最近预览与已选用分开，避免新返图被旧选择遮住，刷新恢复真实已选组合。此为最后UI范围，后续只处理工程失败与发布。
+- 为保留已打包成果，两最终完整归档由02720/95原Git归档加精确5文件Git归档差量组成；已核Git提交标记、完整2433文件集合与每一文件SHA，原包/原差量/原Git差异原件保留。不是替换生产文件。GitHub推送两次返回Internal Server Error与fatal error in commit_refs_rules；只读rulesets为空，尚不推断具体权限或全站故障，不换账号/远端/协议绕过。完整构建继续，推送状态另核。
+
+### 9.2 回退原请求判定与构建接续（2026-11-05）
+
+- 主255源码保持冻结，完整工程/Next/内置类型与lint于16:25:50 UTC通过，BUILD 2CoRsHQe1UqEpAyPeesP9。最终主与guard的41三业务文件、93两文件已保留。GitHub前两次普通推送返回内部错误；只读核rulesets为空、分支protected=false且现账号canPush=true，官方当次状态无报告事件，未据此编造全站故障或权限不足。沿同一账号/远端/协议的普通快进推送接续成功，两支最终源已推送，未强推或绕过分支规则。
+- 回退82在准备后、完整构建前，发现关闭新建分支先于receipt读取，可能将无task的旧submitting误标submitted=false。仅guard将该拒绝后移至耐久prepared判定之后，保已受理先回原batch、未知继续未知；增加实际原号断言。主版常量true时该分支不可达，主源码与通过构建不改，不重构建主。
+- 新相容guard为1d452f9186053d3012f420d330f4dce93a33d7f2，版本仍0.133.0+body-pair-reader-guard.1；82不得作为本批正式回退。82只准备过依赖，未跑native/Next或切换生产；原包、准备记录和停止原因留存。新guard两文件Git归档差量及完整集合/字节/提交标记已核，最终guard11组专项及未知分类新增断言已fresh通过，attempt02/guard-body-pair-reader-fresh.log为原件，guard-body-pair-reader.json明确记本次1d实际执行，随后串行完整工程/Next。
+- 主工作区CodeGraph已同步255，1917源码文件无缺失/内容差异/解析错误；开工真实结构查询与关键源码核对有效。收口的一次补充结构查询长时间未返回，已结束该补查，未冒新查询成功，也未重跑通过的测试。
+
+### 9.3 发布完成（2026-11-05）
+
+- 已部署，待用户手动验收。2026-11-05 16:51:51 UTC，正式源255eb58760561401089c2a2d63b8e6a0bf1077da，v0.133.0，BUILD 2CoRsHQe1UqEpAyPeesP9。入口 https://sd2.youdooart.com/tools/character-lab?view=body，刷新后使用“一起生成正背面”。现在同一个计划、同一份单图报价和count=1请求生成左正面/右背面的同图组合，整组选用同时写入两现有全身槽；原图参考、高清展示、单面历史和原请求保留，补充要求真正冻结入prompt。
+- 新相容回退为1d452f9186053d3012f420d330f4dce93a33d7f2 / v0.133.0+body-pair-reader-guard.1 / BUILD 4THsI43mwKhhvzVsWliHk。只关新成对生成并保新格式读取/选用/合成、原受理与未知查询，以及原cutout普通成员保护。已有body-pair数据后不可用旧d2d8或未完成构建的82作为回退；程序恢复入口program-recovery.sh加release-input.json绑定本次新源，恢复不回业务数据，未做真实回退演练。
+- 主与新guard均通过现有全量工程、高清链路、完整Next、内置类型和lint。主11组核心专项按未变输入SHA复用cf4实际执行；guard11组及未知分类断言在1d实际fresh执行。cutout旧32检查仅按11个后端reader及9个路由/auth/media依赖同字节复用；一次过宽比较发现旧guard与本版cutout页面认证接线不同，已分别核新页使用同一canUseCutout且member=false关闭入口，未冒所有页面字节相同、不为无关UI差异重跑未变后端检查。
+- 从实际41e59b68/v0.132.5保护切换，精确保留41资产侧栏、b87插件侧栏、93 Works只读回执修复。11 writer自然退出、旧源进程归零且无强杀，一致SQLite备份、配置恢复点、6项启动检查、12消费者源绑定完成。7服务、4timer、角色页JS精确SHA40d565ce93b5fd3095d67ed51174cedf0dc3a69ed4ccce4b91f04880f2610c9b、两匿名401与health=true均有实际证据，原价格全字段、私有策略和持久链接保持；无schema迁移、业务数据回退、收费生成或浏览器功能验收。
+- 完整原证在/data/video-api-debugger/release-staging/character-body-pair-20261105/attempt02，主要为public-deployed.json、main/guard-build-success.json、main/guard-body-pair-reader.json、guard-body-pair-reader-fresh.log、source-pair-contract.json、startup-pair-checks.json、writers-stopped.json、database-protected.json、cutover.log。原始包、差量及被替代候选/原失败记录保留；主/guard两分支已推送并核远端，源码与部署版本分开。
+- 实际成对构图与一致性、补充要求效果、整组选用、历史切换/刷新、图下无信息堆叠、高清放大及合成复制保存待用户手动验收。原第五组缺少供应商任务号的历史缺口未补造、未重发，10点预留仍沿§7核对。本轮未新增范围外业务问题，仅为既有本机工程准备慢线索补证。
