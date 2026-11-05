@@ -1,7 +1,7 @@
 'use client';
 import { ProjectSelector } from '@/components/ProjectSelector';
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Folder, Grid2X2, ImageIcon, Maximize, Minimize, Music, Play, RotateCcw, Search, SlidersHorizontal, Upload, X, ZoomIn, Trash2 } from 'lucide-react';
 import { useResultPages } from '@/components/useResultPages';
@@ -49,6 +49,7 @@ export interface ResourceLibraryPickerProps {
   currentReferenceImageIds?: string[];
   portalContainer?: Element | null;
   onClose: () => void;
+  renderImagePreview?: (props: { src: string; alt: string; onClose: () => void }) => ReactNode;
   onUploadFile: (file: File, onProgress?: UploadProgressHandler) => Promise<string | UploadedAssetPayload>;
   onConfirm: (ids: string[], assets?: UploadedAssetSelection[]) => Promise<UploadedImagePickerConfirmResult>;
   onConfirmSelection?: (items: PickerItem[]) => Promise<UploadedImagePickerConfirmResult>;
@@ -97,7 +98,7 @@ function templateChoice(prefsKey: string, templateId: string) {
 function rememberTemplateChoice(prefsKey: string, templateId: string, value: 'template' | 'all') {
   try { sessionStorage.setItem(templateChoiceKey(prefsKey, templateId), value); } catch { /* Optional preference. */ }
 }
-export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'image-studio' : 'assets', title = '添加参考素材', confirmLabel = '添加到参考区', purpose = 'reference', contextKey, focusIntent, onFocusIntentConsumed, initialSource = 'all', contextTemplateId, maxSelection, typeLimits, acceptedTypes, currentCount, currentAssetIds, currentReferenceImageIds = [], portalContainer, onClose, onUploadFile, onConfirm, onConfirmSelection, onUploadedAssetsConfirmed, avatarTarget, onAvatarApplied, onAvatarConfirm }: ResourceLibraryPickerProps) {
+export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'image-studio' : 'assets', title = '添加参考素材', confirmLabel = '添加到参考区', purpose = 'reference', contextKey, focusIntent, onFocusIntentConsumed, initialSource = 'all', contextTemplateId, maxSelection, typeLimits, acceptedTypes, currentCount, currentAssetIds, currentReferenceImageIds = [], portalContainer, onClose, renderImagePreview, onUploadFile, onConfirm, onConfirmSelection, onUploadedAssetsConfirmed, avatarTarget, onAvatarApplied, onAvatarConfirm }: ResourceLibraryPickerProps) {
   const { user, loadingUser, hasLoadedUser, userLoadError, sessionChanged, refreshUser } = useAppSession();
   const pickerId = useId();
   const { confirm: askConfirm, productDialog } = useProductDialog();
@@ -737,7 +738,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
         <div className={`${styles.footerActions} exp-dialog-actions`}><button type="button" className={styles.cancelAction} disabled={busy} onClick={close}>取消</button><button type="button" className={styles.primary} disabled={busy || !selected.length || !!canSelect(selected)} onClick={() => void confirm()}>{busy && !uploadLabel ? '正在添加' : confirmLabel}</button></div>
       </footer>
     </div>
-    {preview && (preview.type === 'image' ? <ZoomableImagePreview contentKey={preview.key} src={preview.previewUrl || preview.originalUrl} thumbnailSrc={preview.thumbnailUrl || undefined} alt={selectionName(preview)} fileName={preview.fileName} safeDetails={{ width: preview.width || undefined, height: preview.height || undefined, fileSize: preview.fileSize ?? undefined }} onClose={() => setPreview(null)} /> : <MediaPreview contentKey={preview.key} src={preview.previewUrl || preview.originalUrl} type={preview.type} title={preview.fileName} poster={preview.thumbnailUrl || undefined} onClose={() => setPreview(null)} />)}
+    {preview && (preview.type === 'image' ? renderImagePreview ? renderImagePreview({ src: preview.previewUrl || preview.originalUrl, alt: selectionName(preview), onClose: () => setPreview(null) }) : <ZoomableImagePreview contentKey={preview.key} src={preview.previewUrl || preview.originalUrl} thumbnailSrc={preview.thumbnailUrl || undefined} alt={selectionName(preview)} fileName={preview.fileName} safeDetails={{ width: preview.width || undefined, height: preview.height || undefined, fileSize: preview.fileSize ?? undefined }} onClose={() => setPreview(null)} /> : <MediaPreview contentKey={preview.key} src={preview.previewUrl || preview.originalUrl} type={preview.type} title={preview.fileName} poster={preview.thumbnailUrl || undefined} onClose={() => setPreview(null)} />)}
     {productDialog}
   </div>, container);
 }

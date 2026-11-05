@@ -34,7 +34,7 @@ function resolveImage(source: string, plans: CharacterLabPlan[], tasks: Record<s
     url.searchParams.set('hd', '1');
     return { src: url.pathname + url.search };
   }
-  return /^\/api\/image-studio\/(?:assets|template-assets)\//.test(url.pathname) ? { src: source } : { src: '' };
+  return imageDisplaySource(source, 'hd-description') !== source ? { src: source } : { src: '' };
 }
 
 function useCharacterLabImage(source: string) {
@@ -101,7 +101,7 @@ export function CharacterLabPreview({ src, alt, onClose }: { src: string; alt: s
     return () => { active = false; original.onload = null; original.onerror = null; original.removeAttribute('src'); if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [image.imageSrc, crop?.x, crop?.y, crop?.width, crop?.height, key]);
   if (ready) return <ZoomableImagePreview src={ready} alt={alt} fileName="character-reference.webp" previewOnly imageSharing={false} onClose={onClose} />;
-  return <div ref={backdropRef} className={styles.imagePreviewBackdrop}><div ref={loadingRef} className={styles.imagePreviewLoading} role="dialog" aria-modal="true" aria-label="高清图片预览">
+  return <div ref={backdropRef} className={`${styles.root} ${styles.imagePreviewBackdrop}`}><div ref={loadingRef} className={styles.imagePreviewLoading} role="dialog" aria-modal="true" aria-label="高清图片预览">
     <p role="status">{image.failed || failed === key ? '图片暂不可读取，请关闭后重试' : '正在读取高清图…'}</p>
     <button type="button" onClick={onClose}>关闭</button>
   </div></div>;
