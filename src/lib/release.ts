@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '角色正背面生成与高清预览', outline: [
-  '新增全身正反面制作页，分别生成、选用后进入成品预览',
-  '角色素材、候选与放大预览统一使用高清展示',
+const notice = { title: '插件页工作区导航统一', outline: [
+  '插件下载页与作品广场共用同一工作区侧栏',
+  '保留桌面常驻、独立滚动及手机工作区菜单',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
