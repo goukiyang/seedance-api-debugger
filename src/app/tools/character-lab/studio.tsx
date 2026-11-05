@@ -22,7 +22,7 @@ import { imageUiQuoteFields, imageUiQuotePriceText, validImageUiQuote } from '@/
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, imageStudioNewQualityOptions, imageStudioQualityLabel } from '@/lib/image-studio/model-catalog';
 import { imageStudioChannelModel, imageStudioChannelModels, imageStudioEffectiveChannelId, imageStudioUsesLegacyRoute, normalizeImageStudioChannels } from '@/lib/image-studio/channels';
 import { faceLabPrompt, labDefaultViewPrompts, labViewPrompt, labViewPromptFields } from '@/lib/character-lab/prompts';
-import { characterLabMediaUrl, characterLabSlot, characterLabStrength, sameLabReference, type CharacterLabOperation, type CharacterLabReference, type CharacterLabView, type CharacterLabBootstrap, type CharacterLabConfig, type CharacterLabDraft, type CharacterLabFace, type CharacterLabPlan, type CharacterLabPromptFields, type CharacterLabQuote, type CharacterLabStage, type CharacterLabTask, type CharacterLabWorkspace, type CharacterLabWorkspacePayload } from '@/lib/character-lab/types';
+import { characterLabMediaUrl, characterLabSlot, characterLabSlotsOverlap, characterLabReferenceSlot, characterLabStrength, sameLabReference, type CharacterLabOperation, type CharacterLabReference, type CharacterLabView, type CharacterLabBootstrap, type CharacterLabConfig, type CharacterLabDraft, type CharacterLabFace, type CharacterLabPlan, type CharacterLabPromptFields, type CharacterLabQuote, type CharacterLabStage, type CharacterLabTask, type CharacterLabWorkspace, type CharacterLabWorkspacePayload } from '@/lib/character-lab/types';
 import styles from './studio.module.css';
 
 const stages: Array<{ id: CharacterLabStage | 'body'; label: string }> = [{ id: 'faces', label: '人脸生成' }, { id: 'selection', label: '方案选择' }, { id: 'body', label: '全身正反面' }, { id: 'result', label: '成品预览' }];
@@ -32,7 +32,7 @@ const viewTitles = { side: '侧脸', 'body-front': '正面全身', 'body-back': 
 const promptTitles: Record<PromptTarget, string> = {
   faces: '人脸候选提示词', result: '旧版整图提示词',
   'refine-face': '正脸微调提示词', side: '侧脸提示词', 'refine-side': '侧脸微调提示词',
-  'body-front': '正面全身提示词', 'body-back': '背面全身提示词',
+  'body-front': '正面全身提示词', 'body-back': '背面全身提示词', 'body-pair': '正背面生成提示词',
 };
 function pendingLabPlans(payload: CharacterLabWorkspacePayload, pending: string[]) {
   return Array.from(new Set([...pending, ...payload.plans.filter(plan => payload.submissionByRequestId[plan.id] === 'submitting').map(plan => plan.id)]))
@@ -328,7 +328,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
     const slot = characterLabSlot({ kind, operation });
     return pendingRef.current.some(id => {
       const plan = plans.find(item => item.id === id);
-      return !plan?.slotScoped || slot === 'legacy' || characterLabSlot(plan) === slot;
+      return !plan?.slotScoped || slot === 'legacy' || characterLabSlotsOverlap(plan, { kind, operation });
     });
   }
   async function generate(kind: CharacterLabPlan['kind'], operation?: CharacterLabOperation, refine?: Refinement) {
@@ -340,7 +340,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
       const { plan } = await labApi<{ plan: CharacterLabPlan }>({
         action: 'prepare', workspaceId: current.id, requestId: crypto.randomUUID(), workbench: operation || kind === 'faces' ? 2 : undefined,
         kind, draft: input, operation, ...(refine ? { input: refine.target, description: refine.text }
-          : operation === 'body-front' || operation === 'body-back' ? { description: input.context } : {}),
+          : operation?.startsWith('body-') ? { description: input.context } : {}),
       });
       assertActive(); if (capturedScope !== scope.current) return;
       const quote = await labApi<CharacterLabQuote>({ action: 'quote', planId: plan.id });
@@ -348,7 +348,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
       if (!validImageUiQuote(quote)) throw new Error('报价已过期或不完整，请重新获取报价；尚未提交生成。');
       setPlans(previous => [plan, ...previous.filter(item => item.id !== plan.id)]);
       const label = refine ? '生成1张四宫格微调方案'
-        : operation ? `生成1张${viewTitles[operation as CharacterLabView]}`
+        : operation === 'body-pair' ? '生成1张正背面全身对照图' : operation ? `生成1张${viewTitles[operation as CharacterLabView]}`
           : kind === 'faces' ? `生成1张${plan.count}宫格候选图，面部变化${characterLabStrength(plan.diversity)}` : '生成1张旧版整图';
       if (!await confirm(`${label}，${imageUiQuotePriceText(quote)}。已有图片保留。`, { title: '确认生成', confirmLabel: '开始生成' })) return;
       assertActive();
@@ -477,9 +477,12 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
   const frontReady = Boolean(draft?.mainFace && referencePlan(draft.mainFace)?.sourceAssetId === draft.sourceAssetId && tasks[draft.mainFace.planId]?.asset);
   const viewReady = (slot: CharacterLabView, reference = viewSelection(slot)) => {
     const plan = referencePlan(reference);
-    return Boolean(plan && characterLabSlot(plan) === slot && plan.sourceAssetId === draft?.sourceAssetId && tasks[plan.id]?.asset
+    return Boolean(plan && reference && characterLabReferenceSlot(plan, reference) === slot && plan.sourceAssetId === draft?.sourceAssetId && tasks[plan.id]?.asset
       && (slot !== 'side' || sameLabReference(plan.mainFace, draft?.mainFace)));
   };
+  const bodyPairReady = viewReady('body-front') && viewReady('body-back')
+    && draft?.views?.['body-front']?.planId === draft?.views?.['body-back']?.planId
+    && referencePlan(draft?.views?.['body-front'])?.operation === 'body-pair';
   const sheetReady = frontReady && viewSlots.every(slot => viewReady(slot));
   const refinePlan = refinement ? (referencePlan(refinement.planId ? { planId: refinement.planId } : undefined)
     || plans.find(plan => plan.operation === refinement.operation && plan.sourceAssetId === draft?.sourceAssetId
@@ -508,7 +511,14 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
     window.history.replaceState(window.history.state, '', url);
     updateDraft({ stage: 'result', views: draft?.views || {} });
   }
+  function chooseBodyPair(planId: string) {
+    const plan = plans.find(item => item.id === planId);
+    if (plan?.operation === 'body-pair' && plan.sourceAssetId === draft?.sourceAssetId && tasks[plan.id]?.asset) {
+      updateDraft({ views: { ...draft?.views, 'body-front': { planId, cell: 0 }, 'body-back': { planId, cell: 1 } } });
+    }
+  }
   function chooseView(slot: CharacterLabView, choice: CharacterLabReference) {
+    if (referencePlan(choice)?.operation === 'body-pair') { chooseBodyPair(choice.planId); return; }
     if (viewReady(slot, choice)) updateDraft({ views: { ...draft?.views, [slot]: choice } });
   }
   function compositionUrl(id: string, saved?: string) {
@@ -569,7 +579,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
     {!sessionReady ? <div className={styles.welcome}><UserRound size={36} /><p>正在核对当前账号，工作现场已保留。</p></div> : loading && !workspace ? <div className={styles.loading}><div /><div /><div /><span>正在恢复角色工作区…</span></div> : !workspace || !draft ? <section className={styles.welcome}><ImagePlus size={44} /><h1>从一张角色原图开始</h1><p>探索不同的真人面孔，再制作完整的角色参考图。</p><button type="button" className={styles.primary} disabled={locked || !bootstrap} onClick={() => void createWorkspace()}><Plus size={17} />新建角色</button>{error && <button type="button" onClick={() => window.location.reload()}>重新读取</button>}</section> : <>
       {historyOpen && <section className={styles.historyPanel} aria-label="角色生成历史"><header><h2>历史记录</h2><button type="button" className={styles.iconButton} onClick={() => setHistoryOpen(false)} aria-label="关闭历史记录"><X size={17} /></button></header>{!plans.length && <p>尚未生成候选或成品。</p>}<div className={styles.historyRows}>{plans.map(plan => <article className={styles.historyItem} key={plan.id}><button type="button" disabled={locked} onClick={() => {
         if ((plan.operation === 'refine-face' || plan.operation === 'refine-side') && plan.input && plan.sourceAssetId === draft.sourceAssetId) openRefinement(plan.operation, plan.input, plan);
-        else if (plan.operation === 'body-front' || plan.operation === 'body-back') showBodyGeneration();
+        else if (plan.operation === 'body-front' || plan.operation === 'body-back' || plan.operation === 'body-pair') showBodyGeneration();
         else if (plan.operation) showIndependentViews();
         else if (plan.kind === 'faces') updateDraft({ facePlanId: plan.id, stage: 'selection' });
         else { showIndependentViews(); setLegacyResultOpen(true); updateDraft({ resultPlanId: plan.id, stage: 'result' }); }
@@ -594,8 +604,8 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
             <strong>当前显示第{shownFacePlanNumber}组 · {shownFacePlan.count}宫格旧图</strong>
             <span>第{facePlanNumber}组 · {facePlan.count}宫格尚无可显示的新图片。旧图生成于 <RelativeTime value={shownFacePlan.createdAt} />。</span>
           </div>}
-          {bodyOpen && <p className={styles.bodyIntro}>以左侧原始角色图为参考，保留身材比例、服装和配件细节。分别生成正面与背面，选用满意的版本后进入成品预览。</p>}
-          {bodyOpen ? renderViewBoard(true) : draft.stage === 'result' ? !legacyResultOpen ? renderViewBoard() : shownResultPlan && resultTask?.asset ? <><div className={styles.resultArea}><button type="button" className={styles.resultImage} onClick={() => setPreview({ src: characterLabMediaUrl(shownResultPlan.id), alt: '角色四格参考图' })}><ReturnedImage src={characterLabMediaUrl(shownResultPlan.id)} alt="角色四格参考图：正面特写、侧面特写、正面全身、背面全身" /></button></div><div className={styles.canvasTools}><span>成图比例 2:3{resultTask.asset.width && resultTask.asset.height ? ` · 实际 ${resultTask.asset.width}×${resultTask.asset.height}` : ''}</span><button type="button" onClick={() => setPreview({ src: characterLabMediaUrl(shownResultPlan.id), alt: '角色参考图' })}><Maximize2 size={15} />放大</button></div></> : <div className={styles.canvasEmpty}><Grid2X2 size={42} /><h3>{currentTask && ['queued', 'running'].includes(currentTask.status) ? '正在制作角色参考图' : '在这里预览角色参考图'}</h3><p>选定面部后，结合原图生成正面特写、侧面特写和正背全身。</p>{draft.mainFace && <button type="button" className={styles.primary} disabled={locked || unresolved} onClick={showIndependentViews}>制作角色参考图<ArrowRight size={16} /></button>}</div> : shownFacePlan ? <div className={styles.candidateGrid} style={{ gridTemplateColumns: `repeat(${shownFacePlan.count === 9 ? 3 : 2}, minmax(0, 1fr))` }}>{Array.from({ length: shownFacePlan.count }, (_, cell) => {
+          {bodyOpen && <p className={styles.bodyIntro}>以左侧原始角色图为参考，同一次生成左正面、右背面的全身对照图，保持比例、服装和配饰一致。选用整组后进入成品预览。</p>}
+          {bodyOpen ? renderBodyPair() : draft.stage === 'result' ? !legacyResultOpen ? renderViewBoard() : shownResultPlan && resultTask?.asset ? <><div className={styles.resultArea}><button type="button" className={styles.resultImage} onClick={() => setPreview({ src: characterLabMediaUrl(shownResultPlan.id), alt: '角色四格参考图' })}><ReturnedImage src={characterLabMediaUrl(shownResultPlan.id)} alt="角色四格参考图：正面特写、侧面特写、正面全身、背面全身" /></button></div><div className={styles.canvasTools}><span>成图比例 2:3{resultTask.asset.width && resultTask.asset.height ? ` · 实际 ${resultTask.asset.width}×${resultTask.asset.height}` : ''}</span><button type="button" onClick={() => setPreview({ src: characterLabMediaUrl(shownResultPlan.id), alt: '角色参考图' })}><Maximize2 size={15} />放大</button></div></> : <div className={styles.canvasEmpty}><Grid2X2 size={42} /><h3>{currentTask && ['queued', 'running'].includes(currentTask.status) ? '正在制作角色参考图' : '在这里预览角色参考图'}</h3><p>选定面部后，结合原图生成正面特写、侧面特写和正背全身。</p>{draft.mainFace && <button type="button" className={styles.primary} disabled={locked || unresolved} onClick={showIndependentViews}>制作角色参考图<ArrowRight size={16} /></button>}</div> : shownFacePlan ? <div className={styles.candidateGrid} style={{ gridTemplateColumns: `repeat(${shownFacePlan.count === 9 ? 3 : 2}, minmax(0, 1fr))` }}>{Array.from({ length: shownFacePlan.count }, (_, cell) => {
             const face = { planId: shownFacePlan.id, cell }, main = sameFace(draft.mainFace, face), auxiliary = draft.auxiliaryFaces.some(item => sameFace(item, face));
             return <article key={cell} className={styles.candidate} data-main={main} data-auxiliary={auxiliary}><button type="button" className={styles.candidateImage} disabled={locked} aria-pressed={main} aria-label={`选择候选${cell + 1}作为主面部`} onClick={() => selectFace(face)}><ReturnedImage src={characterLabMediaUrl(shownFacePlan.id, cell)} alt={`真人面部候选${cell + 1}`} /><span className={styles.cellNumber}>{String(cell + 1).padStart(2, '0')}</span>{main && <span className={styles.mainBadge}><Check size={12} />主面部</span>}{auxiliary && <span className={styles.auxBadge}>辅助参考</span>}</button><div className={styles.cellActions}><button type="button" disabled={locked} onClick={() => setPreview({ src: characterLabMediaUrl(shownFacePlan.id, cell), alt: `候选${cell + 1}` })}><Maximize2 size={13} />放大</button><button type="button" disabled={locked || main} aria-pressed={auxiliary} onClick={() => toggleAuxiliary(face)}>{auxiliary ? '移除辅助' : '作为辅助'}</button></div></article>;
           })}</div> : <div className={styles.canvasEmpty}><UserRound size={46} /><h3>{currentTask && ['queued', 'running'].includes(currentTask.status) ? '正在探索不同的面部方案' : '探索适合角色的真人面孔'}</h3><p>添加一张角色原图，调整面部差异，生成4宫格或9宫格候选。</p>{!draft.sourceAssetId && <button type="button" className={styles.outline} disabled={locked} onClick={() => setPickerOpen(true)}><ImagePlus size={16} />添加原始素材</button>}</div>}
@@ -605,12 +615,12 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
           {bodyOpen ? <>
             <section><h2>正反面生成设置</h2>
               <label className={styles.field}><span>角色补充要求</span><textarea rows={5} maxLength={3000} value={draft.context} disabled={locked} onChange={event => updateDraft({ context: event.target.value })} placeholder="例如：保持原图头身比、腰带和靴子细节，双手自然下垂" /></label>
-              <p className={styles.hint}>这些要求用于下一次正面或背面生成。每一面的提示词可在对应区域查看。</p>
+              <p className={styles.hint}>这些要求用于下一次正背面共同生成。</p>
               {renderGenerationSettings()}
             </section>
-            <section><h2>已选用 {Number(viewReady('body-front')) + Number(viewReady('body-back'))} / 2</h2>
-              <p className={styles.hint}>生成后点击“选用这张”，两面会直接带入成品预览。</p>
-              <button type="button" className={styles.primary} disabled={locked || !viewReady('body-front') || !viewReady('body-back')} onClick={showIndependentViews}>确认并进入成品预览<ArrowRight size={16} /></button>
+            <section><h2>{bodyPairReady ? '已选用正背面组合' : '选择一组正背面'}</h2>
+              <p className={styles.hint}>生成后点击“选用这组”，正背面一起带入成品预览。</p>
+              <button type="button" className={styles.primary} disabled={locked || !bodyPairReady} onClick={showIndependentViews}>确认并进入成品预览<ArrowRight size={16} /></button>
             </section>
             <button type="button" disabled={locked} onClick={() => updateDraft({ stage: 'selection' })}><ArrowLeft size={15} />返回选脸</button>
           </> : draft.stage === 'result' && !legacyResultOpen ? <>
@@ -678,7 +688,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
             <pre>{activePromptTarget === 'faces'
               ? faceLabPrompt(bootstrap.config, draft)
               : labViewPrompt(bootstrap.config, activePromptTarget, refinement?.operation === activePromptTarget ? refinement.text
-                : activePromptTarget === 'body-front' || activePromptTarget === 'body-back' ? draft?.context || '' : '')}</pre>
+                : activePromptTarget.startsWith('body-') ? draft?.context || '' : '')}</pre>
           </details>}
           {activePromptFields.map(([field, title, placeholder]) => (
             <label className={styles.field} key={field}>
@@ -711,11 +721,42 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
     </button>;
   }
 
-  function renderViewBoard(bodyOnly = false) {
+  function renderBodyPair() {
+    const options = plans.filter(plan => plan.operation === 'body-pair' && plan.sourceAssetId === draft?.sourceAssetId);
+    const latest = options.find(plan => tasks[plan.id] || pendingPlanIds.includes(plan.id));
+    const task = latest ? tasks[latest.id] : null;
+    const available = options.filter(plan => tasks[plan.id]?.asset);
+    const selected = bodyPairReady ? referencePlan(viewSelection('body-front')) : undefined;
+    const shown = selected || available[0];
+    return <section className={styles.bodyPair}>
+      <div className={styles.settingsHeading}><h2>正背面组合</h2>{renderPromptButton('body-pair')}</div>
+      <div className={styles.viewBoard} data-body-only="true">
+        {(['正面全身', '背面全身'] as const).map((title, cell) => <article key={title} className={styles.viewSlot} data-body="true">
+          <h2>{title}</h2>
+          {shown ? <button type="button" className={styles.viewImage} onClick={() => setPreview({ src: characterLabMediaUrl(shown.id, cell), alt: title })}>
+            <ReturnedImage src={characterLabMediaUrl(shown.id, cell)} alt={title} />
+          </button> : <div className={styles.viewEmpty}>同一次生成中呈现{title}</div>}
+        </article>)}
+      </div>
+      <div className={styles.viewActions}>
+        <button type="button" className={styles.primary} disabled={locked || !draft?.sourceAssetId || pendingBlocks('result', 'body-pair')} onClick={() => void generate('result', 'body-pair')}>{shown ? '重新生成正背面' : '一起生成正背面'}</button>
+        {shown && <button type="button" className={styles.outline} disabled={locked || selected?.id === shown.id} onClick={() => chooseBodyPair(shown.id)}>{selected?.id === shown.id ? '已选用这组' : '选用这组'}</button>}
+        {shown && <button type="button" onClick={() => setPreview({ src: characterLabMediaUrl(shown.id), alt: '正背面全身对照图' })}>查看整张对照图</button>}
+      </div>
+      {latest && <p className={styles.hint} role="status">{task ? taskState[task.status] || '状态待确认' : '原提交待确认'}{task?.error && <> · {task.error}</>}{selected && ' · 已选用组合保留'}</p>}
+      {!bodyPairReady && (viewReady('body-front') || viewReady('body-back')) && <p className={styles.hint}>原有单面选择保留在成品预览。选用新的组合会一起替换两面。</p>}
+      {available.some(plan => plan.id !== shown?.id) && <details className={styles.viewHistory}><summary>选用其他正背面组合</summary>
+        <div>{available.filter(plan => plan.id !== shown?.id).map((plan, index) => <button type="button" key={plan.id} disabled={locked} onClick={() => chooseBodyPair(plan.id)}>
+          <ReturnedImage src={characterLabMediaUrl(plan.id)} alt="正背面组合" /><span>选用组合 {index + 1}</span>
+        </button>)}</div>
+      </details>}
+    </section>;
+  }
+
+  function renderViewBoard() {
     const front = draft?.mainFace;
-    const slots = bodyOnly ? (['body-front', 'body-back'] as const) : viewSlots;
-    return <div className={styles.viewBoard} data-body-only={bodyOnly}>
-      {!bodyOnly && <article className={styles.viewSlot}>
+    return <div className={styles.viewBoard}>
+      <article className={styles.viewSlot}>
         <div className={styles.settingsHeading}><h2>正脸</h2>{frontReady && <small>已选用</small>}</div>
         {frontReady && front ? <>
           <button type="button" className={styles.viewImage} onClick={() => setPreview({ src: characterLabMediaUrl(front.planId, front.cell), alt: '选定正脸' })}>
@@ -723,28 +764,29 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
           </button>
           <div className={styles.viewActions}><button type="button" className={styles.outline} disabled={locked} onClick={() => openRefinement('refine-face', front)}>微调这张脸</button></div>
         </> : <div className={styles.viewEmpty}>先选定一张正脸</div>}
-      </article>}
-      {slots.map(slot => {
+      </article>
+      {viewSlots.map(slot => {
         const title = viewTitles[slot], selected = viewSelection(slot);
-        const options = plans.filter(plan => plan.operation === slot && plan.sourceAssetId === draft?.sourceAssetId
+        const options = plans.filter(plan => (plan.operation === slot || slot !== 'side' && plan.operation === 'body-pair') && plan.sourceAssetId === draft?.sourceAssetId
           && (slot !== 'side' || sameLabReference(plan.mainFace, draft?.mainFace)));
         const latest = options.find(plan => tasks[plan.id] || pendingPlanIds.includes(plan.id));
         const latestTask = latest ? tasks[latest.id] : null;
         const available = options.filter(plan => tasks[plan.id]?.asset);
         const adopted = viewReady(slot);
-        const shown: CharacterLabReference | undefined = adopted ? selected : available[0] ? { planId: available[0].id } : undefined;
+        const choiceFor = (plan: CharacterLabPlan): CharacterLabReference => ({ planId: plan.id, ...(plan.operation === 'body-pair' ? { cell: slot === 'body-front' ? 0 : 1 } : {}) });
+        const shown: CharacterLabReference | undefined = adopted ? selected : available[0] ? choiceFor(available[0]) : undefined;
         const src = shown ? characterLabMediaUrl(shown.planId, shown.cell) : '';
         const canGenerate = Boolean(draft?.sourceAssetId && (slot !== 'side' || frontReady));
         return <article className={styles.viewSlot} key={slot} data-body={slot !== 'side'}>
-          <div className={styles.settingsHeading}><h2>{title}</h2>{renderPromptButton(slot)}</div>
+          <div className={styles.settingsHeading}><h2>{title}</h2>{slot === 'side' && renderPromptButton(slot)}</div>
           {shown ? <button type="button" className={styles.viewImage}
             onClick={() => slot === 'side' && !locked ? openRefinement('refine-side', shown) : setPreview({ src, alt: title })}>
             <ReturnedImage src={src} alt={title} />
           </button> : <div className={styles.viewEmpty}>{slot === 'side' && !frontReady ? '先选定正脸' : '待生成'}</div>}
           <div className={styles.viewActions}>
-            <button type="button" className={styles.outline} disabled={locked || !canGenerate || pendingBlocks('result', slot)}
-              onClick={() => void generate('result', slot)}>{shown ? '再生成' : '生成'}{title}</button>
-            {shown && !adopted && <button type="button" className={styles.primary} disabled={locked} onClick={() => chooseView(slot, shown)}>选用这张</button>}
+            {slot === 'side' ? <button type="button" className={styles.outline} disabled={locked || !canGenerate || pendingBlocks('result', slot)}
+              onClick={() => void generate('result', slot)}>{shown ? '再生成' : '生成'}{title}</button> : slot === 'body-front' && <button type="button" className={styles.outline} disabled={locked} onClick={showBodyGeneration}>生成或更换正背面</button>}
+            {shown && !adopted && <button type="button" className={styles.primary} disabled={locked} onClick={() => chooseView(slot, shown)}>{referencePlan(shown)?.operation === 'body-pair' ? '选用这组正背面' : '选用这张'}</button>}
             {shown && slot === 'side' && <button type="button" disabled={locked} onClick={() => openRefinement('refine-side', shown)}>微调侧脸</button>}
             {shown && <a href={src + '&download=1'} download={title + '.png'}>下载</a>}
           </div>
@@ -756,8 +798,8 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
           {available.some(plan => plan.id !== shown?.planId) && <details className={styles.viewHistory}>
             <summary>选用其他版本</summary>
             <div>{available.filter(plan => plan.id !== shown?.planId).map((plan, index) => (
-              <button type="button" key={plan.id} disabled={locked} onClick={() => chooseView(slot, { planId: plan.id })}>
-                <ReturnedImage src={characterLabMediaUrl(plan.id)} alt={title + '候选'} /><span>选用方案 {index + 1}</span>
+              <button type="button" key={plan.id} disabled={locked} onClick={() => chooseView(slot, choiceFor(plan))}>
+                <ReturnedImage src={characterLabMediaUrl(plan.id, choiceFor(plan).cell)} alt={title + '候选'} /><span>选用方案 {index + 1}</span>
               </button>
             ))}</div>
           </details>}

@@ -86,7 +86,7 @@ async function main() {
     aspectRatio: record.aspectRatio, draft: { referencePolicy: { primaryIds: record.referenceIds,
       primaryMin: 0, primaryMax: 10, auxiliaryMax: 10, styleMax: 10, referenceMax: 10,
       useFixedReferences: true } } });
-  const createPlan = async (record: ReturnType<typeof plan>, receipt: 'prepared' | 'submitting' | 'accepted' = 'prepared') => {
+  const createPlan = async (record: { id: string }, receipt: 'prepared' | 'submitting' | 'accepted' = 'prepared') => {
     await db.platformSetting.createMany({ data: [
       { key: planKey(record.id), value_json: JSON.stringify(record), updated_by: owner },
       { key: receiptKey(record.id), value_json: JSON.stringify({ state: receipt }), updated_by: owner },
@@ -236,17 +236,21 @@ async function main() {
     const high = await prepare('faces', undefined, { draft: { ...draft, diversity: 75 } });
     assert.match(high.prompt, /第9格结构方向/);
 
-    const paint = async (record: { id: string }, color: string) => {
+    const paint = async (record: { id: string }, color: string, rightColor?: string) => {
       const id = randomUUID();
       const url = '/uploads/assets/' + id + '.png';
-      const png = await sharp({ create: { width: 90, height: 90, channels: 3, background: color } }).png().toBuffer();
+      const right = rightColor ? await sharp({ create: { width: 45, height: 90, channels: 3, background: rightColor } }).png().toBuffer() : null;
+      const image = sharp({ create: { width: 90, height: 90, channels: 3, background: color } });
+      const png = await (right ? image.composite([{ input: right, left: 45, top: 0 }]) : image).png().toBuffer();
       mkdirSync(path.join(directory, 'public/uploads/assets'), { recursive: true });
       writeFileSync(path.join(directory, 'public', url), png);
       await db.asset.create({ data: {
         id, owner_id: owner, type: 'image', status: 'active', original_url: url, file_name: id + '.png',
         mime_type: 'image/png', width: 90, height: 90, file_size: png.length,
       } });
-      await db.imageStudioTask.create({ data: {
+      const task = await db.imageStudioTask.findFirst({ where: { batch_id: batchId(owner, record.id) } });
+      if (task) await db.imageStudioTask.update({ where: { id: task.id }, data: { status: 'succeeded', asset_id: id } });
+      else await db.imageStudioTask.create({ data: {
         id: randomUUID(), batch_id: batchId(owner, record.id), owner_id: owner, ordinal: 1, fingerprint: sha(record.id),
         prompt: 'fixture', context: '', revision: 1, model: 'gpt-image-2', reference_ids: '[]',
         unit_credits: 5, status: 'succeeded', asset_id: id,
@@ -287,7 +291,60 @@ async function main() {
     await paint(bodyFront, '#0000ff');
     await paint(bodyBack, '#ffff00');
 
-    const views = { side: { planId: side.id }, 'body-front': { planId: bodyFront.id }, 'body-back': { planId: bodyBack.id } };
+    const pairInput = { ...picked, context: '保持腰带与衣服细节' };
+    const pair = service.CHARACTER_LAB_BODY_PAIRS_ENABLED
+      ? await prepare('result', 'body-pair', { draft: pairInput, description: pairInput.context })
+      : { ...plan(randomUUID()), workspaceId, kind: 'result' as const, operation: 'body-pair' as const,
+          slotScoped: true as const, count: 4 as const, aspectRatio: '1:1' as const, mainFace: null, referenceIds: [sourceAssetId] };
+    if (service.CHARACTER_LAB_BODY_PAIRS_ENABLED) {
+      assert.equal(pair.aspectRatio, '1:1');
+      assert.equal(pair.mainFace, null);
+      assert.deepEqual(pair.referenceIds, [sourceAssetId]);
+      assert.match(pair.prompt, /左半区严格正面/);
+      assert.match(pair.prompt, /右半区严格背面/);
+      assert.match(pair.prompt, /保持腰带与衣服细节/);
+      assert.equal(pair.adjustment, pairInput.context);
+      const quote = await service.quoteLab(user, pair.id);
+      assert.equal(quote.estimatedCredits, quote.unitCredits);
+      const submitted = await service.submitLab(user, { planId: pair.id, billingQuoteId: quote.billingQuoteId,
+        pricingRevision: quote.pricingRevision, maxEstimatedCost: quote.estimatedCredits });
+      const pairTasks = await db.imageStudioTask.findMany({ where: { batch_id: submitted.batchId } });
+      assert.equal(pairTasks.length, 1);
+      assert.equal(pairTasks[0].prompt, pair.prompt);
+      assert.deepEqual(JSON.parse(pairTasks[0].reference_ids), [sourceAssetId]);
+      assert.equal(pairTasks[0].aspect_ratio, '1:1');
+      const beforeRepeat = await db.creditLedger.count();
+      assert.deepEqual(await service.submitLab(user, { planId: pair.id }), submitted);
+      assert.equal(await db.creditLedger.count(), beforeRepeat);
+      assert.equal(await db.imageStudioTask.count({ where: { batch_id: submitted.batchId } }), 1);
+    } else {
+      await createPlan(pair);
+      await assert.rejects(prepare('result', 'body-pair', { draft: pairInput }), /恢复版本暂不新建/);
+      await assert.rejects(service.submitLab(user, { planId: pair.id }), /恢复版本暂不新建/);
+      assert.equal(await db.imageStudioTask.count({ where: { batch_id: batchId(owner, pair.id) } }), 0);
+    }
+    await paint(pair, '#0000ff', '#ffff00');
+    const media = await import('../src/lib/character-lab/media');
+    assert.deepEqual(media.labCellRect(91, 90, pair, 0), { left: 0, top: 0, width: 45, height: 90 });
+    assert.deepEqual(media.labCellRect(91, 90, pair, 1), { left: 45, top: 0, width: 46, height: 90 });
+    assert.throws(() => media.labCellRect(90, 90, pair, 2), /格子选择无效/);
+    await assert.rejects(media.readLabReference(user, workspaceId, sourceAssetId, { planId: pair.id, cell: 1 }, 'body-front'), /其他角色、原图或视图/);
+    await assert.rejects(media.readLabReference(user, workspaceId, sourceAssetId, { planId: pair.id }, 'body-back'), /其他角色、原图或视图/);
+    await media.readLabReference(user, workspaceId, sourceAssetId, { planId: pair.id, cell: 0 }, 'body-front');
+    await media.readLabReference(user, workspaceId, sourceAssetId, { planId: bodyFront.id }, 'body-front');
+    const pendingWorkspace = await store.createLabWorkspace(owner, randomUUID(), '成对未知提交', 'gpt-image-2');
+    const pendingPair = { ...plan(randomUUID()), workspaceId: pendingWorkspace.id, kind: 'result', operation: 'body-pair', slotScoped: true };
+    await createPlan(pendingPair, 'submitting');
+    await assert.rejects(prepare('result', 'body-front', { workspaceId: pendingWorkspace.id }), /原提交结果待确认/);
+    await assert.rejects(prepare('result', 'body-back', { workspaceId: pendingWorkspace.id }), /原提交结果待确认/);
+    if (service.CHARACTER_LAB_BODY_PAIRS_ENABLED) {
+      const pendingSingleWorkspace = await store.createLabWorkspace(owner, randomUUID(), '单面未知提交', 'gpt-image-2');
+      const pendingSingle = { ...plan(randomUUID()), workspaceId: pendingSingleWorkspace.id, kind: 'result', operation: 'body-back', slotScoped: true };
+      await createPlan(pendingSingle, 'submitting');
+      await assert.rejects(prepare('result', 'body-pair', { workspaceId: pendingSingleWorkspace.id }), /原提交结果待确认/);
+    }
+
+    const views = { side: { planId: side.id }, 'body-front': { planId: pair.id, cell: 0 }, 'body-back': { planId: pair.id, cell: 1 } };
     const selected = await store.updateLabWorkspace(owner, workspaceId, workspace.revision, workspace.name, { ...picked, views });
     assert.deepEqual(selected.views, views);
     const legacy = await service.labWorkspaceState(user, workspaceId);
@@ -320,7 +377,7 @@ async function main() {
       checks: ['lab_source_ignores_global_default_fixed_style_skill', 'quote_create_source_and_specification_match',
         'source_marker_requires_server_internal_parameter', 'accepted_and_unknown_preserve_original_request',
         'legacy_quote_rejected_before_submitting_or_fees', 'nine_grid_and_strength_rules', 'refinement_and_view_references',
-        'same_slot_pending_only', 'legacy_projection_and_writer', 'composition_png_order_identity_and_idempotency'],
+        'same_slot_pending_only', 'body_pair_single_task_description_crops_and_slot_conflicts', 'legacy_projection_and_writer', 'composition_png_order_identity_and_idempotency'],
       taskId: created.id, batchId: created.batch_id, databasePath, productionWrites: 0, paidRequests: 0,
       browserRuns: 0, forbiddenCalls }, null, 2));
   } finally {
