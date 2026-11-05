@@ -131,7 +131,7 @@
 .notice { font-size: 13px; overflow-wrap: anywhere; }
 .feedback { color: #c4d7cd; font-size: 13px; overflow-wrap: anywhere; }
 .issueTrigger { display: inline; padding: 0; border: 0; background: transparent; color: #bdc9c5; font: inherit; text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; white-space: nowrap; }
-.issueTrigger[data-reason] { display: inline-flex; align-items: center; justify-content: center; color: #ff6b6b; text-decoration: none; }
+.issueTrigger[data-reason] { display: inline-flex; align-items: center; justify-content: center; color: #e0e9e5; text-decoration: none; }
 .issueTrigger:focus-visible, .issueClose:focus-visible, .operationFeedback button:focus-visible { outline: 2px solid #79daca; outline-offset: 2px; }
 .issueLayer, .operationFeedback { z-index: 2147000200; max-width: min(320px, calc(100vw - 24px)); max-height: min(420px, calc(100dvh - 24px)); overflow: auto; padding: 12px; border: 1px solid #414b48; border-radius: 6px; background: #202725; color: #e0e9e5; box-shadow: 0 6px 24px #10171570; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .issueLayer[data-structured] { width: min(420px, calc(100vw - 24px)); max-width: min(420px, calc(100vw - 24px)); }
