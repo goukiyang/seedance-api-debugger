@@ -41,7 +41,9 @@ async function main() {
       User: [{ id: 'owner', name: 'Fixture' }], Project: [{ id: 'project', name: 'Fixture Project' }],
       PlatformSetting: [{ id: 'policy', key: 'pricing_policy_v1', value_json: JSON.stringify({ schemaVersion: 1, revision: 'current', rules }) },
         { id: 'defaults', key: 'image_generation_model_defaults_v1', value_json: JSON.stringify({ qualityRoutes: { 'gpt-image-2.5-sunburst': { medium: 'medium-channel', max: 'max-channel' } } }) }],
-      ImageStudioTask: [image('image-current'), image('image-frozen', { billing_contract_json: JSON.stringify(frozen) }),
+      ImageStudioTask: [image('image-current', { provider_cost_usd: 0.064 }), image('image-frozen', { billing_contract_json: JSON.stringify(frozen), provider_cost_usd: 0.064 }),
+        image('image-recorded', { model: 'gpt-image-2.5-flare', provider_cost_usd: 0.064 }),
+        image('image-recorded-negative', { model: 'gpt-image-2.5-flare', provider_cost_usd: -0.064 }),
         image('image-failed', { status: 'failed', asset_id: null }), image('image-unknown', { status: 'uncertain', asset_id: null }),
         image('image-unpriced', { model: 'unpriced' }), image('image-other-channel', { snapshot_json: JSON.stringify({ imageChannel: { channelId: 'unpriced-channel' } }) }),
         image('image-medium', { model: 'gpt-image-2.5-sunburst', quality: 'medium', snapshot_json: '{}' }),
@@ -51,6 +53,9 @@ async function main() {
         video('video-rate'), video('video-token', { provider: 'volcengine_ark', model: 'doubao-seedance-2-0-260128', provider_usage_snapshot: '{"completion_tokens":500}' }),
         video('video-bill', { provider_task_id: 'provider-bill', provider_cost_currency: 'USD', provider_final_amount_micros: 200000, provider_cost_status: 'official_confirmed',
           provider_usage_snapshot: '{"completion_tokens":100}', provider_cost_snapshot: '{"source":"provider_get_result"}', provider_cost_confirmed_at: time }),
+        video('video-h3-free', { provider: 'h3', model: 'lightx2v_4step_turbo', raw_status_response: '{"billing":{"charged":false,"cost":0,"cost_model":"free_local"}}' }),
+        video('video-h3-missing', { provider: 'h3', model: 'lightx2v_4step_turbo' }),
+        video('video-h3-not-free', { provider: 'h3', model: 'lightx2v_4step_turbo', raw_status_response: '{"billing":{"charged":true,"cost":0,"cost_model":"free_local"}}' }),
         video('video-upgrade', { source_draft_task_id: 'draft' }), video('video-failed', { local_status: 'failed' })],
       CostLedger: [{ id: 'cash', source_type: 'task', source_id: 'video-bill', task_id: 'video-bill', user_id: 'owner', project_id: 'project', provider_name: 'seedance', provider_task_id: 'provider-bill',
         event_type: 'official_charge', amount_micros: 200000, currency: 'USD', cost_source: 'provider_usage', confidence: 'confirmed', official_charge_id: 'provider-bill', occurred_at: time, created_at: time }],
@@ -82,11 +87,17 @@ c.close()
       assert.equal(cost('image-banana')?.amountCnyMicros, '60000');
       assert.equal(cost('image-frozen')?.amountCnyMicros, '50000');
       assert.equal(cost('image-frozen')?.revision, 'frozen-old');
+      assert.equal(cost('image-current')?.source, 'current_rate');
+      assert.equal(cost('image-recorded')?.amountCnyMicros, '448000');
+      assert.equal(cost('image-recorded')?.source, 'recorded_rate');
+      assert.equal(cost('video-h3-free')?.amountCnyMicros, '0');
+      assert.equal(cost('video-h3-free')?.source, 'provider_response');
       assert.equal(cost('video-asset')?.amountCnyMicros, '14000000');
       assert.equal(cost('video-token')?.amountCnyMicros, '7000000');
       assert.equal(cost('video-rate')?.amountCnyMicros, '5617284');
       assert.equal(byId.get('video-bill')?.confirmedCostCnyMicros, '1400000');
-      for (const id of ['video-bill', 'video-upgrade', 'video-failed', 'image-failed', 'image-unknown', 'image-unpriced', 'image-other-channel']) assert.equal(cost(id), undefined, id);
+      for (const id of ['video-bill', 'video-upgrade', 'video-failed', 'image-failed', 'image-unknown', 'image-unpriced', 'image-other-channel',
+        'image-recorded-negative', 'video-h3-missing', 'video-h3-not-free']) assert.equal(cost(id), undefined, id);
       const conflicted = { ...byId.get('image-current')!, costStatus: 'conflict' as const, accountingCost: undefined };
       await attachAccountingCosts(db, [{ fact: conflicted, raw: {} }]); assert.equal(conflicted.accountingCost, undefined);
       const ambiguous = { revision: 'conflict', qualityRoutes: {}, rules: [rules[0], { ...rules[0], id: 'duplicate', baseCny: '0.09' }] };
@@ -101,8 +112,8 @@ c.close()
       const expected = summarizeUsageFacts(snapshot.facts), fold = new UsageSummaryFold();
       for (const fact of snapshot.facts) fold.add(fact);
       assert.deepEqual(fold.value(), expected);
-      assert.equal(expected.calculatedCount, 8); assert.equal(expected.calculatedCostCnyMicros, '26947284');
-      assert.equal(expected.accountedCostCnyMicros, '28347284');
+      assert.equal(expected.calculatedCount, 10); assert.equal(expected.calculatedCostCnyMicros, '27395284');
+      assert.equal(expected.accountedCostCnyMicros, '28795284');
       const cash = publicUsageCash(snapshot.facts, snapshot.cashEvents), publicFold = new PublicUsageSummaryFold();
       for (const fact of snapshot.facts) {
         const record: UsageRecordDTO = { id: `${fact.sourceKind}:${fact.sourceId}`, sourceKind: fact.sourceKind, type: fact.kind === 'video' ? 'video' : 'image', occurredAt: fact.occurredAt, status: fact.status, model: fact.model,
@@ -122,7 +133,7 @@ c.close()
       const raw = await db.$queryRaw<Array<{ count: number }>>`SELECT count(*) AS count FROM CostLedger`;
       assert.equal(Number(raw[0].count), 1);
       assert.ok(snapshot.sourceFingerprintParts.some(part => part.includes('frozen-old')));
-      return { checks: 23, calculatedCount: expected.calculatedCount, accountedCnyMicros: expected.accountedCostCnyMicros, actualCnyMicros: cash.netCnyMicros };
+      return { checks: 31, calculatedCount: expected.calculatedCount, accountedCnyMicros: expected.accountedCostCnyMicros, actualCnyMicros: cash.netCnyMicros };
     }, { dataAsOf: '2026-11-05T12:00:00Z' });
     process.stdout.write(`${JSON.stringify({ ok: true, offlineFixture: true, ...result })}\n`);
   } finally {
