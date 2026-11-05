@@ -5121,6 +5121,28 @@ body.compare-fullscreen-open {
   background: var(--bg-input);
 }
 
+/* Keep the document as the main scroller so workspace sidebars can stick to it. */
+body:has(.shell-root) {
+  overflow-x: clip;
+}
+
+/* Opt in navigation panes without changing page scrolling or virtual lists. */
+:where([data-sidebar-scroll]) {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scroll-padding-block: 8px;
+}
+
+:where([data-sidebar-scroll="page"]) {
+  position: sticky;
+  top: var(--sidebar-scroll-top, var(--composer-topbar-height, 48px));
+  align-self: start;
+  max-height: max(0px, calc(100dvh - var(--sidebar-scroll-top, var(--composer-topbar-height, 48px)) - var(--sidebar-scroll-gap, 0px)));
+}
+
 .shell-topbar {
   position: sticky;
   top: 0;
@@ -5406,10 +5428,14 @@ body.compare-fullscreen-open {
 .shell-projects-workspace .shell-nav-link.active { background: color-mix(in srgb, #51b5bc 12%, var(--bg-panel)); border-color: color-mix(in srgb, #51b5bc 35%, var(--border-color)); color: #8fd3d5; }
 
 .shell-sidebar {
-  min-height: calc(100vh - 73px);
+  min-height: 0;
   padding: 18px 14px;
   background: oklch(0.985 0.004 245);
   border-right: 1px solid oklch(0.91 0.012 245);
+}
+
+.shell-sidebar:not(.shell-sidebar-mobile) {
+  height: calc(100dvh - var(--composer-topbar-height, 48px));
 }
 
 .shell-nav-group + .shell-nav-group {
@@ -10687,6 +10713,7 @@ body.compare-fullscreen-open {
 }
 
 .admin-template-list {
+  --sidebar-scroll-gap: 12px;
   align-content: start;
   display: grid;
   gap: 9px;
@@ -10941,6 +10968,11 @@ body.compare-fullscreen-open {
   padding: 14px;
   position: sticky;
   top: 98px;
+}
+
+.template-library-filters {
+  --sidebar-scroll-gap: 12px;
+  top: var(--composer-topbar-height, 48px);
 }
 
 .template-library-search {
@@ -13326,6 +13358,15 @@ body.compare-fullscreen-open {
     display: none;
   }
 
+  .admin-template-shell:not(.is-workspace) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-template-list[data-sidebar-scroll] {
+    position: static;
+    max-height: min(40dvh, 320px);
+  }
+
   .composer-topbar {
     gap: 6px;
     padding: 4px 12px;
@@ -13497,6 +13538,12 @@ body.compare-fullscreen-open {
   .template-library-filters,
   .template-library-preview {
     position: static;
+  }
+
+  .template-library-filters {
+    max-height: none;
+    overflow: visible;
+    scrollbar-gutter: auto;
   }
 
   .template-library-filter-list {

@@ -13,7 +13,7 @@
   top: var(--composer-topbar-height, 48px);
   align-self: start;
   height: calc(100dvh - var(--composer-topbar-height, 48px));
-  min-height: 400px;
+  min-height: 0;
   overflow-y: auto;
   border-right: 1px solid var(--border-color);
   background: oklch(0.18 0.006 160);
@@ -42,6 +42,7 @@
 
 .workspaceLinks {
   padding: 23px 13px 16px;
+  overscroll-behavior-y: contain;
 }
 
 .workspaceLinks h1 {
@@ -605,8 +606,10 @@
     top: auto;
     height: auto;
     min-height: 0;
+    max-height: none;
     margin-bottom: 16px;
     overflow: visible;
+    scrollbar-gutter: auto;
     border: 0;
     background: transparent;
   }

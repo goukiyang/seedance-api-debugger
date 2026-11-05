@@ -116,6 +116,7 @@
 
 .layout { display: grid; grid-template-columns: minmax(245px, 290px) minmax(0, 1fr); min-height: calc(100dvh - 166px); }
 .sidebar {
+  --sidebar-scroll-gap: 12px;
   min-width: 0;
   padding: 16px 12px 24px;
   border-right: 1px solid var(--line);
@@ -305,9 +306,9 @@
   .viewTabs button { flex: 0 0 auto; padding-inline: 9px; }
   .headerActions { width: 100%; justify-content: flex-start; }
   .layout { grid-template-columns: minmax(0, 1fr); }
-  .sidebar { padding: 12px 12px 8px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .sidebar { position: static; max-height: none; overflow: visible; scrollbar-gutter: auto; padding: 12px 12px 8px; border-right: 0; border-bottom: 1px solid var(--line); }
   .sidebarSection + .sidebarSection { margin-top: 15px; }
-  .list { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); max-height: 250px; overflow: auto; }
+  .list { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); max-height: 250px; overflow: auto; overscroll-behavior-y: contain; }
   .content { padding: 15px 12px 28px; }
   .contentHeader { align-items: flex-start; flex-direction: column; }
   .twoFields { grid-template-columns: minmax(0, 1fr); }

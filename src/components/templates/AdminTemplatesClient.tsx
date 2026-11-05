@@ -257,7 +257,7 @@ export function AdminTemplatesClient({ initialTemplateId = null, initialCardId =
 
       <section className={detailWorkspaceMode ? 'admin-template-shell is-workspace' : 'admin-template-shell'}>
         {!detailWorkspaceMode && (
-          <aside className="admin-template-list">
+          <aside className="admin-template-list" data-sidebar-scroll="page">
             {loading && (templates.length ? <LoadingStatus>正在更新模板</LoadingStatus> : <LoadingSkeleton label="正在读取模板" />)}
             {!loading && error && <div className="admin-template-state is-error">{error}</div>}
             {!loading && !error && templates.length === 0 && (

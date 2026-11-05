@@ -62,7 +62,7 @@ export default function SideNav({ isAdmin, user, mobile = false, onNavigate }: S
   const pathname = usePathname();
   const inAdmin = isAdmin && (pathname === '/admin' || pathname.startsWith('/admin/'));
   return (
-    <aside className={mobile ? 'shell-sidebar shell-sidebar-mobile' : 'shell-sidebar'} aria-label="页面导航">
+    <aside className={mobile ? 'shell-sidebar shell-sidebar-mobile' : 'shell-sidebar'} data-sidebar-scroll={mobile ? 'pane' : 'page'} aria-label="页面导航">
       {(!inAdmin || mobile) && userNavGroups.map((group) => (
         <SideNavGroup group={group} user={user} onNavigate={onNavigate} key={group.title} />
       ))}

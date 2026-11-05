@@ -1371,7 +1371,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   };
   const imageSectionOpen = imageGenerationExpanded;
   return <>{productDialog}{deletion.productDialog}{(<main ref={pageRef} className={`${styles.page} ${templateWorkbench ? styles.templateWorkbench : ''}`}>
-    <aside className={styles.moduleRail} data-remember-scroll="image-groups" aria-label={templateWorkbench ? '模板导航' : '分组快捷栏'}>
+    <aside className={styles.moduleRail} data-sidebar-scroll="pane" data-remember-scroll="image-groups" aria-label={templateWorkbench ? '模板导航' : '分组快捷栏'}>
       {templateWorkbench ? <>
         <div className={styles.moduleRailTitle}>模板工作台</div>
         <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-current={coverView ? 'page' : undefined} onClick={navigateToCovers}>全部封面<small>{directoryPaging.total}项</small></button>

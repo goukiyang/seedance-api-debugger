@@ -1729,7 +1729,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
       </header>
 
       <div className={styles.layout}>
-        <aside className={styles.sidebar} data-remember-scroll="video-groups">
+        <aside className={styles.sidebar} data-sidebar-scroll="page" data-remember-scroll="video-groups">
           {view === 'templates' ? (
             <>
               <section className={styles.sidebarSection} aria-label="模板目录">

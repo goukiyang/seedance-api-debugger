@@ -140,7 +140,7 @@
 .au-record-details dd { margin-top: 2px; word-break: break-word; }
 .au-master-detail { display: grid; grid-template-columns: minmax(220px, 270px) minmax(0, 1fr); align-items: start; gap: 24px; }
 .au-master-pane, .au-detail-pane { min-width: 0; }
-.au-master-pane { border-right: 1px solid var(--au-line); padding-right: 20px; }
+.au-master-pane { --sidebar-scroll-gap: 12px; border-right: 1px solid var(--au-line); padding-right: 20px; }
 .au-directory-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
 .au-directory-search { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .au-directory-search .input { flex: 1 1 120px; width: 120px; }
@@ -243,7 +243,7 @@
 @media (max-width: 850px) {
   .admin-usage-page { padding: 18px; }
   .au-master-detail { display: block; }
-  .au-master-pane { border: 0; padding: 0; }
+  .au-master-pane { position: static; max-height: none; overflow: visible; scrollbar-gutter: auto; border: 0; padding: 0; }
   .au-view-members .au-detail-pane, .au-view-projects .au-detail-pane { display: none; }
   .au-show-detail .au-master-pane { display: none; }
   .au-show-detail .au-detail-pane { display: block; }

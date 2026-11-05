@@ -289,7 +289,7 @@ export function TemplateLibraryClient() {
       </section>
 
       <section className="template-library-shell" aria-label="模板库">
-        <aside className="template-library-filters" aria-label="模板筛选">
+        <aside className="template-library-filters" data-sidebar-scroll="page" aria-label="模板筛选">
           <label className="template-library-search">
             <Search size={16} aria-hidden="true" />
             <input

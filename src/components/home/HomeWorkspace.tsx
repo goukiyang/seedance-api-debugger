@@ -285,7 +285,7 @@ export default function HomeWorkspace({ accountId, internal, images, admin, work
   ];
 
   return <div className={styles.page}>
-    <aside className={styles.sidebar}>
+    <aside className={styles.sidebar} data-sidebar-scroll="page">
       <button ref={menuButton} type="button" className={styles.workspaceToggle} aria-expanded={workspaceOpen} aria-controls="home-workspace-links" onClick={() => setOpen(value => !value)}>
         <Menu size={18} aria-hidden="true" />工作区
       </button>
