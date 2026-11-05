@@ -1,5 +1,7 @@
 'use client';
 
+import TemplateUsageCount from '@/components/template-studio/TemplateUsageCount';
+
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Copy, Download, ExternalLink, Image as ImageIcon, Music, X, Undo2, RefreshCw, RotateCcw } from 'lucide-react';
@@ -445,6 +447,7 @@ function AccountCollections({ action, userId, urlCategory, urlQuery, hasContent,
       <div className={styles.body}>{item.category === 'template' ? <TemplateFavoriteTitle contentKey={item.key} initialState={item.state} onChange={(state, act, active, previous) => changed(item, state, act, active, previous)}><h3 className={styles.title} title={item.content?.title || '内容已不可用'}>{item.content?.title || '内容已不可用'}</h3></TemplateFavoriteTitle> : <h3 className={styles.title}>{item.content?.title || '内容已不可用'}</h3>}{item.content?.owner && <UserIdentityBadge size="sm" user={item.content.owner} />}
         <span className={styles.muted}>{item.category === 'template' ? '收藏于' : '喜欢于'} <RelativeTime value={item.markedAt} /></span>
         {item.content?.versionLabel && <span className={styles.muted}>{/^\d{4}-\d{2}-\d{2}T/.test(item.content.versionLabel) ? <>{item.category === 'prompt' ? '生成于' : '更新于'} <RelativeTime value={item.content.versionLabel} /></> : <>版本：{item.content.versionLabel}</>}</span>}
+        {item.category === 'template' && <TemplateUsageCount count={item.content?.usageCount} />}
         {item.content?.templateKind && <span className={styles.muted}>{item.content.templateKind === 'workpage' ? '我的工作页' : '模板'} · {item.content.templateMedium === 'image' ? '图片' : '视频'}</span>}
         {item.content?.generationOrigin && <span className={styles.muted}>{item.content.generationOrigin.label}{item.content.generationOrigin.templateName ? ` · ${item.content.generationOrigin.templateName}` : ''}</span>}
         <div className={styles.actions}>{!['image', 'video', 'audio', 'template'].includes(item.category) && <ContentReactions contentKey={item.key} initialState={item.state} onChange={(state, act, active, previous) => changed(item, state, act, active, previous)} />}

@@ -17,6 +17,7 @@ export type ReactionState = {
 };
 
 export type ContentSummary = {
+  usageCount?: number | null;
   key: ContentKey;
   category: ContentCategory;
   title: string;

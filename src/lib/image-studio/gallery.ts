@@ -1,3 +1,4 @@
+import { templateUsageCounts } from '@/lib/template-studio/usage-counts';
 import 'server-only';
 import { createHash } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
@@ -156,7 +157,9 @@ export async function queryStudioGallery(user: ImageStudioIdentity, raw: unknown
       : sort === 'name' ? a.name.localeCompare(b.name, 'zh-CN') : directoryCompare(a, b)) || a.key.localeCompare(b.key));
     const pageSize = input.pageSize || 12, page = Math.min(input.page || 1, Math.max(1, Math.ceil(matches.length / pageSize)));
     const items: GalleryItem[] = [];
-    for (const entry of input.navigationOnly ? [] : matches.slice((page - 1) * pageSize, page * pageSize)) {
+    const pageEntries = input.navigationOnly ? [] : matches.slice((page - 1) * pageSize, page * pageSize);
+    const usage = await templateUsageCounts(tx, catalog.actor.id, pageEntries.filter(entry => entry.available).map(entry => entry.key));
+    for (const entry of pageEntries) {
       const target = catalog.targets.get(entry.key);
       let fixedCover: GalleryItem['fixedCover'] = null, banner: GalleryItem['banner'] = null;
       let cover: GalleryItem['cover'] = null;
@@ -179,7 +182,7 @@ export async function queryStudioGallery(user: ImageStudioIdentity, raw: unknown
           }
         }
       }
-      items.push({ ...entry, fixedCover, banner, cover, originalActions: { open: true, editCover: entry.coverEditable, deletion: entry.deletion } });
+      items.push({ ...entry, usageCount: entry.available ? usage.get(entry.key) ?? null : null, fixedCover, banner, cover, originalActions: { open: true, editCover: entry.coverEditable, deletion: entry.deletion } });
     }
     return { items, navigation: entries, matches, total: matches.length, page, pageSize, catalogRevision: revision, capabilities: { independentReactions: true },
       removedDefaultGroups: await getStudioRemovedDefaultGroups(catalog.actor.id, catalog.client),

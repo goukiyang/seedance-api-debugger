@@ -1,3 +1,4 @@
+import { templateUsageCounts } from './usage-counts';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
@@ -195,7 +196,8 @@ export async function listStudioTemplates(user: SessionUser, query: { cursor?: s
   const nextCursor = merged.length > TEMPLATE_PAGE_SIZE && last
     ? encodeCursor(`${last.updatedAt.toISOString()}|${last.id}`)
     : null;
-  return { items: page.map(({ dto }) => dto), nextCursor };
+  const usage = await templateUsageCounts(prisma, user.id, page.map(({ dto }) => `${dto.source === 'legacy' ? 'legacy_template' : 'video_template'}:${dto.id}`));
+  return { items: page.map(({ dto }) => ({ ...dto, usageCount: usage.get(`${dto.source === 'legacy' ? 'legacy_template' : 'video_template'}:${dto.id}`) ?? null })), nextCursor };
 }
 
 export async function getStudioTemplate(user: SessionUser, id: string, source: 'legacy' | 'studio' = 'studio', includePrivate = false) {

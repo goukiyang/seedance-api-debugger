@@ -1,5 +1,7 @@
 'use client';
 
+import TemplateUsageCount from './TemplateUsageCount';
+
 import { useProductDialog } from '@/components/useProductDialog';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
 import TemplateFavoriteTitle from '@/components/content-reactions/TemplateFavoriteTitle';
@@ -1749,7 +1751,7 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                   {templates.map((template) => (
                     <div key={`${template.source}:${template.id}`} className={styles.templateListItem}><button type="button" className={styles.listItem} aria-current={template.id === routedTemplateId && template.source === routedTemplateSource} onClick={() => void openTemplateDetail(template)}>
                       <span className={styles.listItemTitle}>{template.name || '未命名模板'}</span>
-                      <span className={styles.listItemMeta}><span>{template.groupName || '未分组'}</span><span>V{template.version?.number || '草稿'}</span><span className={`${styles.status} ${statusClass(template.status)}`}>{template.status === 'published' ? '可用' : template.status === 'archived' ? '已停用' : '草稿'}</span></span>
+                      <span className={styles.listItemMeta}><span>{template.groupName || '未分组'}</span><span>V{template.version?.number || '草稿'}</span><TemplateUsageCount count={template.usageCount} /><span className={`${styles.status} ${statusClass(template.status)}`}>{template.status === 'published' ? '可用' : template.status === 'archived' ? '已停用' : '草稿'}</span></span>
                       {template.owner && <span className={styles.owner}><UserIdentityBadge size="sm" user={{ name: template.owner.displayName, avatar_url: template.owner.avatarUrl }} /></span>}
                     </button>
                     {template.status !== 'archived' && <ContentReactions contentKey={`${template.source === 'legacy' ? 'legacy_template' : 'video_template'}:${template.id}`} favoriteOnly />}
@@ -2135,7 +2137,7 @@ function TemplateOverview({
   return (
     <>
       <div className={styles.contentHeader}>
-        <div className={styles.templateHeading}><TemplateFavoriteTitle contentKey={template.status !== 'archived' ? `${template.source === 'legacy' ? 'legacy_template' : 'video_template'}:${template.id}` : undefined}><h2 title={template.name || '未命名模板'}>{template.name || '未命名模板'}</h2></TemplateFavoriteTitle><p>{template.description || '暂无说明'} · {template.groupName || '未分组'} · {isLegacy ? '旧版模板' : template.version ? `版本 V${template.version.number}` : '尚未发布'}</p></div>
+        <div className={styles.templateHeading}><TemplateFavoriteTitle contentKey={template.status !== 'archived' ? `${template.source === 'legacy' ? 'legacy_template' : 'video_template'}:${template.id}` : undefined}><h2 title={template.name || '未命名模板'}>{template.name || '未命名模板'}</h2></TemplateFavoriteTitle><p>{template.description || '暂无说明'} · {template.groupName || '未分组'} · {isLegacy ? '旧版模板' : template.version ? `版本 V${template.version.number}` : '尚未发布'} · <TemplateUsageCount count={template.usageCount} /></p></div>
         <div className={styles.headerActions}>
           <button className={styles.quietButton} type="button" onClick={onBack}>返回模板列表</button>
           {!isLegacy && template.canManage && <button className={styles.quietButton} type="button" onClick={onEdit}><Settings size={15} />模块上下文</button>}

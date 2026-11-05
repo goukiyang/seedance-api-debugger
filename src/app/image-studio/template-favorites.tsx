@@ -1,5 +1,7 @@
 'use client';
 
+import TemplateUsageCount from '@/components/template-studio/TemplateUsageCount';
+
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import * as Popper from '@radix-ui/react-popper';
@@ -192,7 +194,7 @@ function FavoriteList({ data, selected, busy, onSelect }: { data: ReturnType<typ
     {data.writeError && <p role="alert">{data.writeError}{data.unconfirmed && <button type="button" disabled={data.writing} onClick={() => void data.retry().catch(() => undefined)}>重试保存</button>}</p>}
     {data.items.map(item => <div key={item.key} className={styles.row}>
       <button type="button" className={styles.item} disabled={busy || !item.content || !item.state.available} aria-pressed={selected === item.key} title={name(item)} onClick={() => onSelect(item)}>
-        <span>{name(item)}</span><small>{item.content ? item.key.startsWith('image_') ? '图片' : '视频' : '不可用 · 收藏保留'}</small>
+        <span>{name(item)}</span><small>{item.content ? item.key.startsWith('image_') ? '图片' : '视频' : '不可用 · 收藏保留'}{item.content?.usageCount !== undefined && <> · <TemplateUsageCount count={item.content.usageCount} /></>}</small>
       </button>
       <div className={styles.menuHost}><Popper.Root><Popper.Anchor asChild><button type="button" className={styles.rowAction} title="管理这条收藏" aria-label={`管理${name(item)}`}
         disabled={disabled || data.unconfirmed} aria-haspopup="dialog" aria-controls={`${menuId}-${item.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`}

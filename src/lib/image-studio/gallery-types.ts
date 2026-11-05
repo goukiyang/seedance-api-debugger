@@ -14,6 +14,7 @@ export type GalleryNavigationItem = {
   reaction: ReactionState | null; coverEditable: boolean; deletion: StudioDeletionCapability;
 };
 export type GalleryItem = GalleryNavigationItem & {
+  usageCount?: number | null;
   fixedCover: ModuleCoverDTO | null;
   cover?: { thumbnailUrl: string; resultUrl: string } | null;
   banner: { id: string; thumbnailUrl: string; originalUrl: string; width: number | null; height: number | null } | null;

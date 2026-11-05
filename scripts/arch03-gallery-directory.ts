@@ -3,6 +3,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { galleryDirectorySql } from '../src/lib/image-studio/gallery-directory-sql';
 import { queryStudioGallery } from '../src/lib/image-studio/gallery';
 import { sharedCommandFingerprint } from '../src/lib/image-studio/shared-command-storage';
+import { verifyTemplateUsageCounts } from './template-usage-counts-checks';
 
 export async function verifyGalleryDirectory(db: PrismaClient) {
   const owner = 'catalog-writer-fixture', other = 'catalog-gallery-publisher';
@@ -37,6 +38,7 @@ export async function verifyGalleryDirectory(db: PrismaClient) {
   const unionSql = await galleryDirectorySql(db, actor, unionQuery);
   assert.deepEqual(unionReference.matches.map(row => row.key).sort(), expectedFavorites);
   assert.deepEqual((await unionSql.rows(1, 24)).map(row => row.key).sort(), expectedFavorites);
+  const usageCounts = await verifyTemplateUsageCounts(db, owner, other, module);
   let comparisons = 0;
   for (const sort of ['created', 'updated', 'likes', 'recent', 'directory'] as const) for (const scope of ['all', 'mine', 'shared', 'favorites'] as const) {
     const query = { sort, scope, page: 2, pageSize: 12, navigationOnly: true,
@@ -58,5 +60,5 @@ export async function verifyGalleryDirectory(db: PrismaClient) {
   assert.deepEqual(page.items, reference.items);
   await db.user.update({ where: { id: other }, data: { name: 'Updated Publisher' } });
   await assert.rejects(readGalleryPage(db, actor, { sort: 'created', page: 2, pageSize: 12, catalogRevision: page.catalogRevision }), /目录已变化/);
-  return { comparisons, historicalTemplateMarksUnion: true, accountIsolatedMarks: true, exactCounts: true, canonicalDuplicateWinner: true, authorSearch: true, maximumPage: 24, realPageProjection: true, revisionInvalidatedByUser: true };
+  return { comparisons, usageCounts, historicalTemplateMarksUnion: true, accountIsolatedMarks: true, exactCounts: true, canonicalDuplicateWinner: true, authorSearch: true, maximumPage: 24, realPageProjection: true, revisionInvalidatedByUser: true };
 }
