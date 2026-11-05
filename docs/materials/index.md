@@ -1,5 +1,11 @@
 # 项目资料索引
 
+<!-- TEMPLATE-MARK01-MATERIALS-20261104 -->
+## TEMPLATE-MARK01 模板喜欢与收藏合并（2026-11-04）
+
+[固定todo](../../tasks/todo.md#template-mark01-模板喜欢与收藏合并2026-11-04)；[正式回执](2026-11-04-template-favorites-unified/release/attempt02/)。v0.131.2／d09830e269／BUILD -zSf7_X7lT7IQ4vWtTeJl已部署，guard ca7a7d5ea9。单爱心、旧并集、私人收藏、原号/CAS和分组保留；双完整构建、真实SQLite20组对照、6启动门、7服务4timer、公网产物及两个401、价格/数据保护有证。待用户手动验收，无真实收藏/收费/浏览器测试。原失败、接续和恢复入口见同一todo及私有回执，不以文档HEAD冒运行源。
+<!-- /TEMPLATE-MARK01-MATERIALS-20261104 -->
+
 <!-- BR-FEEDBACK01-20261102 -->
 ## BR-FEEDBACK01 插件右上角信封反馈入口（2026-11-02）
 
