@@ -1,4 +1,5 @@
-import { RMB_INTEGER_ROUNDING, type PricingAdminFilter, type PricingAdminRow } from './admin-contract';
+import { PRICING_ADMIN_LIMITS, RMB_INTEGER_ROUNDING, type PricingAdminFilter, type PricingAdminRow } from './admin-contract';
+import { compareDecimal, multiplyDecimal, normalizeDecimal, PricingNumberError, roundFixedPricingCredits } from './math';
 import { imageStudioQualityLabel } from '@/lib/image-studio/model-catalog';
 import type { ImageQualityRoutes } from '@/lib/image-studio/quality-routing';
 
@@ -44,6 +45,24 @@ export function canEditPricingBase(row: PricingAdminRow, globalRate: string | nu
 
 export function showPricingImageRow(row: PricingAdminRow, globalRate: string | null | undefined, includeAlternate: boolean) {
   return canEditPricingBase(row, globalRate) && (row.isDefault || includeAlternate);
+}
+
+export function pricingDisplayFixedCredits(
+  row: PricingAdminRow, quantity: string, draft?: { amount: string; rate: string | null | undefined; rounding: PricingAdminRow['rounding'] },
+) {
+  if (row.identity.billingMode !== 'fixed' || row.availability !== 'ready' || row.mode === 'free') return null;
+  try {
+    const amount = draft ? draft.amount : row.baseCny;
+    const rate = draft ? draft.rate : row.currentPointsPerCny;
+    if (!amount || !rate) return null;
+    normalizeDecimal(amount, { max: PRICING_ADMIN_LIMITS.baseMax, maxScale: PRICING_ADMIN_LIMITS.baseScale, allowZero: false });
+    const credits = roundFixedPricingCredits(multiplyDecimal([amount, rate, quantity]), draft ? draft.rounding : row.rounding);
+    const limit = row.identity.unit === 'image' ? PRICING_ADMIN_LIMITS.maxImageCredits : PRICING_ADMIN_LIMITS.maxTaskCredits;
+    return compareDecimal(credits, limit) <= 0 ? credits : null;
+  } catch (error) {
+    if (error instanceof PricingNumberError) return null;
+    throw error;
+  }
 }
 
 export const allPricingFilters: PricingAdminFilter = { kind: 'all', difference: 'all', defaultsOnly: false, search: '', channelId: '', basisKind: undefined };
