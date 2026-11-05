@@ -40,3 +40,11 @@
 - 小修沿既有授权及项目工程检查执行；结构性、大范围及影响不明事项先出方案等用户确认。功能验收仍由用户手动完成，不以构建、推送或健康检查冒充通过。
 
 - **D-20261104-TEMPLATE-MARK-LIST-SCALE｜个人收藏列表先全量解析再分页｜待核线索 / P3**：`/api/content-reactions` 的模板组织列表沿 `listReactions` 先读取本账号全部有效标记，逐条 `resolveReactionContent` 后再截取页；分组统计也读本账号模板标记。实现事实已核，当前收藏数量、请求耗时和瓶颈未测，不能判成已发生的性能故障，也不把它归因于本次统一标记。CP01/ARCH03封面目录的有限SQL分页仍保留。本轮不扩为重构；后续如列表卡顿，先固定真实账号、标记量、权限条件，测一次请求耗时/查询数，再决定是否将组织列表接入相同授权投影与分页，不能先分页后漏权限/搜索结果。来源：TEMPLATE-MARK01，`src/lib/content-reactions/service.ts:listReactions`、`template-favorites.ts:favoriteOrganization`；未做浏览器或生产规模测试。
+
+<!-- CUTOUT-WORKER-OFFLINE-20261105 -->
+### CUTOUT-WORKER-OFFLINE：抠图原生计算端离线（2026-11-05）
+
+已确认：原计算进程在联合API发布前已掉线；恢复原应用进程后仍无真实心跳，API与RabbitMQ可达、无在途任务。launchctl遗留127.0.0.1代理让原HTTPX链ConnectError；仅在项目私有配置加抠图两域名与loopback的NO_PROXY后，同库public health变200，未改系统代理、原身份或权限。
+
+待核线索：心跳先读取模型状态，app包会连带导入FastAPI；只读独立诊断曾停在依赖元数据读取，尚不能证明实际worker死锁或确定全部根因。当前页面继续按真实worker能力拦住新增处理；没有创建测试图或伪造心跳。项目开放授权与API隔离已部署，不等同原生计算端已恢复。详细脱敏证据见docs/materials/2026-11-05-plugin-download-cover-sharing/worker-recovery.json。
+<!-- /CUTOUT-WORKER-OFFLINE-20261105 -->

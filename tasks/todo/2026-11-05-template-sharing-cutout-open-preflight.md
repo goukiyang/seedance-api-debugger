@@ -188,3 +188,7 @@ guard原生/价格完整通过后，包装输入误将两个reader标签串成�
 业务key签发沿原管理API逐条持久回执，未知/保存失败即停，不重签；真实25条identity/history均核准。应用绑定前两包完整构建和6门通过；无schema、数据覆盖或计费通道调整。真实图片处理、共享/下载/安装仍用户手验。上游实际源7e28858，后续测试/资料31756a7未改运行代码。
 
 恢复入口为同run的recovery-commands.sh，只回新guard d2d8f2240，保新增业务身份、上游identity和全部数据；未做线上回退演练，不冒通过。Mac真实心跳接续见后续worker-recovery脱敏证据，不能以人工心跳或health200冒就绪。
+
+### 原生计算端接续证据（2026-11-05）
+
+原有AI Cutout Mac进程已按原bundle及身份恢复，私有项目NO_PROXY已修正继承代理导致的HTTPX ConnectError；全局网络设置未改。当前仍没有真实worker心跳，页面继续禁用新增处理。模型状态导入连带加载FastAPI是待核线索，不能写成已证实死锁。未上传用户图片、创建真实任务或人为补心跳；详细脱敏记录为本单materials内worker-recovery.json。此阻点保留，不能以网站/API部署成功冒抠图可用。
