@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '角色图片与提示词同步', outline: [
-  '切换生成图片时同步查看当次提示词和参考来源',
-  '沿用设置与按原设置重做分开，保留下一次输入',
-  '角色微调、正背面和成品来源一起追溯',
+const notice = { title: '工作区侧栏统一', outline: [
+  '项目、任务和图集统一使用作品广场侧栏',
+  '补齐用量、费率、账户与帮助入口',
+  '保留筛选、分页和返回浏览位置',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
