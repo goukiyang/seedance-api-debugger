@@ -11,6 +11,8 @@
 <!-- LEDGER-RATE-ACCOUNTING-MATERIALS-20261105 -->
 ## COST-CHECK01 账本费用核算接入（2026-11-05）
 
+当前价重算v0.134.1 / aff41ac30 / BUILD yInCrZREmBsu5NEEsZ-R6已于UTC 2026-11-06T06:04:46Z部署，待用户手验。[原单](../../tasks/todo/2026-11-05-ledger-rate-accounting.md)、[公网收口](2026-11-05-ledger-rate-accounting/release/attempt05/public-deployed.json)、[主/guard配对](2026-11-05-ledger-rate-accounting/release/attempt05/source-pair-contract.json)、[完整构建](2026-11-05-ledger-rate-accounting/release/attempt05/main-build-success.json)、[健康](2026-11-05-ledger-rate-accounting/release/attempt05/service-health.json)。统一当前参考价/折合点数，不混加历史实扣；旧型号及默认档可编辑，失败/在途不计合计，导出保快照。3448视频+763图片全有价，11文字+1排队抠图待设置；不改原账/旧点数/费率，无DDL/收费生成/浏览器验收。继承765与d2ee guard，窗口已释放；下方为旧批次证据。
+
 追加已部署v0.133.6 / 213c0596e / BUILD72IjU8mLcMmyT8I1ANeIB，19:52:26Z收口，待用户手验。[追加发布回执](2026-11-05-ledger-rate-accounting/release/attempt03/public-deployed.json)、[最终只读核对](2026-11-05-ledger-rate-accounting/release/followup-gap-audit/sd2-cost-gap-after1336-20261105.json)、[剩余351条清单](2026-11-05-ledger-rate-accounting/release/followup-gap-audit/sd2-remaining-cost-gaps-20261105.csv)。97图片旧参考价及3明确免费H3已补算；31专项及完整候选工程通过，原费率/账本/点数保持。下列为首批发布历史。
 
 [原单](../../tasks/todo/2026-11-05-ledger-rate-accounting.md)；正式根私有[发布原证](2026-11-05-ledger-rate-accounting/release/attempt02/public-deployed.json)及[源配对](2026-11-05-ledger-rate-accounting/release/attempt02/source-pair-contract.json)。v0.133.4 / 0b166d223a / BUILD pwKGQBXWQ3e9wpOqTfwgG于19:09:56Z保护部署，待用户手验。视频资产费用/图片确认人民币费率接入只读账本，原实扣优先，不改原价格/账本/扣点，无DDL；23项隔离检查和最终完整构建、服务/公网/数据保护通过。guard1d452原产物保持；此前候选未部署，旧证据时间保留。

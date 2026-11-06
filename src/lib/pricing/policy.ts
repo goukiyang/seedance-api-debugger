@@ -29,6 +29,7 @@ import { emptyPricingAuthoring, parsePricingAuthoring, pricingAuthoringContent, 
 type Actor = Pick<PricingAdminActor, 'id'>;
 type Standards = Record<PricingAdminBasis, string | null>;
 type StoredRule = {
+  pricingEnabled?: boolean;
   rounding?: typeof RMB_INTEGER_ROUNDING;
   id: string; identity: PricingAdminIdentity; mode: PricingAdminRow['mode']; basisKind: PricingAdminBasis;
   baseCny: string | null; source: PricingAdminSource | null; exchangeRate: PricingAdminExchange | null;
@@ -98,8 +99,12 @@ function exchangeInput(value: unknown): PricingAdminExchangeInput {
     rate: normalized, effectiveFrom: new Date(time).toISOString(), source: sourceInput(value.source) };
 }
 function rowChange(value: unknown): PricingAdminRowChange {
-  keys(value, ['id', 'mode', 'customPointsPerCny', 'basisKind', 'base', 'exchangeRate', 'specifications', 'authoringRateMode', 'baseRelation', 'evidence', 'rounding']);
+  keys(value, ['id', 'mode', 'customPointsPerCny', 'basisKind', 'base', 'exchangeRate', 'specifications', 'authoringRateMode', 'baseRelation', 'evidence', 'rounding', 'pricingEnabled']);
   const result: PricingAdminRowChange = { id: textValue(value.id, 160) };
+  if (Object.hasOwn(value, 'pricingEnabled')) {
+    if (typeof value.pricingEnabled !== 'boolean') fail('费率启停状态无效');
+    result.pricingEnabled = value.pricingEnabled;
+  }
   if (value.rounding !== undefined) {
     if (value.rounding !== RMB_INTEGER_ROUNDING) fail('扣点取整规则无效');
     result.rounding = value.rounding;
@@ -226,10 +231,12 @@ function parsePolicy(raw: string): Policy {
         || typeof rule.identity.channelId !== 'string' || typeof rule.identity.modelId !== 'string'
         || !['fixed', 'actual'].includes(String(rule.identity.billingMode)) || !['image', 'second'].includes(String(rule.identity.unit))
         || Object.values(rule.identity.specifications).some(item => typeof item !== 'string') || !isBasis(rule.basisKind)
-        || !['follow', 'custom', 'free', 'legacy_fixed', 'legacy_actual'].includes(String(rule.mode))
+        || !['follow', 'custom', 'free', 'legacy_fixed', 'legacy_actual', 'unset'].includes(String(rule.mode))
         || !record(rule.binding) || ['configRevision', 'billingPrincipalId', 'credentialVersion', 'configFingerprint'].some(name => typeof (rule.binding as Record<string, unknown>)[name] !== 'string')) corrupt();
       keys(rule, ['id', 'identity', 'mode', 'basisKind', 'baseCny', 'source', 'exchangeRate', 'customPointsPerCny', 'binding',
-        'legacyUnitCredits', 'legacyRounding', 'legacyPointsPerUsd', 'updatedAt', 'rounding']);
+        'legacyUnitCredits', 'legacyRounding', 'legacyPointsPerUsd', 'updatedAt', 'rounding', 'pricingEnabled']);
+      if (Object.hasOwn(rule, 'pricingEnabled') && typeof rule.pricingEnabled !== 'boolean'
+        || rule.mode === 'unset' && rule.pricingEnabled !== false) corrupt();
       keys(rule.identity, ['kind', 'channelId', 'modelId', 'billingMode', 'unit', 'specifications']);
       keys(rule.binding, ['configRevision', 'billingPrincipalId', 'credentialVersion', 'configFingerprint']);
       if (!Number.isFinite(Date.parse(String(rule.updatedAt))) || rule.identity.unit !== (rule.identity.kind === 'image' ? 'image' : 'second')
@@ -274,7 +281,7 @@ function sameBinding(a: PricingCatalogBinding, b: PricingCatalogBinding) {
 }
 function effectiveRow(original: PricingAdminRow, policy: Policy, binding: PricingCatalogBinding): PricingAdminRow {
   const rule = selectPricingRule(policy.rules, original.identity);
-  const result = { ...original };
+  const result = { ...original, pricingEnabled: rule?.pricingEnabled ?? (rule?.mode ?? original.mode) !== 'unset' };
   if (rule) {
     Object.assign(result, { mode: rule.mode, basisKind: rule.basisKind, baseCny: rule.baseCny, source: rule.source,
       exchangeRate: rule.exchangeRate, updatedAt: rule.updatedAt });
@@ -381,10 +388,12 @@ function view(value: PricingAdminRow): PricingAdminPriceView {
   const { mode, baseCny, basisKind, currentPointsPerCny, currentUnitCredits, relativeMultiplier, differencePercent,
     confirmation, hasDifference, exchangeRate, authoringRateMode, authoringEntry, rounding } = value;
   return { mode, baseCny, basisKind, currentPointsPerCny, currentUnitCredits, relativeMultiplier,
-    differencePercent, confirmation, hasDifference, exchangeRate, authoringRateMode, authoringEntry, ...(rounding ? { rounding } : {}) };
+    differencePercent, confirmation, hasDifference, exchangeRate, authoringRateMode, authoringEntry,
+    pricingEnabled: value.pricingEnabled ?? value.mode !== 'unset', ...(rounding ? { rounding } : {}) };
 }
 function toRule(row: PricingAdminRow, binding: PricingCatalogBinding, now: string): StoredRule {
   return { id: row.id, identity: row.identity, mode: row.mode, basisKind: row.basisKind, baseCny: row.baseCny,
+    pricingEnabled: row.pricingEnabled ?? row.mode !== 'unset',
     source: row.source, exchangeRate: row.exchangeRate, customPointsPerCny: row.mode === 'custom' ? row.currentPointsPerCny : null,
     binding, legacyUnitCredits: row.currentUnitCredits, legacyRounding: row.legacyRounding,
     legacyPointsPerUsd: row.legacyPointsPerUsd, updatedAt: now, ...(row.rounding ? { rounding: row.rounding } : {}) };
@@ -405,6 +414,7 @@ async function readRevision(id: string, client: PricingClient): Promise<Revision
   } catch { return corrupt(); }
 }
 function simulationPrice(row: PricingAdminRow, quantity: string, example?: string) {
+  if (row.pricingEnabled === false || row.mode === 'unset') return null;
   if (row.mode === 'free') return { exact: '0', credits: '0.0' };
   if (row.availability !== 'ready') return null;
   if (row.identity.billingMode === 'actual') {
@@ -446,7 +456,7 @@ function simulate(input: PricingAdminPreviewInput['simulation'], before: Pricing
     deltaCredits: delta, differencePercent: percent, rounding: b.mode === 'legacy_fixed' || b.mode === 'legacy_actual' ? b.legacyRounding || 'legacy' : b.rounding ?? 'half_up_tenth',
     adjustedCredits: next?.credits || null, authorizedMaximumCredits: null, isExample: a.identity.billingMode === 'actual',
     roundedToZero: !!next && compareDecimal(next.exact, '0') > 0 && compareDecimal(next.credits, '0') === 0,
-    exactCredits: next?.exact || null, reason: next ? a.identity.billingMode === 'actual' ? '仅为示例，实际费用须匹配真实账单；本试算不建立授权上限' : null : '依据、价格或实际示例金额尚未就绪' };
+    exactCredits: next?.exact || null, reason: b.pricingEnabled === false ? '该费率已停用，不接受新请求' : next ? a.identity.billingMode === 'actual' ? '仅为示例，实际费用须匹配真实账单；本试算不建立授权上限' : null : '依据、价格或实际示例金额尚未就绪' };
 }
 async function prepare(actor: PricingAdminActor, input: PricingAdminPreviewInput, state: State, client: PricingClient,
   confirmedAt = new Date().toISOString()): Promise<Prepared> {
@@ -471,6 +481,10 @@ async function prepare(actor: PricingAdminActor, input: PricingAdminPreviewInput
   }
   const requested = new Set<string>();
   const metadataOnly = new Set<string>();
+  const activationOnly = new Set<string>();
+  const activationBatch = input.action.kind === 'save' && input.action.changes.rows.length > 0
+    && !Object.keys(input.action.changes.standards || {}).length && !input.action.changes.authoring
+    && input.action.changes.rows.every(change => Object.keys(change).every(key => ['id', 'pricingEnabled'].includes(key)));
   const find = (id: string) => { const value = state.rows.find(row => row.id === id); if (!value) fail('所选收费项已删除或不属于当前目录'); return value; };
   const put = (rule: StoredRule) => { const index = next.rules.findIndex(item => item.id === rule.id);
     if (index < 0) next.rules.push(rule); else next.rules[index] = rule; requested.add(rule.id); };
@@ -489,6 +503,13 @@ async function prepare(actor: PricingAdminActor, input: PricingAdminPreviewInput
         authoring.members = authoring.members.filter(id => id !== change.id);
         requested.add(change.id); metadataOnly.add(change.id); continue;
       }
+      if (Object.keys(change).every(key => ['id', 'pricingEnabled'].includes(key))) {
+        const selected = selectPricingRule(next.rules, current.identity);
+        const candidate = selected ? { ...structuredClone(selected), id: current.id, identity: current.identity }
+          : toRule(current, state.catalog.bindings[current.id], now);
+        candidate.pricingEnabled = change.pricingEnabled!; candidate.updatedAt = now;
+        put(candidate); activationOnly.add(current.id); continue;
+      }
       if (Object.keys(current.identity.specifications).length && !next.rules.some(rule => rule.id === current.id)) {
         const fallback = state.rows.find(row => row.identity.kind === current.identity.kind && row.identity.channelId === current.identity.channelId
           && row.identity.modelId === current.identity.modelId && row.identity.billingMode === current.identity.billingMode && !Object.keys(row.identity.specifications).length);
@@ -498,6 +519,7 @@ async function prepare(actor: PricingAdminActor, input: PricingAdminPreviewInput
       if (change.mode === 'legacy_fixed') fail('旧固定价只能从所选历史修订恢复，不能伪造旧价');
       const rule = next.rules.find(item => item.id === current.id) || toRule(current, state.catalog.bindings[current.id], now);
       const candidate = structuredClone(rule);
+      if (change.pricingEnabled !== undefined) candidate.pricingEnabled = change.pricingEnabled;
       const rebind = current.availability === 'needs_review';
       if (rebind && !(current.identity.billingMode === 'actual' ? change.exchangeRate : change.base)) fail(`${current.label}：来源已变化，请明确重新确认依据`);
       candidate.binding = state.catalog.bindings[current.id]; candidate.updatedAt = now;
@@ -598,7 +620,7 @@ async function prepare(actor: PricingAdminActor, input: PricingAdminPreviewInput
       }
     }
   }
-  if (authoringEnabled) {
+  if (authoringEnabled && !activationBatch) {
     const changedParents = new Set(Array.from(requested).filter(id => !metadataOnly.has(id)
       && ((next.rules.find(rule => rule.id === id)?.baseCny ?? null) !== find(id).baseCny
         || authoring.entries[id]?.adoptedRevision !== state.authoring.entries[id]?.adoptedRevision)));
@@ -624,8 +646,12 @@ async function prepare(actor: PricingAdminActor, input: PricingAdminPreviewInput
     }
     for (const id of authoring.members) {
       const current = find(id), projected = effectiveRow(state.catalog.rows.find(row => row.id === id)!, next, state.catalog.bindings[id]);
-      if (!authoring.globalPointsPerCny || !current.enabled || projected.availability !== 'ready' || !projected.canAdopt || projected.mode === 'free') fail(`${current.label}：统一成员不可用或依据待确认，请先明确移出该项，整组未保存`);
+      if (!authoring.globalPointsPerCny || projected.mode === 'free'
+        || projected.pricingEnabled !== false && (!current.enabled || projected.availability !== 'ready' || !projected.canAdopt)) fail(`${current.label}：统一成员不可用或依据待确认，请先明确移出该项，整组未保存`);
       const rule = structuredClone(next.rules.find(item => item.id === id) || toRule(current, state.catalog.bindings[id], now));
+      if (rule.identity.billingMode === 'actual' ? !rule.exchangeRate : !rule.baseCny || !rule.source) {
+        fail(`${current.label}：请先补齐计费依据，再跟随统一费率`);
+      }
       if (rule.mode !== 'custom' || rule.customPointsPerCny !== authoring.globalPointsPerCny) rule.updatedAt = now;
       rule.mode = 'custom'; rule.customPointsPerCny = authoring.globalPointsPerCny; put(rule);
     }
@@ -655,7 +681,7 @@ async function prepare(actor: PricingAdminActor, input: PricingAdminPreviewInput
         put(rule);
       }
       authoring.enhanceGroup = structuredClone(requestedGroup);
-    } else if (Array.from(requested).some(id => state.rows.find(row => row.id === id)?.identity.kind === 'enhance')) delete authoring.enhanceGroup;
+    } else if (Array.from(requested).some(id => !activationOnly.has(id) && state.rows.find(row => row.id === id)?.identity.kind === 'enhance')) delete authoring.enhanceGroup;
   }
   assertNoRuleAmbiguity(next.rules);
   if (next.rules.some(rule => rule.rounding && !['follow', 'custom'].includes(rule.mode))) fail('整点计费需要已生效的人民币基价规则');
@@ -663,15 +689,18 @@ async function prepare(actor: PricingAdminActor, input: PricingAdminPreviewInput
   for (const id of Array.from(requested)) {
     if (metadataOnly.has(id)) continue;
     const value = rows.find(row => row.id === id)!;
+    if (value.pricingEnabled === false) continue;
+    if (!value.enabled || value.availability !== 'ready' || value.mode === 'unset') fail(`${value.label}：费用尚未配置可用，不能启用该费率`);
     if (['follow', 'custom'].includes(value.mode) && (!value.canAdopt || !value.currentPointsPerCny)) fail(`${value.label}：${value.adoptionReason || '请设置有效费率或标准'}`);
     if (value.currentUnitCredits && compareDecimal(value.currentUnitCredits, value.identity.kind === 'image' ? PRICING_ADMIN_LIMITS.maxImageCredits : PRICING_ADMIN_LIMITS.maxTaskCredits) > 0) fail(`${value.label}：超过原业务金额上限`);
   }
   const changedStandards = (Object.keys(next.standards) as PricingAdminBasis[]).filter(name => next.standards[name] !== state.policy.standards[name]);
   // A standard change is atomic across its entire follow set, including off-screen rows.
-  for (const row of rows.filter(value => value.mode === 'follow' && changedStandards.includes(value.basisKind))) {
+  for (const row of rows.filter(value => value.pricingEnabled !== false && value.mode === 'follow' && changedStandards.includes(value.basisKind))) {
     if (!row.canAdopt || !row.currentPointsPerCny) fail(`${row.label}：跟随项尚未就绪，不能只保存一部分统一标准`);
   }
   const affected = rows.filter((row, index) => pricingCanonical({ price: view(row), entry: row.authoringEntry, rateMode: row.authoringRateMode }) !== pricingCanonical({ price: view(state.rows[index]), entry: state.rows[index].authoringEntry, rateMode: state.rows[index].authoringRateMode })
+    || requested.has(row.id) && next.rules.some(rule => rule.id === row.id && rule.pricingEnabled === false) && !state.policy.rules.some(rule => rule.id === row.id)
     || requested.has(row.id) && pricingCanonical({ source: row.source, base: row.baseCny, mode: row.mode, exchange: row.exchangeRate })
       !== pricingCanonical({ source: state.rows[index].source, base: state.rows[index].baseCny, mode: state.rows[index].mode, exchange: state.rows[index].exchangeRate })).map(row => row.id);
   if (affected.length > PRICING_ADMIN_LIMITS.maxChanges) fail('完整影响范围超过 2000 项，未截断或部分保存');
@@ -680,6 +709,7 @@ async function prepare(actor: PricingAdminActor, input: PricingAdminPreviewInput
     return value;
   };
   const requiresImage = rows.some((row, index) => row.identity.kind === 'image' && affected.includes(row.id) && !metadataOnly.has(row.id)
+    && row.pricingEnabled !== false
     && pricingCanonical(chargeView(row)) !== pricingCanonical(chargeView(state.rows[index])));
   if (requiresImage) {
     try { await assertPricingImageConsumerReady(client); }
@@ -875,7 +905,7 @@ export async function exportAdminPricingCsv(actor: Actor, input: PricingAdminFil
   const header = ['revision', 'exportedAt', 'timezone', 'ruleId', 'kind', 'channelId', 'modelId', 'specifications', 'label', 'provider',
     'unit', 'mode', 'basis', 'baseCny', 'pointsPerCny', 'unitCredits', 'confirmation', 'sourceType', 'sourceReference', 'confirmedAt', 'confirmedBy',
     'legacyRounding', 'legacyPointsPerUsd', 'exchangeSourceCurrency', 'exchangeDirection', 'exchangeRate', 'exchangeEffectiveFrom', 'exchangeRevision',
-    'exchangeSourceType', 'exchangeSourceReference', 'exchangeConfirmedAt', 'exchangeConfirmedBy', 'authoringRevision', 'globalPointsPerCny', 'authoringRateMode', 'sourceKind', 'evidence', 'baseRelation'];
+    'exchangeSourceType', 'exchangeSourceReference', 'exchangeConfirmedAt', 'exchangeConfirmedBy', 'authoringRevision', 'globalPointsPerCny', 'authoringRateMode', 'sourceKind', 'evidence', 'baseRelation', 'pricingEnabled'];
   return '\uFEFF' + [header, ...rows.map(row => [data.revision, exportedAt, 'UTC', row.id, row.identity.kind, row.identity.channelId,
     row.identity.modelId, pricingCanonical(row.identity.specifications), pricingDisplayName(row), row.providerLabel, row.identity.unit, row.mode,
     row.basisKind, row.baseCny, row.currentPointsPerCny, row.currentUnitCredits, row.confirmation, row.source?.type, row.source?.reference,
@@ -884,7 +914,7 @@ export async function exportAdminPricingCsv(actor: Actor, input: PricingAdminFil
     row.exchangeRate?.effectiveFrom, row.exchangeRate?.revision, row.exchangeRate?.source.type,
     row.exchangeRate?.source.reference, row.exchangeRate?.confirmedAt, row.exchangeRate?.confirmedBy.id,
     data.authoring?.revision, data.authoring?.globalPointsPerCny, row.authoringRateMode, row.authoringEntry?.sourceKind,
-    row.authoringEntry?.evidence ? pricingCanonical(row.authoringEntry.evidence) : '', row.authoringEntry?.baseRelation ? pricingCanonical(row.authoringEntry.baseRelation) : ''])].map(values => values.map(csvCell).join(',')).join('\r\n');
+    row.authoringEntry?.evidence ? pricingCanonical(row.authoringEntry.evidence) : '', row.authoringEntry?.baseRelation ? pricingCanonical(row.authoringEntry.baseRelation) : '', row.pricingEnabled ?? row.mode !== 'unset'])].map(values => values.map(csvCell).join(',')).join('\r\n');
 }
 
 export async function resolvePricingCharge(identity: PricingAdminIdentity, client: PricingClient = prisma, menu?: PricingMenuContext): Promise<{
@@ -895,16 +925,24 @@ export async function resolvePricingCharge(identity: PricingAdminIdentity, clien
     : await client.platformSetting.findUnique({ where: { key: PRICING_POLICY_KEY } });
   const policy = menu ? menuPolicy(menu) : stored ? parsePolicy(stored.value_json) : emptyPolicy();
   const adopted = selectPricingRule(policy.rules, identity);
+  if (adopted && !(adopted.pricingEnabled ?? adopted.mode !== 'unset')) {
+    if (identity.kind === 'image') throw new PricingItemUnavailableError(identity, 'disabled', '该费率已停用，不接受新请求；原任务保持原合同');
+    throw new PricingAdminServiceError('该费率已停用，不接受新请求；原任务保持原合同', 409, 'pricing_charge_disabled');
+  }
   if (!adopted && policy.rules.some(rule => rule.identity.kind === identity.kind && rule.identity.channelId === identity.channelId
     && rule.identity.modelId === identity.modelId && rule.identity.unit === identity.unit)) {
     throw new PricingAdminServiceError('该收费作用域已采用新策略，但当前规格没有唯一规则，未回退旧价', 409, 'pricing_scope_unmatched');
   }
   await assertPricingCatalogIdentity(identity, client, Boolean(adopted && ['follow', 'custom'].includes(adopted.mode) && adopted.baseCny && adopted.source), menu);
-  if (!adopted) return null;
   const state = await (menu ? menu.state ?? (menu.state = readState(client, menu)) : readState(client));
   const catalogRow = selectPricingRule(state.catalog.rows, identity);
   if (!catalogRow) throw new PricingAdminServiceError('当前规格没有唯一且已确认的收费目录项，未回退旧价', 409, 'pricing_scope_unmatched');
   const row = state.rows.find(item => item.id === catalogRow.id)!;
+  if (!(row.pricingEnabled ?? row.mode !== 'unset')) {
+    if (identity.kind === 'image') throw new PricingItemUnavailableError(identity, 'disabled', '该费率已停用，不接受新请求；原任务保持原合同');
+    throw new PricingAdminServiceError('该费率已停用，不接受新请求；原任务保持原合同', 409, 'pricing_charge_disabled');
+  }
+  if (!adopted) return null;
   if (row.availability !== 'ready' || row.mode === 'unset' || row.confirmation === 'needs_review') {
     const message = row.unavailableReason || '收费依据未就绪，未回退旧价';
     if (identity.kind === 'image') throw new PricingItemUnavailableError(identity, row.mode === 'unset' ? 'price_unconfigured' : 'evidence_unconfirmed', message);

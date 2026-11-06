@@ -64,6 +64,16 @@
 .tools button, .selection button, .rowTools button, .link { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .page button:not(:global(.btn)), .history button:not(:global(.btn)) { color: inherit; background: transparent; border: 0; cursor: pointer; padding: 6px; border-radius: 4px; min-height: 36px; }
 .page button:disabled { opacity: .5; cursor: not-allowed; }
+.pricingName { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.pricingName > strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.page button.pricingSwitch { position: relative; flex: 0 0 36px; width: 36px; height: 36px; min-height: 36px; padding: 0; border-radius: 4px; }
+.pricingSwitch::before { content: ''; position: absolute; width: 32px; height: 18px; left: 2px; top: 9px; border-radius: 999px; background: #697784; transition: background-color 120ms ease; }
+.pricingSwitch::after { content: ''; position: absolute; width: 14px; height: 14px; left: 4px; top: 11px; border-radius: 50%; background: #fff; transition: transform 120ms ease; }
+.pricingSwitch[aria-checked=true]::before { background: #2583dd; }
+.pricingSwitch[aria-checked=true]::after { transform: translateX(14px); }
+@media (prefers-reduced-motion: reduce) {
+  .pricingSwitch::before, .pricingSwitch::after { transition: none; }
+}
 .page button:focus-visible, .page input:focus-visible, .page select:focus-visible, .page textarea:focus-visible, .page summary:focus-visible { outline: 2px solid var(--accent-primary, #16b6e8); outline-offset: 2px; }
 .page input:not([type=checkbox]), .page select, .page textarea { color: var(--text-primary); background: var(--bg-secondary, #161e23); border: 1px solid var(--border-color); border-radius: 4px; min-height: 38px; padding: 7px 9px; min-width: 0; max-width: 100%; font-size: 14px; }
 .page input[type=checkbox], .history input[type=checkbox] { width: 18px; height: 18px; flex: 0 0 18px; accent-color: var(--accent-primary, #16b6e8); }

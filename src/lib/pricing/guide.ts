@@ -29,7 +29,7 @@ export function pricingGuideMoney(amount: string) {
 
 export function projectPricingGuide(rows: PricingAdminRow[], pointsPerCny: string | null,
   updatedAt: string | null, imagesVisible: boolean): PricingGuideSnapshot {
-  const available = rows.filter(row => row.enabled && row.availability === 'ready');
+  const available = rows.filter(row => row.enabled && row.pricingEnabled !== false && row.mode !== 'unset' && row.availability === 'ready');
   const resolutionOrder = ['480p', '720p', '1080p', '2k', '4k'];
   const resolutionRanks = new Map(available.map(row => [row.id,
     resolutionOrder.indexOf(row.identity.specifications.resolution?.toLowerCase() || '')]));
@@ -40,7 +40,7 @@ export function projectPricingGuide(rows: PricingAdminRow[], pointsPerCny: strin
     if (image && (!imagesVisible || !row.isDefault)) continue;
     if (row.identity.kind === 'video') {
       if (specs.referenceVideo && specs.referenceVideo !== 'none' || specs.pricingPurpose && specs.pricingPurpose !== 'standard') continue;
-      if (!specs.resolution && available.some(other => other.identity.channelId === row.identity.channelId
+      if (!specs.resolution && rows.some(other => other.identity.channelId === row.identity.channelId
         && other.identity.modelId === row.identity.modelId && other.identity.specifications.resolution
         && other.identity.specifications.referenceVideo === 'none' && other.identity.specifications.pricingPurpose === 'standard')) continue;
     }

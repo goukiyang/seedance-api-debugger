@@ -9,14 +9,36 @@
 - [x] 个人/项目/管理账本、排序、趋势、资产卡和CSV共用同一报价；每个读取快照只取一份费率。CSV保存本次单价、单位、数量、金额、折合点数及费率/映射版本，后续改价不改变既有导出。
 - [x] 费率页新增折叠“历史参考标价”，支持类型默认价/当前规则引用、旧型号映射、文字输入输出token价。管理员显式保存到独立 `usage_reference_pricing_v1`，同事务CAS与OperationLog原请求回执，未知只GET核原保存；不修改主费率、历史数据或调用生成。
 - [x] 隔离SQLite工程检查通过，包含四档图片、当前规则替代旧价、实际现金不混加、失败/在途不计合计、按规则标准换点、0输入/输出token、缺价不造0、直接/流式/公共汇总一致与导出快照冻结。
-- [ ] 最终v0.134.1候选完整原生/价格/Next/types/lint与保护发布：进行中，已合并765b角色配方源，准备沿d2ee recipe相容guard接续；等角色v0.134.0实际发布后才切换。原1339/55ec候选的专项和原生/价格门已通过，但未构建Next、未上线；保留attempt04原证，不冒充最终1341工程结果。最终批次为 `ledger-rate-accounting-20261105/attempt05`，无DDL/新依赖，只回程序不回业务数据。
+- [x] 最终v0.134.1已于UTC 2026-11-06T06:04:46Z保护部署，待用户手动验收。应用源 `aff41ac30bcf40dbf55704f8fa4e2f7e8c69f96e` / BUILD `yInCrZREmBsu5NEEsZ-R6`，继承实际765b/v0.134.0全部角色与模板改动。最终原生/价格门、Prisma generate、完整Next/types/lint通过；复用的金额专项相关26文件逐项hash一致，保原检查时间。无DDL/新依赖/真实生成/浏览器验收。
+- [x] 7服务4timer、6启动门、4公网JS同SHA、4匿名401及鲜核health200/ok=true通过；一致DB备份、原环境/媒体链接和原私有policy保留。原费率两键全字段SHA仍194e8d3a，未改原实扣、余额、已扣点或在途合同。
+- [x] 相容guard沿 `d2eea332d39e974a23318c99fd36f99406cb1211` / `0.134.0+recipe-reader-guard.1` / BUILD `sFx7NvYa1dkHeWkz9fOx3`，保留其05:47:46Z原完整构建与配方读者证明；不能回旧1d guard。恢复入口为最终 `attempt05/program-recovery.sh`，只回程序/指针，不回DB/媒体/账本/回执，未线上演练。原1339/55ec候选未构建Next、未上线，attempt04原证保留；SSH管道滞留在服务端成功退出后，仅关闭本人本机客户端，未重跑成功检查。
 - [ ] 用户手动验收：改费率后刷新账本与资产金额/折合点数一致；老auto/旧型号可估价；失败报价不计合计；保存与原号恢复、导出金额与版本可用。没有浏览器/真实生成或收费回归。
 
 已知缺口：文字、抠图没有已登记的人民币参考价，不擅自填免费；已有可编辑每次参考价，文字另支持已存token计价。未设置时仍明示待设置。H3默认0仅指现有free_local API合同，不含机器成本。页面效果待用户手验。
 
 05:25:26Z只读生产快照复核4223条叶子：3448视频、763图片全部有当前报价，11文字与1排队抠图缺参考单价。报价来源为当前匹配2977、历史映射1104、类型默认130；435条失败/在途等报价仅参考不计入合计。该诊断未写生产数据、未调用上游，不是页面功能验收；原证保留attempt04/current-price-audit.json。
 
+入口：[费率与历史参考标价](https://sd2.youdooart.com/admin/pricing)、[本人/项目账本](https://sd2.youdooart.com/usage)、[管理费用](https://sd2.youdooart.com/admin/usage-costs)。最终私有回执为正式根 `docs/materials/2026-11-05-ledger-rate-accounting/release/attempt05/` 的public-deployed、source-pair-contract、main-build-success和service-health；服务器同名stage为原证。重型构建/切版窗口已释放给侧栏后继批次，本对话仅文档/Git收口。
+
 本轮新发现的线索与问题：未新增范围外问题；原COST-LABEL与NOCHARGE线索继续保留，不顺手改写原账。
+
+## 实际扣点与费率页同步核查（2026-11-05）
+
+用户要求核查实际扣点是否跟随费率页。本轮只读源码和生产SQLite（mode=ro、query_only、同快照），未改应用、费率、余额或流水，未发起生成/收费测试。实际运行仍为aff41/v0.134.1；正式目录是较旧分支，因此按已部署源对应工作区核读，源码与aff41无差异。CodeGraph查询工具本轮不可用，未同步索引，以定向源码为证。
+
+**结论：主干机制已接通，但实际收费尚未全站统一。上轮“全部有参考价”不代表实际扣点全部采用人民币价。**
+
+- 主费率保存写pricing_policy_v1，产生新revision。报价读取当前政策，受理事务重算/核对，冻结到图片billing_contract_json或视频pricing_snapshot；结算沿原冻结，不在完成时拿新价追扣。显示菜单15秒缓存不用于实际扣点。
+- 当前生产政策1358b6b0、统一100点/元：40项人民币规则（4图片、6普通Seedance视频、30超分）全部在全局跟随集合。编辑并成功保存主费率后，这些已覆盖范围的新任务采用新规则；页面未保存草稿不生效。
+- 图片四档基价为Sunburst最高0.10、中等0.05、Banana2.1 0.06、Banana Pro 0.07元，固定换算10/5/6/7点。本次读到7条当前修订已结算图片，均为最高档10点，冻结公式、actual_credits与CreditLedger各10点，未见不一致；其余三档确认代码/配置，未新做付费实测。
+- 两条Seedance通用规则仍legacy_fixed：2.0为3点/秒、2.5为4.5点/秒。6条人民币视频规则只覆盖无参考视频、standard的480/720/1080p；样片、带参考视频、升级等未命中时仍可能选通用旧价。已确认本次费率保存后新建的10条Seedance任务均为480p样片，仍冻结4.5点/秒，并非仅历史旧单。
+- 当前政策没有volcengine_ark / doubao型号人民币收费规则；IP报价未命中时quoteVideoPricing第45行返回旧算法。真实成功样本中IP 2.0的4秒扣12点，2.5的4秒扣18点（720p也如此）。这类新任务没有pricingCharge新合同，修改普通Seedance人民币行不改变它们的旧扣点。
+- 最近30条成功视频的estimated_cost、actual_cost和个人/项目task_success_deduct逐条一致；不是流水多扣/少扣，而是部分新请求仍采用旧价。未证明当前人民币视频/超分全规格真实结算，本轮不以源码和样本冒全量验收。
+- 历史参考标价写独立usage_reference_pricing_v1，只用于账本/资产当前价核算和导出；修改它不会改变实际收费。不能拿参考映射价当实际收费证据。
+
+源码入口：pricing/policy.ts:758、890；pricing/charge.ts:13、37；pricing/video.ts:32、45；pricing/resolve.ts:15；image-studio/tasks.ts:701、1211、1334；video/task-finalizer.ts:259；credits/policy.ts:511。按已部署aff41解释，当前正式目录旧文件不冒运行实现。
+
+接续建议：先明确并登记IP、样片、参考视频、升级对应的人民币收费与实际计量单位，预览其新任务影响，再收敛无新价时的旧价兜底；不能直接把普通视频单价抄给不同供应商/模式，也不改旧余额、账本或已受理/未知合同。缺口登记D-20261105-ACTUAL-RATE-COVERAGE，尚未修复或切换新收费。
 
 ## 目标
 
