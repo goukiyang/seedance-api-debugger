@@ -565,7 +565,7 @@ export async function registerVerifiedUpload(input: { ownerId: string; proof: Ve
       original_url: input.originalUrl, thumbnail_url: input.thumbnailUrl, file_name: path.basename(input.fileName || 'upload.bin'),
       mime_type: input.proof.mimeType, file_size: input.proof.bytes, hash: input.proof.hash,
       width: input.proof.width ?? input.width ?? null, height: input.proof.height ?? input.height ?? null, status: 'active',
-      metadata_json: JSON.stringify({ uploadIntegrity: { version: 'verified-upload-v2', hash: input.proof.hash }, ...(input.purpose === 'feedback' ? { feedbackOnly: true } : {}) }) } });
+      metadata_json: JSON.stringify({ uploadIntegrity: { version: 'verified-upload-v2', hash: input.proof.hash }, ...(input.purpose === 'feedback' ? { feedbackOnly: true } : { materialImported: true }) }) } });
     asset = await ordinaryUse(db, asset);
     let reused = Boolean(fresh);
     if (key) {

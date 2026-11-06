@@ -141,6 +141,11 @@ async function main() {
     assert.equal((await purpose.legacyFeedbackAssetIds(db, owner)).length, 0);
     assert.equal((await db.asset.findUnique({ where: { id: legacy.id } })).status, 'active');
     checks.push('历史精确反馈关联过滤，真实SQLite SQL/Prisma列表与数量一致，共用素材/原图保留');
+    const normalIntent = await register.registerVerifiedUpload(input('normal-material-intent', sha('normal-material-intent')));
+    await db.feedback.create({ data: { user_id: owner, content: 'synthetic normal image', pathname: '/plugin/chatgpt', image_urls_json: JSON.stringify([normalIntent.asset.original_url]) } });
+    await db.asset.update({ where: { id: normalIntent.asset.id }, data: { file_name: '反馈截图.png' } });
+    assert.equal((await purpose.legacyFeedbackAssetIds(db, owner)).length, 0, '明确普通导入的素材后来用于反馈或改名，仍须保留');
+    checks.push('普通素材保留明确导入来源，改成截图同名后也不被历史兼容规则误排除');
     await browserUploadIdentity();
     checks.push('网站新用途独立身份，升级前raw/direct未知请求沿原号原合同继续核对');
     for (const check of checks) console.log('ok', check);
