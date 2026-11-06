@@ -32,3 +32,4 @@ CodeGraph 查询接口当前不可用，以对应工作区的定向源码核对�
 - 开关草稿/金额合并、各自撤销、旧固定/实扣/免费规则重新开启、不可用来源禁开、操作回执消费、账号隔离恢复及预览键变化的纯工程检查通过。UI定向lint通过；没有浏览器验收或真实生成。
 - 本机 `tsc --noEmit --incremental false` 卡在 `node_modules/@dnd-kit/sortable/dist/utilities/arrayMove.d.ts` 的文件读取，停止本人进程，未将其记为通过；最终类型/lint由Linux完整候选构建执行。
 - 本批私有发布准备目录为 `/tmp/sd2-pricing-item-activation-20261105/attempt01`；沿已有多服务发布入口准备main与新guard，不修改release-engine，不自动写生产费率或账本。
+- 首轮Linux原生计费门通过；原有图片尺寸工程检查发现无主费率策略时新增校验多拦了旧自定义比例通路。恢复无策略的原快速返回；关闭状态一律持久存于主费率策略中，有关闭规则时仍严格拦截。未进行Next构建或上线该候选，失败原证保留，不把首轮原生整批记为通过。
