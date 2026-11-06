@@ -702,6 +702,21 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
   return moduleDTO(row, ownerId, await getImageStudioSettings(), true, isAdmin, source || undefined, sourceIdentity);
 }
 
+export async function shareSavedStudioModule(ownerId: string, body: Record<string, unknown>) {
+  if (!validStudioModuleId(body.id, ownerId) || body.isShared !== true
+    || typeof body.requestId !== 'string' || !/^[a-zA-Z0-9_-]{16,100}$/.test(body.requestId)
+    || !Number.isInteger(body.revision)) throw new StudioModuleError('共享设置参数无效');
+  const actor = await assertStudioActor(ownerId);
+  // Whitelist the command: share the saved definition, never client drafts or personal images.
+  const published = await publishSharedStudioModule(actor, body.id, {
+    requestId: body.requestId, expectedRevision: body.revision, isShared: true,
+    publicationMode: 'saved-workspace-v1', prompt: '', templatePrompt: '', referenceIds: [], entryPoint: 'workbench',
+  }, undefined, { shareSavedWorkspace: true });
+  return { ...await studioModuleDTOForUser(actor, body.id), sharingPreference: null, canChooseSharing: false,
+    sharingCommandReceipt: { action: 'share-saved-module', requestId: body.requestId, moduleId: body.id,
+      expectedRevision: body.revision, revision: published.receipt.revision } };
+}
+
 export async function chooseStudioModuleSharing(ownerId: string, body: Record<string, unknown>) {
   if (!validStudioModuleId(body.id, ownerId) || typeof body.isShared !== 'boolean'
     || typeof body.requestId !== 'string' || !/^[a-zA-Z0-9_-]{16,100}$/.test(body.requestId)
