@@ -52,6 +52,8 @@ import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { StudioBatchHistory } from '@/app/image-studio/batch-results';
 import { costAmountToCnyEstimate, formatCurrencyAmount, usdToCnyRateText } from '@/lib/costs/currency';
 import type { NormalVideoChargeEstimate } from '@/lib/costs/normal-video-charge';
+import type { AccountingCost } from '@/lib/usage/accounting';
+import { usageCnyDisplay } from '@/lib/admin/usage-money';
 import type { ImageBillingView } from '@/lib/image-studio/billing-contract';
 import { useImageBillingRefresh } from '@/lib/hooks/use-image-billing-refresh';
 import { assetGridProfilerOnRender } from '@/lib/performance/interaction-metrics';
@@ -156,6 +158,7 @@ type AssetLibraryItem = {
   chargedCredits: number | null;
   imageBilling?: ImageBillingView | null;
   normalChargeEstimate: NormalVideoChargeEstimate | null;
+  referenceQuote?: AccountingCost | null;
   videoCardId: string | null;
   isEnhanceTask: boolean;
   canEnhanceVideo: boolean;
@@ -850,6 +853,13 @@ function AssetsPageContent() {
     setRestoredPageScope(pageScope);
   }, [user?.id, pageScope]);
   const [items, setItems] = useState<AssetLibraryItem[]>([]);
+  useEffect(() => {
+    if (!user?.id) return;
+    const refresh = () => { void invalidateAssetCache().then(() => setReloadToken(value => value + 1)); };
+    const storage = (event: StorageEvent) => { if (event.key === 'sd2-pricing-revision') refresh(); };
+    window.addEventListener('pricing-reference-updated', refresh); window.addEventListener('storage', storage);
+    return () => { window.removeEventListener('pricing-reference-updated', refresh); window.removeEventListener('storage', storage); };
+  }, [user?.id]);
   const [pagination, setPagination] = useState<Pagination | null>(null);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [users, setUsers] = useState<UserItem[]>([]);
@@ -1980,12 +1990,16 @@ function AssetsPageContent() {
 
   const activeItemPrompt = activeItem?.prompt ? <div className="asset-detail-prompt"><span>Prompt</span><p>{activeItem.prompt}</p></div> : null;
   const activeItemDetails = (withReaction = true) => activeItem ? <>
+    {activeItem.referenceQuote && <div className="asset-detail-cost-panel" aria-label="当前参考标价">
+      <div><span>当前参考费用</span><strong>¥{usageCnyDisplay(activeItem.referenceQuote.amountCnyMicros)}</strong></div>
+      <small>{activeItem.referenceQuote.points ?? '—'} 点 · {activeItem.referenceQuote.detail}</small>
+    </div>}
     {!activeItemCostBreakdown && activeItem.normalChargeEstimate && <div className="asset-detail-cost-panel" aria-label="按普通费率估算扣费">
       <div><span>按普通费率估算</span><strong title={`按站内展示汇率折算：${usdToCnyRateText()}`}>{costAmountToCnyEstimate({ amount_micros: activeItem.normalChargeEstimate.amountMicros, currency: 'USD' })}</strong></div>
       <small>同模型、同参考类型；{activeItem.normalChargeEstimate.completionTokens.toLocaleString('zh-CN')} Token × {formatCurrencyAmount(activeItem.normalChargeEstimate.usdPerMillionTokens, 'USD')}/百万 Token，按站内展示汇率折算。</small>
     </div>}
     {activeItemCostBreakdown && <div className="asset-detail-cost-panel" aria-label="扣费金额">
-      <div><span>费用（人民币）</span><strong title={activeItemCostBreakdown.rate}>{activeItemCostBreakdown.cny}</strong></div>
+      <div><span>历史实扣折算</span><strong title={activeItemCostBreakdown.rate}>{activeItemCostBreakdown.cny}</strong></div>
     </div>}
     <dl className="asset-detail-list">
       <div><dt>状态</dt><dd>{statusLabel(activeItem.status)}</dd></div>
@@ -2373,10 +2387,8 @@ function AssetsPageContent() {
                 const previewed = previewSet.has(item.id);
                 const duration = formatDuration(item.duration);
                 const specText = formatAssetSpec(item);
-                const cnyCostBadge = formatCnyCostBadge(item);
-                const estimate = item.normalChargeEstimate;
-                const estimatedCash = estimate ? costAmountToCnyEstimate({ amount_micros: estimate.amountMicros, currency: estimate.currency }) : '';
-                const costBadge = cnyCostBadge || (estimatedCash ? `约 ${estimatedCash}` : item.kind === 'video' && item.source === 'video_task' && item.status === 'succeeded' ? '扣费待确认' : '');
+                const costBadge = item.referenceQuote ? `参考 ¥${usageCnyDisplay(item.referenceQuote.amountCnyMicros)}${item.referenceQuote.points ? ` · ${item.referenceQuote.points}点` : ''}`
+                  : item.source === 'video_task' ? '参考价待设置' : '';
                 const enhanceMenuOpen = enhanceMenuItemId === item.id;
                 const enhanceReason = enhanceMenuOpen ? enhanceDisabledReason(item) : '';
                 const estimatedEnhanceCost = enhanceMenuOpen ? enhanceEstimatedCost(item) : null;
@@ -2439,7 +2451,7 @@ function AssetsPageContent() {
                       {(costBadge || enhanceStateLabel) && (
                         <span className="asset-card-top-right-badges">
                           {costBadge && (
-                            <span className="asset-card-badge asset-card-cost-badge" title={cnyCostBadge ? '已记录现金扣费的人民币估算' : estimatedCash ? '按普通生成相同模型、相同参考类型的费率估算扣费；尚无此任务现金账单' : '缺少现金账单、计费用量或普通生成费率，暂无法确认扣费金额'}>
+                            <span className="asset-card-badge asset-card-cost-badge" title={item.referenceQuote?.detail || '参考单价尚未设置；不代表免费'}>
                               {costBadge}
                             </span>
                           )}

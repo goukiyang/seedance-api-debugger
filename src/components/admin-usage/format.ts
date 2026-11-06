@@ -1,4 +1,5 @@
-import type { UsageMoney, UsageSummary } from '@/lib/admin/usage-types';
+import type { UsageFact, UsageMoney, UsageSummary } from '@/lib/admin/usage-types';
+import { usageQuoteIncluded } from '@/lib/usage/aggregate';
 
 // Format integer micros without passing their total through an unsafe Number.
 export function fixedDecimal(value: string | null | undefined, scale = 0, places = scale): string {
@@ -24,9 +25,13 @@ export function originalMoney(values: UsageMoney[]) {
   return values.length ? values.map(item => `${item.currency} ${fixedDecimal(item.amountMicros, 6, 6)}`).join(' · ') : '尚无实扣凭据';
 }
 export function summaryCost(summary: UsageSummary) {
-  if (summary.accountedCostCnyMicros != null) return money(summary.accountedCostCnyMicros);
-  if (summary.confirmedCostCnyMicros !== null) return money(summary.confirmedCostCnyMicros);
-  return summary.confirmedCost.length ? originalMoney(summary.confirmedCost) : '待核 / 未接入';
+  return money(summary.accountedCostCnyMicros ?? summary.calculatedCostCnyMicros);
+}
+export function quoteLabel(record: UsageFact) {
+  if (!record.leaf) return '按子任务核算';
+  if (!record.accountingCost) return '报价待核';
+  if (!usageQuoteIncluded(record)) return '参考报价 · 不计入合计';
+  return record.accountingCost.estimated ? '预计核算' : '当前价核算';
 }
 export const KIND_LABELS: Record<string, string> = { video: '视频', image: '图片', text: '文字', flow: '工具流', cutout: '抠图' };
 export const SOURCE_LABELS: Record<string, string> = {
@@ -35,7 +40,7 @@ export const SOURCE_LABELS: Record<string, string> = {
 };
 export const RESULT_LABELS: Record<string, string> = { ready: '文件已就绪', not_ready: '文件未就绪', unknown: '文件状态未知' };
 export const RETENTION_LABELS: Record<string, string> = { active: '正常留存', user_deleted: '本人已删除', admin_hidden: '管理隐藏', retained: '保留中', unknown: '留存待确认' };
-export const COST_LABELS: Record<string, string> = { confirmed: '费用已确认', calculated: '费用已核算', pending: '费用待核', conflict: '费用冲突', unconnected: '费用未接入' };
+export const COST_LABELS: Record<string, string> = { confirmed: '费用已确认', calculated: '费用已核算', pending: '费用待核', conflict: '费用冲突', unconnected: '暂无实扣凭据' };
 export const ATTRIBUTION_LABELS: Record<string, string> = {
   frozen: '原使用归属', legacy_current: '历史按现有归属', legacy_snapshot: '历史快照归属', unassigned: '未归属', conflict: '归属冲突',
 };

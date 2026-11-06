@@ -15,6 +15,8 @@ import { summarizeUsageFacts } from '../src/lib/admin/usage-analytics';
 import type { UsageRecordDTO } from '../src/lib/usage/dto';
 import { attachAccountingCosts, calculateRateCost } from '../src/lib/usage/accounting';
 import { usageCsvChunks } from '../src/lib/usage/csv';
+import { getDefaultReferenceSettings } from '../src/lib/pricing/reference-contract';
+import type { PricingPolicy } from '../src/lib/pricing/types';
 import type { UsageExportSnapshot } from '../src/lib/usage/dto';
 
 async function main() {
@@ -32,6 +34,12 @@ async function main() {
         id, identity: identity('image', model, channel), mode: 'custom', baseCny, source: { confirmedAt: '2026-11-05T00:00:00Z' },
       })),
     ];
+    const policy = { schemaVersion: 1, revision: 'current', standards: { site_base_cny: '100', supplier_cost_cny: '100' },
+      rules: rules.map(rule => ({ ...rule, basisKind: 'site_base_cny', customPointsPerCny: '100' })) } as unknown as PricingPolicy;
+    const reference = getDefaultReferenceSettings(policy);
+    reference.defaults.image.ruleId = 'medium'; reference.defaults.video.ruleId = 'video';
+    reference.defaults.text.amountCny = '0.02';
+    reference.models = [{ kind: 'image', model: 'gpt-image-2.5-flare', ruleId: 'medium' }];
     const frozen = { pricing: { baseCny: '0.05', mode: 'custom', revision: 'frozen-old', identity: { billingMode: 'fixed' } } };
     const image = (id: string, extra = {}) => ({ id, owner_id: 'owner', model: 'gemini-3-pro-image-preview', quality: 'auto', output_size: '2K', status: 'succeeded', asset_id: `asset-${id}`,
       billing_status: 'fixed_settled', snapshot_json: JSON.stringify({ imageChannel: { channelId: 'channel' } }), actual_credits: 7, unit_credits: 7, billing_settled_at: time, created_at: time, updated_at: time, ...extra });
@@ -39,7 +47,8 @@ async function main() {
       duration: 5, resolution: '720p', created_at: time, updated_at: time, actual_cost: 99, frozen_cost: 0, refund_amount: 0, public_video_url: '/synthetic-not-read', ...extra });
     const seed = {
       User: [{ id: 'owner', name: 'Fixture' }], Project: [{ id: 'project', name: 'Fixture Project' }],
-      PlatformSetting: [{ id: 'policy', key: 'pricing_policy_v1', value_json: JSON.stringify({ schemaVersion: 1, revision: 'current', rules }) },
+      PlatformSetting: [{ id: 'policy', key: 'pricing_policy_v1', value_json: JSON.stringify(policy) },
+        { id: 'reference', key: 'usage_reference_pricing_v1', value_json: JSON.stringify(reference) },
         { id: 'defaults', key: 'image_generation_model_defaults_v1', value_json: JSON.stringify({ qualityRoutes: { 'gpt-image-2.5-sunburst': { medium: 'medium-channel', max: 'max-channel' } } }) }],
       ImageStudioTask: [image('image-current', { provider_cost_usd: 0.064 }), image('image-frozen', { billing_contract_json: JSON.stringify(frozen), provider_cost_usd: 0.064 }),
         image('image-recorded', { model: 'gpt-image-2.5-flare', provider_cost_usd: 0.064 }),
@@ -85,35 +94,51 @@ c.close()
       assert.equal(cost('image-medium')?.amountCnyMicros, '50000');
       assert.equal(cost('image-max')?.amountCnyMicros, '100000');
       assert.equal(cost('image-banana')?.amountCnyMicros, '60000');
-      assert.equal(cost('image-frozen')?.amountCnyMicros, '50000');
-      assert.equal(cost('image-frozen')?.revision, 'frozen-old');
+      assert.equal(cost('image-frozen')?.amountCnyMicros, '70000');
+      assert.equal(cost('image-frozen')?.revision, 'current');
       assert.equal(cost('image-current')?.source, 'current_rate');
-      assert.equal(cost('image-recorded')?.amountCnyMicros, '448000');
-      assert.equal(cost('image-recorded')?.source, 'recorded_rate');
+      assert.equal(cost('image-recorded')?.amountCnyMicros, '50000');
+      assert.equal(cost('image-recorded')?.source, 'historical_reference');
       assert.equal(cost('video-h3-free')?.amountCnyMicros, '0');
-      assert.equal(cost('video-h3-free')?.source, 'provider_response');
-      assert.equal(cost('video-asset')?.amountCnyMicros, '14000000');
-      assert.equal(cost('video-token')?.amountCnyMicros, '7000000');
+      assert.equal(cost('video-h3-free')?.source, 'type_default');
+      assert.equal(cost('video-asset')?.amountCnyMicros, '5617284');
+      assert.equal(cost('video-token')?.amountCnyMicros, '5617284');
       assert.equal(cost('video-rate')?.amountCnyMicros, '5617284');
       assert.equal(byId.get('video-bill')?.confirmedCostCnyMicros, '1400000');
-      for (const id of ['video-bill', 'video-upgrade', 'video-failed', 'image-failed', 'image-unknown', 'image-unpriced', 'image-other-channel',
-        'image-recorded-negative', 'video-h3-missing', 'video-h3-not-free']) assert.equal(cost(id), undefined, id);
+      assert.equal(cost('video-bill')?.amountCnyMicros, '5617284');
+      for (const id of ['video-upgrade', 'image-unpriced', 'image-other-channel', 'image-recorded-negative', 'video-h3-missing', 'video-h3-not-free']) assert.ok(cost(id), id);
+      for (const id of ['video-failed', 'image-failed', 'image-unknown']) { assert.ok(cost(id)); assert.equal(cost(id)?.included, false); }
+      assert.equal(cost('image-current')?.points, '7');
+      const followBasis = { revision: 'follow', qualityRoutes: {}, settings: reference, pointsPerCny: '100',
+        standards: { site_base_cny: '200', supplier_cost_cny: '300' }, rules: [{ ...policy.rules[0], mode: 'follow' as const }] };
+      assert.equal(calculateRateCost(byId.get('image-current')!, { channel_id: 'channel' }, followBasis)?.points, '14');
+      const tokenBasis = { ...followBasis, settings: { ...reference, defaults: { ...reference.defaults,
+        text: { ...reference.defaults.text, tokenInputCny: '2', tokenOutputCny: '4' } } } };
+      const textFact = { ...byId.get('image-current')!, kind: 'text' as const };
+      assert.equal(calculateRateCost(textFact, { input_tokens: 0, output_tokens: 1000 }, tokenBasis)?.amountCnyMicros, '4000');
+      assert.equal(calculateRateCost(textFact, { input_tokens: 1000, output_tokens: 0 }, tokenBasis)?.amountCnyMicros, '2000');
+      const unsetText = { ...tokenBasis, settings: { ...tokenBasis.settings, defaults: { ...tokenBasis.settings.defaults,
+        text: { ruleId: null, amountCny: null, unit: 'call' as const, defaultQuantity: '1' } } } };
+      assert.equal(calculateRateCost(textFact, {}, unsetText), null, 'Missing supplier/reference price must not fabricate free calls');
       const conflicted = { ...byId.get('image-current')!, costStatus: 'conflict' as const, accountingCost: undefined };
-      await attachAccountingCosts(db, [{ fact: conflicted, raw: {} }]); assert.equal(conflicted.accountingCost, undefined);
-      const ambiguous = { revision: 'conflict', qualityRoutes: {}, rules: [rules[0], { ...rules[0], id: 'duplicate', baseCny: '0.09' }] };
+      await attachAccountingCosts(db, [{ fact: conflicted, raw: {} }]); assert.ok(conflicted.accountingCost); assert.equal(conflicted.costStatus, 'conflict');
+      const ambiguous = { revision: 'conflict', qualityRoutes: {}, settings: reference, pointsPerCny: '100',
+        rules: [policy.rules[0], { ...policy.rules[0], id: 'duplicate', baseCny: '0.09' }] };
       assert.equal(calculateRateCost(byId.get('image-current')!, { channel_id: 'channel' }, ambiguous as Parameters<typeof calculateRateCost>[2]), null);
       const enhanceFact = { ...byId.get('video-rate')!, model: 'enhance-video' };
-      const enhanceBasis = { revision: 'enhance', qualityRoutes: {}, rules: [{ id: 'enhance', mode: 'custom', baseCny: '0.04',
+      const enhanceBasis = { revision: 'enhance', qualityRoutes: {}, settings: { ...reference, defaults: { ...reference.defaults,
+        enhance: { ruleId: 'enhance', amountCny: null, unit: 'second', defaultQuantity: '1' } } }, pointsPerCny: '100', rules: [{ id: 'enhance', mode: 'custom', baseCny: '0.04',
+        basisKind: 'site_base_cny', customPointsPerCny: '100', source: null, exchangeRate: null,
         identity: { kind: 'enhance', channelId: 'volcengine_mediakit', modelId: 'enhance-video', billingMode: 'fixed', unit: 'second',
           specifications: { resolution: '720p', toolVersion: 'standard', fpsTier: 'lte30' } } }] } as Parameters<typeof calculateRateCost>[2];
       const enhanceRow = { provider: 'volcengine_mediakit', duration: 5, resolution: '720p', tool_version: 'standard', fps: null };
-      assert.equal(calculateRateCost(enhanceFact, enhanceRow, enhanceBasis), null);
+      assert.equal(calculateRateCost(enhanceFact, enhanceRow, enhanceBasis)?.estimated, true);
       assert.equal(calculateRateCost(enhanceFact, { ...enhanceRow, fps: 24 }, enhanceBasis)?.amountCnyMicros, '200000');
       const expected = summarizeUsageFacts(snapshot.facts), fold = new UsageSummaryFold();
       for (const fact of snapshot.facts) fold.add(fact);
       assert.deepEqual(fold.value(), expected);
-      assert.equal(expected.calculatedCount, 10); assert.equal(expected.calculatedCostCnyMicros, '27395284');
-      assert.equal(expected.accountedCostCnyMicros, '28795284');
+      assert.equal(expected.calculatedCount, 17); assert.equal(expected.calculatedCostCnyMicros, '28656420');
+      assert.equal(expected.accountedCostCnyMicros, '28656420');
       const cash = publicUsageCash(snapshot.facts, snapshot.cashEvents), publicFold = new PublicUsageSummaryFold();
       for (const fact of snapshot.facts) {
         const record: UsageRecordDTO = { id: `${fact.sourceKind}:${fact.sourceId}`, sourceKind: fact.sourceKind, type: fact.kind === 'video' ? 'video' : 'image', occurredAt: fact.occurredAt, status: fact.status, model: fact.model,
@@ -125,17 +150,45 @@ c.close()
       assert.equal(cash.netCnyMicros, '1400000');
       const exportRow: UsageRecordDTO = { id: 'negative-cost', sourceKind: 'video_task', type: 'video', occurredAt: '2026-11-05T10:00:00Z', status: 'succeeded', model: 'fixture',
         project: { id: 'project', label: 'Fixture', available: true }, taskCount: 1, requestCount: 1, successfulCount: 1, outputCount: 1, availableCount: 1,
-        cash: { ...cash, calculatedCnyMicros: '0', accountedCnyMicros: '-1000000', calculatedCount: 1 }, points: publicUsagePoints([]), originalHref: null };
+        cash: { ...cash, calculatedCnyMicros: '0', accountedCnyMicros: '-1000000', calculatedCount: 1 }, points: publicUsagePoints([]),
+        referenceQuote: cost('image-current'), originalHref: null };
       const exportSnapshot = { report: { schema: 1, scope: 'self', asOf: '2026-11-05T12:00:00Z', fingerprint: 'fixture', query: {},
         range: { startUtc: '2026-11-01T00:00:00Z', endUtc: '2026-12-01T00:00:00Z', timeZone: 'UTC' }, coverage: [], restricted: false }, records: [exportRow] } as unknown as UsageExportSnapshot;
       let csv = ''; for await (const chunk of usageCsvChunks(exportSnapshot)) csv += chunk;
-      assert.ok(csv.endsWith(',"0","-1000000","1"\r\n'), 'Calculated/accounted CSV amounts retain numeric negative values');
+      const parsed = spawnSync('python3', ['-c', `import csv,io,json,sys
+rows=list(csv.reader(io.StringIO(sys.stdin.read().lstrip('\ufeff'))));i=next(i for i,r in enumerate(rows) if r and r[0]=='record_id');print(json.dumps(dict(zip(rows[i],rows[i+1]))))`], { input: csv, encoding: 'utf8' });
+      assert.equal(parsed.status, 0, parsed.stderr);
+      const exported = JSON.parse(parsed.stdout);
+      assert.equal(exported.calculated_cny_micros, '0');
+      assert.equal(exported.accounted_cny_micros, '-1000000', 'Numeric negative CSV values are not formula-escaped');
+      assert.equal(exported.calculated_count, '1');
+      assert.equal(exported.unit_cny, '0.07');
+      assert.equal(exported.reference_points, '7');
+      assert.equal(exported.rate_revision, 'current');
       const raw = await db.$queryRaw<Array<{ count: number }>>`SELECT count(*) AS count FROM CostLedger`;
       assert.equal(Number(raw[0].count), 1);
-      assert.ok(snapshot.sourceFingerprintParts.some(part => part.includes('frozen-old')));
-      return { checks: 31, calculatedCount: expected.calculatedCount, accountedCnyMicros: expected.accountedCostCnyMicros, actualCnyMicros: cash.netCnyMicros };
+      assert.ok(snapshot.sourceFingerprintParts.some(part => part.includes('current')));
+      assert.equal(byId.get('video-bill')?.costStatus, 'confirmed');
+      return { calculatedCount: expected.calculatedCount, accountedCnyMicros: expected.accountedCostCnyMicros,
+        actualCnyMicros: cash.netCnyMicros, oldImageMicros: cost('image-current')!.amountCnyMicros, exportedUnit: exported.unit_cny };
     }, { dataAsOf: '2026-11-05T12:00:00Z' });
-    process.stdout.write(`${JSON.stringify({ ok: true, offlineFixture: true, ...result })}\n`);
+    const next = { ...policy, revision: 'updated', rules: policy.rules.map(rule => ({ ...rule,
+      baseCny: rule.id === 'image' ? '0.12' : rule.baseCny, customPointsPerCny: '200' })) };
+    // Change only the isolated fixture, never the application's configured database.
+    const mutate = spawnSync('python3', ['-c', `import sqlite3,sys
+c=sqlite3.connect(sys.argv[1]);c.execute('UPDATE PlatformSetting SET value_json=? WHERE key=?',(sys.argv[2],'pricing_policy_v1'));c.commit();c.close()`, filename, JSON.stringify(next)], { encoding: 'utf8' });
+    assert.equal(mutate.status, 0, mutate.stderr);
+    await withUsageReadSnapshot(async reader => {
+      const snapshot = await readUsageFacts(usageReaderDatabase(reader), '2026-11-05T12:00:00Z');
+      const current = snapshot.facts.find(fact => fact.sourceId === 'image-current')!;
+      assert.equal(current.accountingCost?.amountCnyMicros, '120000');
+      assert.equal(current.accountingCost?.points, '24');
+      assert.equal(current.accountingCost?.revision, 'updated');
+      assert.equal(result.oldImageMicros, '70000');
+      assert.equal(result.exportedUnit, '0.07');
+      assert.equal(result.actualCnyMicros, '1400000');
+    });
+    process.stdout.write(`${JSON.stringify({ ok: true, offlineFixture: true, currentRateRevaluation: true, originalCashPreserved: true, ...result })}\n`);
   } finally {
     if (previous === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = previous;
     globalThis.fetch = originalFetch; await rm(directory, { recursive: true, force: true });

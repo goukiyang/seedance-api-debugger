@@ -1,3 +1,5 @@
+import type { AccountingCost } from './accounting';
+
 export interface SelfUsageScope { kind: 'self'; viewerId: string }
 export interface ProjectUsageScope { kind: 'project'; viewerId: string; projectId: string; memberOwnerId?: string }
 export interface AdminUsageScope { kind: 'admin'; viewerId: string }
@@ -19,6 +21,7 @@ export interface UsagePublicQuery {
 }
 
 export interface UsageCashDTO {
+  referencePoints?: string | null;
   calculatedCnyMicros?: string | null;
   accountedCnyMicros?: string | null;
   calculatedCount?: number;
@@ -33,7 +36,7 @@ export interface UsageCashDTO {
 }
 
 export function usageAccountedMoney(cash: UsageCashDTO): string | null {
-  return cash.accountedCnyMicros ?? cash.netCnyMicros;
+  return cash.accountedCnyMicros ?? cash.calculatedCnyMicros ?? null;
 }
 
 export interface UsagePointsPartDTO {
@@ -69,6 +72,7 @@ export interface UsageCoverageDTO {
 }
 
 export interface UsageRecordDTO {
+  referenceQuote?: AccountingCost;
   id: string;
   sourceKind: string;
   type: UsageType;

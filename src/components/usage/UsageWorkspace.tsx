@@ -22,11 +22,15 @@ export function formatUsageMoney(value: string | null, prefix = '¥') {
   return `${negative ? '-' : ''}${prefix}${(cents / BigInt(100)).toLocaleString('zh-CN')}.${String(cents % BigInt(100)).padStart(2, '0')}`;
 }
 const count = (value: number | null) => value === null ? '待确认' : value.toLocaleString('zh-CN');
-const point = (value: string | null) => value === null ? '待核' : `${value} 点`;
+const point = (value: string | null | undefined) => value == null ? '待核' : `${value} 点`;
 const labels: Record<UsageType, string> = { video: '视频', image: '图片', other: '其他业务' };
 const statusText = (status: string) => ({ succeeded: '已完成', completed: '已完成', failed: '未完成', cancelled: '已取消', running: '处理中', processing: '处理中', pending: '待处理', queued: '排队中', submitted: '已提交', unknown: '提交结果待确认', awaiting_reconciliation: '费用待核' } as Record<string, string>)[status] || status;
-const cashState = (cash: UsageCashDTO) => cash.state === 'conflict' ? '费用有冲突' : cash.calculatedCount ? '含核算费用' : ({ confirmed: '已确认', partial: '部分已确认', pending: '费用待核', conflict: '费用有冲突', unavailable: '费用未覆盖' })[cash.state];
-const costText = (cash: UsageCashDTO) => usageAccountedMoney(cash) === null ? '费用待核' : `${cash.calculatedCount ? '费用' : '已确认'} ${formatUsageMoney(usageAccountedMoney(cash))}`;
+const cashState = (cash: UsageCashDTO) => ({ confirmed: '已确认', partial: '部分已确认', pending: '费用待核', conflict: '费用有冲突', unavailable: '费用未覆盖' })[cash.state];
+const costText = (cash: UsageCashDTO) => `当前价核算 ${formatUsageMoney(usageAccountedMoney(cash))}`;
+const groupedRecord = (record: UsageRecordDTO) => ['role_run', 'toolflow_run'].includes(record.sourceKind);
+const quoteState = (record: UsageRecordDTO) => groupedRecord(record) ? '按子任务核算' : !record.referenceQuote ? '报价待核'
+  : !(record.referenceQuote.included ?? !!record.cash.calculatedCount) ? '参考报价 · 不计入合计'
+    : record.referenceQuote.estimated ? '预计核算' : '当前价核算';
 
 function safeHref(value: string | null | undefined, image = false) {
   if (!value || !value.startsWith('/') || value.startsWith('//') || /[\\\u0000-\u001f\u007f]/.test(value)) return null;
@@ -37,18 +41,25 @@ function safeHref(value: string | null | undefined, image = false) {
   } catch { return null; }
 }
 
-function CashDetails({ cash, points }: { cash: UsageCashDTO; points: UsagePointsDTO }) {
+function CashDetails({ cash, points, quote, grouped = false }: { cash: UsageCashDTO; points: UsagePointsDTO; quote?: UsageRecordDTO['referenceQuote']; grouped?: boolean }) {
+  if (grouped) return <details className={styles.breakdown}><summary>金额与点数明细</summary><p>按子任务核算</p></details>;
   return <details className={styles.breakdown}>
     <summary>金额与点数明细</summary>
     <dl>
-      {!!cash.calculatedCount && <><dt>费用合计</dt><dd>{formatUsageMoney(usageAccountedMoney(cash))}</dd><dt>核算费用</dt><dd>{formatUsageMoney(cash.calculatedCnyMicros ?? null)} · {cash.calculatedCount} 笔，按资产费用或确认费率核算，非供应商实扣</dd></>}
+      <dt>当前价核算合计</dt><dd>{formatUsageMoney(usageAccountedMoney(cash))} · 折合 {point(cash.referencePoints)}</dd>
+      {quote && <>
+        <dt>当前报价依据</dt><dd>{quote.detail}</dd>
+        <dt>单价 / 单位 / 数量</dt><dd>¥{quote.unitCny ?? '待核'} / {quote.unit ?? '待核'} × {quote.quantity ?? '待核'}</dd>
+        <dt>费率 / 映射版本</dt><dd>{quote.revision || '未记录'} / {quote.mappingRevision || '未记录'}</dd>
+      </>}
+      <dt>现金核验状态</dt><dd>{cashState(cash)}</dd>
       <dt>确认收费</dt><dd>{formatUsageMoney(cash.chargeCnyMicros)}</dd>
       <dt>确认退款</dt><dd>{formatUsageMoney(cash.refundCnyMicros)}</dd>
       <dt>确认净额</dt><dd>{formatUsageMoney(cash.netCnyMicros)}</dd>
       <dt>原币收费</dt><dd>{cash.chargeOriginal.map((v) => formatUsageMoney(v.amountMicros, `${v.currency} `)).join(' / ') || '待核'}</dd>
       <dt>原币退款</dt><dd>{cash.refundOriginal.map((v) => formatUsageMoney(v.amountMicros, `${v.currency} `)).join(' / ') || '待核'}</dd>
       <dt>原币净额</dt><dd>{cash.netOriginal.map((v) => formatUsageMoney(v.amountMicros, `${v.currency} `)).join(' / ') || '待核'}</dd>
-      <dt>金额依据</dt><dd>{cash.calculatedCount ? '核算部分按资产费用或已确认费率；供应商实扣单列' : cash.basis === 'CNY' ? '原始人民币金额' : cash.basis === 'UNAVAILABLE' ? '尚无可确认依据' : '人民币折算，1 USD = 7 CNY；非银行实扣'}</dd>
+      <dt>实扣金额依据</dt><dd>{cash.basis === 'CNY' ? '原始人民币金额' : cash.basis === 'UNAVAILABLE' ? '尚无可确认依据' : '人民币折算，1 USD = 7 CNY；非银行实扣'}</dd>
       <dt>实扣点数</dt><dd>{point(points.charged)}</dd>
       <dt>扣后返还</dt><dd>{point(points.refunded)}</dd>
       <dt>净扣点数</dt><dd>{point(points.net)}</dd>
@@ -77,14 +88,14 @@ function ProjectUsageRow({ record, onNavigate, onPreview }: { record: UsageRecor
     <td data-label="时间"><RelativeTime value={record.occurredAt} /></td>
     <td data-label="类型 / 模型">{labels[record.type]}<br /><span className={styles.muted}>{record.model ? seedanceVideoModelLabel(record.model) : '型号待确认'}</span></td>
     <td data-label="生成状态">{statusText(record.status)}</td>
-    <td data-label="费用（人民币）"><strong>{formatUsageMoney(usageAccountedMoney(record.cash))}</strong><br /><span className={styles.muted}>{cashState(record.cash)}</span></td>
-    <td data-label="净扣点数">{point(record.points.net)}</td>
+    <td data-label="当前价核算"><strong>{groupedRecord(record) ? '-' : formatUsageMoney(record.referenceQuote?.amountCnyMicros ?? null)}</strong><br /><span className={styles.muted}>{quoteState(record)}</span></td>
+    <td data-label="折合点数">{groupedRecord(record) ? '-' : point(record.referenceQuote?.points)}</td>
     <td data-label="原记录"><div className={styles.actions}>
       {href && <Link className="link" href={href} onClick={() => onNavigate(record.id)}>查看原记录</Link>}
       {preview && <button className="btn btn-secondary" type="button" title={record.type === 'image' ? '查看图片' : '播放视频'} aria-label={record.type === 'image' ? '查看图片' : '播放视频'} onClick={() => onPreview(record)}>{record.type === 'image' ? <ImageIcon size={15} /> : <Play size={15} />}</button>}
       {download && <a className="btn btn-secondary" title="下载" aria-label="下载" href={download}><Download size={15} /></a>}
       {!href && !preview && <span className={styles.muted}>暂无可用入口</span>}
-    </div><CashDetails cash={record.cash} points={record.points} /></td>
+    </div><CashDetails cash={record.cash} points={record.points} quote={record.referenceQuote} grouped={groupedRecord(record)} /></td>
   </tr>;
 }
 
@@ -94,8 +105,7 @@ function Category({ type, value }: { type: 'video' | 'image'; value: UsageCatego
     <div className={styles.money}>{costText(value.cash)}</div>
     <p>{type === 'image' ? `请求 ${count(value.requestCount)} 次 · 产出 ${count(value.outputCount)} 张 · 可用 ${count(value.availableCount)} 张`
       : `任务 ${count(value.taskCount)} 个 · 成功 ${count(value.successfulCount)} 个 · 可用 ${count(value.availableCount)} 个`}</p>
-    <p className={styles.muted}>{cashState(value.cash)}{value.cash.basis === 'USD_CNY_DISPLAY' || value.cash.basis === 'MIXED_CNY_USD' ? ' · 含人民币折算' : ''} · 净扣 {point(value.points.net)}</p>
-    {(value.pendingCount !== 0 || value.conflictCount !== 0) && <p className={styles.muted}>待核 {count(value.pendingCount)} · 冲突 {count(value.conflictCount)}</p>}
+    <p className={styles.muted}>折合点数 {point(value.cash.referencePoints)}</p>
     <CashDetails cash={value.cash} points={value.points} />
   </section>;
 }
@@ -109,7 +119,7 @@ export function CompactUsageSummary({ report, error }: { report: Pick<UsageRepor
       const query = usageQueryParams({ ...report.query, project_id: null, member_owner_id: null, type, page: 1 });
       return <Link key={type} href={`/usage?${query}`}><strong>{labels[type]} {costText(value.cash)}</strong>
         {' · '}{type === 'image' ? `产出 ${count(value.outputCount)} 张` : `成功 ${count(value.successfulCount)} 个`}
-        {value.cash.state !== 'confirmed' ? ` · ${cashState(value.cash)}` : ''}</Link>;
+        {' · 折合点数 '}{point(value.cash.referencePoints)}</Link>;
     })}
     {report.restricted && <span className={styles.muted}>部分来源受限</span>}
   </div>;
@@ -132,9 +142,9 @@ function UsageRecord({ record, onPreview, onNavigate }: { record: UsageRecordDTO
     <div>
       <h3>{record.model ? seedanceVideoModelLabel(record.model) : labels[record.type]} · {statusText(record.status)}</h3>
       <div className={styles.scopeLine}>{record.project.label} · <RelativeTime value={record.occurredAt} /></div>
-      <p><strong>{costText(record.cash)}</strong> <span className={styles.muted}>{cashState(record.cash)}</span></p>
-      <p className={styles.muted}>{image ? `原请求 ${count(record.requestCount)} 次 · 产出 ${count(record.outputCount)} 张 · 可用 ${count(record.availableCount)} 张` : `任务 ${count(record.taskCount)} · 可用 ${count(record.availableCount)}`} · 净扣 {point(record.points.net)}</p>
-      <CashDetails cash={record.cash} points={record.points} />
+      <p><strong>{groupedRecord(record) ? '按子任务核算' : `当前价核算 ${formatUsageMoney(record.referenceQuote?.amountCnyMicros ?? null)}`}</strong> {!groupedRecord(record) && <span className={styles.muted}>{quoteState(record)}</span>}</p>
+      {!groupedRecord(record) && <p className={styles.muted}>{image ? `原请求 ${count(record.requestCount)} 次 · 产出 ${count(record.outputCount)} 张 · 可用 ${count(record.availableCount)} 张` : `任务 ${count(record.taskCount)} · 可用 ${count(record.availableCount)}`} · 折合点数 {point(record.referenceQuote?.points)}</p>}
+      <CashDetails cash={record.cash} points={record.points} quote={record.referenceQuote} grouped={groupedRecord(record)} />
     </div>
     <div className={styles.actions}>
       {preview && <button className="btn btn-secondary" type="button" onClick={() => onPreview(record)}>{image ? <ImageIcon size={15} /> : <Play size={15} />}{image ? '查看图片' : '播放视频'}</button>}
@@ -149,7 +159,7 @@ function UsageRecord({ record, onPreview, onNavigate }: { record: UsageRecordDTO
 function Trend({ report, view }: { report: UsageReportDTO; view: ReturnType<typeof useUsageViewState> }) {
   const { metric } = view.value;
   if (!report.trend) return null;
-  const amount = (value: UsageCategorySummary) => metric === 'cash' ? usageAccountedMoney(value.cash) === null ? null : Number(usageAccountedMoney(value.cash)) / 1e6 : value.points.net === null ? null : Number(value.points.net);
+  const amount = (value: UsageCategorySummary) => metric === 'cash' ? usageAccountedMoney(value.cash) === null ? null : Number(usageAccountedMoney(value.cash)) / 1e6 : value.cash.referencePoints == null ? null : Number(value.cash.referencePoints);
   const data = report.trend.items.map((item) => ({ month: item.month,
     video: Number.isFinite(amount(item.video)) ? amount(item.video) : null,
     image: Number.isFinite(amount(item.image)) ? amount(item.image) : null,
@@ -157,8 +167,8 @@ function Trend({ report, view }: { report: UsageReportDTO; view: ReturnType<type
   return <details className={styles.trend} open={view.value.trendOpen} onToggle={(event) => { if (view.ready && view.value.trendOpen !== event.currentTarget.open) view.update({ trendOpen: event.currentTarget.open }); }}>
     <summary>{report.trend.range.label}</summary>
     <div className={styles.actions} aria-label="趋势单位">
-      <button className="btn btn-secondary" type="button" aria-pressed={metric === 'cash'} onClick={() => view.update({ metric: 'cash' })}>人民币</button>
-      <button className="btn btn-secondary" type="button" aria-pressed={metric === 'points'} onClick={() => view.update({ metric: 'points' })}>点数</button>
+      <button className="btn btn-secondary" type="button" aria-pressed={metric === 'cash'} onClick={() => view.update({ metric: 'cash' })}>当前价核算</button>
+      <button className="btn btn-secondary" type="button" aria-pressed={metric === 'points'} onClick={() => view.update({ metric: 'points' })}>折合点数</button>
     </div>
     <div className={styles.trendChart} aria-label={`近六个月${metric === 'cash' ? '人民币' : '点数'}用量`}>
       <ResponsiveContainer width="100%" height="100%" minWidth={0}>
@@ -174,7 +184,7 @@ function Trend({ report, view }: { report: UsageReportDTO; view: ReturnType<type
       </ResponsiveContainer>
     </div>
     <details className={styles.trendValues}><summary>查看每月数值</summary><table className="table exp-data-table"><thead><tr><th>月份</th><th>视频</th><th>图片</th></tr></thead><tbody>
-      {report.trend.items.map((item) => <tr key={item.month}><th scope="row">{item.month}</th>{(['video', 'image'] as const).map((type) => <td key={type}>{metric === 'cash' ? formatUsageMoney(usageAccountedMoney(item[type].cash)) : point(item[type].points.net)}</td>)}</tr>)}
+      {report.trend.items.map((item) => <tr key={item.month}><th scope="row">{item.month}</th>{(['video', 'image'] as const).map((type) => <td key={type}>{metric === 'cash' ? formatUsageMoney(usageAccountedMoney(item[type].cash)) : point(item[type].cash.referencePoints)}</td>)}</tr>)}
     </tbody></table></details>
   </details>;
 }
@@ -191,7 +201,33 @@ export default function UsageWorkspace({ ownerId, projectId }: { ownerId: string
   const [members, setMembers] = useState<Array<{ id: string; label: string }>>([]);
   const [memberError, setMemberError] = useState('');
   const active = useRef(usage.identity); active.current = usage.identity;
+  const reload = useRef(usage.reload); reload.current = usage.reload;
   const anchorRestored = useRef('');
+  useEffect(() => {
+    if (!ownerId) return;
+    const identity = usage.identity;
+    const refresh = () => { if (active.current === identity) reload.current(); };
+    const pricingChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ ownerId?: string }>).detail;
+      if (!detail?.ownerId || detail.ownerId === ownerId) refresh();
+    };
+    const storageChanged = (event: StorageEvent) => {
+      if (event.key !== 'sd2-pricing-revision' || !event.newValue) return;
+      // The signal contains no billing data; reload only this mounted scope.
+      let owner: string | undefined;
+      try { owner = JSON.parse(event.newValue)?.ownerId; } catch { /* Plain revision signals are also supported. */ }
+      if (!owner || owner === ownerId) refresh();
+    };
+    const visible = () => { if (document.visibilityState === 'visible') refresh(); };
+    window.addEventListener('pricing-reference-updated', pricingChanged);
+    window.addEventListener('storage', storageChanged);
+    document.addEventListener('visibilitychange', visible);
+    return () => {
+      window.removeEventListener('pricing-reference-updated', pricingChanged);
+      window.removeEventListener('storage', storageChanged);
+      document.removeEventListener('visibilitychange', visible);
+    };
+  }, [ownerId, usage.identity]);
   useEffect(() => { setKeyword(query?.keyword || ''); }, [query?.keyword]);
   useEffect(() => { setPreview(null); }, [usage.request]);
   useEffect(() => { if (!report) setPreview(null); }, [report]);
@@ -266,7 +302,7 @@ export default function UsageWorkspace({ ownerId, projectId }: { ownerId: string
       <button className="btn btn-secondary" title="重置用量筛选" aria-label="重置用量筛选" type="button" onClick={() => update({}, true)}><RotateCcw size={16} /></button>
       <button className="btn btn-secondary" title="重新读取用量" aria-label="重新读取用量" type="button" disabled={busy} onClick={usage.reload}><RefreshCw size={16} /></button>
     </div>
-    <div className={styles.scopeLine}>{projectId ? '本项目可读已确认小计' : '本人任务的已确认实际消耗'} · {query.month}发起 · {query.time_zone}
+    <div className={styles.scopeLine}>{projectId ? '本项目可读当前价核算' : '本人任务的当前价核算'} · {query.month}发起 · {query.time_zone}
       {projectId && <Link className="link" href={`/usage?${usageQueryParams({ ...query, member_owner_id: null, page: 1 })}`}>查看本人用量</Link>}
     </div>
     {memberError && <p role="status" className={styles.muted}>{memberError}，未扩大成员范围。</p>}
@@ -290,7 +326,7 @@ export default function UsageWorkspace({ ownerId, projectId }: { ownerId: string
         <option value="">全部状态</option><option value="succeeded">已完成</option><option value="running">处理中</option><option value="queued">排队中</option><option value="failed">未完成</option><option value="cancelled">已取消</option><option value="unknown">提交结果待确认</option>
         {query.status && !['succeeded','running','queued','failed','cancelled','unknown'].includes(query.status) && <option value={query.status}>{statusText(query.status)}</option>}
       </select></label>
-      <label>排序<select className="input" value={query.sort} onChange={(e) => update({ sort: e.target.value as 'newest' | 'oldest' | 'cost' })}><option value="newest">最近发起</option><option value="oldest">最早发起</option><option value="cost">确认消耗从高到低</option></select></label>
+      <label>排序<select className="input" value={query.sort} onChange={(e) => update({ sort: e.target.value as 'newest' | 'oldest' | 'cost' })}><option value="newest">最近发起</option><option value="oldest">最早发起</option><option value="cost">当前报价从高到低</option></select></label>
       <label>每页<select className="input" value={query.limit} onChange={(e) => update({ limit: Number(e.target.value) })}>{[12,20,50].includes(query.limit) ? null : <option value={query.limit}>{query.limit}</option>}<option value="12">12</option><option value="20">20</option><option value="50">50</option></select></label>
       <button className="btn btn-secondary" type="button" disabled={!current || busy || exporting} onClick={() => void exportCsv()}><Download size={16} />{exporting ? '正在导出…' : '导出全部匹配明细'}</button>
     </form>
@@ -299,9 +335,9 @@ export default function UsageWorkspace({ ownerId, projectId }: { ownerId: string
     {report && <>
       <div className={styles.scopeLine}>{labels[report.query.type]} · 共 {report.records.total} 条 · 截至 <RelativeTime value={report.asOf} /></div>
       {report.records.updated && <p role="status" className={styles.muted}>记录已更新，已显示有效页。</p>}
-      {report.query.type === 'other' && <p>{report.summary.other.cash.netCnyMicros === null ? '其他业务实际费用待核' : `其他业务已确认 ${formatUsageMoney(report.summary.other.cash.netCnyMicros)}`} · 运行 {count(report.summary.other.taskCount)} 次</p>}
+      {report.query.type === 'other' && <p>{costText(report.summary.other.cash)} · 折合点数 {point(report.summary.other.cash.referencePoints)} · 运行 {count(report.summary.other.taskCount)} 次</p>}
       {report.records.items.length === 0 ? <p className={styles.muted}>当前范围没有可读记录。{report.restricted ? '部分来源受限。' : ''}</p>
-        : projectId ? <div className={styles.projectTable}><table className="table exp-data-table"><thead><tr><th>时间</th><th>类型 / 模型</th><th>生成状态</th><th>费用（人民币）</th><th>净扣点数</th><th>原记录与明细</th></tr></thead>
+        : projectId ? <div className={styles.projectTable}><table className="table exp-data-table"><thead><tr><th>时间</th><th>类型 / 模型</th><th>生成状态</th><th>当前价核算</th><th>折合点数</th><th>原记录与明细</th></tr></thead>
           {report.query.type === 'image' ? Array.from(groups, ([id, records]) => <tbody key={id}><tr><th colSpan={6} scope="rowgroup">{records[0].groupId ? '原批次' : '原请求'} · 当前页 {records.length} 条 · 费用保留原请求口径</th></tr>{records.map((record) => <ProjectUsageRow key={record.id} record={record} onNavigate={onNavigate} onPreview={setPreview} />)}</tbody>)
             : <tbody>{report.records.items.map((record) => <ProjectUsageRow key={record.id} record={record} onNavigate={onNavigate} onPreview={setPreview} />)}</tbody>}
         </table></div>

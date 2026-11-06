@@ -312,7 +312,9 @@ export async function readUsageFacts(source: UsageDbSource, dataAsOf: string, op
     json_extract(CASE WHEN json_valid("pricing_snapshot") THEN "pricing_snapshot" ELSE '{}' END, '$.pricingCharge.quantity') AS "frozen_quantity",
     CASE WHEN ("local_video_path" IS NOT NULL AND "local_video_path" <> '') OR ("public_video_url" IS NOT NULL AND "public_video_url" <> '') THEN 1 ELSE 0 END AS "has_output"`, Prisma.sql`"id"`, condition('video_task'));
   const images = await rows(db, Prisma.sql`"ImageStudioTask"`, imageFields, Prisma.sql`"id"`, condition('image_task'));
-  const studio = await rows(db, Prisma.sql`"VideoStudioRun"`, Prisma.sql`"id", "owner_user_id", "model", "mode", "status", "created_at", "updated_at", "completed_at"`, Prisma.sql`"id"`, Prisma.sql`"mode" = 'llm' AND ${condition('video_studio_run')}`);
+  const studio = await rows(db, Prisma.sql`"VideoStudioRun"`, Prisma.sql`"id", "owner_user_id", "model", "mode", "status", "created_at", "updated_at", "completed_at",
+    json_extract(CASE WHEN json_valid("usage_json") THEN "usage_json" ELSE '{}' END, '$.prompt_tokens') AS "input_tokens",
+    json_extract(CASE WHEN json_valid("usage_json") THEN "usage_json" ELSE '{}' END, '$.completion_tokens') AS "output_tokens"`, Prisma.sql`"id"`, Prisma.sql`"mode" = 'llm' AND ${condition('video_studio_run')}`);
   const agentText = await rows(db, Prisma.sql`"AgentRunStep" s JOIN "AgentRun" r ON r."id" = s."agent_run_id"`,
     agentTextFields, Prisma.sql`s."id"`, Prisma.sql`s."step_key" = 'llm_generate' AND ${condition('agent_text_step')}`);
   const roleRuns = await rows(db, Prisma.sql`"CanvasRoleTaskRun" r`, Prisma.sql`r."id", r."owner_user_id", r."document_id", r."status", r."created_at", r."updated_at"`, Prisma.sql`r."id"`, condition('role_run'));

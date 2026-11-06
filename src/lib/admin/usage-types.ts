@@ -86,6 +86,8 @@ export interface UsageFact {
 }
 
 export interface UsageSummary {
+  referencePoints?: string | null;
+  quoteMissingCount?: number;
   calculatedCostCnyMicros?: string | null;
   accountedCostCnyMicros?: string | null;
   calculatedCount?: number;

@@ -16,6 +16,7 @@ import type { PricingEnhanceGroup } from '@/lib/pricing/pricing-authoring-contra
 import { multiplyDecimal, roundDecimal } from '@/lib/pricing/math';
 import PricingSourceEditor from './PricingSourceEditor';
 import PricingHistory from './PricingHistory';
+import PricingReferenceSettings, { broadcastReferencePricingUpdated } from './PricingReferenceSettings';
 import styles from './pricing.module.css';
 import PricingPageNav from '@/components/pricing/PricingPageNav';
 
@@ -279,7 +280,8 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
       catalogFingerprint: current.catalogFingerprint === operation.payload.catalogFingerprint ? receipt.snapshot!.catalogFingerprint : current.catalogFingerprint,
       changes: consumePricingAdminDraft(current.changes, operation.submittedDraft) }));
     setSnapshot(receipt.snapshot); forgetOperation(operation); setSelected([]); setRestore(null); setAllMatched(false);
-    setPreviewResult(null); setMessage('已保存，仅影响新任务。后续草稿已保留。'); await load();
+    const broadcasted = broadcastReferencePricingUpdated(receipt.revision);
+    setPreviewResult(null); setMessage(`已保存，历史实扣不变。后续草稿已保留。${broadcasted ? '' : '此浏览器的同步通知未写入，不影响服务端保存。'}`); await load();
   }
   const queryReceipt = useCallback(async (operation: PricingAdminPending) => {
     if (saveLock.current || denied) return;
@@ -459,6 +461,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
           <div className={styles.tools}>{dirty && <button type="button" disabled={saving || Boolean(pending)} onClick={resetDraft}>{complexDraft ? '撤销旧草稿' : '撤销修改'}</button>}
             <button type="button" className="btn btn-primary" disabled={!canSave || complexDraft || pendingRows.length > 0} onClick={() => void save()}><Save size={16} />{saving ? '正在保存' : pending ? '保存待确认' : '保存'}</button></div>
         </footer>
+        <PricingReferenceSettings key={actorId} actorId={actorId} policyRevision={snapshot.revision} onUnauthorized={unauthorized} />
       </main>{productDialog}</>;
   }
   const editEnhance = (next: PricingEnhanceGroup) => updateChanges(changes => ({ ...changes, authoring: { ...changes.authoring, enhanceGroup: next } }));
@@ -600,6 +603,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
       {actionable && <button type="button" disabled={saving} onClick={() => { if (action.kind === 'save') setDraft({ revision: snapshot.revision, authoringRevision: snapshot.authoring?.revision, catalogFingerprint: snapshot.catalogFingerprint, changes: { rows: [] } }); setSelected([]); setRestore(null); setAllMatched(false); }}><RotateCcw size={15} />撤销本轮草稿</button>}
       <button type="button" className="btn btn-primary" disabled={!canSave} onClick={() => void save()}><Save size={17} />{saving ? '正在核对' : pending ? '保存待确认' : action.kind === 'restore' ? '保存历史恢复' : dirty ? '保存并生效' : '无待保存调整'}</button>
     </div></footer>
+    <PricingReferenceSettings key={actorId} actorId={actorId} policyRevision={snapshot.revision} onUnauthorized={unauthorized} />
     {historyOpen && <PricingHistory snapshot={snapshot} onUnauthorized={unauthorized} onClose={() => setHistoryOpen(false)} onRestore={candidate => { setRestore(candidate); setSelected([]); setAllMatched(false); setView(current => ({ ...current, changesOpen: true })); }} />}
     {productDialog}
   </main></>;

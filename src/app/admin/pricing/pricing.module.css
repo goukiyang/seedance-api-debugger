@@ -1,4 +1,39 @@
 .page { min-width: 0; color: var(--text-primary); padding-bottom: 20px; }
+.referenceSettings { margin-top: 20px; border-block: 1px solid var(--border-color); }
+.referenceSettings summary { cursor: pointer; min-height: 44px; padding: 12px 0; font-size: 14px; font-weight: 600; }
+.referenceBody { padding-bottom: 12px; min-width: 0; }
+.referenceToolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 8px 0; font-size: 13px; }
+.referenceToolbar > div:first-child { min-width: 0; overflow-wrap: anywhere; }
+.referenceToolbar button { display: inline-flex; align-items: center; gap: 6px; }
+.referenceFields { border: 0; margin: 0; padding: 0; min-width: 0; }
+.referenceRow { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border-color); }
+.referenceRow > strong { width: 70px; align-self: center; flex-shrink: 0; font-size: 14px; }
+.referenceRow label, .referenceTokens label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--text-secondary); min-width: 0; }
+.referenceRow > label:nth-child(2) { flex: 1 1 220px; }
+.referenceRow select { width: 100%; }
+.referenceRow input { width: 120px; font-variant-numeric: tabular-nums; }
+.referencePoints { align-self: center; font-size: 13px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.referenceFull { flex-basis: 100%; }
+.referenceTokens { display: flex; flex-wrap: wrap; gap: 12px 24px; flex-basis: 100%; padding-left: 82px; }
+.referenceTokens input { width: 180px; }
+.referenceMappings { border-top: 1px solid var(--border-color); }
+.referenceMappingList { display: grid; gap: 8px; }
+.referenceMappingRow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+.referenceMappingRow > span { flex: 1 1 240px; font-size: 13px; overflow-wrap: anywhere; min-width: 0; }
+.referenceMappingRow > select { flex: 1 1 200px; width: 200px; }
+.referenceMappingRow > input { flex: 1 1 200px; width: 200px; }
+.referenceMappingRow > button { flex: 0 0 36px; display: inline-flex; align-items: center; justify-content: center; }
+@media (max-width: 540px) {
+  .referenceRow { gap: 10px; }
+  .referenceRow > strong { width: 100%; }
+  .referenceRow > label:nth-child(2) { flex-basis: 100%; }
+  .referenceRow > label { flex: 1 1 110px; }
+  .referenceRow input { width: 100%; }
+  .referenceTokens { padding-left: 0; }
+  .referenceTokens label { flex: 1 1 160px; }
+  .referenceTokens input { width: 100%; }
+  .referenceMappingRow > span { flex-basis: 100%; }
+}
 .moneyTable { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 14px; }
 .moneyTable th, .moneyTable td { padding: 12px 10px; text-align: left; border-bottom: 1px solid var(--border-color); overflow-wrap: anywhere; }
 .moneyTable thead th { color: var(--text-secondary); background: var(--bg-secondary); font-size: 13px; font-weight: 500; }

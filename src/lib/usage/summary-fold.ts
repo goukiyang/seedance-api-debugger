@@ -1,5 +1,6 @@
 import type { UsageFact, UsageSummary } from '@/lib/admin/usage-types';
 import { usageCnyMicros, usageDecimalUnits, usageInteger, usageMoneyTotals, usageUnitsText } from '@/lib/admin/usage-money';
+import { usageQuoteIncluded } from './aggregate';
 
 const pointFields = ['chargedPoints', 'reservedPoints', 'releasedPoints', 'refundedPoints'] as const;
 const failed = new Set(['failed', 'cancelled', 'canceled', 'rejected', 'not-submitted']);
@@ -13,6 +14,10 @@ export class UsageSummaryFold {
   private money = new Map<string, bigint>();
   private calculated = BigInt(0);
   private calculatedCount = 0;
+  private quoteMissing = false;
+  private quoteMissingCount = 0;
+  private referencePoints = BigInt(0);
+  private referencePointsMissing = false;
   private points = new Map<typeof pointFields[number], bigint>();
   add(fact: UsageFact) {
     if (fact.ownerUserId) this.members.add(fact.ownerUserId);
@@ -23,8 +28,13 @@ export class UsageSummaryFold {
     this.counts.usageCount++; this.counts.outputCount += fact.outputCount;
     if (fact.costStatus === 'pending') this.counts.pendingCount++;
     if (!['confirmed', 'calculated'].includes(fact.costStatus)) this.counts.unknownCostCount++;
-    if (fact.costStatus === 'calculated' && fact.accountingCost) {
-      this.calculated += BigInt(fact.accountingCost.amountCnyMicros); this.calculatedCount++;
+    if (!fact.accountingCost) this.quoteMissingCount++;
+    this.quoteMissing ||= !fact.accountingCost;
+    if (usageQuoteIncluded(fact)) {
+      this.calculated += BigInt(fact.accountingCost!.amountCnyMicros); this.calculatedCount++;
+      const points = usageDecimalUnits(fact.accountingCost!.points, 2);
+      if (points === null) this.referencePointsMissing = true;
+      else this.referencePoints += points;
     }
     if (failed.has(fact.status)) this.counts.failedCount++;
     if (fact.resultReady === false) this.counts.resultNotReadyCount++;
@@ -43,10 +53,11 @@ export class UsageSummaryFold {
     const confirmedCost = usageMoneyTotals(Array.from(this.money, ([currency, amount]) => ({ currency, amountMicros: amount.toString() })));
     const confirmedCny = this.counts.usageCount ? usageCnyMicros(confirmedCost) : '0';
     const points = Object.fromEntries(pointFields.map(field => [field, this.points.has(field) ? usageUnitsText(this.points.get(field)!) : this.counts.usageCount ? null : '0'])) as Pick<UsageSummary, typeof pointFields[number]>;
+    const calculated = this.calculatedCount || !this.quoteMissing ? this.calculated.toString() : null;
     return { ...this.counts, ...points, confirmedCost,
       confirmedCostCnyMicros: confirmedCny, calculatedCount: this.calculatedCount,
-      calculatedCostCnyMicros: this.calculatedCount ? this.calculated.toString() : null,
-      accountedCostCnyMicros: confirmedCny === null && !this.calculatedCount ? null : (BigInt(confirmedCny || '0') + this.calculated).toString(),
+      calculatedCostCnyMicros: calculated, accountedCostCnyMicros: calculated, quoteMissingCount: this.quoteMissingCount,
+      referencePoints: this.referencePointsMissing || !this.calculatedCount && this.quoteMissing ? null : usageUnitsText(this.referencePoints),
       activeMemberCount: this.members.size, projectCount: this.projects.size };
   }
 }

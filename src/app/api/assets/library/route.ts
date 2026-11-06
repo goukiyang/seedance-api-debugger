@@ -18,6 +18,7 @@ import { removedLibraryResources } from '@/lib/assets/library-removal';
 import { ordinaryVideoTaskWhere, safeVideoTaskKeywordWhere } from '@/lib/video/multiview-task-privacy';
 import { multiviewOutputGroups } from '@/lib/video/multiview-output-groups.server';
 import { estimateNormalVideoCharge, loadNormalVideoChargeRates, type NormalVideoChargeEstimate } from '@/lib/costs/normal-video-charge';
+import { calculateRateCost, readCurrentRateBasis, type AccountingCost, type CurrentRateBasis } from '@/lib/usage/accounting';
 import { catalogReaderReady, readCatalogRevision } from '@/lib/image-studio/catalog-revision';
 import { readLibraryDirectory, type LibraryDirectoryPage } from '@/lib/assets/library-directory';
 import { CatalogSqlCompatibilityError } from '@/lib/assets/catalog-visibility-sql';
@@ -53,6 +54,7 @@ type LibraryProject = {
 };
 
 type LibraryItem = {
+  referenceQuote?: AccountingCost | null;
   multiviewGroup?: { workId: string; revision: number; children: LibraryItem[]; roles: string[]; frameCount: number; missing: number; syncing: boolean };
   id: string;
   kind: LibraryItemKind;
@@ -213,9 +215,12 @@ async function serializeTask(task: {
   provider_final_amount_micros: number | null;
   actual_cost: number | null;
   is_draft: boolean;
+  source_draft_task_id: string | null;
+  draft_upgrade_mode: string | null;
   reference_video_urls: string | null;
   provider_usage_snapshot: string | null;
   raw_status_response: string | null;
+  pricing_snapshot: string | null;
   params_json: string | null;
   retention_status: string;
   created_at: Date;
@@ -225,12 +230,21 @@ async function serializeTask(task: {
   project: LibraryProject | null;
   owner: LibraryUser | null;
   user: LibraryUser | null;
-}, viewer: SessionUser, normalRates: ReadonlyMap<string, number>): Promise<LibraryItem> {
+}, viewer: SessionUser, normalRates: ReadonlyMap<string, number>, referenceBasis?: CurrentRateBasis): Promise<LibraryItem> {
   const hasVideo = Boolean(task.public_video_url || task.local_video_path || task.result_video_url || task.result_last_frame_url);
   const videoUrl = task.public_video_url || (hasVideo ? `/api/video/play/${task.id}` : null);
   const deliveryStage = videoDeliveryStageForTask(task);
   const owner = userSummary(task.owner || task.user);
   const isEnhanceTask = task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit';
+  let priceMetadata: { toolVersion?: string; fps?: number } = {};
+  try { priceMetadata = JSON.parse(task.pricing_snapshot || '{}'); } catch { /* Missing old specifications use the configured reference. */ }
+  let resultFps: number | null = null;
+  try {
+    const raw = JSON.parse(task.raw_status_response || '{}');
+    resultFps = raw?.result?.fps ?? raw?.data?.result?.fps ?? null;
+  } catch { /* Old records without readable result specifications use the reference default. */ }
+  let referenceVideos: string | null = task.reference_video_urls?.trim() || null;
+  try { if (referenceVideos && JSON.parse(referenceVideos).length === 0) referenceVideos = null; } catch { /* Keep an invalid historical reference explicit. */ }
   const hasThumbnailSource = canRequestTaskThumbnail({
     publicVideoUrl: task.public_video_url,
     localVideoPath: task.local_video_path,
@@ -258,6 +272,12 @@ async function serializeTask(task: {
   }
   return {
     id: `video_task:${task.id}`,
+    referenceQuote: referenceBasis && (viewer.role === 'admin' || task.user?.id === viewer.id || task.owner?.id === viewer.id)
+      ? calculateRateCost({ sourceKind: 'video_task', kind: 'video', model: task.model, status: task.local_status,
+        outputCount: task.local_status === 'succeeded' ? 1 : 0 }, { provider: task.provider, duration: task.duration,
+        resolution: task.resolution, is_draft: task.is_draft,
+        is_upgrade: Boolean(task.source_draft_task_id || task.draft_upgrade_mode === 'draft_upgrade'), reference_video_urls: referenceVideos,
+        tool_version: priceMetadata?.toolVersion || null, fps: priceMetadata?.fps ?? resultFps }, referenceBasis) : null,
     kind: 'video',
     source: 'video_task',
     taskId: task.id,
@@ -480,6 +500,7 @@ function shouldIncludeActiveLibraryMedia(status: string) {
 }
 
 async function loadVideoItems(options: {
+  referenceBasis?: CurrentRateBasis;
   user: SessionUser;
   type: string;
   scope: string;
@@ -605,9 +626,12 @@ async function loadVideoItems(options: {
         provider_final_amount_micros: true,
         actual_cost: true,
         is_draft: true,
+        source_draft_task_id: true,
+        draft_upgrade_mode: true,
         reference_video_urls: true,
         provider_usage_snapshot: true,
         raw_status_response: true,
+        pricing_snapshot: true,
         params_json: true,
         retention_status: true,
         created_at: true,
@@ -630,12 +654,13 @@ async function loadVideoItems(options: {
   try { normalRates = await loadNormalVideoChargeRates(unbilledTasks); }
   catch { console.warn('[AssetCosts] Ordinary billing rate lookup unavailable'); }
   return {
-    items: await Promise.all(tasks.map((task) => serializeTask(task, user, normalRates))),
+    items: await Promise.all(tasks.map((task) => serializeTask(task, user, normalRates, options.referenceBasis))),
     total,
   };
 }
 
 async function loadAssetItems(options: {
+  referenceBasis?: CurrentRateBasis;
   user: SessionUser;
   userId: string;
   role: 'admin' | 'user';
@@ -791,7 +816,8 @@ async function loadAssetItems(options: {
     && (options.user.role === 'admin' || asset.owner_id === options.user.id)).map(asset => asset.id) },
     ...(options.user.role === 'admin' ? {} : { owner_id: options.user.id }), AND: [studioOutputTaskWhere] },
     select: { asset_id: true, owner_id: true, billing_status: true, actual_amount_micros: true,
-      actual_credits: true, billing_contract_json: true, status: true, usage_json: true }, take: 1001 });
+      actual_credits: true, billing_contract_json: true, status: true, usage_json: true, model: true, quality: true, output_size: true,
+      snapshot_json: true }, take: 1001 });
   const billsByAsset = new Map<string, typeof billingRows>();
   if (billingRows.length < 1001) for (const row of billingRows.filter(studioTaskHasViewableOutput)) { const rows = billsByAsset.get(row.asset_id!) || []; rows.push(row); billsByAsset.set(row.asset_id!, rows); }
 
@@ -800,6 +826,11 @@ async function loadAssetItems(options: {
       ...asset,
       owner: ownerById.get(asset.owner_id) || null,
     }), generationOrigin: assetGenerationOrigin(asset, origins),
+      referenceQuote: (() => { const rows = billsByAsset.get(asset.id); const row = rows?.length === 1 ? rows[0] : null;
+        let channel: string | null = null;
+        try { channel = JSON.parse(row?.snapshot_json || '{}')?.imageChannel?.channelId || null; } catch { /* Old images may not record their route. */ }
+        return row && options.referenceBasis ? calculateRateCost({ sourceKind: 'image_task', kind: 'image', model: row.model,
+          status: 'succeeded', outputCount: 1 }, { quality: row.quality, output_size: row.output_size, channel_id: channel }, options.referenceBasis) : null; })(),
       imageBilling: (() => { const rows = billsByAsset.get(asset.id); return rows?.length === 1 && rows[0].owner_id === asset.owner_id
         ? imageBillingView(rows[0], options.user.id, options.user.role === 'admin') : null; })() })),
     total,
@@ -954,9 +985,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: '权限不足' }, { status: 403 });
     }
 
-    const videoOptions = { user, type, scope, enhance, status, sort, projectId, ownerUserId, keyword, multiviewOutputsOnly,
+    let referenceBasis: CurrentRateBasis | undefined;
+    try { referenceBasis = await readCurrentRateBasis(prisma); }
+    catch { console.warn('[AssetCosts] Current reference pricing unavailable'); }
+    const videoOptions = { user, type, scope, enhance, status, sort, projectId, ownerUserId, keyword, multiviewOutputsOnly, referenceBasis,
       page: 1, limit, includeForMerge: false, removedIds: removed.video_task, directoryPage: Boolean(directoryPage) };
-    const assetOptions = { user, userId: user.id, role: user.role, type, enhance, scope, status, ownerUserId,
+    const assetOptions = { user, userId: user.id, role: user.role, type, enhance, scope, status, ownerUserId, referenceBasis,
       keyword, includeUploads, includeGenerated, multiviewOutputsOnly, take: limit, removedIds: removed.asset, directoryPage: Boolean(directoryPage) };
     const referenceOptions = { user, type, enhance, scope, status, projectId, ownerUserId, keyword,
       take: limit, multiviewOutputsOnly, removedIds: removed.reference_image, removedAssetIds: removed.asset, directoryPage: Boolean(directoryPage) };

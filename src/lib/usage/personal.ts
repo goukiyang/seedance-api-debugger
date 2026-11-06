@@ -42,6 +42,7 @@ function projectRecord(fact: UsageFact, source: UsageFactSnapshot, viewerId: str
     availableCount: image ? sourceMedia?.available ?? (fact.outputCount === 0 ? 0 : null)
       : video ? sourceMedia?.available ?? null : null,
     cash: publicUsageCash([fact], events), points: publicUsagePoints([fact]),
+    ...(fact.leaf && fact.accountingCost ? { referenceQuote: fact.accountingCost } : {}),
     originalHref: video ? `/tasks/${encodeURIComponent(fact.sourceId)}` : null,
     ...(ownedImage ? { imageTaskId: fact.sourceId,
       ...(source.publicMetadata?.get(usageSourceKey(fact))?.batchId ? { groupId: source.publicMetadata.get(usageSourceKey(fact))!.batchId } : {}) } : {}),
@@ -54,7 +55,7 @@ function safeCoverage(source: UsageFactSnapshot, scope: PublicUsageScope): Usage
     detail: item.source === 'cost_ledger' ? '仅连接到当前可读原任务的唯一成本事件；孤立、关联冲突及镜像不计入已确认小计，不提供原账本。'
       : item.source === 'usage_attribution' ? '优先使用原任务冻结归属；缺少记录时只采用可证明的历史字段，不补写历史。'
         : item.source === 'role_run' || item.source === 'toolflow_run' ? '父运行只列运行记录，费用及点数在原叶子计算，不重复相加。'
-          : '仅含当前有权查看的原来源；缺少现金或点数依据时保留未知，不按现价估算。',
+          : '仅含当前有权查看的原来源；按当前价重新核算，历史实扣与真实扣点单列，缺少报价依据保留未知。',
   }));
   result.push({ source: 'agent_text_step', label: 'Agent文字调用', status: 'unsupported', detail: '本人来源读取尚未支持，未读取或纳入小计。' },
     { source: 'cutout_receipt', label: '抠图回执', status: 'unsupported', detail: '本人回执读取尚未支持，未读取或纳入小计。' },
@@ -66,7 +67,7 @@ function safeCoverage(source: UsageFactSnapshot, scope: PublicUsageScope): Usage
 
 function compareRecords(a: UsageRecordDTO, b: UsageRecordDTO, sort: UsagePublicQuery['sort']) {
   if (sort === 'cost') {
-    const aa = usageInteger(a.cash.accountedCnyMicros ?? a.cash.netCnyMicros), bb = usageInteger(b.cash.accountedCnyMicros ?? b.cash.netCnyMicros);
+    const aa = usageInteger(a.referenceQuote?.amountCnyMicros), bb = usageInteger(b.referenceQuote?.amountCnyMicros);
     if (aa === null && bb !== null) return 1;
     if (aa !== null && bb === null) return -1;
     if (aa !== null && bb !== null && aa !== bb) return aa > bb ? -1 : 1;
@@ -124,7 +125,7 @@ export async function getUsagePublicReferenceSnapshot(scope: PublicUsageScope, i
     const fingerprint = createHash('sha256').update('public-usage.v1\0').update(scope.kind).update('\0').update(user.id)
       .update(JSON.stringify(actualQuery)).update(JSON.stringify(usageExchangeRate)).update(JSON.stringify(records))
       .update(JSON.stringify([safe.summary, safe.coverage, safe.projects, safe.trend]))
-      .update(JSON.stringify(allFacts.map(fact => [usageSourceKey(fact), fact.updatedAt])))
+      .update(JSON.stringify(allFacts.map(fact => [usageSourceKey(fact), fact.updatedAt, fact.accountingCost])))
       .update(JSON.stringify(source.sourceFingerprintParts)).digest('hex');
     return { report: { ...safe, fingerprint }, records };
   }, { maxWait: 10000, timeout: 120000 });
