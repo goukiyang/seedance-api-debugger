@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '视频复用修复与新模型配置', outline: [
-  '修复原素材仍在却无法复用的问题',
-  '素材不可用时可单独恢复参数，保留当前参考区',
-  '新增 GPT Image 2.6 后台配置项，待通道与价格确认后启用',
+const notice = { title: '模板共享与视频复用修复', outline: [
+  '修复过度帧首次共享后无法打开的问题',
+  '修复视频复用误判原素材缺失，保留参数恢复',
+  '新增 GPT Image 2.6 配置项，待通道与价格确认后启用',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
