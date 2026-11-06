@@ -25,8 +25,8 @@ import { characterLabOperations, characterLabSlotsOverlap, sameLabReference, typ
 import type { CharacterLabBootstrap, CharacterLabPlan, CharacterLabQuote, CharacterLabTask, CharacterLabWorkspace, CharacterLabWorkspacePayload } from './types';
 
 // The compatible recovery build keeps paired results readable while closing fresh generation.
-export const CHARACTER_LAB_BODY_PAIRS_ENABLED = true;
-export const CHARACTER_LAB_RECIPE_WRITES_ENABLED = true;
+export const CHARACTER_LAB_BODY_PAIRS_ENABLED = false;
+export const CHARACTER_LAB_RECIPE_WRITES_ENABLED = false;
 
 type StoredPlan = CharacterLabPlan & { inputFingerprint: string };
 type Receipt = { state: 'prepared' | 'submitting' | 'accepted' | 'rejected'; error?: string };
