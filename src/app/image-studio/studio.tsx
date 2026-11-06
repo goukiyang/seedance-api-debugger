@@ -1528,12 +1528,14 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
         sharingControl: pageItem?.sharing && <TemplateSharingSwitch name={entry.name}
           shared={pageItem.sharing.kind === 'preset' && pageItem.sharing.shared}
           selected={pageItem.sharing.kind === 'module' && pageItem.sharing.selected}
-          pending={pageItem.sharing.kind === 'preset' ? Boolean(sharing.pending[pageItem.sharing.id]) : preferenceSharing.pending[pageItem.sharing.id]}
+          pending={Boolean(preferenceSharing.pending[entry.id]) || (pageItem.sharing.kind === 'preset' ? Boolean(sharing.pending[pageItem.sharing.id]) : preferenceSharing.pending[pageItem.sharing.id])}
           disabled={Boolean(presetSharingId || preferenceSharing.busyId || pool.loading || pool.error)}
           onChange={anchor => {
             const state = pageItem.sharing!;
             setError('');
-            void (state.kind === 'preset'
+            void (preferenceSharing.pending[entry.id]
+              ? preferenceSharing.submit(entry.id, modules.find(item => item.id === entry.id)?.revision ?? 0, true)
+              : state.kind === 'preset'
               ? requestPresetSharing(state.id, !state.shared, state.revision, 'workbench', anchor)
               : preferenceSharing.submit(state.id, state.revision, true))
               .catch(cause => { setError(cause instanceof Error ? cause.message : '共享状态保存未确认'); pool.refresh(); });
@@ -2608,11 +2610,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     if (moduleSaveLock.current || moduleDeleteLock.current || uploading || bannerUploading || submitting || pendingSubmission || presetSaveLock.current) {
       setError('请等当前保存或生成完成后再修改共享'); return;
     }
-    if (module.sourcePresetCanManageSharing && module.sourcePresetId) {
+    if (!preferenceSharingPending && module.sourcePresetCanManageSharing && module.sourcePresetId) {
       await onToggleSharing(module, anchor);
       return;
     }
-    if (!module.canChooseSharing || sharedLive) { setError('只有创建者或管理员可以修改共享'); return; }
+    if (!preferenceSharingPending && (!module.canChooseSharing || sharedLive)) { setError('只有创建者或管理员可以修改共享'); return; }
     moduleSaveLock.current = true; setSharingPreferenceSaving(true); setError('');
     try {
       const result = await onChooseSharing(module.id, revisionRef.current, true);
