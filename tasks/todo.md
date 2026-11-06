@@ -1122,3 +1122,13 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 - 本轮额外发现已登记到[统一发现清单](discoveries.md)：D-20261101-01 至 04 分别保留生产 bundle 共享身份待核、目录全局失效放大、报表 Web 计算量和跨能力计价故障范围；均未实施额外重构，原任务与手验边界不变。
 
 - 封面媒体定点接续仅增短时日志并已恢复原配置；同一B/640/revision2自然点击5.256s、媒体TTFB2.390s，对应Nginx上游头/完整响应均113ms、总时长888ms，Node响应构造89.7ms。已把主要等待缩到观察的上游处理区间之外，公网/前置代理/浏览器等细因仍未证；不冒新修复或全站改善。[原代理计时](../docs/materials/2026-11-01-admin-usage-read-snapshot/media-edge-diagnostic/attempt02/timing-snapshot.jsonl)、[配置恢复证明](../docs/materials/2026-11-01-admin-usage-read-snapshot/media-edge-diagnostic/attempt02/automatic-restore.json)保留；App未重启、源88/v0.125.2不变。
+
+<!-- WORKS-READ01-20261106 -->
+### WORKS-READ01 作品列表503：设置元数据与权限快照前缀冲突（2026-11-06）
+
+- 用户截图为作品广场“作品暂时无法读取，请稍后重试；原内容与操作记录保留”。生产基线v0.134.8/d5d77d6e8，服务/health正常；nginx多次GET /api/works=503，而collections/project-audience=200。独立Chrome Agent Window只读复现同提示，未提交生成，未借用用户页；该会话ukbf随后已不在注册清单，不操作其余会话。
+- 实际根因：正常设置writer保存合法`studio_shared_reproduction_v1:workspace:<module>`与`:preset:<id>`的v2来源元数据（ownerId/moduleId/taskSettings），旧目录/私有绑定读取器却按整个前缀当作复现权限快照，要求sourceOwnerId/templateFixedReferences。生产query_only只读执行同readWorkPage在67ms抛CatalogSqlCompatibilityError；诊断原SQL唯一命中合法workspace:e4c9bed0-37c7-4d70-9b81-f14c6cb24d56。未删除/重写该行或任何作品；当时Work/WorkMediaVersion各2759条，只作存在性核对，不据此冒称全部内容可读。
+- 局部修法：共同的reproduction-record-keys按两个已保留的子空间分类，供catalog-visibility-sql、protected-assets（SQL/旧兼容/封面257条限额前过滤）、gallery-directory-sql和usage/media使用。真正v1/v2复现快照、固定/样式参考、URL别名、鲜核身份及撤权仍按原保护；不以字段缺失/版本号自动略过真坏绑定，不修改writer、价格、原请求、DB或原件。
+- 已有证据：原代码真实SQLite加入260条合法workspace/preset元数据后复现同Error；候选5文件在生产原数据中仅内存加载，四原文件SHA与d5一致，query_only=ON。admin的list/detail/authors/projects链路成功（合计335ms）；普通internal user同链路成功空结果（282ms），仅证明该账号可读范围，非同事全量可见性验收。隔离脚本works-reproduction-key-engineering.ts已由原代码red转为8项green（真实v2快照继续保护、两子空间共存、旧兼容、封面限额、gallery、作品列表/详情ACL、用量媒体ACL、真坏绑定拒绝），生产写入/网络调用为0。lint/types与统一主/guard发布尚待完成；未上线本修复，不把候选纯读成功冒线上已恢复，功能仍用户手验。
+- 前项VIDEO-SUBMIT01原截图实际按钮阻断仍待原页现场；本项不覆盖该缺口。本轮暂未新增范围外问题。
+<!-- /WORKS-READ01-20261106 -->
