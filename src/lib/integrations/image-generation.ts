@@ -2047,6 +2047,7 @@ function imageApiGroupModelStatuses(settings: ImageGenerationResolvedSettings, g
       if (capability.actualQuoteRequired !== true) actualBillingReasons.push('该 API Key 与型号的精确账单证明未就绪');
     }
     const missingRequirements = imageApiGroupModelMissingRequirements({
+      model, enabled: capability?.enabled,
       providerSupported: isStudioImageGenerationProvider(settings.provider),
       baseUrlConfigured: Boolean(effective.base_url), apiKeyConfigured: Boolean(effective.api_key),
       protocol: capability?.protocol, qualities: capability?.qualities, resolutions: capability?.resolutions,
