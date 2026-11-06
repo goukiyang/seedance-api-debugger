@@ -50,6 +50,7 @@ body:has(:is(.mj-generation-page, .mj-image-generation-page)) .composer-project-
 body:has(:is(.mj-generation-page, .mj-image-generation-page)) .video-payer { align-self: flex-start; margin-top: 31px; color: #c5c8d2; font-size: 13px; }
 body:has(:is(.mj-generation-page, .mj-image-generation-page)) .video-payer::before { content: '费用：'; color: #9297a5; }
 @media (max-width: 640px) {
+  body:has(:is(.mj-generation-page, .mj-image-generation-page)) [data-mj-feishu-open] > [data-mj-feishu-notice] { left: 0; right: auto; }
   body:has(:is(.mj-generation-page, .mj-image-generation-page)) .video-payer { margin-top: 0; }
   body:has(:is(.mj-generation-page, .mj-image-generation-page)) [class*="video-feishu_label__"] { min-height: 44px; }
   body:has(:is(.mj-generation-page, .mj-image-generation-page)) [class*="ResourceLibraryPicker_layout__"] { grid-template-columns: minmax(0, 1fr); }

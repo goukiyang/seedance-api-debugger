@@ -12,10 +12,12 @@
     a: { href: '/works', path: '/works', label: 'A · 作品广场' },
     b: { href: '/template-studio?type=image', path: '/template-studio', label: 'B · 图片模板工作台' },
     c: { href: '/generate', path: '/generate', label: 'C · 视频生成' },
+    d: { href: '/template-studio?type=image', path: '/template-studio', label: 'D · 图片生成' },
   };
   let variant = Object.hasOwn(pages, query.get('variant')) ? query.get('variant') : 'a';
   let viewport = query.get('viewport') === 'mobile' ? 'mobile' : 'desktop';
   let navigationVersion = 0;
+  let targetVersion = 0;
   let reconnectAttempts = 0;
   let reconnectTimer;
   const reconnectDelays = [2500, 5000, 10000];
@@ -48,6 +50,7 @@
 
   function sync() {
     for (const button of variants) button.setAttribute('aria-pressed', String(button.dataset.variant === variant));
+    variants.find(button => button.dataset.variant === variant)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     for (const button of viewports) button.setAttribute('aria-pressed', String(button.dataset.viewport === viewport));
     stage.dataset.viewport = viewport;
     original.href = pages[variant].href;
@@ -71,6 +74,7 @@
   function openPage(name) {
     clearTimeout(reconnectTimer);
     navigationVersion++;
+    const target = ++targetVersion;
     reconnectAttempts = 0;
     variant = name;
     sync();
@@ -78,10 +82,36 @@
     frame.hidden = false;
     frame.classList.remove('is-ready');
     status.textContent = `正在载入${pages[variant].label}。页面操作在原站生效。`;
+    if (variant === 'd') {
+      frame.hidden = true;
+      status.textContent = '正在读取当前账号的图片生成工作区…';
+      void openImageWorkspace(target);
+      return;
+    }
     frame.src = pages[variant].href;
   }
 
+  async function openImageWorkspace(target) {
+    try {
+      const response = await fetch('/api/auth/me', { method: 'GET', cache: 'no-store', signal: AbortSignal.timeout(15000) });
+      if (!response.ok) throw new Error('session-unavailable');
+      const data = await response.json();
+      if (target !== targetVersion) return;
+      if (data.user === null) { requireLogin(); return; }
+      if (typeof data.user?.id !== 'string' || !data.user.id) throw new Error('session-unavailable');
+      pages.d.href = `/template-studio?type=image&moduleId=${encodeURIComponent(`default-${data.user.id}`)}`;
+      sync();
+      frame.hidden = false;
+      status.textContent = '正在载入本人图片生成工作区。页面操作在原站生效。';
+      frame.src = pages.d.href;
+    } catch {
+      if (target !== targetVersion) return;
+      status.textContent = '当前账号信息暂未读取，请点击“重新载入”。原工作区与输入保留。';
+    }
+  }
+
   frame.addEventListener('load', () => {
+    if (variant === 'd' && frame.hidden && loginGate.hidden) return;
     clearTimeout(reconnectTimer);
     const version = ++navigationVersion;
     let doc;
@@ -116,10 +146,13 @@
     loginGate.hidden = true;
     frame.hidden = false;
     if (variant === 'c') doc.querySelector('.composer-page')?.classList.add('mj-generation-page');
+    if (variant === 'd') doc.querySelector('.shell-root')?.classList.add('mj-image-generation-page');
     const link = doc.createElement('link');
     link.rel = 'stylesheet';
-    link.href = new URL(`${variant}.css?v=${variant === 'c' ? 'r05-generation' : 'r02'}`, location.href).href;
-    let pendingAssets = variant === 'c' ? 3 : 1;
+    const versionTag = { a: 'r02', b: 'r02', c: 'r05-generation', d: 'r07-image' };
+    link.href = new URL(`${variant}.css?v=${versionTag[variant]}`, location.href).href;
+    const withUx = variant === 'c' || variant === 'd';
+    let pendingAssets = withUx ? 3 : 1;
     const assetReady = () => {
       if (version !== navigationVersion || frame.contentDocument !== doc) return;
       if (--pendingAssets) return;
@@ -134,10 +167,10 @@
     link.onload = assetReady;
     link.onerror = assetError;
     doc.head.appendChild(link);
-    if (variant === 'c') {
+    if (withUx) {
       const uxStyle = doc.createElement('link');
       uxStyle.rel = 'stylesheet';
-      uxStyle.href = new URL('ux-r06.css', location.href).href;
+      uxStyle.href = new URL('ux-r07.css', location.href).href;
       uxStyle.onload = assetReady;
       uxStyle.onerror = assetError;
       const uxScript = doc.createElement('script');

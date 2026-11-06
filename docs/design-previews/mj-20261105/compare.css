@@ -23,8 +23,8 @@ iframe.is-ready { opacity: 1; }
 @media (max-width: 760px) {
   .compare-bar { padding: 10px 12px; gap: 8px; }
   .compare-brand { flex: 1; }
-  .variants { order: 3; flex: 0 0 100%; }
-  .variants button { flex: 1; min-width: 0; min-height: 42px; padding-inline: 7px; gap: 5px; font-size: 12px; white-space: normal; }
+  .variants { order: 3; flex: 0 0 100%; max-width: 100%; overflow-x: auto; scrollbar-width: thin; }
+  .variants button { flex: 0 0 auto; min-width: 0; min-height: 42px; padding-inline: 10px; gap: 5px; font-size: 12px; white-space: nowrap; }
   .viewport { margin-left: 0; }
   .viewport button, .reload, .site-link { min-height: 40px; padding: 6px 9px; }
   #status { order: 4; }
