@@ -90,8 +90,11 @@ async function evidenceRoot(create = false) {
   if (create) await fs.mkdir(storage, { recursive: true, mode: 0o700 });
   const realStorage = await fs.realpath(storage);
   if (process.env.NODE_ENV === 'production' && !realStorage.startsWith('/data/')) throw new Error('studio_response_evidence_storage_not_data');
-  const root = path.join(realStorage, 'studio-response-evidence');
-  if (create) await fs.mkdir(root, { mode: 0o700 }).catch(cause => { if ((cause as NodeJS.ErrnoException).code !== 'EEXIST') throw cause; });
+  const configuredRoot = path.join(realStorage, 'studio-response-evidence');
+  if (create) await fs.mkdir(configuredRoot, { mode: 0o700 }).catch(cause => { if ((cause as NodeJS.ErrnoException).code !== 'EEXIST') throw cause; });
+  // Managed releases link this root to private persistent storage, just like storage itself.
+  const root = await fs.realpath(configuredRoot);
+  if (process.env.NODE_ENV === 'production' && !root.startsWith('/data/')) throw new Error('studio_response_evidence_storage_not_data');
   await checkDirectory(root);
   if (create) await syncDirectory(realStorage);
   return root;
