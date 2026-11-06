@@ -1,6 +1,7 @@
 import './server-runtime.cjs';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -24,6 +25,8 @@ async function main() {
   const { queryStudioGallery } = await import('../src/lib/image-studio/gallery');
   const { setStudioPresetSharing } = await import('../src/lib/image-studio/presets');
   const { canViewStudioPreset } = await import('../src/lib/image-studio/access');
+  const { STUDIO_TASK_SETTINGS_FILES, writeStudioWorkspaceSource, readStudioWorkspaceSource } = await import('../src/lib/image-studio/task-settings-storage');
+  const { studioTaskSettings } = await import('../src/lib/image-studio/task-settings');
   const checks: string[] = [];
   try {
     for (const id of ['author', 'other']) await prisma.user.create({ data: {
@@ -32,6 +35,11 @@ async function main() {
     } });
     const author = { id: 'author', role: 'admin', account_type: 'internal' };
     const other = { id: 'other', role: 'admin', account_type: 'internal' };
+    process.env.STUDIO_TASK_SETTINGS_V2_WRITE = '1';
+    await prisma.platformSetting.create({ data: { key: 'studio_shared_worker_v1', updated_by: other.id, value_json: JSON.stringify({
+      taskSettingsProtocol: 'task-settings-v2', expiresAt: new Date(Date.now() + 60000).toISOString(),
+      loadedModuleSha: Object.fromEntries(STUDIO_TASK_SETTINGS_FILES.map(file => [file, createHash('sha256').update(readFileSync(path.join(sourceRoot, file))).digest('hex')])),
+    }) } });
     const id = 'default-author';
     await prisma.imageStudioModule.create({ data: { id, owner_id: author.id, name: '模块 1', context: 'fixture context' } });
     const saved = await saveStudioModule(author.id, { id, revision: 0, name: '过度帧', prompt: '', count: 1, referenceIds: [], context: 'fixture context', aspectRatio: 'auto' });
@@ -134,6 +142,7 @@ async function main() {
       prompt: 'personal supplement stays private', context: 'saved template context', reference_ids: '["personal-image"]',
     } });
     const command = { id: regularId, revision: privateChoice.revision, isShared: true, requestId: randomUUID() };
+    await writeStudioWorkspaceSource(prisma, { version: 2, ownerId: other.id, moduleId: regularId, sourceTaskId: null, taskSettings: studioTaskSettings('current') });
     await assert.rejects(() => shareSavedStudioModule(author.id, command), error => [403, 404].includes((error as { status: number }).status));
     await assert.rejects(() => shareSavedStudioModule(other.id, { ...command, revision: command.revision - 1, requestId: randomUUID() }),
       error => (error as { status: number }).status === 409);
@@ -149,6 +158,9 @@ async function main() {
     assert.equal(immediate.sharingCommandReceipt.action, 'share-saved-module');
     assert.equal(canViewStudioPreset(author, immediateSource), true);
     checks.push('one_command_publishes_saved_definition_without_personal_or_unsaved_inputs');
+    assert.equal(immediate.taskSettings?.mode, 'current');
+    assert.equal((await readStudioWorkspaceSource(prisma, other.id, immediateSource.id, 'preset'))?.taskSettings.mode, 'current');
+    checks.push('immediate_publication_preserves_saved_current_settings_mode');
     const replay = await shareSavedStudioModule(other.id, command);
     assert.equal(replay.revision, immediate.revision);
     assert.equal(replay.sourcePresetId, immediate.sourcePresetId);
@@ -165,7 +177,12 @@ async function main() {
       id: 'default-other', revision: 0, isShared: true, requestId: randomUUID(),
     }), error => (error as Error).message.includes('名称'));
     checks.push('immediate_switch_also_rejects_unnamed_default');
-    await prisma.imageStudioModule.update({ where: { id: 'default-other' }, data: { name: '过度帧', context: 'default saved context' } });
+    // Seed an existing historical request; no generator or upstream is invoked.
+    await prisma.imageStudioTask.create({ data: { id: 'historical-seed', batch_id: 'fixture', owner_id: other.id, ordinal: 0,
+      fingerprint: 'fixture', prompt: '', context: '', revision: 0, model: 'gpt-image-1', reference_ids: '[]', unit_credits: 0,
+      status: 'completed', snapshot_json: JSON.stringify({ moduleContext: 'default saved context', globalContext: 'historical global context' }) } });
+    await prisma.imageStudioModule.update({ where: { id: 'default-other' }, data: { name: '过度帧', context: 'default saved context', reproduce_task_id: 'historical-seed' } });
+    await writeStudioWorkspaceSource(prisma, { version: 2, ownerId: other.id, moduleId: 'default-other', sourceTaskId: 'historical-seed', taskSettings: studioTaskSettings('historical', 'historical-seed') });
     const directDefault = await shareSavedStudioModule(other.id, {
       id: 'default-other', revision: 0, isShared: true, requestId: randomUUID(),
     });
@@ -174,9 +191,13 @@ async function main() {
     assert.equal(directDefault.sourcePresetCanManageSharing, true);
     assert.equal((await queryStudioGallery(author, { pageSize: 12 })).items.some(item => item.presetId === directDefault.sourcePresetId), true);
     checks.push('default_module_publishes_directly_and_appears_in_colleague_gallery');
+    assert.equal(directDefault.taskSettings?.mode, 'historical');
+    const historicalSource = await readStudioWorkspaceSource(prisma, other.id, directDefault.sourcePresetId!, 'preset');
+    assert.equal(historicalSource?.taskSettings.sourceTaskId, 'historical-seed');
+    checks.push('immediate_publication_preserves_saved_historical_mode_and_original_source');
     assert.equal(networkCalls, 0);
-    assert.equal(await prisma.imageStudioTask.count(), 0);
-    console.log(JSON.stringify({ passed: checks.length, checks, networkCalls, generatedTasks: 0 }));
+    assert.equal(await prisma.imageStudioTask.count(), 1);
+    console.log(JSON.stringify({ passed: checks.length, checks, networkCalls, generatedTasks: 0, syntheticSourceTasks: 1 }));
   } finally {
     globalThis.fetch = oldFetch;
     await prisma.$disconnect();

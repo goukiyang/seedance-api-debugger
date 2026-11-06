@@ -943,9 +943,9 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
       throw new StudioSharingError('skills仅自己可见，请移除后再共享模板', 409);
     }
     let reproduction = source ? await reproductionForPreset(tx, actor.id, presetId) : undefined;
-    const taskSettings = parseStudioTaskSettings(input.taskSettings);
-    if (taskSettings && has(input, 'globalContext')) throw new StudioSharingError('通用上下文由设置模式确定，不能随模板覆盖', 400);
     const workspaceSource = await readStudioWorkspaceSource(tx, actor.id, moduleId);
+    const taskSettings = parseStudioTaskSettings(input.taskSettings) ?? (lifecycle?.shareSavedWorkspace ? workspaceSource?.taskSettings : undefined);
+    if (taskSettings && has(input, 'globalContext')) throw new StudioSharingError('通用上下文由设置模式确定，不能随模板覆盖', 400);
     const presetSettingsSource = source ? await readStudioWorkspaceSource(tx, actor.id, presetId, 'preset') : null;
     assertStudioTaskSettingsWrite(reproduction?.taskSettings ?? presetSettingsSource?.taskSettings ?? workspaceSource?.taskSettings, taskSettings);
     if (taskSettings) await assertStudioTaskSettingsWriter(tx);
