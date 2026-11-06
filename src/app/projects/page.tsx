@@ -5,6 +5,7 @@ import { ProjectWorkAudience } from '@/components/works/ProjectWorkAudience';
 import { forwardRef, Suspense, useEffect, useId, useImperativeHandle, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useWorkspaceScroll } from '@/lib/hooks/use-workspace-scroll';
 import { Download, FolderKanban, MoreHorizontal, Plus, RotateCcw, Search } from 'lucide-react';
 import ProjectFilters from '@/components/projects/ProjectFilters';
 import PaginationControls from '@/components/PaginationControls';
@@ -382,6 +383,7 @@ function ProjectsPageContent() {
   const queryKey = JSON.stringify({ accountKey, ...currentPreferences, search: appliedSearch, pageSize });
   const preferencesReady = preferencesReadyFor === accountKey;
   const hasCurrentList = preferencesReady && appliedSearch === search && projectsAccountKey === accountKey && loadedQueryKey === queryKey;
+  useWorkspaceScroll(currentUserId, `projects:${queryKey}`, hasCurrentList);
   const showListError = search === appliedSearch && Boolean(listError && failedQueryKey === queryKey);
 
   function beginAccountOperation(kind: AccountOperation): AccountOperationSnapshot {
@@ -1013,6 +1015,7 @@ function ProjectsPageContent() {
           return (
             <article
               id={`project-card-${project.id}`}
+              data-remember-scroll-anchor={project.id}
               key={project.id}
               data-project-id={project.id}
               className={styles.projectCard}

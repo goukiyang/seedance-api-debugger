@@ -12,6 +12,7 @@ import ShareAlbumDialog, { type ShareAlbumDialogAlbum } from '@/components/Share
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { useAppSession } from '@/lib/context/AppSessionContext';
+import { useWorkspaceScroll } from '@/lib/hooks/use-workspace-scroll';
 import { uploadFileAsAsset } from '@/lib/http/file-upload';
 import { UploadedImagePicker } from '@/components/UploadedImagePicker';
 import type { PickerItem } from '@/lib/assets/picker-types';
@@ -177,6 +178,7 @@ export default function ReferenceAlbumDetailClient({ albumId, returnTo }: { albu
   const [uploadProgress, setUploadProgress] = useState<AlbumUploadProgress | null>(null);
   const [pendingAlbumAttach, setPendingAlbumAttach] = useState<PendingAlbumAttach | null>(null);
   const [loading, setLoading] = useState(false);
+  useWorkspaceScroll(accountId, `collection:${albumId}`, loadedContextKey === contextKey && !loading);
   const [shareDialogAlbum, setShareDialogAlbum] = useState<ShareAlbumDialogAlbum | null>(null);
   const [sharingImageId, setSharingImageId] = useState<string | null>(null);
 

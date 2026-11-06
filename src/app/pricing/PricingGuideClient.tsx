@@ -6,6 +6,7 @@ import { RefreshCw } from 'lucide-react';
 import PricingPageNav from '@/components/pricing/PricingPageNav';
 import { RelativeTime } from '@/components/RelativeTime';
 import { useOptionalAppSession } from '@/lib/context/AppSessionContext';
+import { useWorkspaceScroll } from '@/lib/hooks/use-workspace-scroll';
 import { pricingGuideMoney, type PricingGuideKind, type PricingGuideSnapshot } from '@/lib/pricing/guide';
 import styles from './pricing-guide.module.css';
 
@@ -28,6 +29,7 @@ export default function PricingGuideClient({ actorId, isAdmin }: { actorId: stri
   const wrongAccount = Boolean(session?.sessionChanged || session?.hasLoadedUser && session.user?.id !== actorId);
   const pricing = !wrongAccount && result?.owner === actorId ? result.pricing : null;
   const storageKey = `sd2:pricing-guide:${actorId}`;
+  useWorkspaceScroll(actorId, `pricing:${kind}:${fpsTier}`, preferencesOwner === actorId && Boolean(pricing) && !loading);
 
   useEffect(() => {
     let saved: { kind?: unknown; fpsTier?: unknown } = {};

@@ -20,6 +20,14 @@ export interface NavGroup {
 export const showLegacyVideoWorkbenchEntry = false;
 export const showVideoCardManagementUi = false;
 
+export const workspaceSections = ['assets', 'projects', 'tasks', 'collections', 'usage', 'pricing', 'account', 'notifications', 'help'] as const;
+export type WorkspaceSection = typeof workspaceSections[number];
+
+export function workspaceSection(pathname: string): WorkspaceSection | undefined {
+  return workspaceSections.find(section => pathname === `/${section}`
+    || (['projects', 'tasks', 'collections'].includes(section) && pathname.startsWith(`/${section}/`)));
+}
+
 export const shellRoutes = [
   '/',
   '/workbench',

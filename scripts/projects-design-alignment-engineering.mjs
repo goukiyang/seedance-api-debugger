@@ -18,6 +18,7 @@ const sources = ['scripts/projects-design-alignment-engineering.mjs', 'src/lib/p
   'src/components/projects/ProjectFilters.tsx', 'src/components/usage/UsageWorkspace.tsx',
   'src/components/usage/UsageWorkspace.module.css', 'src/app/tasks/[id]/TaskResult.module.css',
   'src/app/tasks/[id]/page.tsx', 'src/components/AppShell.tsx', 'src/app/globals.css',
+  'src/lib/hooks/use-workspace-scroll.ts', 'src/lib/hooks/use-remembered-scroll.ts',
   'src/lib/release.ts', 'src/components/ReleaseNotice.tsx'];
 let allowed = true;
 let reads = 0;
