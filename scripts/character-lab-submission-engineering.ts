@@ -164,7 +164,7 @@ async function main() {
     const created = await db.imageStudioTask.findFirstOrThrow({ where: { owner_id: owner, batch_id: submitted.batchId } });
     const createdSnapshot = JSON.parse(String(created.snapshot_json));
     const createdContract = contracts.parseImageBillingContract(created.billing_contract_json);
-    assert.deepEqual(createdSnapshot.characterLab, { version: 1, planId: newPlan.id });
+    assert.deepEqual(createdSnapshot.characterLab, { version: 1, planId: newPlan.id, personalPromptSeparated: 1 });
     assert.equal(createdSnapshot.globalContext, ''); assert.equal(createdSnapshot.moduleContext, '');
     assert.deepEqual(JSON.parse(created.reference_ids), [sourceAssetId]); assert.equal(created.prompt, newPlan.prompt);
     assert.equal(createdContract?.specification, expectedContract.specification);
