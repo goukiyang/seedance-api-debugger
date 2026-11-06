@@ -41,7 +41,11 @@ export async function quoteVideoPricing(input: VideoPricingInput, client: Client
   let quantity = normalizeDecimal(String(identity.kind === 'enhance' || identity.kind === 'h3' ? Math.max(1, Math.ceil(input.duration)) : input.duration),
     { maxScale: 8, min: '0', max: '3600', allowZero: false });
   let current = await quotePricingCharge(identity, quantity, client);
-  if (!current) return { identity, quantity, pricing: legacy, revision: null, charge: null };
+  if (!current && identity.kind === 'h3') return { identity, quantity, pricing: legacy, revision: null, charge: null };
+  if (!current || identity.kind !== 'h3' && (!['follow', 'custom'].includes(current.charge.mode)
+    || !current.charge.baseCny || !current.charge.pointsPerCny)) {
+    throw new PricingChargeError('当前视频规格尚未登记人民币价格，请在点数与费率中补齐；未受理、未冻结点数');
+  }
   if (identity.kind === 'enhance' && ['follow', 'custom'].includes(current.charge.mode)) {
     if (!(input.fps ?? input.sourceFps)) throw new PricingChargeError('源视频帧率尚未确认，请选择输出帧率后重新报价；原视频和参数已保留');
     const preciseIdentity = videoPricingIdentity(input);
@@ -57,8 +61,7 @@ export async function quoteVideoPricing(input: VideoPricingInput, client: Client
   if (current.credits === null) throw new PricingChargeError('视频固定收费合同缺少明确金额，未受理');
   const amount = normalizeCredits(current.credits);
   const unitPoints = current.charge.mode === 'free' ? 0
-    : Number(current.charge.mode === 'legacy_fixed' ? current.charge.legacyUnitCredits
-      : multiplyDecimal([current.charge.baseCny!, current.charge.pointsPerCny!]));
+    : Number(multiplyDecimal([current.charge.baseCny!, current.charge.pointsPerCny!]));
   const pricing: PricingSnapshot = { ...legacy, duration: Number(quantity), estimatedCost: amount, baseCostPerSecond: unitPoints,
     internalMultiplier: 1, finalCostPerSecond: unitPoints,
     formula: current.charge.mode === 'free' ? 'explicit_free = 0' : `${current.exactCredits} → ${amount}`,

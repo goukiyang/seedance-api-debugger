@@ -1,8 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '作品广场向飞书用户开放', outline: [
-  '飞书登录后可进入作品广场',
-  '作品的共享范围和原图权限保持原样',
+const notice = { title: '视频费用统一按人民币换算', outline: [
+  '视频和IP生成按费率页金额自动换算点数',
+  '样片、参考视频和升级跟随同档基价',
+  '历史任务保持原扣点，新用户暂不赠分',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
