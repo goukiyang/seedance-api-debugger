@@ -1,3 +1,4 @@
+import { legacyFeedbackAssetIds, materialAssetWhere, materialAssetSql } from '@/lib/assets/upload-purpose';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
@@ -68,7 +69,8 @@ export async function GET(request: NextRequest) {
     const user = await getSession();
     if (!user) return NextResponse.json({ error: '未登录' }, { status: 401 });
     const hiddenUrls = await studioHiddenAssetUrls(user);
-    const visibleWhere = hiddenUrls.length ? { original_url: { notIn: hiddenUrls } } : {};
+    const legacyIds = await legacyFeedbackAssetIds(prisma, user.id);
+    const visibleWhere = { AND: [materialAssetWhere(legacyIds)], ...(hiddenUrls.length ? { original_url: { notIn: hiddenUrls } } : {}) };
 
     const searchParams = request.nextUrl.searchParams;
     if (searchParams.has('assetIds')) {
@@ -109,7 +111,7 @@ export async function GET(request: NextRequest) {
     if (type === 'image' && (source === 'generated' || source === 'uploaded')) {
       const generated = Prisma.sql`(EXISTS (SELECT 1 FROM ImageStudioTask t WHERE t.asset_id = a.id AND t.owner_id = ${user.id} AND t.status = 'succeeded') OR CASE WHEN json_valid(a.metadata_json) THEN json_extract(a.metadata_json, '$.source') IN ('image_generation_api', 'workspace_generation') ELSE 0 END)`;
       const privacy = hiddenUrls.length ? Prisma.sql`AND a.original_url NOT IN (${Prisma.join(hiddenUrls)})` : Prisma.empty;
-      const condition = Prisma.sql`a.owner_id = ${user.id} AND a.status = 'active' AND a.type = 'image' ${privacy} AND ${source === 'generated' ? generated : Prisma.sql`NOT COALESCE(${generated}, 0)`}`;
+      const condition = Prisma.sql`a.owner_id = ${user.id} AND a.status = 'active' AND a.type = 'image' ${privacy} AND ${materialAssetSql(Prisma.sql`a.metadata_json`, Prisma.sql`a.id`, legacyIds)} AND ${source === 'generated' ? generated : Prisma.sql`NOT COALESCE(${generated}, 0)`}`;
       const rows = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT a.id FROM Asset a WHERE ${condition} ORDER BY a.created_at DESC LIMIT ${limit} OFFSET ${skip}`);
       const totals = await prisma.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`SELECT COUNT(*) AS total FROM Asset a WHERE ${condition}`);
       sourceIds = rows.map(row => row.id);

@@ -206,6 +206,7 @@ export default function FeedbackWidget() {
     activeUploadsRef.current.add(item.id);
     try {
       const asset = await uploadFileAsAsset(item.file, {
+        purpose: 'feedback',
         invalidJsonMessage: '反馈截图上传服务返回了页面内容，请刷新后重试；如果仍出现，请重新登录。',
       });
       const imageUrl = asset.originalUrl;
