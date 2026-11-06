@@ -1,3 +1,4 @@
+import { legacyFeedbackAssetIds, materialAssetSql } from './upload-purpose';
 import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import type { SessionUser } from '@/lib/auth/session';
@@ -14,13 +15,14 @@ export type PickerDirectorySelection = { keys: string[]; directAssetIds: string[
   revision: string; marker: string; albums: PickerAlbum[]; templates: PickerTemplate[]; user: SessionUser };
 
 type NameRow = { identity: string; reference_id: string | null; name: string };
-type NameBatch = { keys: string[]; marker: string; access: Awaited<ReturnType<typeof directoryPermissionsSql>> };
+type NameBatch = { legacyIds: string[]; keys: string[]; marker: string; access: Awaited<ReturnType<typeof directoryPermissionsSql>> };
 export function readPickerDirectory(db: Prisma.TransactionClient, session: SessionUser, p: URLSearchParams, keys: string[] | null): Promise<PickerDirectorySelection>;
 export function readPickerDirectory(db: Prisma.TransactionClient, session: SessionUser, p: URLSearchParams, keys: string[] | null, batch: NameBatch): Promise<NameRow[]>;
 export async function readPickerDirectory(db: Prisma.TransactionClient, session: SessionUser, p: URLSearchParams, keys: string[] | null, batch?: NameBatch): Promise<PickerDirectorySelection | NameRow[]> {
   const before = batch?.marker || await readCatalogRevision(db, 'assets');
   if (!before) throw new CatalogSqlCompatibilityError('目录writer尚未就绪');
   const access = batch?.access || await directoryPermissionsSql(db, session), user = access.user;
+  const legacyIds = batch?.legacyIds || await legacyFeedbackAssetIds(db, user.id);
   const batchAssetIds = batch?.keys.filter(key => key.startsWith('asset:')).map(key => key.slice(6)) || [];
   const batchReferenceIds = batch?.keys.filter(key => key.startsWith('reference_image:')).map(key => key.slice('reference_image:'.length)) || [];
   const batchVideoIds = batch?.keys.filter(key => key.startsWith('video_task:')).map(key => key.slice('video_task:'.length)) || [];
@@ -30,7 +32,7 @@ export async function readPickerDirectory(db: Prisma.TransactionClient, session:
   const typeCondition = (column: Prisma.Sql) => types.length ? Prisma.sql`${column} IN (${Prisma.join(types)})` : Prisma.sql`0 = 1`;
   const referenceVisible = Prisma.sql`${access.visibility.visible(Prisma.sql`r."url"`)} AND (a."id" IS NULL OR ${access.visibility.visible(Prisma.sql`a."original_url"`)})`;
   const revisionQuery = new URLSearchParams(p); for (const field of ['page', 'after', 'directory_revision']) revisionQuery.delete(field);
-  const revision = createHash('sha256').update(JSON.stringify([before, user.id, user.role, user.account_type, revisionQuery.toString()])).digest('hex');
+  const revision = createHash('sha256').update(JSON.stringify(['feedback-library-v1', before, user.id, user.role, user.account_type, revisionQuery.toString()])).digest('hex');
   if (p.get('directory_revision') && p.get('directory_revision') !== revision) throw new StudioSharingError('素材目录已变化，请重新读取', 409);
   const ownFiles = scope === 'mine' && !album && !project;
   const template = templateFilterId(p.get('template'));
@@ -54,7 +56,7 @@ export async function readPickerDirectory(db: Prisma.TransactionClient, session:
         o.origin_kind, o.template_id, o.template_name, o.template_alias, 0 AS priority, 0 AS natural
       FROM "Asset" a JOIN asset_origins o ON o.asset_id = a."id" WHERE ${ownFiles ? 1 : 0} = 1
         AND (${batch ? catalogIdsSql(Prisma.sql`a."id"`, batchAssetIds) : Prisma.sql`1 = 1`})
-        AND a."owner_id" = ${user.id} AND a."status" = 'active' AND ${typeCondition(Prisma.sql`a."type"`)} AND ${access.visibility.visible(Prisma.sql`a."original_url"`)}
+        AND a."owner_id" = ${user.id} AND a."status" = 'active' AND ${typeCondition(Prisma.sql`a."type"`)} AND ${access.visibility.visible(Prisma.sql`a."original_url"`)} AND ${materialAssetSql(Prisma.sql`a."metadata_json"`, Prisma.sql`a."id"`, legacyIds)}
       UNION ALL SELECT CASE WHEN r.asset_id IS NULL THEN 'reference_image:' || r.reference_id ELSE 'asset:' || r.asset_id END,
         r.asset_id, r.reference_id, NULL, COALESCE(r.file_name, '参考图-' || r.reference_id), r."created_at",
         CASE WHEN r."source_type" = 'generated' OR o.generated = 1 THEN 'generated' WHEN r."source_type" = 'upload' THEN 'uploaded' ELSE 'other' END,
@@ -105,7 +107,7 @@ export async function readPickerDirectory(db: Prisma.TransactionClient, session:
     else {
       const spool = await usageRowSpool<NameRow>(compare);
       try {
-        for await (const keys of catalogKeyBatches(db, 'picker', user.id)) await spool.add(await readPickerDirectory(db, session, p, null, { keys, marker: before, access }));
+        for await (const keys of catalogKeyBatches(db, 'picker', user.id)) await spool.add(await readPickerDirectory(db, session, p, null, { keys, marker: before, access, legacyIds }));
         const rows = await spool.finish(); selected = [];
         if (p.get('after')) {
           let found = false, position = 0;
