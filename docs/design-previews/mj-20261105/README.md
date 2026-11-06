@@ -1,0 +1,7 @@
+# MJ preview controller
+
+Controller for the existing same-origin SD2 style preview. A opens the authenticated Works page; B opens the authenticated image template workbench. The normal application remains the content and permission source.
+
+Explicit nginx 502/503/504 documents show reconnect feedback and receive at most three read-only readiness probes. Only the failed iframe document is reopened with GET. Healthy pages, drafts, generation and business operations are never retried. Switching pages cancels a pending reconnect.
+
+The controller is published as `compare.js` with the existing preview HTML/CSS. Source styles remain on the A/B candidate branches; private reference images and incident evidence stay outside the public artifacts.
