@@ -83,6 +83,12 @@ v0.121.5已部署，运行源`6a0d74f2b5782a52b797cdf99434bb48e15e7bf4` / BUILD`
 
 已部署 **v0.121.1** / `9b55cf22c5a9b76df09ccb71870fb980dcac51b8` / BUILD `i8f8NqmDpzIPlFtgvCO2B`，2026-10-31T08:46:45Z公网收口，待用户手验。范围与原号未知边界见[工单](../../tasks/todo/2026-10-31-image-studio-personal-prompt-recovery.md)。原图、工程/失败原证、主/guard完整构建、证据复用、数据备份与部署回执保正式根私有 `docs/materials/2026-10-31-studio-personal-prompt-receipts/implementation/deployment-result.json`，不随源码外发；没有工程代清pending、重发或收费测试。
 
+## CHAR02 角色差异与独立视图重规划（2026-10-31）
+
+<!-- CHARACTER-HISTORY-FIX-20261106 -->
+角色三项界面修复已部署v0.134.10 / 0b17ac9a18 / ncFC4el-COldx9qIzw6At，guard3499/SrcNDCaW3KCU5psE62z9t原产物复用。历史个人补充恢复、正侧图框对齐、正脸版本/提示词同步已实现，待用户手验。[原单§12.3](../../tasks/todo/2026-10-31-character-reference-replan.md#123-发布完成2026-11-06)为权威入口；[用户原图](2026-11-06-character-history-context/user-reference/codex-clipboard-509abce5-4818-4296-b0db-df23294c8e20.png)与attachment.json保原件SHA。私有实施/完整构建、发布/公网CSS/健康及首次归档差量误判原证沿2026-11-06-character-history-context/implementation/attempt01，不随源码外发；无浏览器/收费或自动功能验收。
+<!-- /CHARACTER-HISTORY-FIX-20261106 -->
+
 ## CHAR01 角色参考图工作台（2026-10-30）
 
 已部署 **v0.121.0**，应用源 `3b19c1d438e2ddf876c594b4fc22184f69268fcd`、BUILD `dtT-BETLiEPv83lK9Daq6`；2026-10-31T05:50:35Z切换，05:50:58Z公网收口。[工具入口](https://sd2.youdooart.com/tools/character-lab)，管理员在同页“提示词管理”编辑上下文并保存版本。按定稿完成原图与4/9差异人脸、主辅方案选择、2:3成品预览及直接保存/PNG或ZIP导出；滑杆只影响下一次主动生成，保存导出不生成。本人草稿/历史、管理员规则与原请求/费用快照分别保留。
