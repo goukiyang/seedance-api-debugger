@@ -448,7 +448,6 @@ interface Props {
   onCollectionNew: (name: string) => Promise<void>;
   require1080pApproval: boolean;
   submitAccessory?: React.ReactNode;
-  submitDisabledReasonExternal?: boolean;
   settingsContent?: React.ReactNode;
   settingsOpen?: boolean;
   onSettingsOpenChange?: (open: boolean) => void;
@@ -545,7 +544,6 @@ export function GenerationComposer({
   onCollectionNew,
   onSubmit,
   submitAccessory,
-  submitDisabledReasonExternal = false,
   settingsContent,
   settingsOpen,
   onSettingsOpenChange,
@@ -1284,11 +1282,10 @@ export function GenerationComposer({
       return { message: submitBlocker, tone };
     }
     if (submitDisabledReason) {
-      if (videoRedesign && submitDisabledReasonExternal) return { message: null, tone: 'ok' as const };
       return { message: submitDisabledReason, tone: 'hint' as const };
     }
     return { message: null, tone: 'ok' as const };
-  }, [isSubmitting, durationBlocker, mentionNotice, prompt, videoRedesign, videoPromptGroups, submitBlocker, submitDisabledReason, submitDisabledReasonExternal, submitBlockerState]);
+  }, [isSubmitting, durationBlocker, mentionNotice, prompt, videoRedesign, videoPromptGroups, submitBlocker, submitDisabledReason, submitBlockerState]);
 
   const videoPricing = useVideoPricing({ provider: pricingProvider || selectedProvider || 'seedance',
     model: pricingModelId || selectedModel, resolution, duration, context: (pricingProvider || selectedProvider) === 'volcengine_ip' ? undefined : {
