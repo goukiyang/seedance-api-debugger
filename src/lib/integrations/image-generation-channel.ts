@@ -88,7 +88,7 @@ export function allowsUnconfirmedGeminiProParameters(model: string, capability: 
 } | undefined) {
   return (model === 'gemini-3-pro-image-preview' || model === 'gemini-nano-banana-2.1') && capability?.enabled === true
     && capability.protocol === 'gemini_native' && capability.billingMode === 'fixed'
-    && Number.isSafeInteger(capability.fixedPoints) && Number(capability.fixedPoints) >= 0;
+    && Number.isFinite(capability.fixedPoints) && Number(capability.fixedPoints) >= 0;
 }
 
 export type ImageGenerationChannelSnapshot = {
