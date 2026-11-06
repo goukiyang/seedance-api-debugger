@@ -1,10 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '模板共享与工作台入口', outline: [
-  '模板工作台直接进入全部封面，移除侧栏重复入口',
-  '封面与上下文设置里的共享开关直接发布已保存模板',
-  '共享成功后显示真实状态，个人补充和当前编辑继续保留',
-  '断线后核对原操作，避免重复发布',
+const notice = { title: '账本按当前费率核算', outline: [
+  '资产和账本统一显示当前参考金额与折合点数',
+  '历史规格可使用当前默认档或旧型号映射',
+  '参考价可编辑，历史实扣与已扣点数不变',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
