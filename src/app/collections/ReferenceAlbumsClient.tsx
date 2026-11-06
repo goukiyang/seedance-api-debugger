@@ -1,5 +1,6 @@
 'use client';
 import { ProjectSelector } from '@/components/ProjectSelector';
+import { projectDisplayName } from '@/lib/projects/display';
 import { useProductDialog } from '@/components/useProductDialog';
 
 import Link from 'next/link';
@@ -442,10 +443,6 @@ export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: 
     boundaryRef.current.epoch += 1;
     albumRequestRef.current?.abort();
   }, []);
-
-  function projectDisplayName(project: ProjectOption) {
-    return project.type === 'personal' ? '个人空间' : project.name;
-  }
 
   function canSubmitAlbumToPublic(album: AlbumItem) {
     return album.permissions.edit && !['public', 'system'].includes(album.album_type);

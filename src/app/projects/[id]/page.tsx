@@ -1,4 +1,5 @@
 'use client';
+import { projectDisplayName } from '@/lib/projects/display';
 import { ProjectWorkAudience } from '@/components/works/ProjectWorkAudience';
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -402,11 +403,6 @@ interface ProjectPagination {
   page_size: number;
   total: number;
   total_pages: number;
-}
-
-function projectDisplayName(project: ProjectDetail): string {
-  if (project.type === 'personal') return '个人空间';
-  return project.name;
 }
 
 function roleLabel(role: string): string {

@@ -1,4 +1,5 @@
 'use client';
+import { projectDisplayName } from '@/lib/projects/display';
 import { ProjectSelector } from '@/components/ProjectSelector';
 import { isResolvedCreationIntent, useCreationContext } from '@/lib/hooks/use-creation-context';
 import CreationAvailability from '@/components/creation/CreationAvailability';
@@ -145,10 +146,6 @@ function shouldContinuePollingStableDelivery(task: {
   if (task.delivery_stage?.key === 'ready' || task.delivery_stage?.key === 'failed') return false;
   return task.delivery_stage?.key === 'preparing'
     || (task.stable_download_ready === false && Boolean(task.retry_after_ms));
-}
-
-function projectDisplayName(project: ProjectOption): string {
-  return project.type === 'personal' ? '个人空间' : project.name;
 }
 
 function projectOwnerUser(project: ProjectOption) {

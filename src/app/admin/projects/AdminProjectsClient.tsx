@@ -1,4 +1,5 @@
 'use client';
+import { projectDisplayName } from '@/lib/projects/display';
 import { ProjectSelector } from '@/components/ProjectSelector';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -82,11 +83,6 @@ function canDelete(project: ProjectItem): boolean {
 
 function canShowDeleteProjectAction(project: ProjectItem): boolean {
   return project.type === 'team';
-}
-
-function projectDisplayName(project: ProjectItem): string {
-  if (project.type === 'personal') return '个人空间';
-  return project.name;
 }
 
 function projectActionMeta(project: ProjectItem): string {

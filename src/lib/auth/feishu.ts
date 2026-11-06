@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { defaultPersonalProjectName } from '@/lib/projects/display';
 import type { Prisma, User } from '@prisma/client';
 import { grantInitialCredits } from '@/lib/credits/policy';
 import { prisma } from '@/lib/prisma';
@@ -506,9 +507,9 @@ async function syncExistingUser(tx: Prisma.TransactionClient, user: User, profil
   const data: Prisma.UserUpdateInput = {
     name: profile.name,
     mobile: profile.mobile,
-    // A custom or initials avatar chosen by the user survives Feishu sign-in.
-    ...(user.avatar_source === 'custom' || user.avatar_source === 'initials' ? {} : { avatar_url: profile.avatarUrl }),
-    feishu_avatar_url: profile.avatarUrl,
+    avatar_source: 'feishu',
+    avatar_url: profile.avatarUrl || user.feishu_avatar_url || (user.avatar_source === 'feishu' ? user.avatar_url : null),
+    feishu_avatar_url: profile.avatarUrl || user.feishu_avatar_url,
     feishu_user_id: profile.userId,
     feishu_open_id: profile.openId,
     feishu_union_id: profile.unionId,
@@ -595,7 +596,7 @@ async function createFeishuUser(tx: Prisma.TransactionClient, profile: FeishuPro
 
   const project = await tx.project.create({
     data: {
-      name: '我的默认项目',
+      name: defaultPersonalProjectName(user),
       description: '系统自动创建的个人默认项目',
       type: 'personal',
       visibility: 'private',

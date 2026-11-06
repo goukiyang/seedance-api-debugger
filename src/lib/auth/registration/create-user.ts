@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import { defaultPersonalProjectName } from '@/lib/projects/display';
 import { grantInitialCredits } from '@/lib/credits/policy';
 import { getDefaultFeatureProfileId } from '@/lib/users/profiles';
 import { usernameBaseFromEmail } from './config';
@@ -56,7 +57,7 @@ export async function createRegisteredUser(
 
   const project = await tx.project.create({
     data: {
-      name: '我的默认项目',
+      name: defaultPersonalProjectName(user),
       description: '系统自动创建的个人默认项目',
       type: 'personal',
       visibility: 'private',

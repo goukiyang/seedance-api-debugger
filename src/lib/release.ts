@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '历史费用缺口补算', outline: [
-  '图片旧任务参考价纳入核算，明确区分实扣',
-  'H3原响应明确免费的任务显示零API费',
-  '保留历史账本、点数及资产管理调整',
+const notice = { title: '飞书头像与默认项目名称', outline: [
+  '飞书登录账户统一使用飞书头像',
+  '补齐成员和历史记录的头像显示',
+  '默认项目显示为账户名的默认项目',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

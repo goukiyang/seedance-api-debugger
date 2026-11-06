@@ -34,4 +34,4 @@ export type BridgeBinding = {
 };
 
 export type BridgeBindingOwner = { id: string; name: string; avatar_url: string | null };
-export type ListedBridgeBinding = BridgeBinding & { owner: BridgeBindingOwner; online: boolean };
+export type ListedBridgeBinding = BridgeBinding & { owner: BridgeBindingOwner; editor?: BridgeBindingOwner; online: boolean };

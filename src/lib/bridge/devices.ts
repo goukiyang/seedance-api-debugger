@@ -18,7 +18,7 @@ export type LegacyBridgeDevice = {
   sites: Partial<Record<BridgeSite, BridgeSiteStatus>>;
   lastSeen: string;
 };
-export type BridgeDeviceRecord = LegacyBridgeDevice & Partial<BridgeBinding>;
+export type BridgeDeviceRecord = LegacyBridgeDevice & Partial<BridgeBinding> & { editedByUserId?: string };
 export type BridgeDeviceStore = { userId: string; devices: BridgeDeviceRecord[] };
 
 export class BridgeDeviceError extends Error {

@@ -78,7 +78,7 @@ async function main() {
   try {
     for (const id of ['owner', 'other', 'admin', 'full']) {
       await prisma.user.create({ data: { id, name: id === 'admin' ? '管理员甲' : id, username: id,
-        email: id + '@example.test', password_hash: 'synthetic-unused', role: id === 'admin' ? 'admin' : 'user' } });
+        email: id + '@example.test', avatar_url: `https://example.test/${id}.png`, password_hash: 'synthetic-unused', role: id === 'admin' ? 'admin' : 'user' } });
       cookies.set(id, await createSession(id));
     }
     assert.equal((await call(null, 'PUT', '/binding', report('first'))).status, 401);
@@ -87,7 +87,7 @@ async function main() {
     assert.equal((await call('owner', 'PUT', '/binding', '{broken')).status, 400);
     cases.push('cookie auth, shell header and JSON boundary');
 
-    const initial = await call('owner', 'PUT', '/binding', { ...report('first'), disabled: true, archived: true, cookie: 'must-not-persist' });
+    const initial = await call('owner', 'PUT', '/binding', { ...report('first'), disabled: true, archived: true, cookie: 'must-not-persist', editedByUserId: 'other' });
     assert.equal(initial.status, 200);
     assert.equal(initial.data.binding.chromeEmail, 'a***@example.com');
     assert.equal(initial.data.binding.tools.chatgpt.account, 'a***@example.com');
@@ -95,6 +95,8 @@ async function main() {
     assert.equal(initial.data.binding.archived, false);
     assert.equal(initial.data.binding.editedBy, 'owner');
     assert.equal((await getStored('owner'))[0].cookie, undefined);
+    assert.equal((await getStored('owner'))[0].editedByUserId, 'owner');
+    assert.equal(initial.data.binding.editedByUserId, undefined);
     assert.equal(initial.data.mine[0].tools.midjourney.accountKey, 'abc123000001');
     const tie = report('first');
     tie.machineName = '不应覆盖'; tie.tools.midjourney.login = 'blocked';
@@ -111,6 +113,10 @@ async function main() {
     });
     assert.equal(patch.status, 200);
     assert.equal(patch.data.binding.editedBy, '管理员甲');
+    const editorAfterPatch = (await call('admin', 'GET', '/bindings?scope=all')).data.bindings.find((binding: { deviceId: string }) => binding.deviceId === 'first').editor;
+    assert.equal(editorAfterPatch.id, 'admin');
+    assert.equal(editorAfterPatch.avatar_url, 'https://example.test/admin.png');
+    assert.deepEqual(Object.keys(editorAfterPatch).sort(), ['avatar_url', 'id', 'name']);
     const staleReport = report('first', 99);
     staleReport.tools.midjourney.login = 'none';
     const merged = await call('owner', 'PUT', '/binding', { ...staleReport, platform: 'win', chromeEmail: 'bob@example.com', disabled: false });
@@ -123,6 +129,7 @@ async function main() {
     assert.equal(merged.data.binding.disabled, true);
     assert.equal(merged.data.binding.disabledReason, '维护中');
     assert.equal(merged.data.binding.editedAt, patch.data.binding.editedAt);
+    assert.equal((await getStored('owner')).find(device => device.deviceId === 'first')!.editedByUserId, 'admin');
     const userLater = await call('owner', 'PUT', '/binding', { ...report('first', patch.data.binding.editedAt + 1), machineName: '本人后改' });
     assert.equal(userLater.data.binding.machineName, '本人后改');
     assert.equal(userLater.data.binding.disabled, true);
@@ -169,6 +176,7 @@ async function main() {
     assert.deepEqual(possible.data.possibleSameAs.map((d: { deviceId: string }) => d.deviceId), ['old']);
     assert.equal((await call('other', 'POST', '/binding/adopt', { deviceId: 'new', fromDeviceId: 'old' })).status, 403);
     const adopted = await call('owner', 'POST', '/binding/adopt', { deviceId: 'new', fromDeviceId: 'old' });
+    assert.equal((await getStored('owner')).find(device => device.deviceId === 'new')!.editedByUserId, 'owner');
     assert.equal(adopted.status, 200); assert.equal(adopted.data.binding.shared, true);
     assert.equal(adopted.data.binding.tools.midjourney.login, 'ok');
     assert.equal((await getStored('owner')).find(d => d.deviceId === 'old')!.archived, true);
@@ -183,6 +191,12 @@ async function main() {
     assert.equal(moved.status, 200);
     assert.equal((await getStored('owner')).some(d => d.deviceId === 'new'), false);
     assert.equal((await getStored('other')).filter(d => d.deviceId === 'new').length, 1);
+    assert.equal((await getStored('other')).find(d => d.deviceId === 'new')!.editedByUserId, 'admin');
+    const transferred = (await call('admin', 'GET', '/bindings?scope=all')).data.bindings.find((binding: { deviceId: string }) => binding.deviceId === 'new');
+    assert.equal(transferred.owner.id, 'other');
+    assert.equal(transferred.editor.id, 'admin');
+    assert.equal(transferred.editor.avatar_url, 'https://example.test/admin.png');
+    cases.push('trusted editor identity, live photo, stale heartbeat preservation and owner/editor separation');
     assert.equal((await call('owner', 'PUT', '/binding', report('new'))).status, 403);
     assert.equal((await call('owner', 'POST', '/status', { deviceId: 'new' })).status, 403);
     const transferLog = await prisma.operationLog.findFirstOrThrow({ where: { action: 'bridge_binding_edit', target_id: 'new' } });

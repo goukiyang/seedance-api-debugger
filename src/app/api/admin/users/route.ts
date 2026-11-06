@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { defaultPersonalProjectName } from '@/lib/projects/display';
 import { errorJson, getAdminUser } from '@/lib/auth/api-helpers';
 import { hashPassword } from '@/lib/auth/password';
 import { maintainAccountSessionBinding } from '@/lib/auth/session-account-binding';
@@ -178,7 +179,7 @@ export async function POST(request: NextRequest) {
 
       const defaultProject = await tx.project.create({
         data: {
-          name: '我的默认项目',
+          name: defaultPersonalProjectName(user),
           description: '系统自动创建的个人默认项目',
           type: 'personal',
           visibility: 'private',

@@ -1,8 +1,11 @@
+import { displayUserName, type DisplayUser } from '@/lib/users/display';
+
 export type ProjectRemovalAction = 'delete' | 'archive' | null;
 
 export type ProjectDisplayInput = {
   name: string;
   type: string;
+  owner?: DisplayUser | null;
   can_manage_project?: boolean;
   _count?: {
     tasks?: number;
@@ -10,8 +13,14 @@ export type ProjectDisplayInput = {
   } | null;
 };
 
-export function projectDisplayName(project: Pick<ProjectDisplayInput, 'name' | 'type'>) {
-  return project.type === 'personal' ? '个人空间' : project.name;
+export function defaultPersonalProjectName(owner: DisplayUser | null | undefined) {
+  const name = displayUserName(owner);
+  return name === '未知用户' ? '个人默认项目' : `${name}的默认项目`;
+}
+
+export function projectDisplayName(project: Pick<ProjectDisplayInput, 'name' | 'type' | 'owner'>) {
+  return project.type === 'personal' && ['', '我的默认项目', '个人空间', '个人默认项目'].includes(project.name.trim())
+    ? defaultPersonalProjectName(project.owner) : project.name;
 }
 
 export function projectTypeLabel(type: string) {

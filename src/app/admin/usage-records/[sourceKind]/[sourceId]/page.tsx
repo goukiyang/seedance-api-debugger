@@ -49,7 +49,7 @@ export default async function UsageRecordPage({ params, searchParams }: {
     <div className="au-read-meta">截至 <RelativeTime value={snapshot.asOf} /></div>
     <section className="au-section au-record-details" style={{ maxWidth: 'none' }}><dl>
       <div><dt>原记录编号</dt><dd>{record.sourceKind} · {record.sourceId}</dd></div>
-      <div><dt>消费归属成员</dt><dd>{record.ownerUserId ? <Link className="au-link" href={dimensionHref('member', record.ownerUserId)}><UserIdentityBadge user={{ id: record.ownerUserId, name: record.ownerLabel }} /></Link> : record.ownerLabel}</dd></div>
+      <div><dt>消费归属成员</dt><dd>{record.ownerUserId ? <Link className="au-link" href={dimensionHref('member', record.ownerUserId)}><UserIdentityBadge user={{ id: record.ownerUserId, name: record.ownerLabel, avatar_url: record.ownerAvatarUrl }} /></Link> : record.ownerLabel}</dd></div>
       <div><dt>原使用项目</dt><dd><Link className="au-link" href={dimensionHref('project', record.projectId || 'unassigned')}>{record.projectLabel}</Link></dd></div>
       <div><dt>归属依据</dt><dd>{ATTRIBUTION_LABELS[record.attribution]} · {record.attributionDetail}</dd></div>
       <div><dt>当前管理成员 / 项目</dt><dd>{record.currentOwnerUserId || '未记录'} / {record.currentProjectId || '未归属或未记录'}</dd></div>

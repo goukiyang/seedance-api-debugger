@@ -258,7 +258,7 @@ export default function AdminBridgeDevicesClient({ viewerId, initialBindings, ow
             <details className={styles.details}><summary>设备信息</summary>
               <dl><dt>设备ID</dt><dd>{draft.original.deviceId}</dd><dt>系统 / 插件</dt><dd>{draft.original.platform || '未知'} / {draft.original.extVersion || '未知'}</dd>
                 <dt>Chrome 账号</dt><dd>{draft.original.chromeEmail || '未上报'}</dd></dl>
-              {draft.original.editedBy && <div className={styles.lastEdit}><UserIdentityBadge user={{ name: draft.original.editedBy }} size="sm" />
+              {draft.original.editedBy && <div className={styles.lastEdit}>{draft.original.editor ? <UserIdentityBadge user={draft.original.editor} size="sm" /> : <span>{draft.original.editedBy}</span>}
                 <span>上次修改{draft.original.editedAt > 0 && <> · <RelativeTime value={new Date(draft.original.editedAt).toISOString()} /></>}</span></div>}
             </details>
           </div>

@@ -12,6 +12,9 @@ export async function POST(request: NextRequest) {
   if (!user || user.status !== 'active') return NextResponse.json({ error: '请先登录' }, { status: 401, headers });
   try {
     const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+    if ((user.feishu?.user_id || user.feishu?.open_id) && (body?.action === 'custom' || body?.action === 'initials')) {
+      return NextResponse.json({ error: '飞书登录账户统一使用飞书头像' }, { status: 403, headers });
+    }
     if (body?.action === 'custom') return NextResponse.json(await setCustomAvatar(user.id, body.assetId, body.crop), { headers });
     if (body?.action === 'feishu' || body?.action === 'initials') return NextResponse.json(await restoreAvatar(user, user.id, body.action), { headers });
     if (body?.action === 'admin-reset' && typeof body.userId === 'string') return NextResponse.json(await restoreAvatar(user, body.userId, 'feishu'), { headers });
