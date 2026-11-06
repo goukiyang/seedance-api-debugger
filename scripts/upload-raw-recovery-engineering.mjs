@@ -82,6 +82,7 @@ function environment({ rejectDirectory = false, rejectExisting = false, prefligh
   };
   const metadata = { validateSiteUploadMetadata: () => null, sameOriginPublicUrlForLocalUpload: value => value, isLocalPublicUploadUrl: () => true };
   const state = evaluate(read('src/lib/assets/raw-upload-state.ts'), {
+    './upload-purpose': evaluate(declarations(read('src/lib/assets/upload-purpose.ts'), ['FEEDBACK_UPLOADS_ENABLED'])),
     'node:crypto': crypto, '@/lib/prisma': { prisma }, './verified-upload': verified, './site-upload': metadata,
     './public-storage': { isPubliclyReachableUrl: () => true },
     './upload-similarity': { uploadSimilarityStatus: async () => ({ state: 'disabled' }) },
