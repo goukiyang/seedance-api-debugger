@@ -30,8 +30,10 @@ export async function processCreditDeliveries(limit = 10) {
       if (job.kind === 'approval' && request.status !== 'pending') {
         await prisma.creditRequestDelivery.updateMany({ where: { id: job.id, lease_token: lease }, data: { status: 'cancelled', lease_until: null, lease_token: null } }); continue;
       }
+      const emailApproval = request.kind === 'credits' && request.applicant_open_id === ''
+        && job.kind === 'approval' && Boolean(request.requester.email);
       if (request.app_id !== process.env.FEISHU_APP_ID || request.tenant_key !== process.env.FEISHU_ALLOWED_TENANT_KEY
-        || request.requester.feishu_open_id !== request.applicant_open_id || request.requester.status !== 'active'
+        || (!emailApproval && request.requester.feishu_open_id !== request.applicant_open_id) || request.requester.status !== 'active'
         || request.approver.feishu_open_id !== request.approver_open_id || request.approver.status !== 'active'
         || request.approver.role !== 'admin' || request.approver_id !== process.env.CREDIT_REQUEST_APPROVER_ID) throw new Error('identity_changed');
       const auth = await feishuJson('auth/v3/tenant_access_token/internal', { app_id: process.env.FEISHU_APP_ID, app_secret: process.env.FEISHU_APP_SECRET });

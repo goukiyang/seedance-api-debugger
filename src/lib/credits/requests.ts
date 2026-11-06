@@ -22,7 +22,7 @@ function active(user: User | null): asserts user is User {
   }
 }
 
-export async function parties(tx: Prisma.TransactionClient, userId: string, approverId: string) {
+export async function parties(tx: Prisma.TransactionClient, userId: string, approverId: string, kind = MULTIVIEW_1080P_KIND) {
   const user = await tx.user.findUnique({ where: { id: userId } });
   const approver = await tx.user.findUnique({ where: { id: approverId } });
   active(user); active(approver);
@@ -30,8 +30,9 @@ export async function parties(tx: Prisma.TransactionClient, userId: string, appr
     throw new CreditRequestError('审批人配置已变更，请联系管理员', 403);
   }
   const tenant = process.env.FEISHU_ALLOWED_TENANT_KEY;
-  if (user.account_type !== 'internal' || !user.feishu_open_id || !approver.feishu_open_id
-    || !tenant || user.feishu_tenant_key !== tenant || approver.feishu_tenant_key !== tenant) {
+  const emailApplicant = kind === 'credits' && !user.feishu_open_id && Boolean(user.email);
+  if (!approver.feishu_open_id || !tenant || approver.feishu_tenant_key !== tenant
+    || (!emailApplicant && (user.account_type !== 'internal' || !user.feishu_open_id || user.feishu_tenant_key !== tenant))) {
     throw new CreditRequestError('请使用已绑定公司飞书的有效账号', 403);
   }
   return { user, approver };
@@ -44,7 +45,7 @@ export async function submitCreditRequest(userId: string, purpose: unknown) {
   }
   try {
     return await prisma.$transaction(async (tx) => {
-      const { user, approver } = await parties(tx, userId, process.env.CREDIT_REQUEST_APPROVER_ID!);
+      const { user, approver } = await parties(tx, userId, process.env.CREDIT_REQUEST_APPROVER_ID!, 'credits');
       const existing = await tx.creditRequest.findUnique({ where: { pending_key: userId } });
       if (existing) return existing;
       const summary = await getCreditSummary(tx, user);
@@ -53,8 +54,9 @@ export async function submitCreditRequest(userId: string, purpose: unknown) {
       if (recent) throw new CreditRequestError('提交过于频繁，请一分钟后重试', 429);
       const request = await tx.creditRequest.create({ data: {
         user_id: userId, approver_id: approver.id, pending_key: userId, purpose: purpose.trim(),
-        available_at_submit: summary.available, nonce: nonce(), applicant_open_id: user.feishu_open_id!,
-        approver_open_id: approver.feishu_open_id!, tenant_key: user.feishu_tenant_key!, app_id: process.env.FEISHU_APP_ID!,
+        // Empty applicant ID is a site-only credits request, never a fabricated Feishu identity.
+        available_at_submit: summary.available, nonce: nonce(), applicant_open_id: user.feishu_open_id || '',
+        approver_open_id: approver.feishu_open_id!, tenant_key: approver.feishu_tenant_key!, app_id: process.env.FEISHU_APP_ID!,
       } });
       const card = creditApprovalCard({ id: request.id, nonce: request.nonce, name: user.name, purpose: request.purpose, available: summary.available });
       await tx.creditRequestDelivery.create({ data: {
@@ -105,9 +107,12 @@ export async function handleCreditDecision(input: {
       await tx.operationLog.create({ data: { operator_id: user.id, action: 'credit_request_withdrawn', target_type: 'CreditRequest', target_id: request.id } });
       return { message: '申请已撤回', card: creditResultCard('申请已撤回') };
     }
-    const { user, approver } = await parties(tx, request.user_id, request.approver_id);
-    if (request.app_id !== process.env.FEISHU_APP_ID || user.feishu_open_id !== request.applicant_open_id
-      || approver.feishu_open_id !== request.approver_open_id || user.feishu_tenant_key !== request.tenant_key) {
+    const { user, approver } = await parties(tx, request.user_id, request.approver_id, request.kind);
+    const applicantChanged = request.applicant_open_id
+      ? user.feishu_open_id !== request.applicant_open_id || user.feishu_tenant_key !== request.tenant_key
+      : request.kind !== 'credits';
+    if (request.app_id !== process.env.FEISHU_APP_ID || applicantChanged
+      || approver.feishu_open_id !== request.approver_open_id || approver.feishu_tenant_key !== request.tenant_key) {
       throw new CreditRequestError('飞书身份发生变更，请联系管理员', 409);
     }
     if (request.kind === MULTIVIEW_1080P_KIND) return decideMultiview1080p(tx, request, user, approver, input.action, input.reason);
@@ -160,7 +165,7 @@ export async function handleCreditDecision(input: {
       detail: JSON.stringify({ amount, reason: status === 'rejected' ? reason : null }) } });
     await createInAppNotification(tx, { targetUserId: user.id, actorUserId: withdrawing ? user.id : approver.id,
       type: 'credit_request_result', title: '积分申请结果', body: message, metadata: { request_id: request.id } });
-    await tx.creditRequestDelivery.create({ data: { request_id: request.id, kind: 'result',
+    if (request.applicant_open_id) await tx.creditRequestDelivery.create({ data: { request_id: request.id, kind: 'result',
       payload_json: JSON.stringify({ receive_id: request.applicant_open_id, msg_type: 'text', content: JSON.stringify({ text: `SD2 积分申请\n${message}` }) }) } });
     return { message, card: creditResultCard(message) };
   }, { timeout: 2500 });
