@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '视频费用统一按人民币换算', outline: [
-  '视频和IP生成按费率页金额自动换算点数',
-  '样片、参考视频和升级跟随同档基价',
-  '历史任务保持原扣点，新用户暂不赠分',
+const notice = { title: '费率编辑与生成提示修复', outline: [
+  '切回费率页不再意外锁住金额和开关',
+  '视频暂不可生成时显示具体原因',
+  '图片模型支持人民币换算后的小数点数',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

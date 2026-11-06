@@ -55,6 +55,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
   const scrollAnchor = useRef<{ anchorId: string; anchorOffset: number } | null>(null), readSequence = useRef(0);
   draftRef.current = draft; viewRef.current = view; pendingRef.current = pending;
   const unauthorized = useCallback(() => {
+    setIdentityVerified(false);
     setDenied(true); setSnapshot(null); setHistoryOpen(false); setPreviewResult(null); setSelected([]);
     setDraft({ revision: '', changes: { rows: [] } }); setPending(null); setHydrated(false);
   }, []);
@@ -144,7 +145,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
   useEffect(() => {
     if (!hydrated || denied) return;
     const visibility = () => {
-      setIdentityVerified(false);
+      // A background refresh is not an account change; writes still require a fresh read and preview.
       setHistoryOpen(false);
       window.dispatchEvent(new CustomEvent('sd2-time-bubble', { detail: 'pricing-session-check' }));
       if (!document.hidden) void load();
