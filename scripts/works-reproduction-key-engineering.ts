@@ -57,7 +57,7 @@ async function main() {
     const hidden = await studioHiddenAssetUrls(actor, db);
     assert.ok(hidden.includes(assets[1].original_url)); assert.ok(!hidden.includes(assets[0].original_url));
     passed.push('legacy_reader_preserves_private_binding');
-    assert.deepEqual([...await readableStudioCoverIds(actor, assets)].sort(), [assets[0].id]);
+    assert.deepEqual(Array.from(await readableStudioCoverIds(actor, assets)).sort(), [assets[0].id]);
     passed.push('metadata_does_not_consume_cover_binding_limit');
     await galleryDirectorySql(db, actor, { scope: 'all' }); passed.push('gallery_canonical_metadata_accepts_source_records');
     for (const asset of assets) {
@@ -81,7 +81,7 @@ async function main() {
     const facts = assets.map(asset => ({ sourceKind: 'image_task', sourceId: `task-${asset.id}`, ownerUserId: reader.id,
       currentOwnerUserId: reader.id, retentionStatus: 'active', outputCount: 1, leaf: true })) as UsageFact[];
     const media = await readUsageMedia(db, actor, facts, { kind: 'self', viewerId: reader.id });
-    assert.deepEqual([...media.keys()], [`image_task:task-${assets[0].id}`]); passed.push('usage_media_keeps_acl');
+    assert.deepEqual(Array.from(media.keys()), [`image_task:task-${assets[0].id}`]); passed.push('usage_media_keeps_acl');
     await db.platformSetting.update({ where: { key: 'studio_shared_reproduction_v1:real-snapshot' }, data: { value_json: '{broken' } });
     await assert.rejects(visible(), CatalogSqlCompatibilityError);
     await assert.rejects(studioHiddenAssetUrls(actor, db)); passed.push('corrupt_real_binding_still_fails_closed');
