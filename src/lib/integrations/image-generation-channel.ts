@@ -87,7 +87,7 @@ export type ImageGenerationBillingMode = 'fixed' | 'actual';
  * This is not a support claim: explicit limits, enablement and a real fixed price still apply.
  */
 export function allowsUnconfirmedGeminiProParameters(model: string, capability: {
-  enabled?: boolean; protocol?: string; billingMode?: string | null; fixedPoints?: number | null;
+  enabled?: boolean; protocol?: string | null; billingMode?: string | null; fixedPoints?: number | null;
 } | undefined) {
   return (model === 'gemini-3-pro-image-preview' || model === 'gemini-nano-banana-2.1') && capability?.enabled === true
     && capability.protocol === 'gemini_native' && capability.billingMode === 'fixed'
