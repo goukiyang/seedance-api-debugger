@@ -1,7 +1,7 @@
 import { traceHttpRequest, tracePhase } from '@/lib/performance/request-trace';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { listStudioModules, saveStudioModule, chooseStudioModuleSharing, deleteStudioModule, deleteStudioGroup, studioModuleDeletionStatus, studioModuleDTOForUser, StudioModuleError } from '@/lib/image-studio/modules';
+import { listStudioModules, saveStudioModule, shareSavedStudioModule, chooseStudioModuleSharing, deleteStudioModule, deleteStudioGroup, studioModuleDeletionStatus, studioModuleDTOForUser, StudioModuleError } from '@/lib/image-studio/modules';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { openSharedStudioModule, studioSharedOpenStatus, StudioSharingError } from '@/lib/image-studio/shared-contract';
 import { StudioStyleError } from '@/lib/image-studio/style-groups';
@@ -91,6 +91,7 @@ async function save(request: NextRequest, createOnly: boolean) {
         ? await savePrivateStudioEditor(user, body.id, body)
         : await savePrivateStudioEditorDraft(user, body.id, body), { headers: privateHeaders });
     }
+    if (!createOnly && body.action === 'share-saved-module') return NextResponse.json(await shareSavedStudioModule(user.id, body), { headers: privateHeaders });
     if (!createOnly && body.action === 'set-sharing-preference') return NextResponse.json(await chooseStudioModuleSharing(user.id, body), { headers: privateHeaders });
     if (createOnly && body.action === 'open-shared') {
       if (typeof body.presetId !== 'string' || !body.presetId || body.presetId.length > 160) return NextResponse.json({ error: '共享模板编号无效' }, { status: 400, headers: privateHeaders });

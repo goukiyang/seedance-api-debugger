@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { parseStudioTaskSettings } from './task-settings';
 import { canManageStudioPreset, canViewStudioPreset, type ImageStudioIdentity, type StudioPresetAccessRow } from './access';
 import { MAX_REFERENCE_IMAGES } from './limits';
 import { studioVisibleAssetWhere } from './protected-assets';
@@ -180,9 +181,12 @@ export async function setStudioPresetFixedReferences(ownerId: string, presetId: 
   const historical = await client.platformSetting.findUnique({ where: { key }, select: { value_json: true } });
   if (historical) {
     let value: Record<string, unknown>;
-    try { value = JSON.parse(historical.value_json); }
+    try {
+      value = JSON.parse(historical.value_json);
+      if (value?.version === 2 && !parseStudioTaskSettings(value.taskSettings)) throw new Error('invalid-settings-mode');
+    }
     catch { throw new StudioFixedReferenceError('历史模板定义无法读取', 409); }
-    if (!value || typeof value !== 'object' || Array.isArray(value) || value.sourceOwnerId !== ownerId || value.version !== 1) throw new StudioFixedReferenceError('历史模板定义所有者不匹配', 403);
+    if (!value || typeof value !== 'object' || Array.isArray(value) || value.sourceOwnerId !== ownerId || value.version !== 1 && value.version !== 2) throw new StudioFixedReferenceError('历史模板定义所有者不匹配', 403);
     const changed = await client.platformSetting.updateMany({ where: { key, value_json: historical.value_json },
       data: { value_json: JSON.stringify({ ...value, templateFixedReferences: references }), updated_by: ownerId } });
     if (changed.count !== 1) throw new StudioFixedReferenceError('历史模板固定图已变化，请重新读取', 409);
