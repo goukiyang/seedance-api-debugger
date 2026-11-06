@@ -46,3 +46,14 @@ The existing media service and cross-release flock remain in use. Completion pro
 Detail and comparison GETs are read-only. A user may explicitly prepare the selected lightweight preview through a version-bound POST; historical catalog scans do not bulk-transcode old videos. Existing queued registrations are consumed before source discovery, with durable turns across image, video and collage sources. A failed discovery window cannot prevent other source windows or ready jobs from progressing. The old record that first triggered a discovery failure has not been identified by source inspection alone.
 
 The existing offline Works engineering gate covers the additive SQL, original receipts, access/version intersections, learning records and media-slot yielding. `scripts/works-method-pin-engineering.ts` provides the same synthetic pin check for a compatible reader. These are engineering checks, not browser, media-quality, performance or functional acceptance. Final functional and visual acceptance remains manual.
+
+
+## WORKS-FEISHU01: Open the square to internal Feishu users (2026-11-06)
+
+User explicitly requested opening the square to Feishu users. The current online baseline is c2dc71893e0bd6f8f5c7a4b15781182b551d571c / 0.134.5. The old single-account gate controls the home/sidebar, auth/me capability, page, and every Works API. The product gate now accepts internal Feishu identities from the configured tenant, while retaining the existing exact preview account. External accounts and internal-labelled email accounts without a Feishu identity do not gain entry.
+
+Recommendation shadow/diagnostic shares that old gate, so its two call sites now use a separate exact-account predicate. Opening the product must not expand its background scan to every member. Work visibility, source/project intersections, source withdrawal, private content, original download and all mutation/receipt permissions stay on the existing ACL. There is no schema change, migration, data backfill, automatic publication, generation, billing or price write.
+
+Candidate 0.134.6 adds identity/tenant/navigation assertions and verifies that an ordinary Feishu viewer is rejected before any recommendation DB scan. The existing synthetic Works fixture also retains the original source ACL, withdrawal, download and per-account tests. The current 3234d55db60d74f57eaadd03612dbdf7b7d8faae compatible recovery build can read unchanged data contracts; the old single-account entry is an acceptable program rollback. Do not restore old databases or pricing snapshots.
+
+Status: implemented; necessary engineering checks and protected release pending. Functional acceptance remains manual under project rules; no browser or real generation test is scheduled by this request. Entry: https://sd2.youdooart.com/works . The earlier video-reuse manual acceptance and real Image 2.6 channel/pricing prerequisites remain open.
