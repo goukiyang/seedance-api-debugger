@@ -29,6 +29,7 @@ const a = setup(); a.transport(async () => { throw new TypeError('response lost'
 await assert.rejects(a.render().submit('module-one', 7, true), /共享结果待确认/);
 assert.deepEqual(a.events, ['persist', 'send']);
 const original = a.calls[0]; a.transport(success);
+assert.equal(original.action, 'share-saved-module');
 await a.render().submit('module-one', 8, false);
 assert.deepEqual(a.calls[1], original, 'second click must retain original key, revision, and intended state');
 assert.equal(a.settled.length, 1);
@@ -48,6 +49,55 @@ await assert.rejects(e.render().submit('module-refresh', 3, true));
 const restored = setup(Object.fromEntries(Object.entries(e.localStorage).filter(([k]) => k.startsWith('sd2:'))));
 restored.transport(success); await restored.render().submit('module-refresh', 4, false);
 assert.deepEqual(restored.calls[0], e.calls[0]);
-console.log(JSON.stringify({ passed: 6, checks: ['persist_before_send', 'lost_response_reuses_original_command',
-  'storage_failure_sends_nothing', 'parallel_click_sends_once', 'account_switch_drops_late_response', 'refresh_retains_original_command'],
+const legacyCommand = { id: 'legacy-module', revision: 2, isShared: true, requestId: crypto.randomUUID() };
+const legacy = setup({ 'sd2:module-sharing-preference:v1:author:legacy-module': JSON.stringify(legacyCommand) });
+legacy.transport(success); await legacy.render().submit('legacy-module', 3, true);
+assert.deepEqual(legacy.calls[0], { action: 'set-sharing-preference', ...legacyCommand, entryPoint: 'workbench' });
+await legacy.render().submit('legacy-module', 3, true);
+assert.equal(legacy.calls[1].action, 'share-saved-module');
+const switchSource = ts.transpileModule(fs.readFileSync('src/components/TemplateSharingSwitch.tsx', 'utf8'),
+  { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
+const switchExports = {};
+vm.runInNewContext(switchSource, { exports: switchExports, require: name => name === 'react/jsx-runtime'
+  ? { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) } : { default: {} } });
+const selectedOnly = switchExports.default({ shared: false, selected: true, onChange() {} });
+assert.equal(selectedOnly.props.children[0].props.checked, false);
+assert.equal(switchExports.default({ shared: true, onChange() {} }).props.children[0].props.checked, true);
+// Exercise the actual editor/cover handlers after a lost response changes a module into a published source.
+const studioText = fs.readFileSync('src/app/image-studio/studio.tsx', 'utf8');
+const studioAst = ts.createSourceFile('studio.tsx', studioText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+let editorHandler, coverHandler;
+function visit(node) {
+  if (ts.isFunctionDeclaration(node) && node.name?.text === 'changeModuleSharing') editorHandler = node.getText(studioAst);
+  if (ts.isJsxAttribute(node) && node.name.getText(studioAst) === 'onChange' && node.initializer
+    && ts.isJsxExpression(node.initializer) && node.initializer.expression?.getText(studioAst).includes('const state = pageItem.sharing!')) {
+    coverHandler = node.initializer.expression.getText(studioAst);
+  }
+  ts.forEachChild(node, visit);
+}
+visit(studioAst); assert.ok(editorHandler && coverHandler);
+const routed = [], published = { id: 'module-one', sourcePresetId: 'source-one', sourcePresetCanManageSharing: true, canChooseSharing: false };
+const editorContext = vm.createContext({ module: published, moduleSaveLock: { current: false }, moduleDeleteLock: { current: false },
+  presetSaveLock: { current: false }, uploading: false, bannerUploading: false, submitting: false, pendingSubmission: false,
+  preferenceSharingPending: true, sharedLive: {}, revisionRef: { current: 7 },
+  setError() {}, setSharingPreferenceSaving() {}, setModuleRevision() {}, setSaveStatus() {},
+  onToggleSharing: async () => { routed.push('withdraw'); }, onChooseSharing: async () => {
+    routed.push('query-original'); return { revision: 8, sourcePresetShared: true };
+  } });
+const runEditor = vm.runInContext(ts.transpileModule(editorHandler, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText + '\nchangeModuleSharing;', editorContext);
+await runEditor(); assert.deepEqual(routed, ['query-original']);
+editorContext.preferenceSharingPending = false; await runEditor(); assert.deepEqual(routed, ['query-original', 'withdraw']);
+const coverCalls = [], preference = { pending: { 'module-one': true }, submit: async () => { coverCalls.push('query-original'); } };
+const runCover = vm.runInNewContext(ts.transpileModule(`const handler = ${coverHandler}; handler;`,
+  { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, {
+  pageItem: { sharing: { kind: 'preset', id: 'source-one', shared: true, revision: 'source-revision' } }, entry: { id: 'module-one' },
+  preferenceSharing: preference, modules: [{ id: 'module-one', revision: 8 }], setError() {}, pool: { refresh() {} },
+  requestPresetSharing: async (_id, shared) => { assert.equal(shared, false); coverCalls.push('withdraw'); },
+});
+runCover(); assert.deepEqual(coverCalls, ['query-original']);
+preference.pending = {}; runCover(); assert.deepEqual(coverCalls, ['query-original', 'withdraw']);
+console.log(JSON.stringify({ passed: 11, checks: ['persist_before_send', 'lost_response_reuses_original_command',
+  'storage_failure_sends_nothing', 'parallel_click_sends_once', 'account_switch_drops_late_response', 'refresh_retains_original_command',
+  'new_click_publishes_saved_template', 'legacy_pending_replays_preference_before_explicit_new_publication', 'only_actual_shared_state_checks_switch',
+  'editor_queries_pending_original_after_binding_changes', 'cover_queries_pending_original_after_binding_changes'],
   productionWrites: 0, networkCalls: 0, generatedTasks: 0 }));

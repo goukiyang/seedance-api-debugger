@@ -1,9 +1,10 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '飞书头像与默认项目名称', outline: [
-  '飞书登录账户统一使用飞书头像',
-  '补齐成员和历史记录的头像显示',
-  '默认项目显示为账户名的默认项目',
+const notice = { title: '模板共享与工作台入口', outline: [
+  '模板工作台直接进入全部封面，移除侧栏重复入口',
+  '封面与上下文设置里的共享开关直接发布已保存模板',
+  '共享成功后显示真实状态，个人补充和当前编辑继续保留',
+  '断线后核对原操作，避免重复发布',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
