@@ -9,12 +9,16 @@
 - [x] 个人/项目/管理账本、排序、趋势、资产卡和CSV共用同一报价；每个读取快照只取一份费率。CSV保存本次单价、单位、数量、金额、折合点数及费率/映射版本，后续改价不改变既有导出。
 - [x] 费率页新增折叠“历史参考标价”，支持类型默认价/当前规则引用、旧型号映射、文字输入输出token价。管理员显式保存到独立 `usage_reference_pricing_v1`，同事务CAS与OperationLog原请求回执，未知只GET核原保存；不修改主费率、历史数据或调用生成。
 - [x] 隔离SQLite工程检查通过，包含四档图片、当前规则替代旧价、实际现金不混加、失败/在途不计合计、按规则标准换点、0输入/输出token、缺价不造0、直接/流式/公共汇总一致与导出快照冻结。
-- [ ] 最终v0.134.1候选完整原生/价格/Next/types/lint与保护发布：进行中，已合并765b角色配方源，准备沿d2ee recipe相容guard接续；等角色v0.134.0实际发布后才切换。原1339/55ec候选的专项和原生/价格门已通过，但未构建Next、未上线；保留attempt04原证，不冒充最终1341工程结果。最终批次为 `ledger-rate-accounting-20261105/attempt05`，无DDL/新依赖，只回程序不回业务数据。
+- [x] 最终v0.134.1已于UTC 2026-11-06T06:04:46Z保护部署，待用户手动验收。应用源 `aff41ac30bcf40dbf55704f8fa4e2f7e8c69f96e` / BUILD `yInCrZREmBsu5NEEsZ-R6`，继承实际765b/v0.134.0全部角色与模板改动。最终原生/价格门、Prisma generate、完整Next/types/lint通过；复用的金额专项相关26文件逐项hash一致，保原检查时间。无DDL/新依赖/真实生成/浏览器验收。
+- [x] 7服务4timer、6启动门、4公网JS同SHA、4匿名401及鲜核health200/ok=true通过；一致DB备份、原环境/媒体链接和原私有policy保留。原费率两键全字段SHA仍194e8d3a，未改原实扣、余额、已扣点或在途合同。
+- [x] 相容guard沿 `d2eea332d39e974a23318c99fd36f99406cb1211` / `0.134.0+recipe-reader-guard.1` / BUILD `sFx7NvYa1dkHeWkz9fOx3`，保留其05:47:46Z原完整构建与配方读者证明；不能回旧1d guard。恢复入口为最终 `attempt05/program-recovery.sh`，只回程序/指针，不回DB/媒体/账本/回执，未线上演练。原1339/55ec候选未构建Next、未上线，attempt04原证保留；SSH管道滞留在服务端成功退出后，仅关闭本人本机客户端，未重跑成功检查。
 - [ ] 用户手动验收：改费率后刷新账本与资产金额/折合点数一致；老auto/旧型号可估价；失败报价不计合计；保存与原号恢复、导出金额与版本可用。没有浏览器/真实生成或收费回归。
 
 已知缺口：文字、抠图没有已登记的人民币参考价，不擅自填免费；已有可编辑每次参考价，文字另支持已存token计价。未设置时仍明示待设置。H3默认0仅指现有free_local API合同，不含机器成本。页面效果待用户手验。
 
 05:25:26Z只读生产快照复核4223条叶子：3448视频、763图片全部有当前报价，11文字与1排队抠图缺参考单价。报价来源为当前匹配2977、历史映射1104、类型默认130；435条失败/在途等报价仅参考不计入合计。该诊断未写生产数据、未调用上游，不是页面功能验收；原证保留attempt04/current-price-audit.json。
+
+入口：[费率与历史参考标价](https://sd2.youdooart.com/admin/pricing)、[本人/项目账本](https://sd2.youdooart.com/usage)、[管理费用](https://sd2.youdooart.com/admin/usage-costs)。最终私有回执为正式根 `docs/materials/2026-11-05-ledger-rate-accounting/release/attempt05/` 的public-deployed、source-pair-contract、main-build-success和service-health；服务器同名stage为原证。重型构建/切版窗口已释放给侧栏后继批次，本对话仅文档/Git收口。
 
 本轮新发现的线索与问题：未新增范围外问题；原COST-LABEL与NOCHARGE线索继续保留，不顺手改写原账。
 
