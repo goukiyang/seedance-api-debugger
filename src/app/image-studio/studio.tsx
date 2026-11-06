@@ -4412,7 +4412,12 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         <div className={`${styles.modelQualityRow} ${templateWorkbench ? styles.templateModelQualityRow : ''}`}>
           <label className={styles.compactField} htmlFor={`studio-model-${module.id}`}><strong>生成模型</strong>
             <select id={`studio-model-${module.id}`} title={templateWorkbench ? `${IMAGE_STUDIO_MODEL_LABELS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || moduleModel}${imageChannelReady && !imageStudioChannelReadyForModel(selectedChannel, moduleModel, settings?.modelReady?.[moduleModel] ?? settings?.providerReady) ? '（未就绪）' : ''}` : undefined} disabled={!draftLoaded || draftRestoring || submissionRecoveryScope !== pendingKey || !batch.recoveryKnown || submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} value={moduleModel} onChange={event => selectModuleModel(event.target.value)}>
-              {modelChoices.map(model => <option key={model} value={model} disabled={model === 'gemini-3.1-flash-image-preview'}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || model}{imageChannelReady && !imageStudioChannelReadyForModel(selectedChannel, model, settings?.modelReady?.[model] ?? settings?.providerReady) ? '（未就绪）' : ''}</option>)}
+              {modelChoices.map(model => {
+                const modelChannelId = imageStudioEffectiveChannelId(imageChannels, model, imageChannelId,
+                  model === moduleModel ? quality : defaultImageStudioQuality(model));
+                const modelChannel = imageChannels.items.find(item => item.id === modelChannelId);
+                return <option key={model} value={model} disabled={model === 'gemini-3.1-flash-image-preview'}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || model}{imageChannelReady && !imageStudioChannelReadyForModel(modelChannel, model, settings?.modelReady?.[model] ?? settings?.providerReady) ? '（未就绪）' : ''}</option>;
+              })}
             </select>
           </label>
           {!templateWorkbench && !qualityRouted && <label className={styles.compactField} htmlFor={`studio-channel-${module.id}`}><strong>供应商</strong>
