@@ -57,3 +57,11 @@ CodeGraph 查询接口当前不可用，以对应工作区的定向源码核对�
 - 实际源码回调工程检查8组通过；旧8b6同检查按预期失败，确认覆盖本次回归。新检查纳入既有authoring-ui工程门。自有诊断草稿的0.051测试值已精确撤销，无保存/PATCH/生成；Ego16结束，未动其它人的页签或草稿。
 - 同批v0.134.8只合已授权的VIDEO-SUBMIT01两组件原因提示，以及3号0a5的有限非负小数准入helper/23项检查。后者影响worker恢复，最终新guard须继承，旧965a不再作为本批恢复程序；不接其它模型测试或新能力。
 - 当前阶段：源码已修、准备完整主/guard构建与保护发布；线上仍v0.134.7。费率两键e52bb566、人民币×10、赠分关闭/default0和原账必须保持；最终部署及本次未保存交互检查另附，不冒功能验收已完成。
+
+### RATE-EDIT02 最终交付
+
+- UTC 2026-11-06T15:50:19Z 已保护部署v0.134.8，待用户手动验收。主源d5d77d6e8d19e96fb0b96211ade96b82861d072f / BUILD 3UohRWHsr0d-Om8LwPXc0；新guard be92a5e9ff6d83ea8cd9587411df887c450f5ba4 / BUILD muaBZZWQ0CSgrh81FCHIH；两分支已推送，不回旧965a。
+- 主/guard完整原生与计价门、Prisma generate、Next及内置类型/lint均通过；新增8组实际源码回调检查纳入authoring-ui，旧8b6红对照确认原回归。3号小数23项通过，15号7组仅在三文件SHA相同时保留原运行证据，不冒重新执行。费率修复后的浏览器编辑/开关保存未自动验收，原Failed to fetch的网络成因仍未定位，不声称已修网络。
+- 6实际启动门、7服务4timer、4页面公网JS同SHA、3匿名401和health200/ok=true通过。两费率键全字段仍e52bb566d0137362f0f24c6d379e73f8075e7143532efb5144afd26660f572f3，赠分关闭/default0；无生产费率、余额或账本测试写入，无DDL/真实生成。
+- 一致数据库备份、原环境/持久目录及私有policy保留；服务器pricing-editor-focus-20261106/attempt01/program-recovery.sh只切新相容程序，不回数据库/媒体/费率/账本/回执。未演练生产回退。复制准备缺本机baseline manifest已改取服务器原件；切换前审查校正恢复脚本旧baseline断言，未试停服务或修改release-engine。
+- 正式私有原证：docs/materials/2026-11-05-ledger-rate-accounting/release/pricing-editor-focus-20261106/attempt01/；同名服务器stage保完整日志/源码归档。构建/发布窗口已释放，只剩记录/Git收口。CREDIT-EMAIL01真实申请与手机审批仍用户手验；顶部小数截断另记D-20261106-TOPBAR-CREDIT-FRACTION，未扩修。
