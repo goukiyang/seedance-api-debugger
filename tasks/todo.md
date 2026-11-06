@@ -14,6 +14,10 @@
 正式工单：[实施追加](todo/2026-11-05-template-sharing-cutout-open-preflight.md#10-本次实施追加插件下载页与模板封面共享开关2026-11-05plugin-cover01)。生产桥 MJ-SAFE01 仍待其 0.6.11 所有者交付基线后接续，未改该批应用输入。
 <!-- /PLUGIN-COVER01-20261105 -->
 
+## SHARE-CUTOPEN01 模板共享与 AI 抠图开放联合前置（2026-11-05）
+
+[唯一联合工单](todo/2026-11-05-template-sharing-cutout-open-preflight.md#15-share-effect01--cover-entry01-已部署收口2026-11-05)承接原共享/抠图及本次追加。原联合功能v0.132.0已部署；共享实际生效与工作台直达全部封面已合并部署v0.133.8，主源2dc29ec3c / BUILD GpD4_VSWXng9OZ827K2k-。38项专项工程检查、完整构建、6启动检查、7服务/4timer、3资源SHA及3匿名401有证；无schema、费用、原件或历史改写，原勾选模板不自动公开。已推送并部署，侧栏/入口与共享实际操作仍待用户手动验收，详见原单§15及正式根部署收口原证；未新增范围外事项。
+
 # V1.2 剩余模块落地 Todo
 
 <!-- LEDGER-RATE-ACCOUNTING-20261105 -->

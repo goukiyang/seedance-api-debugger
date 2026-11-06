@@ -1,6 +1,6 @@
 # 生图模板共享与 AI 抠图开放联合前置工单
 
-版本 V1.1 / R02，2026-11-05，video-api-debugger。前置调查与方案已完成，待实施。本单统一承接 SHARE-DEFAULT01 和 CUT-OPEN01，作为本批唯一执行与交接入口。
+版本 V1.2 / R03，2026-11-05，video-api-debugger。原联合功能已于v0.132.0部署；共享即时生效与工作台封面入口追加已于v0.133.8部署，待用户手动验收。本单统一承接 SHARE-DEFAULT01、CUT-OPEN01及后续追加，作为本批唯一执行与交接入口；历史采样和阶段状态保留原时点，以§15为最新收口。
 
 ## 1. 联合目标与基线
 
@@ -231,4 +231,21 @@ guard原生/价格完整通过后，包装输入误将两个reader标签串成�
 
 用户追加“侧栏的全部封面删掉，以后点模板工作台就是全部封面”，同批合并，不拆单。删除工作台桌面侧栏及手机分组栏的重复“全部封面”按钮；顶部导航、常规侧栏、首页及工作区入口统一显式进入 `/template-studio?type=image&view=covers`。旧裸入口完成原鉴权和允许类型核对后，同样进入封面，避免恢复到上次视频任务。
 
-具体图片模板、共享原件、视频模板/结果等带明确目标的链接及浏览器前后记录继续保留；没有图片权限的合法视频账号不被带入图片页。共用原封面页与原路由，不建新页面、不清草稿或历史。专项入口检查覆盖登录回跳、裸入口、封面直达、具体图片、具体视频、仅视频账号与原拒绝权限；桌面/手机外观和同页点击入口待用户手验。既有共享修复继续合并，应用版本仍为尚未上线的0.133.8。
+具体图片模板、共享原件、视频模板/结果等带明确目标的链接及浏览器前后记录继续保留；没有图片权限的合法视频账号不被带入图片页。共用原封面页与原路由，不建新页面、不清草稿或历史。专项入口检查覆盖登录回跳、裸入口、封面直达、具体图片、具体视频、仅视频账号与原拒绝权限；桌面/手机外观和同页点击入口待用户手验。既有共享修复继续合并，实际发布见§15。
+
+## 15. SHARE-EFFECT01 / COVER-ENTRY01 已部署收口（2026-11-05）
+
+已部署，待用户手动验收。UTC 2026-11-06T04:59:20.550626Z切入，实际Web及6个常驻辅助服务同源 `2dc29ec3c40fd7b940e7c8d26f033ebe09075338`，版本 **0.133.8**，BUILD `GpD4_VSWXng9OZ827K2k-`，run `e4a92312-485a-47c4-bc18-681212ae00d6`。此前0.133.7基线的头像、默认项目、抠图、角色参考图及相关交付保留。
+
+- 共享：封面与上下文开关实际发布已保存定义，成功才显示已共享；本人补充、主图、当前编辑保留。旧偏好和待确认原请求兼容；来源已变成preset时仍先核对原发布，不误撤回。默认revision=0、current/historical模式及v2固定参考记录相容已补齐。不在部署时自动公开已有私有模板。
+- 入口：工作台桌面/手机不再单列全部封面按钮；常规模板工作台直接进入 `https://sd2.youdooart.com/template-studio?type=image&view=covers`，裸入口同样落封面，明确模板/视频目标及原权限保留。
+- 工程：38项专项检查（后端20项沿匹配源码原证复用，最终候选11项客户端＋7项入口）；主源完整Linux原生恢复/价格检查、Next构建/types/lint通过；同源6项启动检查、7服务/4timer、3个公网页面资源SHA、3项匿名401核对通过。未运行浏览器功能验收或收费生成。
+- 保护：无schema/迁移变更；旧writer自然排尽，无强杀，一致数据库备份保留在本次server stage；原环境、数据链接、私有策略及两费率键全字段SHA `194e8d3a2a9e009585ec005a488c9767c31b4fc1c6550abc378053f70eb259fe`保持。未回业务数据、图片、账务或原回执。
+- 公网清单初填了不存在的`GET /api/image-studio/gallery`，收到404后原控制器末段退出；服务已正常切入。保留原输入与错误日志，只补核真实`POST /api/image-studio/gallery/query`及共享PUT的匿名401，并以补充只读清单完成公网资源、服务、策略与价格核对；没有重建或再次切换。
+- 回退沿既有相容guard `1d452f9186053d3012f420d330f4dce93a33d7f2` / `0.133.0+body-pair-reader-guard.1` / BUILD `4THsI43mwKhhvzVsWliHk`，原完整构建时点2026-11-05T16:46:20.139681Z不改；本次未重新构建guard、未演练回退。只回程序和配置，不回DB/媒体/费用/回执。入口：`bash /data/video-api-debugger/release-staging/template-sharing-effective-20261105/attempt04/program-recovery.sh /data/video-api-debugger/release-staging/template-sharing-effective-20261105/attempt04/release-input.json`。
+
+待手验：刷新后从模板工作台直接看封面；桌面/手机侧栏精简；“过度帧”重新主动开启共享后同事可见、撤回后失权；当前草稿和个人输入保留。旧勾选未实际发布的模板仍显示尚未共享，不能把旧勾选冒充已经公开。
+
+原证：[部署收口](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-11-05-default-module-sharing/release-effective/closure.json)、[公网证明](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-11-05-default-module-sharing/release-effective/public-deployed.json)、[专项工程证据](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-11-05-default-module-sharing/release-effective/focused-evidence.json)。完整原始记录保留服务器`/data/video-api-debugger/release-staging/template-sharing-effective-20261105/attempt01—04`；08ee候选完整构建通过后因用户追加入口被取代，未部署。更早原记录不重写为当前结果。
+
+本轮未新增范围外问题；原工作区未提交的前置候选已保存在stash `a5b299431ac2279170823771761583392089bf63`，未覆盖他人脏改。
