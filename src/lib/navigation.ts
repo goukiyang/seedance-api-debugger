@@ -89,7 +89,7 @@ const shellRoutePrefixes = [
 export const topbarQuickItems: NavItem[] = [
   { label: '创作首页', href: '/', match: ['/'] },
   { label: '生成', href: '/generate', match: ['/generate', '/generate/canvas'], externalHidden: true },
-  { label: '模板工作台', href: '/template-studio', match: ['/template-studio', '/templates', '/template-generate'], prefixMatch: true, externalHidden: true },
+  { label: '模板工作台', href: '/template-studio?type=image&view=covers', match: ['/template-studio', '/templates', '/template-generate'], prefixMatch: true, externalHidden: true },
   { label: '作品广场', href: '/works', match: ['/works'], externalHidden: true },
   { label: '资产', href: '/assets', match: ['/assets'], prefixMatch: true },
   { label: 'IP生成', href: '/generate/ip', match: ['/generate/ip'], prefixMatch: true },
@@ -104,7 +104,7 @@ export const userNavGroups: NavGroup[] = [
     items: [
       { label: '创作首页', href: '/', match: ['/'] },
       { label: '生成视频', href: '/generate', match: ['/generate', '/generate/canvas'], externalHidden: true },
-      { label: '模板工作台', href: '/template-studio', match: ['/template-studio'], prefixMatch: true, externalHidden: true },
+      { label: '模板工作台', href: '/template-studio?type=image&view=covers', match: ['/template-studio'], prefixMatch: true, externalHidden: true },
       { label: '视频超分', href: '/generate/enhance', match: ['/generate/enhance'], prefixMatch: true, adminOnly: true },
       { label: '模板生成', href: '/template-generate', prefixMatch: true, externalHidden: true },
       { label: '动画模板', href: '/templates', prefixMatch: true, externalHidden: true },

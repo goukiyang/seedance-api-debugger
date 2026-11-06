@@ -7,7 +7,9 @@ export type CharacterLabOperation = typeof characterLabOperations[number];
 export type CharacterLabView = 'side' | 'body-front' | 'body-back';
 export type CharacterLabReference = { planId: string; cell?: number };
 export type CharacterLabViews = Partial<Record<CharacterLabView, CharacterLabReference>>;
-export type CharacterLabComposition = { id: string; name: string; savedAt: string };
+export type CharacterLabComposition = { id: string; name: string; savedAt: string; layout?: string;
+  sources?: { sourceAssetId: string; mainFace: CharacterLabFace; side: CharacterLabReference; front: CharacterLabReference; back: CharacterLabReference } };
+export type CharacterLabPromptTarget = 'faces' | 'result' | CharacterLabOperation;
 
 export function characterLabSlot(plan: Pick<CharacterLabPlan, 'operation' | 'kind'>) {
   if (plan.operation === 'body-pair') return 'body-pair';
@@ -40,6 +42,7 @@ export type CharacterLabDraft = {
   count: 4 | 9;
   diversity: number;
   context: string;
+  sideDescription?: string;
   model: string;
   channelId: string;
   quality: string;
@@ -54,6 +57,7 @@ export type CharacterLabDraft = {
   adjustment: string;
   adjustmentCell: number | null;
   views?: CharacterLabViews;
+  settingsSource?: { planId: string; target: CharacterLabPromptTarget };
 };
 export type CharacterLabWorkspace = {
   id: string; name: string; revision: number; createdAt: string; updatedAt: string;
@@ -84,7 +88,21 @@ export type CharacterLabPlan = {
   operation?: CharacterLabOperation;
   input?: CharacterLabReference;
   slotScoped?: true;
+  origin?: { planId: string; mode: 'current' | 'historical' };
+  recipeProtocol?: 1;
+  frozenReferenceContext?: string;
 };
+export type CharacterLabRecipe = {
+  plan: CharacterLabPlan;
+  taskId: string | null;
+  hasImage: boolean;
+  state: string;
+  instruction: string | null;
+  completePrompt: string | null;
+  personalText: string;
+  references: Array<{ id: string; label: string; available: boolean; source?: CharacterLabReference }>;
+};
+export type CharacterLabRestoredSettings = { patch: Partial<CharacterLabDraft>; operation?: CharacterLabOperation; input?: CharacterLabReference; description: string };
 export type CharacterLabTask = {
   id: string; status: string; error: string | null; billing: ImageBillingView | null;
   asset: { id: string; url: string; thumbnailUrl: string; width: number | null; height: number | null } | null;

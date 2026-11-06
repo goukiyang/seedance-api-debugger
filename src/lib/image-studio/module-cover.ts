@@ -374,7 +374,7 @@ const preparationFingerprint = (value: SnapshotBinding) => hash(['first-shared-c
 function parsePreparation(value: string, ownerId: string, moduleId: string, requestId: string): CoverPreparation {
   const parsed = readObject<CoverPreparation>(value);
   if (parsed.version !== 1 || parsed.ownerId !== ownerId || parsed.moduleId !== moduleId || parsed.requestId !== requestId
-    || !Number.isSafeInteger(parsed.moduleRevision) || parsed.moduleRevision < 1 || !validId(parsed.targetPresetId)
+    || !Number.isSafeInteger(parsed.moduleRevision) || parsed.moduleRevision < 0 || !validId(parsed.targetPresetId)
     || !validId(parsed.lease) || !/^[a-f0-9]{64}$/.test(parsed.fingerprint) || !/^[a-f0-9]{64}$/.test(parsed.operationFingerprint)
     || !Number.isFinite(parsed.expiresAt) || !['pending', 'ready', 'failed', 'committed'].includes(parsed.status)
     || !['image', 'none', 'existing'].includes(parsed.disposition)

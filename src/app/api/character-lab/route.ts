@@ -3,15 +3,16 @@ import { getImageStudioSettings } from '@/lib/image-studio/settings';
 import { StudioError } from '@/lib/image-studio/tasks';
 import { requireLabUser, labFailure, labPrivateHeaders } from '@/lib/character-lab/http';
 import { createLabWorkspace, labConfigVersions, labId, saveLabConfig, updateLabWorkspace } from '@/lib/character-lab/store';
-import { labBootstrapFor, labPlanState, labWorkspaceState, prepareLab, quoteLab, saveLabResult, submitLab } from '@/lib/character-lab/service';
+import { labBootstrapFor, labPlanState, labWorkspaceState, prepareLab, quoteLab, saveLabResult, submitLab, reproduceLab, publicLabPlan } from '@/lib/character-lab/service';
+import { labRecipe, previewLabPrompt, restoreLabSettings } from '@/lib/character-lab/recipe';
 import { saveLabComposition } from '@/lib/character-lab/composition';
 
 export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   try {
     const user = await requireLabUser();
-    const workspace = request.nextUrl.searchParams.get('workspace'), plan = request.nextUrl.searchParams.get('plan');
-    const result = plan ? await labPlanState(user, labId(plan)) : workspace
+    const workspace = request.nextUrl.searchParams.get('workspace'), plan = request.nextUrl.searchParams.get('plan'), recipe = request.nextUrl.searchParams.get('recipe');
+    const result = recipe ? await labRecipe(user, labId(recipe)) : plan ? await labPlanState(user, labId(plan)) : workspace
       ? await labWorkspaceState(user, labId(workspace), request.nextUrl.searchParams.get('workbench') === '2') : await labBootstrapFor(user);
     return NextResponse.json(result, { headers: labPrivateHeaders });
   } catch (error) { return labFailure(error); }
@@ -28,7 +29,10 @@ export async function POST(request: NextRequest) {
     let result: unknown;
     if (action === 'create-workspace') result = { workspace: await createLabWorkspace(user.id, body.id, body.name, (await getImageStudioSettings()).model) };
     else if (action === 'save-workspace') result = { workspace: await updateLabWorkspace(user.id, body.id, body.revision, body.name, body.draft) };
-    else if (action === 'prepare') result = { plan: await prepareLab(user, body) };
+    else if (action === 'prepare') result = { plan: publicLabPlan(user, await prepareLab(user, body)) };
+    else if (action === 'reproduce') result = { plan: publicLabPlan(user, await reproduceLab(user, body)) };
+    else if (action === 'restore-settings') result = await restoreLabSettings(user, body);
+    else if (action === 'preview-prompt') result = await previewLabPrompt(user, body);
     else if (action === 'quote') result = await quoteLab(user, labId(body.planId));
     else if (action === 'submit') result = await submitLab(user, body);
     else if (action === 'save-result') result = { workspace: await saveLabResult(user, body) };

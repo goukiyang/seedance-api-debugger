@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '飞书头像与默认项目名称', outline: [
-  '飞书登录账户统一使用飞书头像',
-  '补齐成员和历史记录的头像显示',
-  '默认项目显示为账户名的默认项目',
+const notice = { title: '角色图片与提示词同步', outline: [
+  '切换生成图片时同步查看当次提示词和参考来源',
+  '沿用设置与按原设置重做分开，保留下一次输入',
+  '角色微调、正背面和成品来源一起追溯',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
