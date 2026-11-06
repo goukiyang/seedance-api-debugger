@@ -3,6 +3,7 @@ import { StudioError } from '@/lib/image-studio/tasks';
 import type { SessionUser } from '@/lib/auth/session';
 import type { CharacterLabConfig, CharacterLabDraft, CharacterLabFace, CharacterLabPlan, CharacterLabPromptFields, CharacterLabReference, CharacterLabViews, CharacterLabWorkspace } from './types';
 import { labViewPromptFields } from './prompts';
+import { characterLabOperations } from './types';
 
 export const CONFIG_KEY = 'character-lab:v1:config';
 export const workspaceKey = (owner: string, id: string) => `character-lab:v1:${owner}:workspace:${id}`;
@@ -50,13 +51,20 @@ export function parseLabDraft(value: unknown): CharacterLabDraft {
   const sourceAssetId = draft.sourceAssetId === null ? null : labText(draft.sourceAssetId, 100, '素材编号');
   if (sourceAssetId !== null && !/^[\w-]+$/.test(sourceAssetId)) throw new StudioError('素材编号无效');
   const projectId = draft.projectId === null ? null : labText(draft.projectId, 100, '项目编号');
+  let settingsSource: CharacterLabDraft['settingsSource'];
+  if (draft.settingsSource !== undefined) {
+    const input = draft.settingsSource as Record<string, unknown> | null;
+    if (!input || typeof input !== 'object' || !['faces', 'result', ...characterLabOperations].includes(String(input.target))) throw new StudioError('设置来源无效');
+    settingsSource = { planId: labId(input.planId, '设置来源'), target: input.target as NonNullable<CharacterLabDraft['settingsSource']>['target'] };
+  }
   return { stage: draft.stage as CharacterLabDraft['stage'], sourceAssetId, count: Number(draft.count) as 4 | 9,
     diversity: Number(draft.diversity), context: labText(draft.context, 3000, '角色补充'), model: labText(draft.model, 100, '模型'),
     channelId: labText(draft.channelId, 80, '通道'), quality: labText(draft.quality, 30, '画质'), resolution: labText(draft.resolution, 20, '分辨率'),
     projectId, facePlanId: optionalId(draft.facePlanId, '候选'), mainFace: face(draft.mainFace), auxiliaryFaces: auxiliaryFaces as CharacterLabFace[],
     auxiliaryFeatures: labText(draft.auxiliaryFeatures, 1000, '辅助特征'), resultPlanId: optionalId(draft.resultPlanId, '成品'), resultName: draft.resultName === undefined ? '' : labText(draft.resultName, 80, '作品名称'),
     adjustment: labText(draft.adjustment, 3000, '调整要求'), adjustmentCell: draft.adjustmentCell as number | null,
-    ...(draft.views !== undefined ? { views: labViews(draft.views) } : {}) };
+    ...(draft.views !== undefined ? { views: labViews(draft.views) } : {}), ...(settingsSource ? { settingsSource } : {}),
+    ...(draft.sideDescription !== undefined ? { sideDescription: labText(draft.sideDescription, 3000, '侧脸补充') } : {}) };
 }
 export async function readLabWorkspace(owner: string, id: string) {
   const row = await prisma.platformSetting.findUnique({ where: { key: workspaceKey(owner, labId(id)) } });

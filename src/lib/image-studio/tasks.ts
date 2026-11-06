@@ -994,7 +994,12 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     let evolution;
     try { if (evolutionRequest) evolution = resolveEvolution(evolutionRequest, input.prompt, capability || { version: 1, defaultDirection: 'increase' }); }
     catch (error) { throw new StudioError((error as Error).message); }
-    const context = [baseContext.trim(), evolution ? evolutionInstructions(evolution) : '', referenceInstructions ? `${roleInstructions}\n\n参考图顺序与作用（编号与实际发送次序一致）：\n${referenceInstructions}` : '',
+    const characterLabRecord = characterLabPlanId ? await tx.platformSetting.findUnique({
+      where: { key: `character-lab:v1:${ownerId}:plan:${characterLabPlanId}` }, select: { value_json: true },
+    }) : null;
+    const frozenLabContext: unknown = characterLabRecord ? JSON.parse(characterLabRecord.value_json).frozenReferenceContext : undefined;
+    if (frozenLabContext !== undefined && typeof frozenLabContext !== 'string') throw new StudioError('原角色上下文无法确认，请沿用当前设置继续创作', 409);
+    const context = typeof frozenLabContext === 'string' ? frozenLabContext : [baseContext.trim(), evolution ? evolutionInstructions(evolution) : '', referenceInstructions ? `${roleInstructions}\n\n参考图顺序与作用（编号与实际发送次序一致）：\n${referenceInstructions}` : '',
       styleNoteInstructions ? `风格组补充说明：\n${styleNoteInstructions}` : '',
       skills.length ? `补充文字skills（仅补充本次未指定部分；本次手写要求优先；多个组冲突时后组优先）：\n${skills.map((skill, index) => `${index + 1}. ${JSON.stringify(skill.prompt)}`).join('\n')}` : '']
       .filter(Boolean).join('\n\n---\n');

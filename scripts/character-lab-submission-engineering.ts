@@ -19,7 +19,7 @@ async function main() {
   const root = realpathSync(process.cwd());
   const previousUmask = process.umask(0o077);
   const sourcePaths = ['src/lib/image-studio/tasks.ts', 'src/lib/image-studio/billing-quote-service.ts',
-    'src/lib/character-lab/service.ts'];
+    'src/lib/character-lab/service.ts', 'src/lib/character-lab/recipe.ts'];
   const sourceHashes = Object.fromEntries(sourcePaths.map(file => [file, sha(readFileSync(path.join(root, file)))]));
   const scratch = path.join(root, '.role-tests');
   mkdirSync(scratch, { recursive: true, mode: 0o700 });
@@ -372,12 +372,76 @@ async function main() {
     assert.equal(await db.imageStudioTask.count(), beforeCompose);
     assert.equal(await db.creditLedger.count(), beforeComposeLedger);
 
+    const recipes = await import('../src/lib/character-lab/recipe');
+    const firstTask = await db.imageStudioTask.findFirstOrThrow({ where: { batch_id: batchId(owner, first.id) } });
+    await db.imageStudioTask.update({ where: { id: firstTask.id }, data: { prompt: first.prompt, context: 'ORIGINAL_REFERENCE_CONTEXT_FROZEN' } });
+    const beforeRead = { tasks: await db.imageStudioTask.count(), ledger: await db.creditLedger.count(),
+      workspace: (await db.platformSetting.findUniqueOrThrow({ where: { key: store.workspaceKey(owner, workspaceId) } })).value_json };
+    const detail = await recipes.labRecipe(user, first.id);
+    assert.equal(detail.completePrompt, `ORIGINAL_REFERENCE_CONTEXT_FROZEN\n\n---\n本次画面要求：\n${first.prompt}`);
+    assert.equal(detail.references[0].id, sourceAssetId);
+    const member: SessionUser = { ...user, role: 'user' };
+    const memberDetail = await recipes.labRecipe(member, first.id);
+    assert.equal(memberDetail.completePrompt, null); assert.equal(memberDetail.instruction, null);
+    assert.equal(memberDetail.plan.prompt, '');
+    assert.ok(!JSON.stringify(memberDetail).includes('ORIGINAL_REFERENCE_CONTEXT_FROZEN'));
+    const memberBootstrap = await service.labBootstrapFor(member);
+    assert.equal(memberBootstrap.config.styleConstraints, ''); assert.deepEqual(memberBootstrap.configVersions, []);
+    await assert.rejects(recipes.labRecipe({ ...user, id: 'other-fixture-owner' }, first.id), /不存在或无权访问/);
+    const restored = await recipes.restoreLabSettings(user, { workspaceId, planId: first.id });
+    assert.equal(restored.patch.count, 9);
+    assert.equal(restored.patch.mainFace, undefined); assert.equal(restored.patch.sourceAssetId, undefined);
+    assert.equal(restored.patch.views, undefined);
+    assert.equal((await db.platformSetting.findUniqueOrThrow({ where: { key: store.workspaceKey(owner, workspaceId) } })).value_json, beforeRead.workspace);
+    assert.equal(await db.imageStudioTask.count(), beforeRead.tasks); assert.equal(await db.creditLedger.count(), beforeRead.ledger);
+    assert.equal(saved.compositions?.[0].layout, 'sheet-2x2-v1');
+    assert.deepEqual(saved.compositions?.[0].sources, { sourceAssetId, mainFace: face, side: views.side, front: views['body-front'], back: views['body-back'] });
+
+    await store.saveLabConfig(user, 0, { ...store.defaultLabConfig, styleConstraints: 'NEW_SAVED_RULES_FOR_NEXT_GENERATION' });
+    const nextDraft = { ...savedByLegacy.draft, ...restored.patch };
+    const preview = await recipes.previewLabPrompt(user, { workspaceId, kind: 'faces', draft: nextDraft });
+    assert.match(preview.prompt || '', /NEW_SAVED_RULES_FOR_NEXT_GENERATION/);
+    assert.doesNotMatch((await recipes.labRecipe(user, first.id)).completePrompt || '', /NEW_SAVED_RULES_FOR_NEXT_GENERATION/);
+    if (service.CHARACTER_LAB_RECIPE_WRITES_ENABLED) {
+      const continued = await prepare('faces', undefined, { draft: nextDraft, recipeProtocol: 1 });
+      assert.deepEqual(continued.origin, { planId: first.id, mode: 'current' });
+      assert.match(continued.prompt, /NEW_SAVED_RULES_FOR_NEXT_GENERATION/);
+      const requestId = randomUUID();
+      const reproduced = await service.reproduceLab(user, { sourcePlanId: first.id, workspaceId, requestId });
+      assert.equal(reproduced.prompt, first.prompt);
+      assert.equal(reproduced.frozenReferenceContext, 'ORIGINAL_REFERENCE_CONTEXT_FROZEN');
+      assert.deepEqual(reproduced.referenceIds, first.referenceIds);
+      assert.deepEqual(reproduced.origin, { planId: first.id, mode: 'historical' });
+      assert.deepEqual(await service.reproduceLab(user, { sourcePlanId: first.id, workspaceId, requestId }), reproduced);
+      const historicalQuote = await service.quoteLab(user, reproduced.id);
+      const historicalSubmit = await service.submitLab(user, { planId: reproduced.id, billingQuoteId: historicalQuote.billingQuoteId,
+        pricingRevision: historicalQuote.pricingRevision, maxEstimatedCost: historicalQuote.estimatedCredits });
+      const historicalTasks = await db.imageStudioTask.findMany({ where: { batch_id: historicalSubmit.batchId } });
+      assert.equal(historicalTasks.length, 1);
+      assert.equal(historicalTasks[0].prompt, first.prompt); assert.equal(historicalTasks[0].context, reproduced.frozenReferenceContext);
+      assert.deepEqual(JSON.parse(historicalTasks[0].reference_ids), first.referenceIds);
+      const ledgerAfterHistorical = await db.creditLedger.count();
+      assert.deepEqual(await service.submitLab(user, { planId: reproduced.id }), historicalSubmit);
+      assert.equal(await db.creditLedger.count(), ledgerAfterHistorical);
+    } else {
+      await assert.rejects(prepare('faces', undefined, { recipeProtocol: 1 }), /恢复版本仅查看/);
+      await assert.rejects(service.reproduceLab(user, { sourcePlanId: first.id, workspaceId, requestId: randomUUID() }), /恢复版本仅查看/);
+    }
+    const unknownRecipe = { ...plan(randomUUID()), workspaceId, slotScoped: true, recipeProtocol: 1 };
+    await createPlan(unknownRecipe, 'submitting');
+    await assert.rejects(service.submitLab(user, { planId: unknownRecipe.id }), (error: unknown) => {
+      assert.notEqual((error as { submitted?: unknown }).submitted, false);
+      return /原提交结果待确认/.test(String(error));
+    });
+
     assert.equal(forbiddenCalls, 0);
     console.log(JSON.stringify({ schema: 'character-lab-submission-engineering.v1', synthetic: true,
       checks: ['lab_source_ignores_global_default_fixed_style_skill', 'quote_create_source_and_specification_match',
         'source_marker_requires_server_internal_parameter', 'accepted_and_unknown_preserve_original_request',
         'legacy_quote_rejected_before_submitting_or_fees', 'nine_grid_and_strength_rules', 'refinement_and_view_references',
-        'same_slot_pending_only', 'body_pair_single_task_description_crops_and_slot_conflicts', 'legacy_projection_and_writer', 'composition_png_order_identity_and_idempotency'],
+        'same_slot_pending_only', 'body_pair_single_task_description_crops_and_slot_conflicts', 'legacy_projection_and_writer', 'composition_png_order_identity_and_idempotency',
+        'recipe_detail_full_context_and_member_projection', 'restore_reads_only_and_composition_lineage',
+        'current_rules_vs_historical_quote_and_single_submission', 'recipe_guard_preserves_unknown_receipts'],
       taskId: created.id, batchId: created.batch_id, databasePath, productionWrites: 0, paidRequests: 0,
       browserRuns: 0, forbiddenCalls }, null, 2));
   } finally {
