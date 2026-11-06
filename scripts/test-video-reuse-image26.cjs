@@ -21,7 +21,7 @@ const task = { id: 'source', user_id: actor.id, owner_user_id: actor.id, retenti
   snapshot_id: 'snapshot', reference_image_urls: '["https://fixture.invalid/image.png"]' };
 const asset = (id, allowed = false) => ({ id, type: 'image', status: 'active', original_url: 'https://fixture.invalid/image.png', reference_images: [], allowed });
 async function routeCases() {
-  const state = { assets: [asset('original', true), asset('other-owner')], snapshot: true, outcome: null };
+  const state = { assets: [asset('original', true), asset('other-owner')], snapshot: true, outcome: null, promptGroups: false, promptGroupsEnabled: true };
   const prisma = { videoTask: { findUnique: async () => task },
     generationTaskSnapshot: { findUnique: async () => state.snapshot ? {
       asset_mapping_json: '{"图1":"original"}', content_json: '[{"type":"image_url","role":"reference_image","image_url":{"url":"https://fixture.invalid/image.png"}}]' } : null },
@@ -34,8 +34,8 @@ async function routeCases() {
     '@/lib/prisma': { prisma }, '@/lib/auth/session': { AuthError, getSession: async () => actor },
     '@/lib/access/feature-guard': { assertInternalOnly() {} }, '@/lib/projects/permissions': { assertCanViewTask: async () => {} },
     '@/lib/video/multiview-task-privacy': { isPrivateMultiviewTask: () => false, isPrivateMultiviewActionTask: () => false },
-    '@/lib/video/prompt-groups': { videoPromptGroupTaskRefs: () => [] },
-    '@/lib/video/prompt-groups-build-mode': { VIDEO_PROMPT_GROUP_WRITES_ENABLED: true },
+    '@/lib/video/prompt-groups': { videoPromptGroupTaskRefs: () => state.promptGroups ? [{ id: 'fixture-group' }] : [] },
+    '@/lib/video/prompt-groups-build-mode': { get VIDEO_PROMPT_GROUP_WRITES_ENABLED() { return state.promptGroupsEnabled; } },
     '@/lib/video/prompt-groups.server': { videoPromptGroupSelections: async () => [] }, '@/lib/video/multiview-private-create.server': {},
     '@/lib/navigation/task-reuse-operation.server': { TaskReuseOperationError: class extends Error {},
       taskReuseRequest: () => ({ surface: 'normal' }), taskReuseSourceStamp: () => 'stamp', taskReusePrivateHeaders: {},
@@ -49,7 +49,14 @@ async function routeCases() {
     '@/lib/provider/volcengine-ip': { VOLCENGINE_IP_VIDEO_PROVIDER: 'volcengine_ark' },
     '@/lib/provider/reference-media-policy': { seedanceReferenceMediaCapabilities: () => ({ imageLimit: 9, videoLimit: 3, audioLimit: 3 }) },
   });
-  const run = () => mod.POST({ headers: { get: () => null }, json: async () => ({}) }, { params: { id: task.id } });
+  const run = (contract = null) => mod.POST({ headers: { get: key => key === 'x-video-prompt-groups-contract' ? contract : null }, json: async () => ({}) }, { params: { id: task.id } });
+  state.promptGroups = true;
+  assert.equal((await run()).status, 426, 'old client retains prompt-group upgrade rejection');
+  assert.deepEqual(plain(state.outcome.payload), {}, 'early contract rejection must not expose a partial draft');
+  state.promptGroupsEnabled = false;
+  assert.equal((await run('1')).status, 426, 'server feature gate still rejects a matching client');
+  assert.deepEqual(plain(state.outcome.payload), {});
+  state.promptGroups = false; state.promptGroupsEnabled = true;
   for (let i = 0; i < 2; i++) {
     assert.equal((await run()).status, 200); assert.deepEqual(plain(state.outcome.items).map(a => a.assetId), ['original']); state.assets.reverse();
   }
