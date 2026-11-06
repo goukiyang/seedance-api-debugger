@@ -5,6 +5,8 @@ export const IMAGE_STUDIO_MODELS = [
   'gpt-image-2',
   'gpt-image-2.5-flare',
   'gpt-image-2.5-sunburst',
+  'gpt-image-2.6-flare',
+  'gpt-image-2.6-sunburst',
 ] as const;
 
 // Historical model ids remain readable; only explicit new selections use this list.
@@ -27,6 +29,8 @@ export const IMAGE_STUDIO_MODEL_LABELS: Record<ImageStudioModel, string> = {
   'gpt-image-2': 'GPT Image 2',
   'gpt-image-2.5-flare': 'GPT Image 2.5 Flare',
   'gpt-image-2.5-sunburst': 'GPT Image 2.5 Sunburst',
+  'gpt-image-2.6-flare': 'GPT Image 2.6 Flare',
+  'gpt-image-2.6-sunburst': 'GPT Image 2.6 Sunburst',
 };
 
 export const IMAGE_STUDIO_MODEL_SHORT_LABELS: Record<ImageStudioModel, string> = {
@@ -36,6 +40,8 @@ export const IMAGE_STUDIO_MODEL_SHORT_LABELS: Record<ImageStudioModel, string> =
   'gpt-image-2': 'img2',
   'gpt-image-2.5-flare': 'img2.5-F',
   'gpt-image-2.5-sunburst': 'img2.5-S',
+  'gpt-image-2.6-flare': 'img2.6-F',
+  'gpt-image-2.6-sunburst': 'img2.6-S',
 };
 
 // Provider USD cost is deliberately separate from the site's credit price.
@@ -46,6 +52,8 @@ export const IMAGE_STUDIO_MODEL_COST_USD: Record<ImageStudioModel, number | null
   'gpt-image-2': null,
   'gpt-image-2.5-flare': 0.064,
   'gpt-image-2.5-sunburst': 0.064,
+  'gpt-image-2.6-flare': null,
+  'gpt-image-2.6-sunburst': null,
 };
 
 export const IMAGE_STUDIO_MODEL_QUALITY_OPTIONS: Record<ImageStudioModel, ImageStudioQuality[]> = {
@@ -55,6 +63,8 @@ export const IMAGE_STUDIO_MODEL_QUALITY_OPTIONS: Record<ImageStudioModel, ImageS
   'gpt-image-2': ['auto', 'low', 'medium', 'high'],
   'gpt-image-2.5-flare': ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
   'gpt-image-2.5-sunburst': ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
+  'gpt-image-2.6-flare': ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
+  'gpt-image-2.6-sunburst': ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
 };
 
 export const IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS: Record<ImageStudioModel, import('@/lib/image-generation/resolution').ImageResolution[]> = {
@@ -64,6 +74,8 @@ export const IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS: Record<ImageStudioModel, imp
   'gpt-image-2': ['1K', '2K', '4K'],
   'gpt-image-2.5-flare': ['1K', '2K', '4K'],
   'gpt-image-2.5-sunburst': ['1K', '2K', '4K'],
+  'gpt-image-2.6-flare': ['1K', '2K', '4K'],
+  'gpt-image-2.6-sunburst': ['1K', '2K', '4K'],
 };
 
 export const IMAGE_STUDIO_QUALITY_LABELS: Record<ImageStudioQuality, string> = {

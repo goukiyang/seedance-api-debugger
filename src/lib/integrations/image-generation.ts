@@ -637,6 +637,8 @@ const GPT_IMAGE_CHANNEL_MODELS = new Set<ImageStudioModel>([
   'gpt-image-2',
   'gpt-image-2.5-flare',
   'gpt-image-2.5-sunburst',
+  'gpt-image-2.6-flare',
+  'gpt-image-2.6-sunburst',
 ]);
 const FLUXPORT_PROTOCOL_BY_MODEL: Record<ImageStudioModel, ImageGenerationChannelProtocol> = {
   'gemini-nano-banana-2.1': 'gemini_native',
@@ -645,6 +647,8 @@ const FLUXPORT_PROTOCOL_BY_MODEL: Record<ImageStudioModel, ImageGenerationChanne
   'gpt-image-2': 'openai_images',
   'gpt-image-2.5-flare': 'openai_images',
   'gpt-image-2.5-sunburst': 'openai_images',
+  'gpt-image-2.6-flare': 'openai_images',
+  'gpt-image-2.6-sunburst': 'openai_images',
 };
 
 function blankCapability(protocol: ImageGenerationChannelProtocol, enabled = false): ImageGenerationModelCapability {

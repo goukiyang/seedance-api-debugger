@@ -650,8 +650,10 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
       const sourceUser = sourceIdentity || { id: ownerId, role: isAdmin ? 'admin' : 'user', account_type: 'internal', feishu: null } as const;
       if (!source || !canViewStudioPreset(sourceUser, source)) throw new StudioModuleError('模板已停止共享，不能保存新的配置', 403);
     }
-    const newOrigins = studioDefinitionOrigins('image-module', { id, owner_id: ownerId, source_preset_id: forcedSourcePresetId });
-    if (!current && newOrigins.length && (data.prompt || data.context)) await requirePrivatePromptRequest(ownerId, newOrigins);
+    if (!current && (data.prompt || data.context)) {
+      const newOrigins = studioDefinitionOrigins('image-module', { id, owner_id: ownerId, source_preset_id: forcedSourcePresetId });
+      if (newOrigins.length) await requirePrivatePromptRequest(ownerId, newOrigins);
+    }
     const protectedData = current ? await protectStudioDefinitionPatch('image-module', current, data, ownerId, body.privatePromptEdit === true)
       : writePrivateStudioDefinition('image-module', { id, owner_id: ownerId, context: '', ...data });
     const saved = !current
