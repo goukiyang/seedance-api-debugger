@@ -14,7 +14,7 @@ export default async function NotificationsPage() {
         title="通知中心"
         description="查看项目、审批、预算和系统状态通知。"
       />
-      <NotificationsPageClient />
+      <NotificationsPageClient key={user.id} ownerId={user.id} />
     </div>
   );
 }
