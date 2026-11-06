@@ -336,10 +336,7 @@ export async function POST(
     if (previous.body.reuse.status !== 'unknown') return NextResponse.json(previous.body, { status: previous.status, headers: taskReusePrivateHeaders });
     if (promptGroupRefs.length && (!VIDEO_PROMPT_GROUP_WRITES_ENABLED || request.headers.get('x-video-prompt-groups-contract') !== '1')) {
       const rejected = await finishTaskReuseOperation(user, params.id, operationRequest, {
-        sourceStamp: taskReuseSourceStamp(task), items: [], payload: {
-          draft, restored_references: preparedItems.length, skipped_references: skippedReferences,
-          inputWarnings: Array.from(warnings),
-        }, rejection: { code: 'VIDEO_PROMPT_GROUP_CLIENT_REQUIRED',
+        sourceStamp: taskReuseSourceStamp(task), items: [], payload: {}, rejection: { code: 'VIDEO_PROMPT_GROUP_CLIENT_REQUIRED',
           message: '当前版本不能完整恢复提示词组，请更新后继续；原输入和成品保留。', status: 426 },
       });
       return NextResponse.json(rejected.body, { status: rejected.status, headers: taskReusePrivateHeaders });
