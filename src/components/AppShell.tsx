@@ -8,7 +8,8 @@ import WorkspaceSidebar from './home/WorkspaceSidebar';
 import FeedbackWidget from './FeedbackWidget';
 import homeStyles from '@/app/home.module.css';
 import templateStudioStyles from './template-studio/template-studio.module.css';
-import { isNavItemVisible, shouldUseNavigationShell, shouldUseTopbarOnlyShell } from '@/lib/navigation';
+import { isNavItemVisible, shouldUseNavigationShell, shouldUseTopbarOnlyShell, workspaceSection } from '@/lib/navigation';
+import { useWorkspaceScroll } from '@/lib/hooks/use-workspace-scroll';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { rememberSettingsOrigin } from '@/lib/navigation/settings-return';
 
@@ -29,14 +30,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const topbarOnlyShell = useMemo(() => pathname === '/' || shouldUseTopbarOnlyShell(pathname), [pathname]);
   const imageStudioShell = pathname === '/image-studio';
   const templateStudioShell = pathname === '/template-studio';
-  const assetsWorkspace = pathname === '/assets';
+  const workspace = workspaceSection(pathname);
+  useWorkspaceScroll(user?.id || '', pathname, Boolean(hasLoadedUser && (workspace === 'account' || workspace === 'help')));
   const projectsWorkspace = /^\/(?:projects(?:\/|$)|usage(?:\/|$)|tasks\/[^/]+$|collections(?:\/|$))/.test(pathname);
-  const shellBodyClass = assetsWorkspace ? homeStyles.page : templateStudioShell
+  const shellBodyClass = workspace ? homeStyles.page : templateStudioShell
     ? templateStudioStyles.shellBody
     : `shell-body${topbarOnlyShell ? ' shell-body-topbar-only' : ''}${imageStudioShell ? ' shell-body-image-studio' : ''}`;
   const shellContentClass = templateStudioShell
     ? templateStudioStyles.shellContent
-    : `shell-content${topbarOnlyShell || assetsWorkspace ? ' shell-content-topbar-only' : ''}`;
+    : `shell-content${topbarOnlyShell || workspace ? ' shell-content-topbar-only' : ''}${workspace && workspace !== 'assets' ? ` ${homeStyles.workspaceContent}` : ''}`;
 
   useEffect(() => {
     if (!showShell || hasLoadedUser || loadingUser) return;
@@ -66,11 +68,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         onSessionClear={clearSession}
       />
       <div className={shellBodyClass}>
-        {assetsWorkspace && <WorkspaceSidebar accountId={user?.id || ''}
+        {workspace && <WorkspaceSidebar accountId={user?.id || ''}
           internal={isNavItemVisible({ label: '创作', href: '/generate', externalHidden: true }, user)}
           images={isNavItemVisible({ label: '图片生成', href: '/image-studio', imageStudioOnly: true }, user)}
-          worksEnabled={user?.works_preview === true} activeView="assets" />}
-        {!assetsWorkspace && !topbarOnlyShell && !imageStudioShell && !templateStudioShell && <SideNav isAdmin={user?.role === 'admin'} user={user} />}
+          worksEnabled={user?.works_preview === true} activeView={workspace} />}
+        {!workspace && !topbarOnlyShell && !imageStudioShell && !templateStudioShell && <SideNav isAdmin={user?.role === 'admin'} user={user} />}
         <main className={shellContentClass}>
           <ComposerTopbarProvided.Provider value>{children}</ComposerTopbarProvided.Provider>
         </main>

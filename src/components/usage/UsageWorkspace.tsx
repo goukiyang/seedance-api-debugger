@@ -12,6 +12,7 @@ import PaginationControls from '@/components/PaginationControls';
 import { useUsageWorkspace, usageQueryParams } from './useUsageWorkspace';
 import { useUsageViewState } from './useUsageViewState';
 import styles from './UsageWorkspace.module.css';
+import { useWorkspaceScroll } from '@/lib/hooks/use-workspace-scroll';
 import { Bar, BarChart, CartesianGrid, Legend, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { seedanceVideoModelLabel } from '@/lib/provider/seedance-models';
 
@@ -203,6 +204,8 @@ export default function UsageWorkspace({ ownerId, projectId }: { ownerId: string
   const active = useRef(usage.identity); active.current = usage.identity;
   const reload = useRef(usage.reload); reload.current = usage.reload;
   const anchorRestored = useRef('');
+  const [anchorContext, setAnchorContext] = useState({ identity: '', anchored: false });
+  useWorkspaceScroll(ownerId, `usage:${usage.identity}:${usage.request}`, current && !busy && view.ready && anchorContext.identity === usage.identity, anchorContext.anchored);
   useEffect(() => {
     if (!ownerId) return;
     const identity = usage.identity;
@@ -250,7 +253,8 @@ export default function UsageWorkspace({ ownerId, projectId }: { ownerId: string
     if (!current || !report || !view.ready) return;
     const key = `sd2:usage-anchor:${usage.identity}`;
     let anchor = '';
-    try { anchor = window.location.hash ? decodeURIComponent(window.location.hash.slice(1)) : localStorage.getItem(key) || ''; } catch { return; }
+    try { anchor = window.location.hash ? decodeURIComponent(window.location.hash.slice(1)) : localStorage.getItem(key) || ''; } catch { /* Pixel restoration remains available without a stored anchor. */ }
+    setAnchorContext(previous => previous.identity === usage.identity && previous.anchored === Boolean(anchor) ? previous : { identity: usage.identity, anchored: Boolean(anchor) });
     if (!anchor || anchorRestored.current === anchor) return;
     const target = document.getElementById(anchor);
     if (target && report.records.items.some((r) => `usage-${r.id}` === anchor)) {
