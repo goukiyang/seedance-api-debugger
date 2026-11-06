@@ -1,196 +1,226 @@
-/* A: reference-led gallery. Scoped to the real works surface and its portals. */
+/* Reference contract: one dark surface, a left navigation rail, quiet tools. */
 body:has([class*="Works_page__"]) {
+  --mj-rail: 224px;
+  --mj-nav-height: min(480px, 60dvh);
   --bg-primary: #0d0e12;
+  --bg-secondary: #16181d;
   --bg-panel: #16181d;
   --bg-input: #1e1f25;
-  --bg-hover: #282a32;
-  --border-color: #30323b;
+  --bg-hover: #23252c;
+  --border-color: #2c2e36;
   --text-primary: #ebecef;
   --text-secondary: #a7aab6;
-  --text-muted: #989daa;
-  --tone-info-bg: #351c17;
-  --tone-info-text: #ff8565;
-  --tone-info-border: #714032;
-  --tone-danger-text: #ff7180;
+  --text-muted: #8c919e;
+  --mj-accent: #ef411f;
+  --mj-active-text: #ff6b46;
+  --mj-active-bg: #331a15;
   --mj-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   background: var(--bg-primary);
   color: var(--text-primary);
   font-family: var(--mj-font);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+/* The existing ResizeObserver measures this header. A vertical rail must not
+   become a viewport-height top offset in the original shell or its dialogs. */
+body:has([class*="Works_page__"]) .shell-root {
+  --composer-topbar-height: 0px !important;
+  min-height: 100dvh;
+  padding-top: 0;
+  background: var(--bg-primary);
 }
 body:has([class*="Works_page__"]) .composer-topbar {
-  background: #0d0e12;
-  border-bottom: 1px solid #1d1f26;
+  position: fixed;
+  inset: 0 auto 0 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  width: var(--mj-rail);
+  height: 100dvh;
+  min-height: 0;
+  padding: 24px 16px 132px;
+  border: 0;
+  background: var(--bg-primary);
   box-shadow: none;
 }
+body:has([class*="Works_page__"]) .composer-topbar-left {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  gap: 6px;
+  height: calc(var(--mj-nav-height) - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #363942 transparent;
+}
+body:has([class*="Works_page__"]) .composer-topbar-logo {
+  padding: 7px 12px 16px;
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-decoration: none;
+}
+body:has([class*="Works_page__"]) .composer-topbar-version { display: block; margin-top: 5px; color: var(--text-muted); font-size: 10px; }
+body:has([class*="Works_page__"]) .composer-topbar-nav { flex-direction: column; flex: none; gap: 4px; }
 body:has([class*="Works_page__"]) .composer-topbar-nav-btn {
-  border-radius: 20px;
-  color: #a7aab6;
-}
-body:has([class*="Works_page__"]) .composer-topbar-nav-btn.active {
-  background: #2b1c19;
-  color: #ff8565;
-}
-body:has([class*="Works_page__"]) .composer-topbar-nav-btn:hover {
-  background: #21232b;
-  color: #ebecef;
-}
-body:has([class*="Works_page__"]) [class*="home_page__"] {
-  grid-template-columns: 224px minmax(0, 1fr);
-  background: #0d0e12;
-  font-family: var(--mj-font);
-}
-body:has([class*="Works_page__"]) [class*="home_sidebar__"] {
-  background: #0d0e12;
-  border-right-color: transparent;
-}
-body:has([class*="Works_page__"]) [class*="home_workspaceLinks__"] {
-  padding: 25px 16px 20px;
-}
-body:has([class*="Works_page__"]) [class*="home_workspaceLinks__"] h1 {
-  margin: 0 12px 18px;
-  color: #878c99;
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: .04em;
-}
-body:has([class*="Works_page__"]) nav[aria-label="工作区"] {
-  gap: 7px;
-}
-body:has([class*="Works_page__"]) nav[aria-label="工作区"] a {
-  min-height: 44px;
-  padding: 10px 13px;
-  margin: 0;
-  gap: 11px;
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 12px;
   border: 1px solid transparent;
   border-radius: 24px;
   background: transparent;
-  color: #ced0d7;
+  color: #d3d4db;
+  font-family: var(--mj-font);
   font-size: 14px;
   font-weight: 500;
   line-height: 1.35;
+  text-decoration: none;
 }
-body:has([class*="Works_page__"]) nav[aria-label="工作区"] a:hover {
-  background: #1b1d24;
-  color: #f3f3f6;
+body:has([class*="Works_page__"]) .composer-topbar-nav-btn:hover { background: #1b1d23; color: #f1f1f4; }
+body:has([class*="Works_page__"]) .composer-topbar-nav-btn.active {
+  border-color: #5b2a20;
+  background: var(--mj-active-bg);
+  color: var(--mj-active-text);
 }
-body:has([class*="Works_page__"]) nav[aria-label="工作区"] a[aria-current="page"] {
-  border-color: #653026;
-  background: #351c17;
-  color: #ff8565;
-}
-body:has([class*="Works_page__"]) nav[aria-label="工作区"] svg {
-  width: 18px;
-  height: 18px;
-  stroke-width: 1.8;
-}
-body:has([class*="Works_page__"]) [class*="home_content__"] {
-  padding: 22px 24px 48px 16px;
-}
-body:has([class*="Works_page__"]) [class*="Works_page__"] {
-  padding: 0;
-  font-family: var(--mj-font);
-}
-body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 44px auto;
+body:has([class*="Works_page__"]) .composer-topbar-nav [aria-label="工具"] { position: static !important; margin: 4px 0 8px 12px; }
+body:has([class*="Works_page__"]) .composer-topbar-right {
+  position: absolute;
+  inset: auto 16px 16px;
+  display: flex;
   align-items: center;
-  gap: 16px 10px;
-  min-height: 0;
-  margin: 0 0 18px;
-  padding: 0;
-  white-space: normal;
+  align-content: flex-end;
+  gap: 8px;
+  padding-top: 12px;
 }
-body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] > form {
-  grid-column: 1 / -1;
-  grid-row: 1;
-  width: 100%;
-  max-width: none;
-  min-height: 56px;
-  border: 1px solid #30323b;
-  border-radius: 15px;
-  background: #1e1f25;
-  box-shadow: 0 5px 20px #08090b40;
+body:has([class*="Works_page__"]) .account-menu-composer { flex: 1 0 100%; min-width: 0; }
+body:has([class*="Works_page__"]) .account-menu-composer .account-menu-trigger { width: 100%; border-radius: 24px; background: #24262d; }
+body:has([class*="Works_page__"]) .account-menu-dropdown { top: auto; bottom: calc(100% + 8px); left: 0; right: auto; }
+body:has([class*="Works_page__"]) .composer-topbar-icon-btn { border-color: transparent; color: #a7aab6; }
+body:has([class*="Works_page__"]) :is(button, a, input, select, textarea):focus-visible { outline-color: #ff7655; }
+@media (min-width: 981px) {
+  body:has([class*="Works_page__"]) .composer-topbar-left > button[aria-label="打开导航"] { display: none; }
 }
-body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] input[type="search"] {
-  min-height: 54px;
-  padding: 14px 18px;
-  font-size: 15px;
-}
-body:has([class*="Works_page__"]) input[type="search"]::placeholder {
-  color: #9b9eaa;
-}
-body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] > select {
-  grid-column: 1;
-  grid-row: 2;
-  width: 138px;
-  justify-self: start;
-  padding: 8px 10px;
-  border-color: transparent;
-  border-radius: 9px;
-  background: #0d0e12;
-  color: #ebecef;
-  font-size: 14px;
-  font-weight: 500;
-}
-body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] > [aria-haspopup="dialog"] {
-  grid-column: 2;
-  grid-row: 2;
-  margin-left: 0;
-}
-body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] > [aria-label="添加作品"] {
-  grid-column: 3;
-  grid-row: 2;
-  padding: 8px 15px;
-  border: 1px solid #653026;
-  border-radius: 22px;
-  background: #351c17;
-  color: #ff967b;
-}
-body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] > [aria-label="添加作品"]:hover {
-  filter: brightness(1.12);
-}
-body:has([class*="Works_page__"]) [class*="Works_mediaButton__"] {
-  border-radius: 4px;
-  background: #16181d;
-}
-body:has([class*="Works_page__"]) [class*="Works_cardOverlay__"] button,
-body:has([class*="Works_page__"]) [class*="Works_imageCardDetails__"] [data-result-details] {
-  background: #121319ed;
-  color: #ebecef;
-  box-shadow: 0 1px 6px #08090b55;
-}
-body:has([class*="Works_page__"]) [class*="Works_filtersPopover__"] {
-  border-radius: 13px;
-  border-color: #343640;
-  box-shadow: 0 16px 48px #07080b80;
-}
-body:has([class*="Works_page__"]) [class*="Works_types__"] button[aria-pressed="true"] {
-  background: #351c17;
-  color: #ff967b;
-  border-radius: 20px;
-}
-@media (max-width: 940px) {
-  body:has([class*="Works_page__"]) [class*="home_page__"] {
-    display: block;
-    padding: 16px;
+@media (max-width: 980px) {
+  body:has([class*="Works_page__"]) .shell-root { --composer-topbar-height: 56px !important; padding-top: 56px; }
+  body:has([class*="Works_page__"]) .composer-topbar {
+    inset: 0 0 auto;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    height: 56px;
+    padding: 8px 12px;
+    border-bottom: 1px solid #23252c;
+    flex-wrap: nowrap;
   }
+  body:has([class*="Works_page__"]) .composer-topbar-left { flex: 1 1 auto; height: auto; flex-direction: row; align-items: center; gap: 8px; overflow: visible; }
+  body:has([class*="Works_page__"]) .composer-topbar-logo { padding: 0; font-size: 16px; }
+  body:has([class*="Works_page__"]) .composer-topbar-version { display: none; }
+  body:has([class*="Works_page__"]) .composer-topbar-nav, body:has([class*="Works_page__"]) .composer-topbar-home { display: none; }
+  body:has([class*="Works_page__"]) .composer-topbar-right { position: static; flex: 0 1 auto; padding: 0; flex-wrap: nowrap; }
+  body:has([class*="Works_page__"]) .account-menu-composer { flex: 0 1 auto; }
+  body:has([class*="Works_page__"]) .account-menu-dropdown { top: calc(100% + 8px); bottom: auto; right: 0; left: auto; }
+}
+@media (max-width: 640px) {
+  body:has([class*="Works_page__"]) .composer-topbar-right > :not(.account-menu-composer):not(.notification-bell) { display: none; }
+}
+@media (min-width: 981px) {
+  body:has([class*="Works_page__"]) .composer-topbar-left a.composer-topbar-nav-btn[href="/"]::before {
+    content: ''; flex: 0 0 18px; width: 18px; height: 18px;
+    background: currentColor; mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m3%2010%209-7%209%207v10H3z%22%2F%3E%3Cpath%20d%3D%22M9%2020v-7h6v7%22%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
+  }
+  body:has([class*="Works_page__"]) .composer-topbar-left a.composer-topbar-nav-btn[href="/generate"]::before {
+    content: ''; flex: 0 0 18px; width: 18px; height: 18px;
+    background: currentColor; mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m12%203%202.6%206.4L21%2012l-6.4%202.6L12%2021l-2.6-6.4L3%2012l6.4-2.6z%22%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
+  }
+  body:has([class*="Works_page__"]) .composer-topbar-left a.composer-topbar-nav-btn[href^="/template-studio"]::before {
+    content: ''; flex: 0 0 18px; width: 18px; height: 18px;
+    background: currentColor; mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%223%22%20y%3D%223%22%20width%3D%2218%22%20height%3D%2218%22%20rx%3D%223%22%2F%3E%3Cpath%20d%3D%22M3%209h18M9%209v12%22%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
+  }
+  body:has([class*="Works_page__"]) .composer-topbar-left a.composer-topbar-nav-btn[href="/works"]::before {
+    content: ''; flex: 0 0 18px; width: 18px; height: 18px;
+    background: currentColor; mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Ccircle%20cx%3D%2212%22%20cy%3D%2212%22%20r%3D%229%22%2F%3E%3Cpath%20d%3D%22m16%208-2.5%205.5L8%2016l2.5-5.5z%22%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
+  }
+  body:has([class*="Works_page__"]) .composer-topbar-left a.composer-topbar-nav-btn[href="/assets"]::before {
+    content: ''; flex: 0 0 18px; width: 18px; height: 18px;
+    background: currentColor; mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%223%22%20y%3D%223%22%20width%3D%2218%22%20height%3D%2218%22%20rx%3D%223%22%2F%3E%3Cpath%20d%3D%22M3%209h18M3%2015h18M9%203v18M15%203v18%22%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
+  }
+  body:has([class*="Works_page__"]) .composer-topbar-left a.composer-topbar-nav-btn[href="/generate/ip"]::before {
+    content: ''; flex: 0 0 18px; width: 18px; height: 18px;
+    background: currentColor; mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Ccircle%20cx%3D%2212%22%20cy%3D%228%22%20r%3D%224%22%2F%3E%3Cpath%20d%3D%22M4%2021v-2a8%208%200%200%201%2016%200v2%22%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
+  }
+  body:has([class*="Works_page__"]) .composer-topbar-left a.composer-topbar-nav-btn[href="/tools/ultimate-canvas"]::before {
+    content: ''; flex: 0 0 18px; width: 18px; height: 18px;
+    background: currentColor; mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%223%22%20y%3D%223%22%20width%3D%2218%22%20height%3D%2218%22%20rx%3D%223%22%2F%3E%3Cpath%20d%3D%22M8%208h8v8H8z%22%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
+  }
+  body:has([class*="Works_page__"]) .composer-topbar-left a.composer-topbar-nav-btn[href="/admin"]::before {
+    content: ''; flex: 0 0 18px; width: 18px; height: 18px;
+    background: currentColor; mask: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m12%203%208%204v6c0%204-8%208-8%208s-8-4-8-8V7z%22%2F%3E%3Cpath%20d%3D%22m8%2012%203%203%205-6%22%2F%3E%3C%2Fsvg%3E") center / contain no-repeat;
+  }
+}
+
+/* A: Works. Keep its real virtualized media geometry and controls. */
+body:has([class*="Works_page__"]) .shell-body-topbar-only { display: block; margin-left: var(--mj-rail); padding: 0; }
+body:has([class*="Works_page__"]) .shell-content-topbar-only { padding: 0; min-width: 0; }
+body:has([class*="Works_page__"]) [class*="home_page__"] { display: block; min-height: 100dvh; background: var(--bg-primary); font-family: var(--mj-font); }
+body:has([class*="Works_page__"]) [class*="home_sidebar__"] {
+  position: fixed; z-index: 65; left: 16px;
+  top: calc(var(--mj-nav-height) + 16px); bottom: 104px;
+  width: calc(var(--mj-rail) - 32px); height: max(0px, calc(100dvh - var(--mj-nav-height) - 120px)); min-height: 0;
+  border: 0; background: var(--bg-primary); overflow-y: auto;
+}
+body:has([class*="Works_page__"]) [class*="home_workspaceLinks__"] { padding: 0; }
+body:has([class*="Works_page__"]) [class*="home_workspaceLinks__"] h1 { margin: 0 12px 12px; color: var(--text-muted); font-size: 11px; font-weight: 500; }
+body:has([class*="Works_page__"]) nav[aria-label="工作区"] { gap: 5px; }
+body:has([class*="Works_page__"]) nav[aria-label="工作区"] a { min-height: 38px; padding: 8px 12px; margin: 0; gap: 10px; border: 1px solid transparent; border-radius: 24px; background: transparent; color: #d3d4db; font-size: 14px; font-weight: 500; line-height: 1.35; }
+body:has([class*="Works_page__"]) nav[aria-label="工作区"] a:hover { background: #1b1d23; color: #f1f1f4; }
+body:has([class*="Works_page__"]) nav[aria-label="工作区"] a[aria-current="page"] { background: var(--mj-active-bg); border-color: #5b2a20; color: var(--mj-active-text); }
+body:has([class*="Works_page__"]) nav[aria-label="工作区"] svg { width: 18px; height: 18px; stroke-width: 1.7; }
+body:has([class*="Works_page__"]) [class*="home_content__"] { padding: 20px 28px 48px 20px; }
+body:has([class*="Works_page__"]) [class*="Works_page__"] { padding: 20px clamp(24px, 5vw, 112px) 48px clamp(20px, 3vw, 72px); font-family: var(--mj-font); }
+body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] { display: grid; grid-template-columns: minmax(0,1fr) 44px auto; align-items: center; gap: 22px 10px; padding: 0; margin: 0 0 16px; min-height: 0; border: 0; background: transparent; }
+body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] > form { grid-column: 1 / -1; grid-row: 1; width: 100%; max-width: none; min-height: 56px; border: 1px solid #2b2d34; border-radius: 13px; background: #1e1f25; box-shadow: none; }
+body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] input[type="search"] { min-height: 54px; padding: 14px 18px; color: var(--text-primary); font-size: 15px; }
+body:has([class*="Works_page__"]) input[type="search"]::placeholder { color: #9094a0; }
+body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] > select { grid-column: 1; grid-row: 2; width: 138px; justify-self: start; min-height: 36px; padding: 7px 10px; border-color: transparent; border-radius: 20px; background: transparent; color: var(--text-primary); font-size: 14px; font-weight: 500; }
+body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] > [aria-haspopup="dialog"] { grid-column: 2; grid-row: 2; margin-left: 0; border-color: transparent; border-radius: 20px; background: transparent; }
+body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] > [aria-label="添加作品"] { grid-column: 3; grid-row: 2; min-height: 36px; padding: 7px 14px; border: 1px solid #5b2a20; border-radius: 22px; color: var(--mj-active-text); background: var(--mj-active-bg); font-size: 14px; font-weight: 500; }
+body:has([class*="Works_page__"]) [class*="Works_mediaButton__"] { border-radius: 4px; background: #16181d; box-shadow: none; }
+body:has([class*="Works_page__"]) [class*="Works_filtersPopover__"] { border-color: var(--border-color); border-radius: 12px; background: #16181d; }
+body:has([class*="Works_page__"]) [class*="Works_types__"] button[aria-pressed="true"] { border-radius: 20px; background: var(--mj-active-bg); color: var(--mj-active-text); }
+@media (max-width: 980px) {
+  body:has([class*="Works_page__"]) .shell-body-topbar-only { margin-left: 0; }
+  body:has([class*="Works_page__"]) [class*="home_page__"] { min-height: calc(100dvh - 56px); padding: 16px; }
+  body:has([class*="Works_page__"]) [class*="home_sidebar__"] { position: static; width: auto; height: auto; overflow: visible; margin-bottom: 16px; }
+  body:has([class*="Works_page__"]) [class*="home_workspaceToggle__"] { display: inline-flex; border-radius: 22px; border-color: #30323b; background: #1e1f25; }
+  body:has([class*="Works_page__"]) [class*="home_workspaceLinks__"][data-open="true"] { padding: 14px; border-radius: 12px; background: #16181d; }
   body:has([class*="Works_page__"]) [class*="home_content__"] { padding: 0; }
-  body:has([class*="Works_page__"]) [class*="home_sidebar__"] { background: transparent; }
-  body:has([class*="Works_page__"]) [class*="home_workspaceLinks__"][data-open="true"] {
-    padding: 16px;
-    background: #16181d;
-    border-radius: 14px;
-  }
 }
 @media (max-width: 640px) {
   body:has([class*="Works_page__"]) [class*="home_page__"] { padding: 12px; }
-  body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] { gap: 12px 6px; }
-  body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] > form { min-height: 50px; }
-  body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] input[type="search"] {
-    min-height: 48px;
-    padding: 12px 14px;
-    font-size: 16px;
-  }
-  body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] > select { width: 124px; min-height: 44px; }
-  body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] > button { min-height: 44px; }
+  body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] { gap: 14px 6px; }
+  body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] input[type="search"] { font-size: 16px; }
+  body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] > :is(select, button) { min-height: 44px; }
 }
+
+/* Exact duplicate destinations stay available in the primary navigation. */
+@media (min-width: 981px) {
+  body:has([class*="Works_page__"]) nav[aria-label="工作区"] a:is([href="/"], [href="/assets"], [href^="/template-studio"]) { display: none; }
+}
+
+@media (max-width: 980px) {
+  body:has([class*="Works_page__"]) [class*="Works_page__"] { padding: 0; }
+}
+
+body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] > [aria-haspopup="dialog"] { width: 44px; padding: 0; }
+body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] > [aria-haspopup="dialog"] [class*="Works_toolbarLabel__"] { display: none; }

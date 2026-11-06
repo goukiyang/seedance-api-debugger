@@ -1083,8 +1083,12 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 
 
 <!-- MJ-STYLE-PREVIEW-20261105 -->
-## MJ-STYLE02 作品广场双版本样板（2026-11-05）
 
-- User requested two branch candidates after the Midjourney style study. Variant A `codex/mj-style-a-20261105` / 8091e6b43 emphasizes the reference gallery; variant B `codex/mj-style-b-20261105` / 243d8638c groups the existing title and tools. Both start at 796da6b03 and retain the original components, permissions and media geometry.
-- [Compare A/B](https://sd2.youdooart.com/__style-preview/mj-20261105/): the static comparison shell applies each branch stylesheet to the original authenticated Works page. Normal page actions affect the original app. The application remains v0.133.7 with its default style; visual and functional acceptance remains manual. Full records and private references stay in the formal project root.
+## MJ-STYLE03 Reference fidelity correction, two different pages (2026-11-05)
+
+The user identified that the prior candidates did not follow the reference closely and requested a different second page. A now restyles the real Works gallery; B removes its Works override and restyles `/template-studio?type=image`. Both use the same reference-derived left navigation, neutral dark surfaces, quiet controls and orange selection language. The original API, permissions, media geometry and actions remain unchanged.
+
+[Compare the two pages](https://sd2.youdooart.com/__style-preview/mj-20261105/) applies the exact branch CSS to the original authenticated pages. Normal actions affect the original app. A logged-in layout inspection caught and corrected the actual Works container and ModuleGallery selectors. No generation, account change, database copy or formal application style rollout was performed. Full acceptance remains manual; private reference images and screenshots remain in the formal project root.
+
+Method: [pixel-perfect-replication](https://github.com/Yu-369/VibeCurb/blob/main/skills/pixel-perfect/SKILL.md), installed and read for this task. Branches remain `codex/mj-style-a-20261105` and `codex/mj-style-b-20261105`.
 <!-- /MJ-STYLE-PREVIEW-20261105 -->
