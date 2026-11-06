@@ -1,3 +1,9 @@
+<!-- WORKS-FEISHU01-20261106 -->
+## WORKS-FEISHU01 作品广场开放给飞书用户
+
+[原作品工单](todo/2026-11-02-team-works-implementation.md#works-feishu01-open-the-square-to-internal-feishu-users-2026-11-06)：已随0.134.6／67c23a3be／BUILD mjE_aQjizKlKb-xBSWWA_在11:48:55Z保护部署。内部有效租户飞书身份可进入导航、页面及API，原精确试用账号保留；推荐试算继续单账号。Works12组、完整原生/计价/Next/types/lint、6启动、7服务4timer、2公网JS同SHA、3匿名401及公网健康200通过。原作品/项目/原件权限、价格03db和数据保持，guard3234沿原完整构建复用；功能待用户手验，无浏览器/真实生成/扣费。前置重复备份与文档差异原证保留，未造成停服失败或数据回退。
+<!-- /WORKS-FEISHU01-20261106 -->
+
 <!-- SHARE-READBACK02-20261105 -->
 ## SHARE-READBACK02 过度帧首次共享回读失败
 
