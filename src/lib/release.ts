@@ -1,6 +1,7 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '模板共享即时生效', outline: [
+const notice = { title: '模板共享与工作台入口', outline: [
+  '模板工作台直接进入全部封面，移除侧栏重复入口',
   '封面与上下文设置里的共享开关直接发布已保存模板',
   '共享成功后显示真实状态，个人补充和当前编辑继续保留',
   '断线后核对原操作，避免重复发布',

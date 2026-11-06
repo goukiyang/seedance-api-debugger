@@ -47,7 +47,7 @@ export default function WorkspaceSidebar({ accountId, internal, images, worksEna
     { title: '新建项目', href: '/projects#create-project', icon: Plus, visible: internal },
     { title: '我的项目', href: '/projects', icon: Folder, visible: internal },
     { title: '资产管理', href: '/assets', icon: ImageIcon, visible: true, current: activeView === 'assets' },
-    { title: '模板工作台', href: '/template-studio', icon: LayoutTemplate, visible: internal || images },
+    { title: '模板工作台', href: '/template-studio?type=image&view=covers', icon: LayoutTemplate, visible: internal || images },
     { title: '我的任务', href: '/tasks', icon: ListTodo, visible: true },
   ];
 

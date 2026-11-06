@@ -37,6 +37,7 @@ export default async function TemplateStudioPage({ searchParams = {} }: { search
   if (canUseCompanyTemplates(user)) allowedTypes.push('image');
   if (user.account_type === 'internal' && !isExternalUser(user)) allowedTypes.push('video');
   if (allowedTypes.length === 0) redirect(externalFallbackPath());
+  if (!query && allowedTypes.includes('image')) redirect('/template-studio?type=image&view=covers');
 
   const requestedType = searchParams.type === 'image' || searchParams.type === 'video'
     ? searchParams.type

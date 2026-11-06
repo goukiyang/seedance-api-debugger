@@ -306,7 +306,7 @@ export default function HomeWorkspace({ accountId, internal, images, admin, work
       {images && <section ref={templateSection} className={styles.section} aria-labelledby="home-templates-title" aria-busy={templateLoading} data-remember-scroll-anchor="home-templates">
         <header className={styles.sectionHeader}>
           <h2 id="home-templates-title">收藏模板</h2>
-          <Link href="/template-studio?type=image">模板工作台<ArrowRight size={14} aria-hidden="true" /></Link>
+          <Link href="/template-studio?type=image&view=covers">模板工作台<ArrowRight size={14} aria-hidden="true" /></Link>
         </header>
         {authorized && accountDataReady && !templateError && (templateLoading || !needed) && !templates.length && <>
           {needed && <span className={styles.visuallyHidden} role="status">正在读取收藏…</span>}
@@ -335,7 +335,7 @@ export default function HomeWorkspace({ accountId, internal, images, admin, work
           <span>{templateError}</span><button type="button" onClick={() => { setNeeded(true); void loadTemplates(); }}><RefreshCw size={16} aria-hidden="true" />重试</button>
         </div>}
         {authorized && accountDataReady && templateLoaded && !templateLoading && !templateError && !templates.length && !cursor && <div className={styles.sectionState}>
-          <span>还没有收藏模板</span><Link href="/template-studio?type=image">去模板工作台<ArrowRight size={16} aria-hidden="true" /></Link>
+          <span>还没有收藏模板</span><Link href="/template-studio?type=image&view=covers">去模板工作台<ArrowRight size={16} aria-hidden="true" /></Link>
         </div>}
         {authorized && accountDataReady && !templateLoading && !templateError && cursor && templates.length < 5 && <button className={styles.continue} type="button" onClick={() => void loadTemplates(cursor, templates)}>
           <RefreshCw size={16} aria-hidden="true" />继续读取收藏

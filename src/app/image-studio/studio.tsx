@@ -1383,7 +1383,6 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     <aside className={styles.moduleRail} data-sidebar-scroll="pane" data-remember-scroll="image-groups" aria-label={templateWorkbench ? '模板导航' : '分组快捷栏'}>
       {templateWorkbench ? <>
         <div className={styles.moduleRailTitle}>模板工作台</div>
-        <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-current={coverView ? 'page' : undefined} onClick={navigateToCovers}>全部封面<small>{directoryPaging.total}项</small></button>
         <button type="button" className={styles.moduleRailMajorLink} aria-expanded={favoritesExpanded} aria-controls="template-favorites-desktop" onClick={() => setFavoritesExpanded(current => !current)}><Heart size={16} /><span>我的收藏</span>{favoritesExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}</button>
         <div id="template-favorites-desktop" hidden={!favoritesExpanded}><TemplateFavoritesList data={favorites} selected={selectedFavorite} busy={favoriteSelecting || loading} onSelect={item => void selectFavorite(item)} /></div>
         <section className={styles.moduleRailMajor} aria-label="图片生成">
@@ -1451,7 +1450,6 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       </div>
       <div id="template-favorites-mobile" className={styles.mobileFavoriteList} hidden={!favoritesExpanded}><TemplateFavoritesList data={favorites} selected={selectedFavorite} busy={favoriteSelecting || loading} onSelect={item => void selectFavorite(item)} /></div>
       <div id="template-mobile-image-groups" className={styles.mobileImageGroups} hidden={!imageSectionOpen}>
-      <button type="button" className={coverView ? styles.moduleRailActive : ''} aria-pressed={coverView} onClick={navigateToCovers}>全部封面 <small>{directoryPaging.total}项</small></button>
       <label className={styles.mobileGroupPicker}><span>分组</span><select aria-label="选择图片分组" value={sidebarGroupedModules[selectedGroup] ? selectedGroup : ''} onChange={event => setSelectedGroup(event.target.value)}>
         {!sidebarGroupedModules[selectedGroup] && <option value="">{navigationVisibility.ready ? '选择分组' : '正在读取侧栏…'}</option>}
         {Object.entries(sidebarGroupedModules).map(([group, items]) => <option key={group} value={group}>{group} ({items.length}项){items.some(item => attention.unread.has(item.id)) ? ' · 未读' : ''}</option>)}
