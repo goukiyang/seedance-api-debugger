@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '账本按当前费率核算', outline: [
-  '资产和账本统一显示当前参考金额与折合点数',
-  '历史规格可使用当前默认档或旧型号映射',
-  '参考价可编辑，历史实扣与已扣点数不变',
+const notice = { title: '视频复用修复与新模型配置', outline: [
+  '修复原素材仍在却无法复用的问题',
+  '素材不可用时可单独恢复参数，保留当前参考区',
+  '新增 GPT Image 2.6 后台配置项，待通道与价格确认后启用',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
