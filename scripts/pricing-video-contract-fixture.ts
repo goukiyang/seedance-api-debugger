@@ -25,7 +25,7 @@ async function run() {
       publicVideoTaskPricing, videoPricingIdentity } = await import('@/lib/pricing/video');
     const { getAdminPricingSnapshot, previewAdminPricing, saveAdminPricing } = await import('@/lib/pricing/policy');
     const { frozenPricingCredits } = await import('@/lib/pricing/charge');
-    const { calculateEstimatedCost, calculateH3EstimatedCost, calculateEnhanceVideoEstimatedCost } = await import('@/lib/pricing');
+    const { calculateEstimatedCost, calculateH3EstimatedCost } = await import('@/lib/pricing');
     const { normalizeEnhanceVideoCreateBody, enhanceVideoSourcePricing } = await import('@/lib/tasks/enhance-video-create');
     const { validateRequestCostCeiling } = await import('@/lib/provider/seedance-video-edit');
     const { buildMultiviewGenerationRequest, defaultMultiviewGenerationDraft } = await import('@/lib/video/multiview-generation-contract');
@@ -43,18 +43,16 @@ async function run() {
       const ip = { provider: 'volcengine_ip' as const, model: 'doubao-seedance-2-5-260628', resolution: '1080p', duration: 5 };
       const h3 = { provider: 'h3' as const, model: 'lightx2v_4step_turbo', resolution: '480p', duration: 5 };
       const enhance = { provider: 'volcengine_mediakit' as const, model: 'enhance-video', resolution: '540p', duration: 2.2, toolVersion: 'professional', fps: 60 };
-      const legacy = await quoteVideoPricing(normal, tx);
-      assert.equal(legacy.charge, null); assert.equal(legacy.revision, null);
-      assert.deepEqual(legacy.pricing, calculateEstimatedCost('720p', 5, normal.model));
-      assert.deepEqual((await quoteVideoPricing(ip, tx)).pricing, calculateEstimatedCost('1080p', 5, ip.model));
+      const legacy = { identity: videoPricingIdentity(normal), quantity: '5', pricing: calculateEstimatedCost('720p', 5, normal.model), revision: null, charge: null };
+      await assert.rejects(() => quoteVideoPricing(normal, tx), /人民币价格/);
+      await assert.rejects(() => quoteVideoPricing(ip, tx), /人民币价格/);
       assert.deepEqual((await quoteVideoPricing(h3, tx)).pricing, calculateH3EstimatedCost(5, h3.model));
-      assert.deepEqual((await quoteVideoPricing(enhance, tx)).pricing, calculateEnhanceVideoEstimatedCost(enhance));
+      await assert.rejects(() => quoteVideoPricing(enhance, tx), /人民币价格/);
       for (const resolution of ['240p', '360p', '480p', '540p']) assert.equal(videoPricingIdentity({ ...enhance, resolution }).specifications.resolution, '480p');
       for (const resolution of ['480p', '720p', '1080p', '2k', '4k']) for (const toolVersion of ['standard', 'professional']) for (const fps of [30, 60]) {
-        const quote = await quoteVideoPricing({ ...enhance, resolution, toolVersion, fps }, tx);
-        assert.equal(quote.pricing.estimatedCost, calculateEnhanceVideoEstimatedCost({ ...enhance, resolution, toolVersion, fps }).estimatedCost);
+        await assert.rejects(() => quoteVideoPricing({ ...enhance, resolution, toolVersion, fps }, tx), /人民币价格/);
       }
-      evidence.push('G11: real helper preserves normal/IP/H3 legacy formulas and every enhancement price group; low resolutions retain their original group');
+      evidence.push('G11: new paid video/IP/enhancement quotes without RMB prices reject; only explicit free H3 survives. Historical pricing helpers and low-resolution identities remain unchanged.');
       let snapshot = await getAdminPricingSnapshot(actor, tx);
       const save = async (action: PricingAdminAction, modern = false) => {
         const input: PricingAdminPreviewInput = { expectedRevision: snapshot.revision, catalogFingerprint: snapshot.catalogFingerprint, action,
@@ -63,14 +61,16 @@ async function run() {
         const operation = await saveAdminPricing(actor, { ...input, operationId: randomUUID(), previewToken: preview.previewToken }, tx);
         assert.equal(operation.state, 'succeeded'); assert.ok(operation.snapshot); snapshot = operation.snapshot!;
       };
-      const normalRow = snapshot.rows.find(row => row.identity.channelId === 'seedance' && row.identity.modelId === normal.model)!;
-      const ipRow = snapshot.rows.find(row => row.identity.channelId === 'volcengine_ark' && row.identity.modelId === ip.model)!;
+      const normalRow = snapshot.rows.find(row => row.identity.channelId === 'seedance' && row.identity.modelId === normal.model
+        && row.identity.specifications.resolution === normal.resolution && row.identity.specifications.referenceVideo === 'none')!;
+      const ipRow = snapshot.rows.find(row => row.identity.channelId === 'volcengine_ark' && row.identity.modelId === ip.model
+        && row.identity.specifications.resolution === ip.resolution)!;
       const h3Row = snapshot.rows.find(row => row.identity.kind === 'h3' && row.identity.modelId === h3.model)!;
       const enhanceRow = snapshot.rows.find(row => row.identity.kind === 'enhance' && row.identity.specifications.resolution === '480p'
         && row.identity.specifications.toolVersion === 'professional' && row.identity.specifications.fpsTier === 'gt30')!;
       const source = { type: 'admin_defined' as const, reference: 'isolated engineering fixture', note: '' };
       const changes: PricingAdminRowChange[] = [normalRow, ipRow, enhanceRow].map(row => ({
-        id: row.id, mode: 'follow', base: { currency: 'CNY', amount: '0.15', unit: 'second', source },
+        id: row.id, mode: 'follow', pricingEnabled: true, base: { currency: 'CNY', amount: '0.15', unit: 'second', source },
       }));
       changes.push({ id: h3Row.id, mode: 'custom', customPointsPerCny: '0.1', base: { currency: 'CNY', amount: '0.5', unit: 'second', source } });
       await save({ kind: 'save', changes: { standards: { site_base_cny: '1.0' }, rows: changes } });
@@ -133,7 +133,7 @@ async function run() {
         const specs = row.identity.specifications;
         const amount = multiplyDecimal([perSecond[specs.toolVersion][['480p', '720p', '1080p', '2k', '4k'].indexOf(specs.resolution)],
           specs.fpsTier === 'gt60' ? '4' : specs.fpsTier === 'gt30' ? '2' : '1']);
-        return { id: row.id, mode: 'custom', customPointsPerCny: '100', rounding: 'half_up_integer',
+        return { id: row.id, mode: 'custom', pricingEnabled: true, customPointsPerCny: '100', rounding: 'half_up_integer',
           base: { currency: 'CNY', amount, unit: 'second', source: {
             type: 'admin_defined', reference: 'https://docs.volcengine.com/docs/intelligent-processing/video-tool-billing?lang=zh',
             note: 'Synthetic adoption of the public list, not an actual account bill',
@@ -179,6 +179,71 @@ async function run() {
       assert.equal((await quoteVideoPricing({ ...estimateInput, ...sourceFacts, fps: null, duration: 3 }, tx)).pricing.estimatedCost, 1.1);
       assert.equal(frozenPricingCredits(exactEnhance.charge!).credits, 6, 'Scaling future prices preserves accepted integer contracts');
       evidence.push('RATE-10 enhancement: preview and runtime keep millisecond duration and measured FPS at 10 points/CNY; original frozen integer and ceil-second contracts retain their prices');
+
+      const { pricingCatalogRowId } = await import('@/lib/pricing/catalog');
+      const { PRICING_POLICY_KEY, PRICING_REVISION_PREFIX } = await import('@/lib/pricing/admin-contract');
+      const { assertPricingBaseRelation } = await import('@/lib/pricing/pricing-authoring');
+      const policy = JSON.parse((await tx.platformSetting.findUniqueOrThrow({ where: { key: PRICING_POLICY_KEY } })).value_json);
+      const oldGeneric = { ...policy.rules.find((row: { id: string }) => row.id === normalRow.id),
+        identity: { ...normalRow.identity, specifications: {} }, mode: 'legacy_fixed', baseCny: null, source: null,
+        customPointsPerCny: null, legacyUnitCredits: '3', legacyRounding: 'ceil_task' };
+      oldGeneric.id = pricingCatalogRowId(oldGeneric.identity); delete oldGeneric.rounding;
+      policy.rules.push(oldGeneric);
+      const revisionKey = `${PRICING_REVISION_PREFIX}${policy.revision}`;
+      const revision = JSON.parse((await tx.platformSetting.findUniqueOrThrow({ where: { key: revisionKey } })).value_json);
+      revision.policy = policy;
+      await tx.platformSetting.update({ where: { key: PRICING_POLICY_KEY }, data: { value_json: JSON.stringify(policy) } });
+      await tx.platformSetting.update({ where: { key: revisionKey }, data: { value_json: JSON.stringify(revision) } });
+      snapshot = await getAdminPricingSnapshot(actor, tx);
+      await assert.rejects(() => quoteVideoPricing({ ...normal, referenceVideo: 'present', pricingPurpose: 'draft' }, tx), /人民币价格/,
+        'A stored legacy fixed rule cannot price a new paid request');
+      const parents = snapshot.rows.filter(row => row.identity.channelId === 'seedance'
+        && row.identity.specifications.referenceVideo === 'none' && row.identity.specifications.pricingPurpose === 'standard');
+      const aliases = snapshot.rows.filter(row => row.identity.kind === 'video' && Object.keys(row.identity.specifications).length === 1);
+      assert.equal(parents.length, 6); assert.equal(aliases.length, 16);
+      const parentFor = (row: typeof aliases[number]) => parents.find(parent => parent.identity.modelId ===
+        (/seedance.*2[.\-]5/i.test(row.identity.modelId) ? 'dreamina-seedance-2-5-260628' : normal.model)
+        && parent.identity.specifications.resolution === row.identity.specifications.resolution)!;
+      await save({ kind: 'save', changes: { rows: [
+        ...parents.map(row => ({ id: row.id, pricingEnabled: true, authoringRateMode: 'follow_global' as const,
+          base: { currency: 'CNY' as const, amount: row.identity.modelId === normal.model ? '0.1' : '0.15', unit: 'second' as const, source } })),
+        ...aliases.map(row => ({ id: row.id, pricingEnabled: true, authoringRateMode: 'follow_global' as const,
+          baseRelation: { parentId: parentFor(row).id, factor: '1' as const } })),
+        { id: oldGeneric.id, remove: true },
+      ] } }, true);
+      assert.equal(snapshot.rows.some(row => row.id === oldGeneric.id), false);
+      const stored = JSON.parse((await tx.platformSetting.findUniqueOrThrow({ where: { key: PRICING_POLICY_KEY } })).value_json);
+      assert.equal(stored.rules.some((row: { mode: string }) => row.mode === 'legacy_fixed'), false);
+      for (const row of aliases) {
+        for (const pricingPurpose of ['standard', 'draft', 'draft_upgrade'] as const) for (const referenceVideo of ['none', 'present'] as const) {
+          const quote = await quoteVideoPricing({ provider: row.identity.channelId === 'seedance' ? 'seedance' : 'volcengine_ip',
+            model: row.identity.modelId, resolution: row.identity.specifications.resolution, duration: 5, pricingPurpose, referenceVideo }, tx);
+          assert.equal(quote.pricing.estimatedCost, /seedance.*2[.\-]5/i.test(row.identity.modelId) ? 7.5 : 5);
+          assert.equal(quote.charge?.pointsPerCny, '10'); assert.equal(quote.charge?.mode, 'custom');
+        }
+      }
+      const generation20 = parents.find(row => row.identity.modelId === normal.model && row.identity.specifications.resolution === '720p')!;
+      const generation25 = parents.find(row => row.identity.modelId !== normal.model && row.identity.specifications.resolution === '720p')!;
+      await save({ kind: 'save', changes: { rows: [{ id: generation25.id,
+        baseRelation: { parentId: generation20.id, factor: '1.5' } }] } }, true);
+      await save({ kind: 'save', changes: { rows: [{ id: generation20.id,
+        base: { currency: 'CNY', amount: '0.2', unit: 'second', source } }] } }, true);
+      for (const row of aliases.filter(row => row.identity.specifications.resolution === '720p')) {
+        const currentRow = snapshot.rows.find(item => item.id === row.id)!;
+        assert.equal(currentRow.baseCny, /seedance.*2[.\-]5/i.test(row.identity.modelId) ? '0.3' : '0.2');
+        assert.equal(currentRow.authoringEntry?.baseRelation?.factor, '1');
+      }
+      assert.throws(() => assertPricingBaseRelation(generation20.identity, { ...ipRow.identity, modelId: 'unknown-model', specifications: { resolution: '720p' } }, '1'));
+      assert.throws(() => assertPricingBaseRelation(generation20.identity, aliases[0].identity, '2'));
+      const blocked = aliases.find(row => row.identity.channelId === 'seedance' && row.identity.modelId === normal.model && row.identity.specifications.resolution === '720p')!;
+      await save({ kind: 'save', changes: { rows: [{ id: blocked.id, pricingEnabled: false }] } }, true);
+      await assert.rejects(() => quoteVideoPricing({ ...normal, referenceVideo: 'present', pricingPurpose: 'draft' }, tx), /停用/);
+      await assert.rejects(() => previewAdminPricing(actor, { expectedRevision: snapshot.revision,
+        expectedAuthoringRevision: snapshot.authoring!.revision, catalogFingerprint: snapshot.catalogFingerprint,
+        action: { kind: 'save', changes: { rows: [{ id: generation20.id, remove: true }] } } }, tx), /仅可移除/);
+      assert.equal(frozenPricingCredits(exactEnhance.charge!).credits, 6);
+      assert.equal(await tx.creditLedger.count(), 0); assert.equal(await tx.videoTask.count(), 0);
+      evidence.push('RATE-VIDEO01: sixteen Seedance/IP scopes quote normal/draft/upgrade/reference modes at 10 points/CNY; 2.0 -> 2.5 -> IP/common propagation, off switches, restricted legacy retirement and frozen contracts verified with zero task/ledger/provider writes.');
       completed = true; throw rolledBack;
     }, { maxWait: 10000, timeout: 120000 });
   } catch (error) { if (error !== rolledBack) throw error; }

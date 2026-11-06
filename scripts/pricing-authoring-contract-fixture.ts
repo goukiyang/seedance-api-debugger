@@ -101,7 +101,7 @@ export async function runPricingAuthoringContractFixture(): Promise<{
       ok(ipRows.length >= 2);
       const a = ipRows[0].id, b = ipRows[1].id;
       await save({ kind: 'save', changes: { standards: { site_base_cny: '6' }, rows: [
-        { id: a, mode: 'follow', base: base('1') }, { id: b, mode: 'follow', base: base('1') },
+        { id: a, mode: 'follow', pricingEnabled: true, base: base('1') }, { id: b, mode: 'follow', pricingEnabled: true, base: base('1') },
       ] } }, false);
       const historicalLegacyFollow = snapshot.revision;
       equal(row(a).currentPointsPerCny, '6'); equal(row(b).mode, 'follow');
@@ -167,8 +167,8 @@ export async function runPricingAuthoringContractFixture(): Promise<{
         && pricingCanonical(value.identity.specifications) === pricingCanonical(parent?.identity.specifications))!;
       ok(parent); ok(child);
       await save({ kind: 'save', changes: { authoring: { globalPointsPerCny: '10' }, rows: [
-        { id: parent.id, mode: 'custom', customPointsPerCny: '10', base: base('0.10') },
-        { id: child.id, mode: 'custom', customPointsPerCny: '10', base: base('0.15') },
+        { id: parent.id, mode: 'custom', pricingEnabled: true, customPointsPerCny: '10', base: base('0.10') },
+        { id: child.id, mode: 'custom', pricingEnabled: true, customPointsPerCny: '10', base: base('0.15') },
       ] } });
       await save({ kind: 'save', changes: { rows: [{ id: parent.id, authoringRateMode: 'follow_global' },
         { id: child.id, authoringRateMode: 'follow_global', baseRelation: { parentId: parent.id, factor: '1.5' } }] } });

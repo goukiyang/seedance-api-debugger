@@ -111,7 +111,8 @@ export type PricingAdminRowChange = {
   rounding?: typeof RMB_INTEGER_ROUNDING;
   specifications?: Record<string, string>;
   authoringRateMode?: 'follow_global' | 'custom';
-  baseRelation?: { parentId: string; factor: '1.5' } | null;
+  baseRelation?: { parentId: string; factor: '1' | '1.5' } | null;
+  remove?: true;
   evidence?: PricingEvidence;
   id: string;
   mode?: 'follow' | 'custom' | 'free' | 'legacy_fixed';

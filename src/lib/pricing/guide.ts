@@ -40,6 +40,10 @@ export function projectPricingGuide(rows: PricingAdminRow[], pointsPerCny: strin
     if (image && (!imagesVisible || !row.isDefault)) continue;
     if (row.identity.kind === 'video') {
       if (specs.referenceVideo && specs.referenceVideo !== 'none' || specs.pricingPurpose && specs.pricingPurpose !== 'standard') continue;
+      if (specs.resolution && !specs.referenceVideo && !specs.pricingPurpose && rows.some(other =>
+        other.identity.kind === 'video' && other.identity.channelId === row.identity.channelId && other.identity.modelId === row.identity.modelId
+        && other.identity.specifications.resolution === specs.resolution && other.identity.specifications.referenceVideo === 'none'
+        && other.identity.specifications.pricingPurpose === 'standard')) continue;
       if (!specs.resolution && rows.some(other => other.identity.channelId === row.identity.channelId
         && other.identity.modelId === row.identity.modelId && other.identity.specifications.resolution
         && other.identity.specifications.referenceVideo === 'none' && other.identity.specifications.pricingPurpose === 'standard')) continue;

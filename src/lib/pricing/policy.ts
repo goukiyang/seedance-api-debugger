@@ -99,8 +99,12 @@ function exchangeInput(value: unknown): PricingAdminExchangeInput {
     rate: normalized, effectiveFrom: new Date(time).toISOString(), source: sourceInput(value.source) };
 }
 function rowChange(value: unknown): PricingAdminRowChange {
-  keys(value, ['id', 'mode', 'customPointsPerCny', 'basisKind', 'base', 'exchangeRate', 'specifications', 'authoringRateMode', 'baseRelation', 'evidence', 'rounding', 'pricingEnabled']);
+  keys(value, ['id', 'mode', 'customPointsPerCny', 'basisKind', 'base', 'exchangeRate', 'specifications', 'authoringRateMode', 'baseRelation', 'evidence', 'rounding', 'pricingEnabled', 'remove']);
   const result: PricingAdminRowChange = { id: textValue(value.id, 160) };
+  if (value.remove !== undefined) {
+    if (value.remove !== true || Object.keys(value).some(key => !['id', 'remove'].includes(key))) fail('移除旧规则不能同时改价');
+    return { ...result, remove: true };
+  }
   if (Object.hasOwn(value, 'pricingEnabled')) {
     if (typeof value.pricingEnabled !== 'boolean') fail('费率启停状态无效');
     result.pricingEnabled = value.pricingEnabled;
@@ -120,8 +124,8 @@ function rowChange(value: unknown): PricingAdminRowChange {
   if (value.baseRelation !== undefined) {
     if (value.baseRelation === null) result.baseRelation = null;
     else { keys(value.baseRelation, ['parentId', 'factor']);
-      if (value.baseRelation.factor !== '1.5') fail('基价系数只支持已确认的1.5');
-      result.baseRelation = { parentId: textValue(value.baseRelation.parentId, 160), factor: '1.5' };
+      if (value.baseRelation.factor !== '1' && value.baseRelation.factor !== '1.5') fail('基价系数只支持已确认的1或1.5');
+      result.baseRelation = { parentId: textValue(value.baseRelation.parentId, 160), factor: value.baseRelation.factor };
     }
   }
   if (value.base !== undefined && value.baseRelation !== undefined && value.baseRelation !== null) fail('不能同时手填子基价与恢复父价跟随，请保留其中一种');
@@ -355,7 +359,7 @@ async function readState(client: PricingClient, menu?: PricingMenuContext): Prom
     if (!entry.baseRelation) continue;
     const child = policy.rules.find(rule => rule.id === id), parent = policy.rules.find(rule => rule.id === entry.baseRelation!.parentId);
     if (!parent?.baseCny || !child?.baseCny) throw new PricingAdminServiceError('基价关系缺少实际收费行', 409, 'pricing_authoring_conflict');
-    assertPricingBaseRelation(parent.identity, child.identity);
+    assertPricingBaseRelation(parent.identity, child.identity, entry.baseRelation.factor);
     if (derivedPricingBase(parent.baseCny, entry.baseRelation.factor).adopted !== child.baseCny
       || authoring.entries[parent.id]?.adoptedRevision && entry.baseRelation.parentRevision !== authoring.entries[parent.id].adoptedRevision) {
       throw new PricingAdminServiceError('父子基价与实际收费不一致', 409, 'pricing_authoring_conflict');
@@ -465,6 +469,7 @@ async function prepare(actor: PricingAdminActor, input: PricingAdminPreviewInput
   if (input.expectedAuthoringRevision !== undefined && input.expectedAuthoringRevision !== state.authoring.revision) conflict(state.policy.revision);
   const now = confirmedAt, next: Policy = structuredClone(state.policy), skipped: PricingAdminPreview['skipped'] = [];
   const authoring = structuredClone(state.authoring), authoringEnabled = input.expectedAuthoringRevision !== undefined;
+  const retired = new Set(input.action.kind === 'save' ? input.action.changes.rows.filter(change => change.remove).map(change => change.id) : []);
   const scopeIds = new Map<string, string>();
   if (input.action.kind === 'save') for (const change of input.action.changes.rows) {
     if (!change.specifications) continue;
@@ -477,7 +482,7 @@ async function prepare(actor: PricingAdminActor, input: PricingAdminPreviewInput
     const id = pricingCatalogRowId(identity); scopeIds.set(change.id, id);
     if (!state.rows.some(row => row.id === id)) state.rows.push(projectPricingAuthoring(effectiveRow(state.catalog.rows.find(row => row.id === id)!, state.policy, state.catalog.bindings[id]), state.authoring));
     // Preserve the original fallback contract for every other, unselected specification.
-    if (!next.rules.some(rule => rule.id === original.id) && original.mode !== 'unset') next.rules.push(toRule(state.rows.find(row => row.id === original.id)!, state.catalog.bindings[original.id], now));
+    if (!retired.has(original.id) && !next.rules.some(rule => rule.id === original.id) && original.mode !== 'unset') next.rules.push(toRule(state.rows.find(row => row.id === original.id)!, state.catalog.bindings[original.id], now));
   }
   const requested = new Set<string>();
   const metadataOnly = new Set<string>();
@@ -497,6 +502,15 @@ async function prepare(actor: PricingAdminActor, input: PricingAdminPreviewInput
     for (const originalChange of input.action.changes.rows) {
       const change = { ...originalChange, id: scopeIds.get(originalChange.id) || originalChange.id };
       const current = find(change.id), original = state.catalog.rows.find(row => row.id === change.id)!;
+      if (change.remove) {
+        const rule = state.policy.rules.find(item => item.id === change.id);
+        if (!authoringEnabled || !rule || rule.identity.kind !== 'video' || rule.mode !== 'legacy_fixed'
+          || Object.keys(rule.identity.specifications).length) fail('仅可移除旧视频通用固定点数规则，历史合同不变');
+        next.rules = next.rules.filter(item => item.id !== change.id);
+        authoring.members = authoring.members.filter(id => id !== change.id);
+        delete authoring.entries[change.id];
+        requested.add(change.id); metadataOnly.add(change.id); continue;
+      }
       const removeMemberOnly = authoringEnabled && authoring.members.includes(change.id)
         && change.authoringRateMode === 'custom' && Object.keys(change).every(key => ['id', 'authoringRateMode'].includes(key));
       if (removeMemberOnly) {
@@ -513,7 +527,7 @@ async function prepare(actor: PricingAdminActor, input: PricingAdminPreviewInput
       if (Object.keys(current.identity.specifications).length && !next.rules.some(rule => rule.id === current.id)) {
         const fallback = state.rows.find(row => row.identity.kind === current.identity.kind && row.identity.channelId === current.identity.channelId
           && row.identity.modelId === current.identity.modelId && row.identity.billingMode === current.identity.billingMode && !Object.keys(row.identity.specifications).length);
-        if (fallback && fallback.mode !== 'unset' && !next.rules.some(rule => rule.id === fallback.id)) next.rules.push(toRule(fallback, state.catalog.bindings[fallback.id], now));
+        if (fallback && !retired.has(fallback.id) && fallback.mode !== 'unset' && !next.rules.some(rule => rule.id === fallback.id)) next.rules.push(toRule(fallback, state.catalog.bindings[fallback.id], now));
       }
       if (!current.enabled || original.availability !== 'ready') fail(`${current.label}：当前通道不可用，不能修改收费依据`);
       if (change.mode === 'legacy_fixed') fail('旧固定价只能从所选历史修订恢复，不能伪造旧价');
@@ -624,13 +638,15 @@ async function prepare(actor: PricingAdminActor, input: PricingAdminPreviewInput
     const changedParents = new Set(Array.from(requested).filter(id => !metadataOnly.has(id)
       && ((next.rules.find(rule => rule.id === id)?.baseCny ?? null) !== find(id).baseCny
         || authoring.entries[id]?.adoptedRevision !== state.authoring.entries[id]?.adoptedRevision)));
-    for (const [id, entry] of Object.entries(authoring.entries)) {
+    // The permitted graph has two layers: 2.0 -> 2.5, then same-generation site prices.
+    for (const [id, entry] of Object.entries(authoring.entries).sort(([, a], [, b]) =>
+      Number(b.baseRelation?.factor === '1.5') - Number(a.baseRelation?.factor === '1.5'))) {
       if (!entry.baseRelation || !changedParents.has(entry.baseRelation.parentId)
         && pricingCanonical(entry.baseRelation) === pricingCanonical(state.authoring.entries[id]?.baseRelation || null)) continue;
       const child = find(id), parent = find(entry.baseRelation.parentId);
-      try { assertPricingBaseRelation(parent.identity, child.identity); }
+      try { assertPricingBaseRelation(parent.identity, child.identity, entry.baseRelation.factor); }
       catch (error) { fail(error instanceof Error ? error.message : '基价跟随关系不合法'); }
-      if (!sameBinding(state.catalog.bindings[id], state.catalog.bindings[parent.id])) fail('父子价格来源主体不相容');
+      if (entry.baseRelation.factor !== '1' && !sameBinding(state.catalog.bindings[id], state.catalog.bindings[parent.id])) fail('父子价格来源主体不相容');
       const parentRule = next.rules.find(rule => rule.id === parent.id), parentBase = parentRule?.baseCny || parent.baseCny;
       if (!parentBase) fail('父项没有独立人民币基价');
       let derived: ReturnType<typeof derivedPricingBase>;
@@ -639,10 +655,12 @@ async function prepare(actor: PricingAdminActor, input: PricingAdminPreviewInput
       const candidate = structuredClone(next.rules.find(rule => rule.id === id) || toRule(child, state.catalog.bindings[id], now));
       candidate.baseCny = derived.adopted;
       candidate.updatedAt = now;
-      candidate.source = confirmSource({ type: 'admin_defined', reference: '同范围2.0基价×1.5', note: `精确乘积${derived.exact}，采用8位基价${derived.adopted}` }, actor, now);
+      candidate.source = confirmSource({ type: 'admin_defined', reference: entry.baseRelation.factor === '1' ? '同代同分辨率站内人民币基价' : '同范围2.0基价×1.5',
+        note: `站内费率，不代表供应商实扣；精确乘积${derived.exact}，采用8位基价${derived.adopted}` }, actor, now);
       entry.baseRelation = { ...entry.baseRelation, parentRevision: authoring.entries[parent.id]?.adoptedRevision || pricingFingerprint({ base: parentBase, revision: state.policy.revision }), exactProduct: derived.exact };
       entry.sourceKind = 'derived'; entry.adoptedRevision = pricingFingerprint({ parent: entry.baseRelation, base: derived.adopted });
       put(candidate);
+      changedParents.add(id);
     }
     for (const id of authoring.members) {
       const current = find(id), projected = effectiveRow(state.catalog.rows.find(row => row.id === id)!, next, state.catalog.bindings[id]);

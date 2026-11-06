@@ -70,7 +70,7 @@ async function run() {
         role: 'user', account_type: 'internal', user_profile: 'other', feature_profile_id: 'internal_email_authorized', status: 'active', expires_at: null };
       const settingsBeforeGuide = await tx.platformSetting.findMany({ orderBy: { key: 'asc' } });
       const guide = await getPricingGuideSnapshot(ordinary, tx);
-      assert.ok(guide.items.some(item => item.specification.includes('IP生成')));
+      assert.equal(guide.items.some(item => item.specification.includes('IP生成')), false, 'Missing RMB video rates must not publish old fixed points');
       assert.equal(guide.pointsPerCny, null, 'An unconfigured conversion must not invent 100');
       assert.ok(guide.items.every(item => item.credits === null || item.free));
       const forbiddenGuideFields = ['billingPrincipalId', 'credentialVersion', 'configFingerprint', 'binding', 'confirmedBy', 'sourceKind', 'fixture-key-not-valid', 'fixture.invalid/api'];
@@ -86,7 +86,7 @@ async function run() {
       const rowA = snapshot.rows.find(row => row.identity.channelId === 'volcengine_ark' && row.isDefault)!;
       const rowB = snapshot.rows.find(row => row.identity.channelId === 'volcengine_ark' && row.id !== rowA.id)!;
       assert.ok(rowA && rowB); assert.equal(rowA.baseCny, null); assert.equal(rowA.confirmation, 'unconfirmed');
-      assert.equal(await resolvePricingCharge(rowA.identity, tx), null);
+      await assert.rejects(() => resolvePricingCharge(rowA.identity, tx), { code: 'pricing_charge_disabled' });
       await assert.rejects(() => resolvePricingCharge({ ...rowA.identity, modelId: 'unregistered-model' }, tx));
       evidence.push('G05/G12: real catalog, 30 enhancement scopes, no first-open write, no missing-scope fallback');
 
@@ -94,8 +94,8 @@ async function run() {
       snapshot = baseline.snapshot;
       const baselineRevision = snapshot.revision;
       const adopted = await persist(tx, snapshot, { kind: 'save', changes: { rows: [
-        { id: rowA.id, mode: 'follow', base: { amount: '0.15', currency: 'CNY', unit: 'second', source: defined } },
-        { id: rowB.id, mode: 'custom', customPointsPerCny: '2.0', base: { amount: '0.5', currency: 'CNY', unit: 'second', source: defined } },
+        { id: rowA.id, mode: 'follow', pricingEnabled: true, base: { amount: '0.15', currency: 'CNY', unit: 'second', source: defined } },
+        { id: rowB.id, mode: 'custom', pricingEnabled: true, customPointsPerCny: '2.0', base: { amount: '0.5', currency: 'CNY', unit: 'second', source: defined } },
       ] } });
       snapshot = adopted.snapshot;
       const adoptedRevision = snapshot.revision;
@@ -210,14 +210,18 @@ async function run() {
       assert.ok(laterRows.length > 0);
       assert.ok(laterRows.every(row => row.currentUnitCredits === null && row.mode === 'unset'));
       const beforeRowB = snapshot.rows.find(row => row.id === rowB.id)!;
-      const restored = await persist(tx, snapshot, { kind: 'restore', revisionId: baselineRevision, ruleIds: [rowA.id] });
+      const missingPriceRestore = await previewAdminPricing(actorA, input(snapshot, { kind: 'restore', revisionId: baselineRevision, ruleIds: [rowA.id] }), tx);
+      assert.equal(missingPriceRestore.changes.find(change => change.id === rowA.id)!.after.mode, 'unset',
+        'Unconfigured historical video scopes never restore invented fixed-point defaults');
+      assert.equal(missingPriceRestore.changes.find(change => change.id === rowA.id)!.after.pricingEnabled, false);
+      const restored = await persist(tx, snapshot, { kind: 'restore', revisionId: adoptedRevision, ruleIds: [rowA.id] });
       snapshot = restored.snapshot;
-      assert.equal(snapshot.rows.find(row => row.id === rowA.id)!.mode, 'legacy_fixed');
+      assert.equal(snapshot.rows.find(row => row.id === rowA.id)!.mode, 'custom');
       assert.deepEqual(snapshot.rows.find(row => row.id === rowB.id), beforeRowB);
       assert.notEqual(snapshot.revision, baselineRevision);
       assert.equal(snapshot.standards.site_base_cny, '1.2', 'unselected standard stays current');
       assert.deepEqual(snapshot.rows.filter(row => row.identity.channelId === laterChannel), laterRows);
-      evidence.push('G08/G12/G20: injection-safe effective CSV, cursor history, selected legacy restore creates a new revision and retains unrelated rows plus a later supplier with no invented default price');
+      evidence.push('G08/G12/G20: injection-safe CSV and cursor history; valid monetary restore preserves unrelated rows, while unconfigured history remains disabled with no invented video price');
 
       const rowsBefore = await tx.platformSetting.findMany({ where: { key: { startsWith: PRICING_REVISION_PREFIX } }, orderBy: { key: 'asc' } });
       const draft = input(snapshot, { kind: 'save', changes: { rows: [{ id: rowA.id, mode: 'custom', customPointsPerCny: '2.1',
@@ -310,7 +314,7 @@ async function run() {
       await activationSave({ kind: 'save', changes: { rows: [{ id: rowA.id, pricingEnabled: true }] } });
       await activationSave({ kind: 'restore', revisionId: offRevision, ruleIds: [rowA.id] });
       assert.equal(activeRow(rowA.id).pricingEnabled, false, 'Historical restore carries off state');
-      await activationSave({ kind: 'restore', revisionId: baselineRevision, ruleIds: [rowA.id] });
+      await activationSave({ kind: 'restore', revisionId: adoptedRevision, ruleIds: [rowA.id] });
       assert.equal(activeRow(rowA.id).pricingEnabled, true, 'Restoring old configured history defaults on');
 
       await activationSave({ kind: 'save', changes: { authoring: { globalPointsPerCny: '2' }, rows: [{ id: rowB.id, authoringRateMode: 'follow_global' }] } });
@@ -339,13 +343,15 @@ async function run() {
         base_url: 'https://fixture.invalid/api/v3', default_model: rowA.identity.modelId });
       snapshot = await getAdminPricingSnapshot(actorA, tx);
       await activationSave({ kind: 'save', changes: { rows: [{ id: rowB.id, pricingEnabled: true }] } });
-      const scopedIdentity = { ...rowB.identity, specifications: { resolution: '720p', referenceVideo: 'none', pricingPurpose: 'standard' } };
+      const scopedIdentity = { ...rowB.identity, specifications: { resolution: rowB.identity.specifications.resolution, referenceVideo: 'none', pricingPurpose: 'standard' } };
       const scopedOff = await activationSave({ kind: 'save', changes: { rows: [{ id: rowB.id, specifications: scopedIdentity.specifications, pricingEnabled: false }] } });
       const scopedId = scopedOff.preview.changes.find(change => change.sourceRowId === rowB.id && change.after.pricingEnabled === false)!.id;
       assert.equal(activeRow(rowB.id).pricingEnabled, true);
       assert.equal(activeRow(scopedId).pricingEnabled, false);
       await assert.rejects(() => resolvePricingCharge(scopedIdentity, tx), { code: 'pricing_charge_disabled' });
-      assert.ok(await resolvePricingCharge({ ...scopedIdentity, specifications: { ...scopedIdentity.specifications, resolution: '1080p' } }, tx), 'Other specifications still use their enabled general contract');
+      assert.ok(await resolvePricingCharge({ ...scopedIdentity, specifications: { ...scopedIdentity.specifications, referenceVideo: 'present' } }, tx), 'Other modes in the same resolution still use their enabled general contract');
+      await assert.rejects(() => resolvePricingCharge({ ...scopedIdentity, specifications: { ...scopedIdentity.specifications, resolution: '1080p' } }, tx),
+        { code: 'pricing_scope_unmatched' }, 'No unrelated resolution borrows a fixed-point fallback');
       const scopedOffRevision = snapshot.revision;
       await activationSave({ kind: 'save', changes: { rows: [{ id: scopedId, pricingEnabled: true }] } });
       await activationSave({ kind: 'restore', revisionId: scopedOffRevision, ruleIds: [scopedId] });
