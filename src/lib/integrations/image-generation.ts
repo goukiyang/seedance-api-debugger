@@ -1450,9 +1450,10 @@ export async function captureImageGenerationChannel(
   if (channelId !== 'original' && channelId !== 'shared' && channelId !== 'banana') {
     const channels = menu ? menu.channels : await getImageGenerationChannels(tx);
     let current = selectImageGenerationSettings(channels, model, channelId);
-    if (qualityRoute) {
+    const capability = current.modelCapabilities[model as ImageStudioModel];
+    if (qualityRoute || capability?.enabled && capability.billingMode == null) {
       const { withImagePricing } = await import('@/lib/pricing/image');
-      current = (await withImagePricing(current, model, tx, undefined, { quality: qualityRoute.quality }, menu)).settings;
+      current = (await withImagePricing(current, model, tx, undefined, qualityRoute ? { quality: qualityRoute.quality } : {}, menu)).settings;
     }
     if (!current.configRevision || current.configRevision === 'unconfigured' || current.deleted || !current.enabled || !current.api_key) {
       throw new ImageGenerationChannelError('该图片供应商尚未配置或已停用，不能提交新任务', 409, 'image_channel_not_available');
