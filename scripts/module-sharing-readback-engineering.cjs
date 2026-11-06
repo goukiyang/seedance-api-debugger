@@ -71,6 +71,17 @@ function load(relative) {
     assert.equal(ordinary.context, sealed.context);
     await assert.rejects(storage.protectStudioDefinitionPatch('image-module', decoded, { context: 'overwrite' }, 'author', true));
     checks.push('unchanged fields preserve exact encrypted bytes; ordinary writes and unauthenticated private edits cannot replace them');
+    const migration = load('src/lib/image-studio/private-migration.server.ts');
+    let plannedRow = linked;
+    const db = { imageStudioModule: { findMany: async () => [plannedRow] }, imageStudioPreset: { findMany: async () => [] }, imageStudioTask: { findMany: async () => [] } };
+    const selection = { modules: ['module'], presets: [], tasks: [] };
+    const plan = await migration.prepareImagePrivateMigration(db, selection);
+    assert.equal(plan.rows.length, 0); assert.equal(plan.unchangedRows, 1); assert.equal(plan.unclassifiedRows, 0);
+    plannedRow = { ...linked, context: 'plaintext with unknown source' };
+    await assert.rejects(migration.prepareImagePrivateMigration(db, selection), crypto.PrivatePromptError);
+    plannedRow = { ...linked, context: 'ppenc:v1:' + JSON.stringify(envelope) };
+    await assert.rejects(migration.prepareImagePrivateMigration(db, selection), crypto.PrivatePromptError);
+    checks.push('explicit maintenance plan authenticates inherited encrypted origins without rewriting bytes; unknown plaintext and tampering still fail');
     console.log(JSON.stringify({ synthetic: true, passed: true, checks, productionWrites: 0, networkCalls: 0, paidRequests: 0, browserRuns: 0 }));
   } finally { fs.rmSync(fixture, { recursive: true, force: true }); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
