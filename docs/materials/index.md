@@ -8,6 +8,10 @@
 
 # 项目资料索引
 
+## RATE-VIDEO01 视频人民币计价补齐
+
+[原单最新交付](../../tasks/todo/2026-11-05-ledger-rate-accounting.md#rate-video01-最终交付)：v0.134.7已部署，正常CAS新增16条跟随金额规则、移除2条旧通用固定点数，56成员含22视频/4图片/30增强统一10点/元；旧40金额来源开关、历史冻结/账本及赠分关闭保持。双完整工程/构建和公网健康通过，功能待用户手验。当前价全字段SHA e52bb566，旧03db仅为保存前；私有[配置核对](2026-11-05-ledger-rate-accounting/release/video-money10-20261106/attempt01/post-config-proof.json)及同目录source-pair/public-deployed原证不上Git。
+
 ## RATE-10 统一每元10点与关闭新用户赠分
 
 [原单](../../tasks/todo/2026-11-06-points-scale10-welcome.md)与[交付说明](2026-11-06-points-scale10/README.md)：v0.134.5已部署，40项统一人民币费率已正常CAS改为10并回读，赠分false/default0；旧余额、原账及已受理合同不重算。完整工程、构建、健康通过，实际生成待用户手验；原私有回执不上Git。
