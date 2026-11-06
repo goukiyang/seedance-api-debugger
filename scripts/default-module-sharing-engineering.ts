@@ -20,7 +20,7 @@ async function main() {
   let networkCalls = 0;
   globalThis.fetch = async () => { networkCalls++; throw new Error('Fixture must stay offline'); };
   const { prisma } = await import('../src/lib/prisma');
-  const { saveStudioModule, studioModuleDTOForUser, chooseStudioModuleSharing } = await import('../src/lib/image-studio/modules');
+  const { saveStudioModule, studioModuleDTOForUser, chooseStudioModuleSharing, shareSavedStudioModule } = await import('../src/lib/image-studio/modules');
   const { queryStudioGallery } = await import('../src/lib/image-studio/gallery');
   const { setStudioPresetSharing } = await import('../src/lib/image-studio/presets');
   const { canViewStudioPreset } = await import('../src/lib/image-studio/access');
@@ -128,6 +128,52 @@ async function main() {
     assert.ok('sharingPreference' in privateChoice);
     assert.equal(privateChoice.sharingPreference?.enabled, false);
     checks.push('regular_template_controls_remain_available');
+    await prisma.asset.create({ data: { id: 'personal-image', owner_id: other.id, type: 'image',
+      original_url: '/uploads/assets/fixture.png', file_name: 'fixture.png', mime_type: 'image/png', file_size: 100 } });
+    await prisma.imageStudioModule.update({ where: { id: regularId }, data: {
+      prompt: 'personal supplement stays private', context: 'saved template context', reference_ids: '["personal-image"]',
+    } });
+    const command = { id: regularId, revision: privateChoice.revision, isShared: true, requestId: randomUUID() };
+    await assert.rejects(() => shareSavedStudioModule(author.id, command), error => [403, 404].includes((error as { status: number }).status));
+    await assert.rejects(() => shareSavedStudioModule(other.id, { ...command, revision: command.revision - 1, requestId: randomUUID() }),
+      error => (error as { status: number }).status === 409);
+    checks.push('immediate_publication_keeps_owner_and_revision_protection');
+    const immediate = await shareSavedStudioModule(other.id, { ...command, prompt: 'must not publish client draft', context: 'unsaved context', referenceIds: ['personal-image'] });
+    const immediateSource = await prisma.imageStudioPreset.findUniqueOrThrow({ where: { id: immediate.sourcePresetId! } });
+    assert.equal(immediateSource.is_shared, true);
+    assert.equal(immediateSource.context, 'saved template context');
+    assert.equal(immediateSource.prompt, '');
+    assert.equal(immediateSource.reference_ids, '[]');
+    assert.equal(immediate.prompt, 'personal supplement stays private');
+    assert.deepEqual(immediate.images.map(image => image.id), ['personal-image']);
+    assert.equal(immediate.sharingCommandReceipt.action, 'share-saved-module');
+    assert.equal(canViewStudioPreset(author, immediateSource), true);
+    checks.push('one_command_publishes_saved_definition_without_personal_or_unsaved_inputs');
+    const replay = await shareSavedStudioModule(other.id, command);
+    assert.equal(replay.revision, immediate.revision);
+    assert.equal(replay.sourcePresetId, immediate.sourcePresetId);
+    assert.equal(await prisma.imageStudioPreset.count(), 2);
+    await assert.rejects(() => shareSavedStudioModule(other.id, { ...command, revision: replay.revision, requestId: randomUUID() }),
+      error => (error as { status: number }).status === 409);
+    checks.push('lost_response_replay_returns_original_publication_without_overwriting');
+    await setStudioPresetSharing(other, immediateSource.id, false, immediateSource.updated_at.toISOString(), randomUUID());
+    const withdrawnReplay = await shareSavedStudioModule(other.id, command);
+    assert.equal(withdrawnReplay.sourcePresetShared, false);
+    assert.equal((await prisma.imageStudioPreset.findUniqueOrThrow({ where: { id: immediateSource.id } })).is_shared, false);
+    checks.push('original_publication_replay_cannot_reshare_after_withdrawal');
+    await assert.rejects(() => shareSavedStudioModule(other.id, {
+      id: 'default-other', revision: 0, isShared: true, requestId: randomUUID(),
+    }), error => (error as Error).message.includes('名称'));
+    checks.push('immediate_switch_also_rejects_unnamed_default');
+    await prisma.imageStudioModule.update({ where: { id: 'default-other' }, data: { name: '过度帧', context: 'default saved context' } });
+    const directDefault = await shareSavedStudioModule(other.id, {
+      id: 'default-other', revision: 0, isShared: true, requestId: randomUUID(),
+    });
+    assert.equal(directDefault.sourcePresetId, 'module-source:default-other');
+    assert.equal(directDefault.sourcePresetShared, true);
+    assert.equal(directDefault.sourcePresetCanManageSharing, true);
+    assert.equal((await queryStudioGallery(author, { pageSize: 12 })).items.some(item => item.presetId === directDefault.sourcePresetId), true);
+    checks.push('default_module_publishes_directly_and_appears_in_colleague_gallery');
     assert.equal(networkCalls, 0);
     assert.equal(await prisma.imageStudioTask.count(), 0);
     console.log(JSON.stringify({ passed: checks.length, checks, networkCalls, generatedTasks: 0 }));

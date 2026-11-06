@@ -640,9 +640,10 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     void refreshPresetCatalogs().catch(cause => setPresetsError(cause instanceof Error ? cause.message : '共享事实已更新，目录暂时无法读取'));
   } });
   const preferenceSharing = useModuleSharingPreference(userId, result => {
-    setModules(items => items.map(item => item.id === result.id ? { ...item, revision: result.revision,
-      sharingPreference: result.sharingPreference, canChooseSharing: result.canChooseSharing } : item));
+    setModules(items => items.map(item => item.id === result.id ? { ...item, ...result } : item));
+    shared.refresh();
     pool.refresh();
+    void refreshPresetCatalogs().catch(cause => setPresetsError(cause instanceof Error ? cause.message : '共享事实已更新，目录暂时无法读取'));
   });
   const presetSharingId = sharing.busyId;
   const [lifecycleHistory, setLifecycleHistory] = useState<{ presetId: string; name: string; anchor?: HTMLElement } | null>(null);
@@ -1534,7 +1535,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
             setError('');
             void (state.kind === 'preset'
               ? requestPresetSharing(state.id, !state.shared, state.revision, 'workbench', anchor)
-              : preferenceSharing.submit(state.id, state.revision, !state.selected))
+              : preferenceSharing.submit(state.id, state.revision, true))
               .catch(cause => { setError(cause instanceof Error ? cause.message : '共享状态保存未确认'); pool.refresh(); });
           }} />,
         usageCount: pageItem?.usageCount, author: entry.author, reactions: entry.reaction && <GalleryReactionButtons key={`${userId}:${entry.key}`} userId={userId} initial={entry.reaction} enabled={!pool.error && pool.data?.capabilities.independentReactions === true} />,
@@ -2205,6 +2206,17 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     revisionRef.current = module.revision; setModuleRevision(module.revision);
     appliedSharedToken.current = token;
     setBillingQuote(null);
+    if (!previous.sharedLive && sharedLive.mode === 'publisher' && sharedLive.available) {
+      // First publication changes the source binding, not the editor's current draft.
+      definitionBaseline.current = module;
+      definitionBaselineFields.current = studioDefinitionFields(module);
+      savedTemplatePrompt.current = module.templatePrompt || '';
+      savedTemplateImageIds.current = JSON.stringify(module.templateReferenceIds || []);
+      setSavedModuleContext(module.context || '');
+      const currentOverrides = { prompt, model: moduleModel, quality, resolution, count, aspectRatio };
+      personalOverridesRef.current = currentOverrides; setPersonalOverrides(currentOverrides);
+      return;
+    }
     if (!sharedLive.available && !repairDefinition || !hasSharedDefaults(sharedLive.defaults)) {
       if (restoredTaskSettings) { setRestoredTaskSettings(null); setRestoredSettingsError('原模板暂不可用，已恢复设置的草稿保留；请重新读取可用模板后恢复。'); }
       if (sharedReferencePreviewId.current) { setPreview(null); sharedReferencePreviewId.current = null; }
@@ -2601,14 +2613,12 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       return;
     }
     if (!module.canChooseSharing || sharedLive) { setError('只有创建者或管理员可以修改共享'); return; }
-    const isShared = !module.sharingPreference?.enabled;
     moduleSaveLock.current = true; setSharingPreferenceSaving(true); setError('');
     try {
-      const result = await onChooseSharing(module.id, revisionRef.current, isShared);
+      const result = await onChooseSharing(module.id, revisionRef.current, true);
       revisionRef.current = result.revision; setModuleRevision(result.revision);
       // The parent merges sharing metadata only; current unsaved inputs remain intact.
-      setSaveStatus(result.sharingPreference?.enabled ? '已选择共享，保存模板后生效' : '已设为仅自己可见，内容保持不变');
-      if (result.sharingPreference?.enabled) openModuleDialog();
+      setSaveStatus(result.sourcePresetShared ? '已共享已保存的模板，当前编辑保留' : '原共享选择已核对，请点击共享发布已保存的模板');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '共享选择保存未确认，请重试原操作');
     } finally { moduleSaveLock.current = false; setSharingPreferenceSaving(false); }
@@ -4235,7 +4245,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     {sharingPending && <button type="button" disabled={Boolean(sharingId)} onClick={() => void onQuerySharing()}>查询共享结果</button>}
   </>;
   const templateSharingAttributes = templateWorkbench && (canManageTemplateSharing || sharingPending)
-    ? <div className={styles.counts} aria-label="模板属性"><span>{unpublishedSharing ? '待发布 · 保存后共享' : '共享给同事'}</span>{sharingControls}</div> : undefined;
+    ? <div className={styles.counts} aria-label="模板属性"><span>{unpublishedSharing ? '尚未共享' : '共享给同事'}</span>{sharingControls}</div> : undefined;
   function activateDraft() {
     onActivate();
     if (draftRestoring || !draftLoaded) beginCurrentInput();

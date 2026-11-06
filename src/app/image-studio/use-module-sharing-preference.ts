@@ -2,10 +2,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { StudioModuleSharingPreference } from '@/lib/image-studio/module-sharing-preference';
+import type { SharedStudioLiveDTO } from '@/lib/image-studio/shared-types';
 
-export type ModuleSharingResult = { id: string; revision: number; canChooseSharing: boolean; sharingPreference: StudioModuleSharingPreference | null };
+export type ModuleSharingResult = { id: string; revision: number; canChooseSharing: boolean; sharingPreference: StudioModuleSharingPreference | null;
+  sourcePresetId?: string | null; sourcePresetShared?: boolean | null; sharedLive?: SharedStudioLiveDTO | null };
 
-type Command = { id: string; revision: number; isShared: boolean; requestId: string };
+type Command = { id: string; revision: number; isShared: boolean; requestId: string; action?: 'set-sharing-preference' | 'share-saved-module' };
 // Both cover and editor retain the same original command when its response is lost.
 export function useModuleSharingPreference(userId: string, onSettled: (module: ModuleSharingResult) => void) {
   const active = useRef(userId); active.current = userId;
@@ -25,9 +27,10 @@ export function useModuleSharingPreference(userId: string, onSettled: (module: M
     let command: Command;
     try {
       const saved = localStorage.getItem(key);
-      command = saved ? JSON.parse(saved) : { id, revision, isShared, requestId: crypto.randomUUID() };
+      command = saved ? JSON.parse(saved) : { id, revision, isShared, requestId: crypto.randomUUID(), action: isShared ? 'share-saved-module' : 'set-sharing-preference' };
       if (command.id !== id || !Number.isSafeInteger(command.revision) || typeof command.isShared !== 'boolean'
-        || typeof command.requestId !== 'string' || !/^[A-Za-z0-9_-]{16,100}$/.test(command.requestId)) throw new Error();
+        || typeof command.requestId !== 'string' || !/^[A-Za-z0-9_-]{16,100}$/.test(command.requestId)
+        || command.action !== undefined && !['set-sharing-preference', 'share-saved-module'].includes(command.action)) throw new Error();
       const raw = JSON.stringify(command); localStorage.setItem(key, raw);
       if (localStorage.getItem(key) !== raw) throw new Error();
     } catch { throw new Error('原共享请求无法保存或读取，本次未发送，当前内容保留'); }
@@ -38,14 +41,14 @@ export function useModuleSharingPreference(userId: string, onSettled: (module: M
     lock.current = true; setBusyId(id); setPending(items => ({ ...items, [id]: true }));
     try {
       const response = await fetch('/api/image-studio/modules', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'set-sharing-preference', ...command, entryPoint: 'workbench' }), signal: AbortSignal.timeout(15000) });
+        body: JSON.stringify({ action: command.action || 'set-sharing-preference', ...command, entryPoint: 'workbench' }), signal: AbortSignal.timeout(15000) });
       const result = await response.json();
       if (!response.ok) {
         if ([400, 401, 403, 404, 409, 428].includes(response.status)) clear();
         throw new Error(result.error || '共享选择保存未确认，请核对原操作');
       }
       const receipt = result.sharingCommandReceipt;
-      if (receipt?.action !== 'set-sharing-preference' || receipt.requestId !== command.requestId
+      if (receipt?.action !== (command.action || 'set-sharing-preference') || receipt.requestId !== command.requestId
         || receipt.moduleId !== id || receipt.expectedRevision !== command.revision) {
         throw new Error('共享选择尚未确认，请重试原操作，当前内容保留');
       }

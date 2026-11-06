@@ -888,7 +888,7 @@ export async function savePrivateStudioEditor(user: ImageStudioIdentity, moduleI
 }
 
 export async function publishSharedStudioModule(user: ImageStudioIdentity, moduleId: string, input: PublishSharedStudioModuleInput, client?: SharedStudioClient,
-  lifecycle?: { firstPublication?: boolean; requestId?: unknown; preparedCover?: PreparedModuleCoverSnapshot | null; coverOperationFingerprint?: string }) {
+  lifecycle?: { firstPublication?: boolean; requestId?: unknown; preparedCover?: PreparedModuleCoverSnapshot | null; coverOperationFingerprint?: string; shareSavedWorkspace?: boolean }) {
   const operationFingerprint = digest(['publish-shared', moduleId, input]);
   const outerFingerprint = lifecycle?.coverOperationFingerprint || operationFingerprint;
   const prior = !client ? await readReceipt(prisma, (await assertStudioActor(user.id)).id, input.requestId, operationFingerprint) : null;
@@ -910,6 +910,7 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
     if (!Number.isInteger(input.expectedRevision) || workspace.revision !== input.expectedRevision) throw new StudioSharingError('工作区版本已更新，本次未保存；当前草稿保留，请刷新版本后重试', 409, 'state-conflict', 'workspace');
     const binding = await studioSharedBinding(actor.id, moduleId, tx);
     if (binding && binding.mode !== 'publisher') throw new StudioSharingError('只能由创建者修改共享原模板', 403);
+    if (binding && lifecycle?.shareSavedWorkspace) throw new StudioSharingError('模板已发布，请重新读取后设置共享范围', 409);
     if (!binding && has(input, 'sharingPreferenceRevision')) {
       const preference = await readStudioModuleSharingPreference(actor.id, moduleId, tx);
       if (!preference?.enabled || preference.revision !== input.sharingPreferenceRevision) {
@@ -1045,7 +1046,11 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
     if (!binding) await promoteModuleCover(actor, moduleId, presetId, tx);
     if (data.is_shared) await assertPresetCoverShareable(actor, presetId, tx);
     const personalChanges = await writeSharedStudioPersonalState(actor, workspace, {
-      ...(has(input, 'personalOverrides') ? { personalOverrides: input.personalOverrides } : {}),
+      ...(lifecycle?.shareSavedWorkspace ? { personalOverrides: {
+        // Local workspace prompt is personal input unless it is protected template text.
+        prompt: privateFieldOrigins(workspace, 'prompt').length ? '' : workspace.prompt,
+        model: data.model, quality: data.quality, resolution: data.resolution, count: data.count, aspectRatio: data.aspect_ratio,
+      } } : has(input, 'personalOverrides') ? { personalOverrides: input.personalOverrides } : {}),
       ...(has(input, 'resetFields') ? { resetFields: input.resetFields } : {}),
       ...(has(input, 'personalReferenceIds') ? { referenceIds: input.personalReferenceIds } : {}),
       ...(has(input, 'personalReferencePolicy') ? { referencePolicy: input.personalReferencePolicy } : {}),

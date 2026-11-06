@@ -29,6 +29,7 @@ const a = setup(); a.transport(async () => { throw new TypeError('response lost'
 await assert.rejects(a.render().submit('module-one', 7, true), /共享结果待确认/);
 assert.deepEqual(a.events, ['persist', 'send']);
 const original = a.calls[0]; a.transport(success);
+assert.equal(original.action, 'share-saved-module');
 await a.render().submit('module-one', 8, false);
 assert.deepEqual(a.calls[1], original, 'second click must retain original key, revision, and intended state');
 assert.equal(a.settled.length, 1);
@@ -48,6 +49,21 @@ await assert.rejects(e.render().submit('module-refresh', 3, true));
 const restored = setup(Object.fromEntries(Object.entries(e.localStorage).filter(([k]) => k.startsWith('sd2:'))));
 restored.transport(success); await restored.render().submit('module-refresh', 4, false);
 assert.deepEqual(restored.calls[0], e.calls[0]);
-console.log(JSON.stringify({ passed: 6, checks: ['persist_before_send', 'lost_response_reuses_original_command',
-  'storage_failure_sends_nothing', 'parallel_click_sends_once', 'account_switch_drops_late_response', 'refresh_retains_original_command'],
+const legacyCommand = { id: 'legacy-module', revision: 2, isShared: true, requestId: crypto.randomUUID() };
+const legacy = setup({ 'sd2:module-sharing-preference:v1:author:legacy-module': JSON.stringify(legacyCommand) });
+legacy.transport(success); await legacy.render().submit('legacy-module', 3, true);
+assert.deepEqual(legacy.calls[0], { action: 'set-sharing-preference', ...legacyCommand, entryPoint: 'workbench' });
+await legacy.render().submit('legacy-module', 3, true);
+assert.equal(legacy.calls[1].action, 'share-saved-module');
+const switchSource = ts.transpileModule(fs.readFileSync('src/components/TemplateSharingSwitch.tsx', 'utf8'),
+  { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
+const switchExports = {};
+vm.runInNewContext(switchSource, { exports: switchExports, require: name => name === 'react/jsx-runtime'
+  ? { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) } : { default: {} } });
+const selectedOnly = switchExports.default({ shared: false, selected: true, onChange() {} });
+assert.equal(selectedOnly.props.children[0].props.checked, false);
+assert.equal(switchExports.default({ shared: true, onChange() {} }).props.children[0].props.checked, true);
+console.log(JSON.stringify({ passed: 9, checks: ['persist_before_send', 'lost_response_reuses_original_command',
+  'storage_failure_sends_nothing', 'parallel_click_sends_once', 'account_switch_drops_late_response', 'refresh_retains_original_command',
+  'new_click_publishes_saved_template', 'legacy_pending_replays_preference_before_explicit_new_publication', 'only_actual_shared_state_checks_switch'],
   productionWrites: 0, networkCalls: 0, generatedTasks: 0 }));
