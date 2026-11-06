@@ -3,6 +3,7 @@ import type { SessionUser } from '@/lib/auth/session';
 import type { UsageFact } from '@/lib/admin/usage-types';
 import type { PublicUsageScope, UsageRecordDTO } from './dto';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
+import { studioReproductionBindingSql } from '@/lib/image-studio/reproduction-record-keys';
 import { studioAssetUrl } from '@/lib/image-studio/media';
 import { getProjectAccess } from '@/lib/projects/permissions';
 import { isTaskHiddenFromRegularUsers } from '@/lib/tasks/retention';
@@ -56,9 +57,9 @@ export async function readUsageMedia(db: Prisma.TransactionClient, user: Session
   // Reduce private protection definitions to a boolean in SQLite. No reference
   // notes, prompt snapshots or original file paths leave this permission query.
   const corrupt = user.role === 'admin' ? [] : await db.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT "id" FROM "PlatformSetting"
-    WHERE ("key" GLOB 'studio_fixed_references_v1:*' OR "key" GLOB 'studio_style_group_v1:*' OR "key" GLOB 'studio_shared_reproduction_v1:*')
+    WHERE ("key" GLOB 'studio_fixed_references_v1:*' OR "key" GLOB 'studio_style_group_v1:*' OR ${studioReproductionBindingSql(Prisma.sql`"key"`)})
     AND CASE WHEN json_valid("value_json") THEN
-      CASE WHEN "key" GLOB 'studio_shared_reproduction_v1:*' THEN
+      CASE WHEN ${studioReproductionBindingSql(Prisma.sql`"key"`)} THEN
         json_type("value_json", '$.sourceOwnerId') IS NOT 'text' OR json_type("value_json", '$.templateFixedReferences') IS NOT 'array'
         OR EXISTS (SELECT 1 FROM json_each("value_json", '$.templateFixedReferences') r WHERE json_type(r.value, '$.assetId') IS NOT 'text')
       ELSE json_type("value_json", '$.ownerId') IS NOT 'text' OR json_type("value_json", '$.references') IS NOT 'array'
@@ -70,9 +71,9 @@ export async function readUsageMedia(db: Prisma.TransactionClient, user: Session
     const allowed = user.role === 'admin' ? Prisma.sql`1 = 1` : Prisma.sql`NOT EXISTS (
       SELECT 1 FROM "PlatformSetting" p,
         json_each(CASE WHEN json_valid(p."value_json") THEN p."value_json" ELSE '{}' END,
-          CASE WHEN p."key" GLOB 'studio_shared_reproduction_v1:*' THEN '$.templateFixedReferences' ELSE '$.references' END) r
+          CASE WHEN ${studioReproductionBindingSql(Prisma.sql`p."key"`)} THEN '$.templateFixedReferences' ELSE '$.references' END) r
         JOIN "Asset" protected ON protected."id" = json_extract(r.value, '$.assetId')
-      WHERE (p."key" GLOB 'studio_fixed_references_v1:*' OR p."key" GLOB 'studio_style_group_v1:*' OR p."key" GLOB 'studio_shared_reproduction_v1:*')
+      WHERE (p."key" GLOB 'studio_fixed_references_v1:*' OR p."key" GLOB 'studio_style_group_v1:*' OR ${studioReproductionBindingSql(Prisma.sql`p."key"`)})
         AND (p."key" NOT GLOB 'studio_style_group_v1:*' OR json_extract(p."value_json", '$.ownerId') <> ${user.id}
           AND NOT EXISTS (SELECT 1 FROM "PlatformSetting" owned,
             json_each(CASE WHEN json_valid(owned."value_json") THEN owned."value_json" ELSE '{}' END, '$.references') ownref
