@@ -17,6 +17,7 @@ import { useMediaPreviewState, useVideoLoopState } from '@/lib/hooks/use-media-p
 import loopStyles from './video-loop.module.css';
 import resultStyles from './TaskResult.module.css';
 import { useAppSession } from '@/lib/context/AppSessionContext';
+import { useWorkspaceScroll } from '@/lib/hooks/use-workspace-scroll';
 import { LoadingSkeleton } from '@/components/LoadingState';
 import { RelativeTime } from '@/components/RelativeTime';
 
@@ -851,6 +852,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
   useEffect(() => { activePageRef.current = true; return () => { activePageRef.current = false; }; }, []);
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [loading, setLoading] = useState(true);
+  useWorkspaceScroll(ownerId, `task:${taskId}`, !loading && task?.id === taskId);
   const [querying, setQuerying] = useState(false);
   const [autoPoll, setAutoPoll] = useState(false);
   const [retrying, setRetrying] = useState(false);

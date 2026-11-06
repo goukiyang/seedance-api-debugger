@@ -5,6 +5,7 @@ import { ProjectWorkAudience } from '@/components/works/ProjectWorkAudience';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { useWorkspaceScroll } from '@/lib/hooks/use-workspace-scroll';
 import { Download, Eye, MoreHorizontal, Play, Repeat2, RotateCcw } from 'lucide-react';
 import ProjectFilters from '@/components/projects/ProjectFilters';
 import ReferenceAlbumsClient from '@/app/collections/ReferenceAlbumsClient';
@@ -672,6 +673,7 @@ export default function ProjectDetailPage() {
   const [viewerId, setViewerId] = useState('');
   const [sectionPagination, setSectionPagination] = useState<ProjectPagination | null>(null);
   const [sectionPaginationQueryKey, setSectionPaginationQueryKey] = useState('');
+  useWorkspaceScroll(currentUserId, `project:${activeSectionQueryKey}`, !loading && !sectionLoading && loadedDataIdentity === identityKey && sectionPaginationQueryKey === activeSectionQueryKey);
   const [activePreviewTask, setActivePreviewTask] = useState<ProjectVideoPreviewTask | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');

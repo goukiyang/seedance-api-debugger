@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useWorkspaceScroll } from '@/lib/hooks/use-workspace-scroll';
 import { AlertTriangle, CheckCheck, ExternalLink, Inbox, RefreshCcw } from 'lucide-react';
 import {
   type AppNotification,
@@ -46,8 +47,10 @@ function viewUrl(view: NotificationView) {
   return '/api/notifications?limit=100';
 }
 
-export default function NotificationsPageClient() {
+export default function NotificationsPageClient({ ownerId }: { ownerId: string }) {
   const [view, setView] = useState<NotificationView>('all');
+  const [viewReady, setViewReady] = useState(false);
+  const [loadedView, setLoadedView] = useState<NotificationView | null>(null);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -55,6 +58,17 @@ export default function NotificationsPageClient() {
   const [error, setError] = useState('');
   const [actingId, setActingId] = useState<string | null>(null);
   const [markingAll, setMarkingAll] = useState(false);
+  const preferenceKey = `sd2:notifications-view:v1:${ownerId}`;
+  useEffect(() => {
+    let saved: string | null = null;
+    try { saved = sessionStorage.getItem(preferenceKey); } catch { /* Keep the default view. */ }
+    setView(saved === 'unread' || saved === 'failed' ? saved : 'all');
+    setViewReady(true);
+  }, [preferenceKey]);
+  useEffect(() => {
+    if (viewReady) { try { sessionStorage.setItem(preferenceKey, view); } catch { /* Browsing remains available. */ } }
+  }, [preferenceKey, view, viewReady]);
+  useWorkspaceScroll(ownerId, `notifications:${view}`, viewReady && loadedView === view && !loading);
 
   const visibleEmptyText = useMemo(() => {
     if (view === 'unread') return '暂无未读通知';
@@ -63,6 +77,7 @@ export default function NotificationsPageClient() {
   }, [view]);
 
   const fetchNotifications = useCallback(async () => {
+    if (!viewReady) return;
     setLoading(true);
     setError('');
     try {
@@ -70,14 +85,16 @@ export default function NotificationsPageClient() {
       const data = await readJson(response);
       setNotifications(data.notifications || []);
       setUnreadCount(data.unread_count || 0);
+      setLoadedView(view);
     } catch (err) {
       setError(err instanceof Error ? err.message : '通知加载失败');
+      setLoadedView(null);
       setNotifications([]);
       setUnreadCount(0);
     } finally {
       setLoading(false);
     }
-  }, [view]);
+  }, [view, viewReady]);
 
   useEffect(() => {
     fetchNotifications();

@@ -15,6 +15,7 @@ import ShareAlbumDialog from '@/components/ShareAlbumDialog';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { useAppSession } from '@/lib/context/AppSessionContext';
+import { useWorkspaceScroll } from '@/lib/hooks/use-workspace-scroll';
 import { sanitizeOptionalReturnTo } from '@/lib/navigation/return-to';
 import styles from './ReferenceAlbumsClient.module.css';
 
@@ -239,6 +240,7 @@ export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: 
     currentPage * ALBUMS_PAGE_SIZE,
   );
   const listKey = `${boundaryKey}:${scope === 'public' ? selectedFolderId : ''}`;
+  useWorkspaceScroll(accountId, `collections:${listKey}:${currentPage}`, !embedded && positionReady && loadedListKey === listKey && !loading, Boolean(anchorId));
   const projectToVerify = projectContextId || (createOpen && albumType === 'project' ? projectId : '');
   const verificationKey = `${accountId}:${projectToVerify}`;
   const currentProject = verifiedProject.key === verificationKey ? verifiedProject.project : null;
@@ -1192,7 +1194,7 @@ export default function ReferenceAlbumsClient({ embeddedProjectId, onCreated }: 
             const canSubmitPublic = canSubmitAlbumToPublic(album);
             const canShareAlbum = canManageAlbumSharing(album);
             return (
-              <article key={album.id} id={`collection-${album.id}`} className="album-card">
+              <article key={album.id} id={`collection-${album.id}`} className="album-card" data-remember-scroll-anchor={album.id}>
                 <Link href={`/collections/${encodeURIComponent(album.id)}?return_to=${encodeURIComponent(collectionListHref(album.id))}`} className="album-card-main" onClick={() => {
                   try { window.localStorage.setItem(`${PREFERENCES_PREFIX}:${boundaryKey}`, JSON.stringify({ schema: 1, page: currentPage, folderId: selectedFolderId, anchorId: album.id })); } catch { /* The detail URL also carries the list position. */ }
                 }}>

@@ -9,6 +9,7 @@ import { useProductDialog } from '@/components/useProductDialog';
 import PageBanner from '@/components/PageBanner';
 import { ExperienceEmpty, OperationReceipt, SelectionBar } from '@/components/experience/ExperienceParts';
 import { useReturnAnchor } from '@/components/experience/useReturnAnchor';
+import { useWorkspaceScroll } from '@/lib/hooks/use-workspace-scroll';
 import PaginationControls from '@/components/PaginationControls';
 import { TaskVideoThumbnail } from '@/components/TaskVideoThumbnail';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
@@ -199,6 +200,7 @@ export default function TasksPage() {
     setReturnPageLoaded(true);
   }, []);
   const returnUnavailable = useReturnAnchor(currentUser?.id, hasTaskData && loadedOwner.current === currentUser?.id && !loading && loadedPage.current === page);
+  useWorkspaceScroll(currentUser?.id || '', `tasks:${page}`, hasTaskData && loadedOwner.current === currentUser?.id && !loading && loadedPage.current === page);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -419,7 +421,7 @@ export default function TasksPage() {
                 const downloadable = isTaskDownloadable(task);
                 const enhanceTask = isEnhanceTask(task);
                 return (
-                  <article key={task.id} className="tasks-card" data-list-return={task.id}>
+                  <article key={task.id} className="tasks-card" data-list-return={task.id} data-remember-scroll-anchor={task.id}>
                     <div className="tasks-preview-cell">
                       <TaskVideoThumbnail
                         taskId={task.id}
