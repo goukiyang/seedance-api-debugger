@@ -97,8 +97,13 @@ async function modelCases() {
   try {
     const catalog = require('../src/lib/image-studio/model-catalog.ts'), { DEFAULT_STUDIO_PRICES } = require('../src/lib/image-studio/settings.ts');
     const { requestStudioImages } = require('../src/lib/image-studio/provider.ts');
+    const { getImageGenerationChannels } = require('../src/lib/integrations/image-generation.ts');
+    const channels = await getImageGenerationChannels({ platformSetting: { findUnique: async () => null } }, false, undefined, false);
     for (const model of ['gpt-image-2.6-flare', 'gpt-image-2.6-sunburst']) {
       assert(catalog.IMAGE_STUDIO_NEW_REQUEST_MODELS.includes(model));
+      assert.equal(channels.fluxport.modelCapabilities[model].enabled, false);
+      assert.equal(channels.fluxport.modelCapabilities[model].protocol, 'openai_images');
+      assert.equal(channels.legacyPrices[model], null, 'new model cannot inherit the old 20-point fallback');
       assert.equal(DEFAULT_STUDIO_PRICES[model], null); assert.equal(catalog.IMAGE_STUDIO_MODEL_COST_USD[model], null);
       for (const editing of [false, true]) {
         const calls = [];

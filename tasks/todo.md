@@ -1,3 +1,9 @@
+<!-- VIDEO-REUSE26-20261105 -->
+## VIDEO-REUSE26 视频复用与 GPT Image 2.6（2026-11-05）
+
+[联合工单](todo/2026-11-05-video-reuse-image26.md)：视频复用根因是同URL他人素材覆盖冻结ID，另有拒绝回执丢参数；已修并通过聚焦工程检查。2.6两型号独立注册，JSON/multipart透传通过，价格null且通道默认关闭。真实通道/费用/目的地许可尚缺证，未开放收费生成；待相容guard完整构建、与当前发布整合、保护部署及用户手验。不得使用旧1d保护版，新guard须继承d2ee recipe-reader。无新生成、扣费、生产数据写入。
+<!-- /VIDEO-REUSE26-20261105 -->
+
 <!-- ASSET-TOP01-PUBLIC-20261105 -->
 ## ASSET-TOP01 资产管理顶部重构
 
