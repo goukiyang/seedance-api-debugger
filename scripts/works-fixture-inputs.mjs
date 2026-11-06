@@ -13,6 +13,8 @@ export const WORKS_CHECKS = [
   'cached_video_poster_is_versioned_authorized_and_read_only',
 ];
 export const WORKS_SOURCES = [
+  'src/lib/image-studio/reproduction-record-keys.ts',
+  'src/lib/assets/catalog-visibility-sql.ts', 'src/lib/assets/directory-permissions-sql.ts',
   'src/app/page.tsx', 'src/app/home.module.css', 'src/components/works/WorksWorkspace.tsx', 'src/lib/works/view-state.ts',
   'src/components/works/WorkMedia.tsx', 'src/components/works/WorkDetail.tsx',
   'prisma/migrations/20261104_works_activity_trial/migration.sql',

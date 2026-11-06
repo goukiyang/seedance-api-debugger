@@ -5,6 +5,7 @@ import { siteUploadBaseUrls, siteUploadPathFromUrl } from '@/lib/assets/site-url
 import { hiddenMultiviewSystemReferenceUrls } from '@/lib/video/multiview-recipe-storage.server';
 import { multiviewOutputFileAccess } from '@/lib/video/multiview-output-access.server';
 import { catalogVisibilitySql, CatalogSqlCompatibilityError } from '@/lib/assets/catalog-visibility-sql';
+import { studioReproductionBindingWhere, studioSettingsSourcePrefixes } from './reproduction-record-keys';
 
 type Client = Pick<Prisma.TransactionClient, 'platformSetting' | 'asset'>;
 type Protection = { assetId: string; ownerId: string; kind: 'template' | 'style' };
@@ -47,6 +48,7 @@ export async function assertStudioCoverAssetNotReferenced(assetId: string,
 
 export function studioProtectedBindings(rows: Array<{ key: string; value_json: string }>): Protection[] {
   return rows.flatMap(row => {
+    if (studioSettingsSourcePrefixes.some(prefix => row.key.startsWith(prefix))) return [];
     let value: Record<string, unknown>;
     try { value = JSON.parse(row.value_json); } catch { throw new Error('参考内容权限记录无法读取'); }
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('参考内容权限记录无效');
@@ -92,7 +94,7 @@ export async function studioHiddenAssetUrls(user: ImageStudioIdentity | null, cl
   const rows = await client.platformSetting.findMany({ where: { OR: [
     { key: { startsWith: 'studio_fixed_references_v1:' } },
     { key: { startsWith: 'studio_style_group_v1:' } },
-    { key: { startsWith: 'studio_shared_reproduction_v1:' } },
+    studioReproductionBindingWhere,
   ] }, select: { key: true, value_json: true } });
   const allBindings = studioProtectedBindings(rows);
   const bindings = hiddenStudioBindings(user, allBindings);
@@ -145,7 +147,7 @@ export async function readableStudioCoverIds(user: ImageStudioIdentity,
     WHERE (p.key GLOB 'studio_fixed_references_v1:*' OR p.key GLOB 'studio_style_group_v1:*') LIMIT 257`);
   if (rows.length > 256) throw new Error('封面权限暂时无法确认');
   const bindings = rows.map(row => ({ ...row, kind: row.settingKey.startsWith('studio_style_group_v1:') ? 'style' as const : 'template' as const }));
-  const historicalRows = await prisma.platformSetting.findMany({ where: { key: { startsWith: 'studio_shared_reproduction_v1:' } }, take: 257, select: { key: true, value_json: true } });
+  const historicalRows = await prisma.platformSetting.findMany({ where: studioReproductionBindingWhere, take: 257, select: { key: true, value_json: true } });
   if (historicalRows.length > 256) throw new Error('封面权限暂时无法确认');
   const historicalBindings = studioProtectedBindings(historicalRows);
   const historicalAssets = await prisma.asset.findMany({ where: { id: { in: historicalBindings.map(binding => binding.assetId) } }, select: { id: true, original_url: true, thumbnail_url: true } });

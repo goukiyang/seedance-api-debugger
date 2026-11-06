@@ -1,13 +1,14 @@
 import { Prisma } from '@prisma/client';
 import { siteUploadBaseUrls } from './site-url';
+import { studioReproductionBindingSql } from '@/lib/image-studio/reproduction-record-keys';
 
 export class CatalogSqlCompatibilityError extends Error {}
 type Db = Pick<Prisma.TransactionClient, '$queryRaw' | 'user'>;
-const studioKeys = Prisma.sql`(p."key" GLOB 'studio_fixed_references_v1:*' OR p."key" GLOB 'studio_style_group_v1:*' OR p."key" GLOB 'studio_shared_reproduction_v1:*')`;
+const historical = studioReproductionBindingSql(Prisma.sql`p."key"`);
+const studioKeys = Prisma.sql`(p."key" GLOB 'studio_fixed_references_v1:*' OR p."key" GLOB 'studio_style_group_v1:*' OR ${historical})`;
 const recipeKeys = Prisma.sql`(p."key" = 'multiview_rotation_preset_v1:current' OR p."key" GLOB 'multiview_rotation_preset_v1:version:*')`;
 const fileKeys = Prisma.sql`p."key" GLOB 'multiview_private_media_access_v1:*'`;
 const safeJson = Prisma.sql`CASE WHEN json_valid(p."value_json") THEN p."value_json" ELSE '{}' END`;
-const historical = Prisma.sql`p."key" GLOB 'studio_shared_reproduction_v1:*'`;
 const bindingOwner = Prisma.sql`json_extract(${safeJson}, CASE WHEN ${historical} THEN '$.sourceOwnerId' ELSE '$.ownerId' END)`;
 const bindingReferences = Prisma.sql`json_extract(${safeJson}, CASE WHEN ${historical} THEN '$.templateFixedReferences' ELSE '$.references' END)`;
 
