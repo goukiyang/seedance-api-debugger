@@ -387,6 +387,13 @@ async function main() {
     assert.ok(!JSON.stringify(memberDetail).includes('ORIGINAL_REFERENCE_CONTEXT_FROZEN'));
     const memberBootstrap = await service.labBootstrapFor(member);
     assert.equal(memberBootstrap.config.styleConstraints, ''); assert.deepEqual(memberBootstrap.configVersions, []);
+    const mixedTask = { ...firstTask, snapshot_json: JSON.stringify({ prompt: first.prompt, personalPrompt: first.prompt,
+      characterLab: { version: 1, planId: first.id }, globalContext: '', moduleContext: '' }) };
+    const mixedPublic = tasks.publicStudioSnapshot(mixedTask, new Map(), false, owner);
+    assert.equal(mixedPublic.prompt, ''); assert.equal(mixedPublic.sourceAvailable, false);
+    const separatedTask = { ...firstTask, snapshot_json: JSON.stringify({ prompt: first.prompt, personalPrompt: 'ONLY_PERSONAL_DESCRIPTION',
+      characterLab: { version: 1, planId: first.id, personalPromptSeparated: 1 }, globalContext: '', moduleContext: '' }) };
+    assert.equal(tasks.publicStudioSnapshot(separatedTask, new Map(), false, owner).prompt, 'ONLY_PERSONAL_DESCRIPTION');
     await assert.rejects(recipes.labRecipe({ ...user, id: 'other-fixture-owner' }, first.id), /不存在或无权访问/);
     const restored = await recipes.restoreLabSettings(user, { workspaceId, planId: first.id });
     assert.equal(restored.patch.count, 9);

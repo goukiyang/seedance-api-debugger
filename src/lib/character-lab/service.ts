@@ -85,7 +85,8 @@ export async function labWorkspaceState(user: SessionUser, id: string, includeVi
     sourceAsset: source ? { id: source.id, fileName: source.file_name, url: studioAssetUrl(source.id), thumbnailUrl: studioAssetUrl(source.id, true) } : null };
 }
 function submission(plan: CharacterLabPlan): Record<string, unknown> {
-  return { requestId: plan.id, projectId: plan.projectId, prompt: plan.prompt, count: 1,
+  return { requestId: plan.id, projectId: plan.projectId, prompt: plan.prompt,
+    personalPrompt: plan.operation ? plan.adjustment : [plan.context, plan.adjustment].filter(Boolean).join('\n\n'), count: 1,
     revision: plan.settingsRevision, referenceIds: plan.referenceIds, model: plan.model, channelId: plan.channelId,
     ...(plan.imageChannel ? { imageChannel: plan.imageChannel } : {}), quality: plan.quality, resolution: plan.resolution,
     aspectRatio: plan.aspectRatio, draft: { referencePolicy: defaultStudioReferencePolicy(plan.referenceIds) } };

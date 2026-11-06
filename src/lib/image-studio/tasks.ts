@@ -1136,7 +1136,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const snapshot = JSON.stringify({
       version: 1,
       personalPrompt,
-      ...(characterLabPlanId ? { characterLab: { version: 1, planId: characterLabPlanId } } : {}),
+      ...(characterLabPlanId ? { characterLab: { version: 1, planId: characterLabPlanId,
+        ...(input.personalPrompt !== undefined ? { personalPromptSeparated: 1 } : {}) } } : {}),
       ...(imageFeishu ? { imageFeishu } : {}),
       ...(input.taskSettings ? { taskSettings: input.taskSettings } : {}),
       usageAttribution: { version: 1, projectId: usageProjectId },
@@ -1620,7 +1621,11 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'id' | 'snapsho
   try { restoredSettings = parseRestoredStudioSettings(parsed.restoredSettings); } catch {}
   let taskSettings;
   try { taskSettings = parseStudioTaskSettings(parsed.taskSettings); } catch {}
-  const personalPromptProjection = serverStudioPersonalPromptProjection({ id: task.id, owner_id: task.owner_id, prompt: task.prompt, snapshot_json: task.snapshot_json }, parsed, viewerOwnerId);
+  const characterLab = parsed.characterLab as { version?: unknown; planId?: unknown; personalPromptSeparated?: unknown } | undefined;
+  const characterRecipe = characterLab?.version === 1 && typeof characterLab.planId === 'string';
+  const personalPromptProjection: ReturnType<typeof serverStudioPersonalPromptProjection> = characterRecipe && !isAdmin && characterLab.personalPromptSeparated !== 1
+    ? { personalPromptState: 'unknown' as const, personalPromptReason: '旧角色记录未分离个人要求，请在角色工作台查看有权读取的内容。' }
+    : serverStudioPersonalPromptProjection({ id: task.id, owner_id: task.owner_id, prompt: task.prompt, snapshot_json: task.snapshot_json }, parsed, viewerOwnerId);
   return {
     ...(sharedLive ? { sharedLive } : {}),
     ...(taskSettings ? { taskSettings } : {}),
@@ -1647,8 +1652,8 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'id' | 'snapsho
     globalContext: isAdmin ? publicText(parsed.globalContext, protectedGlobal) : '',
     moduleContext: isAdmin ? publicText(parsed.moduleContext, protectedModule) : '',
     unitCredits,
-    sourceAvailable,
-    contextAvailable: typeof parsed.globalContext === 'string' && typeof parsed.moduleContext === 'string',
+    sourceAvailable: characterRecipe ? false : sourceAvailable,
+    contextAvailable: !characterRecipe && typeof parsed.globalContext === 'string' && typeof parsed.moduleContext === 'string',
     contextConfigured: Boolean((typeof parsed.globalContext === 'string' && parsed.globalContext.trim()) || (typeof parsed.moduleContext === 'string' && parsed.moduleContext.trim())),
     referenceImages,
     fixedReferenceImages,
