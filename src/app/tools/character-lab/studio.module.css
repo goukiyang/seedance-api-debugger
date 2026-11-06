@@ -174,6 +174,36 @@
 .loading > div { background: var(--lab-panel); border: 1px solid var(--lab-line); border-radius: 8px; height: 65dvh; }
 .loading > span { position: absolute; top: 35%; left: 50%; transform: translateX(-50%); color: var(--lab-muted); }
 .settingsHeading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.recipePanel { min-width: 0; display: flex; flex-direction: column; gap: 12px; max-height: calc(100dvh - 145px); }
+.recipePanel > header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.recipePanel > header h2 { margin: 0; font-size: 14px; }
+.recipeBody { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 0 3px 8px; }
+.recipeBody > [role='status'] { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.recipeIdentity { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.root .recipeIdentity > button { padding: 0; width: 68px; height: 68px; flex: 0 0 68px; overflow: hidden; background: var(--lab-bg); }
+.recipeIdentity > button > * { width: 100%; height: 100%; object-fit: contain; }
+.recipeIdentity > span { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 11px; color: var(--lab-muted); }
+.recipeIdentity strong { color: var(--lab-text); font-size: 12px; }
+.recipeFacts { margin: 16px 0; display: flex; flex-direction: column; gap: 7px; font-size: 11px; }
+.recipeFacts > div { display: flex; gap: 10px; justify-content: space-between; }
+.recipeFacts dt { color: var(--lab-muted); flex: 0 0 auto; }
+.recipeFacts dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+.recipeDetail { border-top: 1px solid var(--lab-line); margin-top: 16px; padding-top: 12px; font-size: 12px; }
+.recipeDetail summary { cursor: pointer; min-height: 30px; }
+.recipeDetail pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.7; background: var(--lab-bg); padding: 10px; border-radius: 5px; }
+.recipeReferences { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.recipeReferences > div { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.recipeReferences > div > :first-child:not(span) { width: 44px; height: 44px; flex: 0 0 44px; object-fit: contain; }
+.root .recipeReferences > div > button { padding: 0; overflow: hidden; }
+.recipeReferences > div > button > * { width: 100%; height: 100%; object-fit: contain; }
+.recipeReferences small { display: block; color: var(--lab-muted); margin-top: 3px; }
+.recipeReferences small button { min-height: 26px; padding: 2px 4px; color: var(--lab-blue); font-size: 10px; }
+.recipeActions { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin-top: 12px; }
+.recipeActions button, .recipeActions summary { font-size: 12px; }
+.recipeActions details { position: relative; }
+.recipeActions summary { cursor: pointer; padding: 8px 6px; }
+.recipeActions details[open] > button { border: 1px solid var(--lab-line); }
+.promptDialog > .recipePanel { padding: 16px; max-height: 65dvh; border-top: 1px solid var(--lab-line); }
 .viewHeadingActions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
 .viewStatusDetail { white-space: pre-wrap; }
 .root .promptTrigger { flex: none; width: auto; margin: 0; padding-inline: 8px; font-size: 12px; color: var(--lab-blue); white-space: nowrap; }

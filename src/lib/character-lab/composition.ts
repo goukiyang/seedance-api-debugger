@@ -63,7 +63,7 @@ export async function saveLabComposition(user: SessionUser, body: Record<string,
   const savedAt = new Date().toISOString();
   const next = {
     ...workspace, revision: workspace.revision + 1, updatedAt: savedAt,
-    compositions: [{ id: compositionId, name, savedAt }, ...(workspace.compositions || [])],
+    compositions: [{ id: compositionId, name, savedAt, layout, sources: selectedSheet(workspace) }, ...(workspace.compositions || [])],
   };
   const updated = await prisma.platformSetting.updateMany({
     where: { key, value_json: row.value_json }, data: { value_json: JSON.stringify(next), updated_by: user.id },

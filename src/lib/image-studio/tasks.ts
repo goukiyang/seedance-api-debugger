@@ -994,7 +994,12 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     let evolution;
     try { if (evolutionRequest) evolution = resolveEvolution(evolutionRequest, input.prompt, capability || { version: 1, defaultDirection: 'increase' }); }
     catch (error) { throw new StudioError((error as Error).message); }
-    const context = [baseContext.trim(), evolution ? evolutionInstructions(evolution) : '', referenceInstructions ? `${roleInstructions}\n\n参考图顺序与作用（编号与实际发送次序一致）：\n${referenceInstructions}` : '',
+    const characterLabRecord = characterLabPlanId ? await tx.platformSetting.findUnique({
+      where: { key: `character-lab:v1:${ownerId}:plan:${characterLabPlanId}` }, select: { value_json: true },
+    }) : null;
+    const frozenLabContext: unknown = characterLabRecord ? JSON.parse(characterLabRecord.value_json).frozenReferenceContext : undefined;
+    if (frozenLabContext !== undefined && typeof frozenLabContext !== 'string') throw new StudioError('原角色上下文无法确认，请沿用当前设置继续创作', 409);
+    const context = typeof frozenLabContext === 'string' ? frozenLabContext : [baseContext.trim(), evolution ? evolutionInstructions(evolution) : '', referenceInstructions ? `${roleInstructions}\n\n参考图顺序与作用（编号与实际发送次序一致）：\n${referenceInstructions}` : '',
       styleNoteInstructions ? `风格组补充说明：\n${styleNoteInstructions}` : '',
       skills.length ? `补充文字skills（仅补充本次未指定部分；本次手写要求优先；多个组冲突时后组优先）：\n${skills.map((skill, index) => `${index + 1}. ${JSON.stringify(skill.prompt)}`).join('\n')}` : '']
       .filter(Boolean).join('\n\n---\n');
@@ -1131,7 +1136,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const snapshot = JSON.stringify({
       version: 1,
       personalPrompt,
-      ...(characterLabPlanId ? { characterLab: { version: 1, planId: characterLabPlanId } } : {}),
+      ...(characterLabPlanId ? { characterLab: { version: 1, planId: characterLabPlanId,
+        ...(input.personalPrompt !== undefined ? { personalPromptSeparated: 1 } : {}) } } : {}),
       ...(imageFeishu ? { imageFeishu } : {}),
       ...(input.taskSettings ? { taskSettings: input.taskSettings } : {}),
       usageAttribution: { version: 1, projectId: usageProjectId },
@@ -1615,7 +1621,11 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'id' | 'snapsho
   try { restoredSettings = parseRestoredStudioSettings(parsed.restoredSettings); } catch {}
   let taskSettings;
   try { taskSettings = parseStudioTaskSettings(parsed.taskSettings); } catch {}
-  const personalPromptProjection = serverStudioPersonalPromptProjection({ id: task.id, owner_id: task.owner_id, prompt: task.prompt, snapshot_json: task.snapshot_json }, parsed, viewerOwnerId);
+  const characterLab = parsed.characterLab as { version?: unknown; planId?: unknown; personalPromptSeparated?: unknown } | undefined;
+  const characterRecipe = characterLab?.version === 1 && typeof characterLab.planId === 'string';
+  const personalPromptProjection: ReturnType<typeof serverStudioPersonalPromptProjection> = characterRecipe && !isAdmin && characterLab.personalPromptSeparated !== 1
+    ? { personalPromptState: 'unknown' as const, personalPromptReason: '旧角色记录未分离个人要求，请在角色工作台查看有权读取的内容。' }
+    : serverStudioPersonalPromptProjection({ id: task.id, owner_id: task.owner_id, prompt: task.prompt, snapshot_json: task.snapshot_json }, parsed, viewerOwnerId);
   return {
     ...(sharedLive ? { sharedLive } : {}),
     ...(taskSettings ? { taskSettings } : {}),
@@ -1642,8 +1652,8 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'id' | 'snapsho
     globalContext: isAdmin ? publicText(parsed.globalContext, protectedGlobal) : '',
     moduleContext: isAdmin ? publicText(parsed.moduleContext, protectedModule) : '',
     unitCredits,
-    sourceAvailable,
-    contextAvailable: typeof parsed.globalContext === 'string' && typeof parsed.moduleContext === 'string',
+    sourceAvailable: characterRecipe ? false : sourceAvailable,
+    contextAvailable: !characterRecipe && typeof parsed.globalContext === 'string' && typeof parsed.moduleContext === 'string',
     contextConfigured: Boolean((typeof parsed.globalContext === 'string' && parsed.globalContext.trim()) || (typeof parsed.moduleContext === 'string' && parsed.moduleContext.trim())),
     referenceImages,
     fixedReferenceImages,
