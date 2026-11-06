@@ -336,7 +336,10 @@ export async function POST(
     if (previous.body.reuse.status !== 'unknown') return NextResponse.json(previous.body, { status: previous.status, headers: taskReusePrivateHeaders });
     if (promptGroupRefs.length && (!VIDEO_PROMPT_GROUP_WRITES_ENABLED || request.headers.get('x-video-prompt-groups-contract') !== '1')) {
       const rejected = await finishTaskReuseOperation(user, params.id, operationRequest, {
-        sourceStamp: taskReuseSourceStamp(task), items: [], payload: {}, rejection: { code: 'VIDEO_PROMPT_GROUP_CLIENT_REQUIRED',
+        sourceStamp: taskReuseSourceStamp(task), items: [], payload: {
+          draft, restored_references: preparedItems.length, skipped_references: skippedReferences,
+          inputWarnings: Array.from(warnings),
+        }, rejection: { code: 'VIDEO_PROMPT_GROUP_CLIENT_REQUIRED',
           message: '当前版本不能完整恢复提示词组，请更新后继续；原输入和成品保留。', status: 426 },
       });
       return NextResponse.json(rejected.body, { status: rejected.status, headers: taskReusePrivateHeaders });
@@ -546,7 +549,9 @@ export async function POST(
       ...candidates.flatMap((candidate) => candidate.assetId ? [candidate.assetId] : []),
       ...Array.from(authorizedReferenceById.values(), (image) => image.assetId),
     ]);
-    const allCandidateUrls = uniquePreserveOrder(candidates.flatMap((candidate) => candidate.url ? [candidate.url] : []));
+    const frozenUrls = new Set(snapshotAssets.map(asset => asset.original_url));
+    const allCandidateUrls = uniquePreserveOrder(candidates.flatMap((candidate) => candidate.url ? [candidate.url] : []))
+      .filter(url => !frozenUrls.has(url));
     const assetFilters = [
       ...(allCandidateAssetIds.length > 0 ? [{ id: { in: allCandidateAssetIds } }] : []),
       ...(allCandidateUrls.length > 0 ? [{ original_url: { in: allCandidateUrls } }] : []),
@@ -564,7 +569,15 @@ export async function POST(
         }) as ReuseAsset[]
       : [];
     const assetById = new Map(assets.map((asset) => [asset.id, asset]));
-    const assetByUrl = new Map(assets.map((asset) => [asset.original_url, asset]));
+    const assetsByUrl = new Map<string, ReuseAsset[]>();
+    for (const asset of assets) {
+      const aliases = assetsByUrl.get(asset.original_url) || [];
+      aliases.push(asset);
+      assetsByUrl.set(asset.original_url, aliases);
+    }
+    // URLs can belong to several Asset rows. Frozen ids keep the original binding;
+    // only legacy URL-only inputs may search other currently authorized records.
+    const sourceAssetIds = new Set(allCandidateAssetIds);
 
     const preparedItems: Array<{ assetId: string; role: AssetRole; referenceImageId: string | null }> = [];
     const preparedRoleByAsset = new Map<string, AssetRole>();
@@ -577,67 +590,70 @@ export async function POST(
       directAccessCache.set(assetId, allowed);
       return allowed;
     };
-    const markSkipped = (candidate: ReuseCandidate, asset?: ReuseAsset) => {
-      skippedMaterialKeys.add(asset?.id || candidate.assetId || candidate.url || `${candidate.role}:unknown`);
-    };
 
     for (const candidate of candidates) {
-      const asset = (candidate.assetId ? assetById.get(candidate.assetId) : undefined)
-        || (candidate.url ? assetByUrl.get(candidate.url) : undefined);
-      const role = asset ? roleForType(candidate.role, asset.type) : null;
-      if (!asset || asset.status !== 'active' || !role) {
-        markSkipped(candidate, asset);
-        continue;
-      }
-      const priorRole = preparedRoleByAsset.get(asset.id);
-      if (priorRole) {
-        if (priorRole !== role) warnings.add('同一素材在原任务中有多个用途；工作区仅能保留一个用途，已保留首次出现的用途。');
-        continue;
-      }
-
-      let referenceImageId: string | null = null;
-      if (candidate.referenceImageId) {
-        const authorized = authorizedReferenceById.get(candidate.referenceImageId);
-        if (authorized?.assetId === asset.id) {
-          referenceImageId = authorized.id;
-        } else {
-          try {
-            const image = await assertCanUseReferenceImage(user, candidate.referenceImageId);
-            if (image.asset_id === asset.id) referenceImageId = image.id;
-          } catch {
-            if (!(await hasDirectAssetAccess(asset.id))) {
-              markSkipped(candidate, asset);
-              continue;
-            }
-          }
-        }
-      }
-
-      if (!referenceImageId && !(await hasDirectAssetAccess(asset.id))) {
-        let authorizedSharedReference: string | null = null;
-        for (const referenceImage of asset.reference_images) {
-          try {
-            const image = await assertCanUseReferenceImage(user, referenceImage.id);
-            if (image.asset_id === asset.id) {
-              authorizedSharedReference = image.id;
-              break;
-            }
-          } catch {
-            // Try other reference-image grants for this asset.
-          }
-        }
-        if (!authorizedSharedReference) {
-          markSkipped(candidate, asset);
+      const aliases = candidate.url ? assetsByUrl.get(candidate.url) || [] : [];
+      const sourceAliases = aliases.filter(asset => sourceAssetIds.has(asset.id));
+      const matches = candidate.assetId ? [assetById.get(candidate.assetId)]
+        : sourceAliases.length ? sourceAliases : aliases;
+      let restored = false;
+      for (const asset of matches) {
+        const role = asset ? roleForType(candidate.role, asset.type) : null;
+        if (!asset || asset.status !== 'active' || !role) {
           continue;
         }
-        referenceImageId = authorizedSharedReference;
-      }
+        const priorRole = preparedRoleByAsset.get(asset.id);
+        if (priorRole) {
+          if (priorRole !== role) warnings.add('同一素材在原任务中有多个用途；工作区仅能保留一个用途，已保留首次出现的用途。');
+          restored = true;
+          break;
+        }
 
-      if (candidate.roleNeedsWarning || candidate.role !== role) {
-        warnings.add('部分历史素材用途与素材类型不匹配，已按素材类型恢复。');
+        let referenceImageId: string | null = null;
+        if (candidate.referenceImageId) {
+          const authorized = authorizedReferenceById.get(candidate.referenceImageId);
+          if (authorized?.assetId === asset.id) {
+            referenceImageId = authorized.id;
+          } else {
+            try {
+              const image = await assertCanUseReferenceImage(user, candidate.referenceImageId);
+              if (image.asset_id === asset.id) referenceImageId = image.id;
+            } catch {
+              if (!(await hasDirectAssetAccess(asset.id))) {
+                continue;
+              }
+            }
+          }
+        }
+
+        if (!referenceImageId && !(await hasDirectAssetAccess(asset.id))) {
+          let authorizedSharedReference: string | null = null;
+          for (const referenceImage of asset.reference_images) {
+            try {
+              const image = await assertCanUseReferenceImage(user, referenceImage.id);
+              if (image.asset_id === asset.id) {
+                authorizedSharedReference = image.id;
+                break;
+              }
+            } catch {
+              // Try other reference-image grants for this asset.
+            }
+          }
+          if (!authorizedSharedReference) {
+            continue;
+          }
+          referenceImageId = authorizedSharedReference;
+        }
+
+        if (candidate.roleNeedsWarning || candidate.role !== role) {
+          warnings.add('部分历史素材用途与素材类型不匹配，已按素材类型恢复。');
+        }
+        preparedRoleByAsset.set(asset.id, role);
+        preparedItems.push({ assetId: asset.id, role, referenceImageId });
+        restored = true;
+        break;
       }
-      preparedRoleByAsset.set(asset.id, role);
-      preparedItems.push({ assetId: asset.id, role, referenceImageId });
+      if (!restored) skippedMaterialKeys.add(candidate.assetId || candidate.url || `${candidate.role}:unknown`);
     }
 
     if (unavailableReferenceImageIds.size > 0) {
@@ -709,7 +725,10 @@ export async function POST(
       video_card: task.video_card,
     };
     if (hasSourceMaterials && (preparedItems.length === 0 || skippedReferences > 0)) {
-      const rejected = await finishTaskReuseOperation(user, params.id, operationRequest, { sourceStamp: taskReuseSourceStamp(task), items: [], payload: {},
+      const rejected = await finishTaskReuseOperation(user, params.id, operationRequest, { sourceStamp: taskReuseSourceStamp(task), items: [], payload: {
+          draft, restored_references: preparedItems.length, skipped_references: skippedReferences,
+          inputWarnings: Array.from(warnings),
+        },
         rejection: { code: 'REUSE_ASSETS_UNAVAILABLE', message: '原任务部分或全部素材无法安全恢复，当前工作区未更改。', status: 409 } });
       return NextResponse.json(rejected.body, { status: rejected.status, headers: taskReusePrivateHeaders });
     }
