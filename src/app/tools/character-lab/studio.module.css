@@ -204,7 +204,7 @@
 .recipeActions summary { cursor: pointer; padding: 8px 6px; }
 .recipeActions details[open] > button { border: 1px solid var(--lab-line); }
 .promptDialog > .recipePanel { padding: 16px; max-height: 65dvh; border-top: 1px solid var(--lab-line); }
-.viewHeadingActions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+.viewHeadingActions { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px; }
 .viewStatusDetail { white-space: pre-wrap; }
 .root .promptTrigger { flex: none; width: auto; margin: 0; padding-inline: 8px; font-size: 12px; color: var(--lab-blue); white-space: nowrap; }
 .root .adjustments > .promptTrigger { margin-top: 12px; }
@@ -227,6 +227,7 @@
 .promptPreview pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; color: var(--lab-muted); }
 .viewBoard { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 12px; }
 .viewSlot { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.viewSlot > :is(.viewImage, .viewEmpty) { margin-top: auto; flex-shrink: 0; }
 .viewSlot .settingsHeading { min-height: 38px; flex-wrap: wrap; column-gap: 4px; }
 .viewSlot .settingsHeading small { color: var(--lab-muted); }
 .root .viewImage, .viewEmpty { width: 100%; aspect-ratio: 800 / 1008; padding: 0; overflow: hidden; border: 1px solid var(--lab-line); border-radius: 6px; background: var(--lab-bg); }
@@ -284,4 +285,4 @@
 
 .bodyPair { display: flex; flex-direction: column; gap: 12px; }
 
-.root .viewVersion { width: auto; min-height: 32px; padding: 4px 8px; }
+.root .viewVersion { width: auto; max-width: 100%; min-width: 0; min-height: 32px; padding: 4px 8px; }

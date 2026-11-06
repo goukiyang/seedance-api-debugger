@@ -5,7 +5,7 @@ import { Copy, Loader2, X } from 'lucide-react';
 import { readJsonResponse } from '@/lib/http/json-response';
 import { RelativeTime } from '@/components/RelativeTime';
 import { CharacterLabImage } from './images';
-import { characterLabMediaUrl, characterLabStrength, type CharacterLabRecipe, type CharacterLabReference } from '@/lib/character-lab/types';
+import { characterLabMediaUrl, characterLabStrength, type CharacterLabPlan, type CharacterLabRecipe, type CharacterLabReference } from '@/lib/character-lab/types';
 import styles from './studio.module.css';
 
 type Props = {
@@ -13,6 +13,7 @@ type Props = {
   tab: 'current' | 'next'; onTab: (tab: 'current' | 'next') => void; onClose: () => void;
   previewPayload: Record<string, unknown>; isAdmin: boolean; disabled: boolean;
   onRestore: (id: string) => Promise<boolean>; onReproduce: (id: string) => Promise<void>;
+  onRestorePersonal: (plan: CharacterLabPlan, text: string) => boolean;
   onPreview: (reference: CharacterLabReference) => void; children: ReactNode;
   previous?: string; next?: string; onBrowse: (id: string) => void;
   escapeEnabled: boolean; onInspectSource: (id: string) => void; onPreviewAsset: (id: string) => void;
@@ -112,6 +113,12 @@ export function CharacterLabPromptPanel(props: Props) {
           <div className={styles.recipeActions}>
             <button type="button" disabled={acting || !currentText} onClick={() => void act(async () => { await navigator.clipboard.writeText(currentText || ''); setFeedback('已复制可见提示词'); })}><Copy size={14} />复制提示词</button>
             <button type="button" className={styles.outline} disabled={acting || props.disabled} onClick={() => void act(async () => { if (await props.onRestore(current.plan.id)) props.onTab('next'); })}>沿用设置</button>
+            <button type="button" className={styles.outline} disabled={acting || props.disabled} onClick={() => void act(async () => {
+              if (props.onRestorePersonal(current.plan, current.personalText)) {
+                props.onTab('next');
+                requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('#character-recipe-panel textarea:not([readonly])')?.focus());
+              }
+            })}>仅恢复补充</button>
             <details><summary>更多</summary><button type="button" disabled={acting || props.disabled || current.plan.operation === 'body-front' || current.plan.operation === 'body-back'} onClick={() => void act(() => props.onReproduce(current.plan.id))}>按原设置重新生成</button></details>
           </div>
           {feedback && <p className={styles.hint} role="status">{feedback}</p>}

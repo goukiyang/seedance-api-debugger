@@ -1,10 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '费率编辑与生成提示修复', outline: [
-  '切回费率页不再意外锁住金额和开关',
-  '视频暂不可生成时显示具体原因',
-  '图片模型支持人民币换算后的小数点数',
-  '邮箱账号可从顶部积分提交申请',
+const notice = { title: '角色历史补充与正脸版本', outline: [
+  '历史记录可单独恢复补充内容到输入框',
+  '正脸支持查看候选与微调版本，再明确选用',
+  '正脸、侧脸和全身图框保持对齐',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
