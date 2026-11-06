@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SD2 · 参考风格 · 三个页面</title>
+  <link rel="stylesheet" href="compare-r05-generation.css">
+  <script src="compare-r05-generation.js" defer></script>
+</head>
+<body>
+  <header class="compare-bar">
+    <div class="compare-brand"><strong>SD2</strong><span>风格对比</span></div>
+    <nav class="variants" aria-label="选择样板页面">
+      <button type="button" data-variant="a" aria-pressed="true"><b>A</b>作品广场</button>
+      <button type="button" data-variant="b" aria-pressed="false"><b>B</b>图片模板工作台</button>
+      <button type="button" data-variant="c" aria-pressed="false"><b>C</b>视频生成</button>
+    </nav>
+    <div class="viewport" role="group" aria-label="预览宽度">
+      <button type="button" data-viewport="desktop" aria-pressed="true">桌面</button>
+      <button type="button" data-viewport="mobile" aria-pressed="false">手机</button>
+    </div>
+    <button class="reload" id="reload" type="button">重新载入</button>
+    <a class="site-link" href="/works" target="_blank" rel="noopener">打开原站 ↗</a>
+    <p id="status" role="status">正在载入原站页面。使用当前账号与真实内容，页面操作会在原站生效。</p>
+  </header>
+  <main class="preview-stage" id="stage" data-viewport="desktop">
+    <section id="login-gate" class="login-gate" hidden aria-labelledby="login-heading">
+      <h1 id="login-heading">登录后查看样板</h1>
+      <p>使用原站账号登录，完成后会回到当前页面。</p>
+      <div class="login-actions">
+        <a id="login-link" class="login-primary" href="/login" target="_top">前往原站登录</a>
+        <button id="login-reload" type="button">已登录，继续查看</button>
+      </div>
+    </section>
+    <iframe id="preview" title="当前账号的参考风格页面预览" referrerpolicy="same-origin" allow="fullscreen" allowfullscreen></iframe>
+  </main>
+</body>
+</html>
