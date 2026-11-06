@@ -12,7 +12,7 @@ const startedAt = Date.now(), runId = readPricingFixtureInputs(root).runId;
 const sources = [
   'scripts/upload-recovery-engineering.mjs', 'scripts/upload-private-directory-engineering.ts',
   'scripts/upload-client-recovery-engineering.ts', 'scripts/upload-raw-recovery-engineering.mjs',
-  'scripts/upload-root-cure-smoke.ts', 'src/lib/assets/verified-upload.ts', 'src/lib/assets/raw-upload-state.ts',
+  'scripts/upload-root-cure-smoke.ts', 'src/lib/assets/verified-upload.ts', 'src/lib/assets/raw-upload-state.ts', 'src/lib/assets/upload-purpose.ts',
   'src/lib/assets/upload-log.ts', 'src/lib/assets/direct-upload.ts', 'src/lib/assets/direct-upload-error.ts', 'src/lib/assets/storage.ts', 'src/lib/assets/site-upload.ts',
   'src/lib/http/file-upload.ts', 'src/lib/http/upload-session.ts', 'src/lib/hooks/useWorkspace.ts', 'src/components/ResourceLibraryPicker.tsx',
   'src/components/ResourceLibraryPicker.module.css', 'src/app/api/assets/upload/route.ts',

@@ -1,5 +1,5 @@
 import 'server-only';
-import { privateOrigin, privatePromptPolicy, PrivatePromptError, type PrivateOrigin } from '@/lib/security/private-prompts.server';
+import { isStoredPrivatePrompt, privateOrigin, privatePromptPolicy, PrivatePromptError, type PrivateOrigin } from '@/lib/security/private-prompts.server';
 import { privateFieldOrigins, privateStoredValue, readPrivateFields, writePrivateFields, transferPrivateFieldOrigin } from '@/lib/security/private-prompt-fields.server';
 import { requirePrivatePromptRequest } from '@/lib/security/private-prompt-request.server';
 
@@ -16,8 +16,10 @@ export function studioDefinitionOrigins(kind: Kind, row: Pick<Definition, 'id' |
 }
 export function readPrivateStudioDefinition<T extends Definition>(kind: Kind, row: T): T {
   if (privateStoredValue(row) !== row) return row;
-  const origins = studioDefinitionOrigins(kind, row);
-  return readPrivateFields(row, kind, row.id, ['prompt', 'context'].map(field => ({ field, origins })));
+  // Publication changes the source alias, not the encrypted field's authorship.
+  // The codec verifies kind/id/field and authenticates the stored origins with AEAD.
+  return readPrivateFields(row, kind, row.id, (['prompt', 'context'] as const).map(field => ({ field,
+    origins: isStoredPrivatePrompt(row[field]) ? [] : studioDefinitionOrigins(kind, row) })));
 }
 export function writePrivateStudioDefinition<T extends Definition>(kind: Kind, row: T, source?: Pick<Definition, 'prompt' | 'context'>): T {
   return writePrivateFields(row, kind, row.id, ['prompt', 'context'].map(field => ({ field,

@@ -1,3 +1,4 @@
+import { legacyFeedbackAssetIds, materialAssetSql } from './upload-purpose';
 import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
@@ -16,18 +17,19 @@ export type LibraryDirectoryQuery = { type: string; scope: string; status: strin
 export type LibraryDirectoryPage = { keys: string[]; total: number; page: number; revision: string; marker: string; receiptKeys: string[]; childAssetIds: string[]; user: SessionUser };
 
 type NameRow = { identity: string; receipt_key: string | null; sortName: string; created: number };
-type NameBatch = { keys: string[]; marker: string; access: Awaited<ReturnType<typeof directoryPermissionsSql>>; collapse: boolean };
+type NameBatch = { legacyIds: string[]; keys: string[]; marker: string; access: Awaited<ReturnType<typeof directoryPermissionsSql>>; collapse: boolean };
 export function readLibraryDirectory(db: Prisma.TransactionClient, session: SessionUser, q: LibraryDirectoryQuery): Promise<LibraryDirectoryPage>;
 export function readLibraryDirectory(db: Prisma.TransactionClient, session: SessionUser, q: LibraryDirectoryQuery, batch: NameBatch): Promise<NameRow[]>;
 export async function readLibraryDirectory(db: Prisma.TransactionClient, session: SessionUser, q: LibraryDirectoryQuery, batch?: NameBatch): Promise<LibraryDirectoryPage | NameRow[]> {
   const marker = batch?.marker || await readCatalogRevision(db, 'assets'); if (!marker) throw new CatalogSqlCompatibilityError('目录writer尚未就绪');
   const access = batch?.access || await directoryPermissionsSql(db, session), user = access.user;
+  const legacyIds = batch?.legacyIds || await legacyFeedbackAssetIds(db, user.role === 'admin' ? (q.scope === 'user' ? q.ownerUserId || undefined : undefined) : user.id);
   const batchIds = (prefix: string) => batch?.keys.filter(key => key.startsWith(prefix + ':')).map(key => key.slice(prefix.length + 1)) || [];
   if (q.scope === 'user' && user.role !== 'admin') throw new AuthError('权限不足', 403);
   if (!batch && q.projectId && user.role !== 'admin' && !await db.project.findFirst({ where: { id: q.projectId, status: { not: 'deleted' }, OR: [
     { owner_user_id: user.id }, { type: { in: ['team', 'public'] }, members: { some: { user_id: user.id, status: 'active' } } },
   ] }, select: { id: true } })) throw new AuthError('项目不存在或无权查看', 403);
-  const revision = createHash('sha256').update(JSON.stringify([marker, user.id, user.role, user.account_type,
+  const revision = createHash('sha256').update(JSON.stringify(['feedback-library-v1', marker, user.id, user.role, user.account_type,
     { ...q, page: undefined, limit: undefined, expectedRevision: undefined }])).digest('hex');
   if (!batch && q.expectedRevision && revision !== q.expectedRevision) throw new StudioSharingError('素材目录已变化，请刷新后继续翻页；当前内容保留', 409);
   const owned = (alias: string) => Prisma.sql`(${Prisma.raw(alias + '."owner_user_id"')} = ${user.id} OR ${Prisma.raw(alias + '."owner_user_id"')} IS NULL AND ${Prisma.raw(alias + '."user_id"')} = ${user.id})`;
@@ -90,7 +92,7 @@ export async function readLibraryDirectory(db: Prisma.TransactionClient, session
         AND (${q.type === 'all' ? Prisma.sql`a."type" IN ('image', 'video', 'audio')` : Prisma.sql`a."type" = ${q.type}`})
         AND (${q.status === 'hidden' ? Prisma.sql`a."status" IN ('hidden', 'deleted')` : Prisma.sql`a."status" = 'active'`})
         AND (${user.role !== 'admin' ? Prisma.sql`a."owner_id" = ${user.id}` : q.scope === 'user' && q.ownerUserId ? Prisma.sql`a."owner_id" = ${q.ownerUserId}` : Prisma.sql`1 = 1`})
-        AND ${access.visibility.visible(Prisma.sql`a."original_url"`)}
+        AND ${access.visibility.visible(Prisma.sql`a."original_url"`)} AND ${materialAssetSql(Prisma.sql`a."metadata_json"`, Prisma.sql`a."id"`, legacyIds)}
         AND (${q.keyword ? Prisma.sql`a."file_name" LIKE ${'%' + q.keyword + '%'}` : Prisma.sql`1 = 1`})
         AND (${q.multiviewOutputsOnly ? q.includeGenerated && !q.includeUploads ? Prisma.sql`${assetFlag} = 1` : Prisma.sql`instr(COALESCE(a."metadata_json", ''), '"multiviewOutput"') > 0`
           : q.includeGenerated && !q.includeUploads ? Prisma.sql`${assetFlag} = 1 OR a."id" IN (SELECT generated."asset_id" FROM "ImageStudioTask" generated WHERE generated."asset_id" IS NOT NULL AND generated."status" = 'succeeded')` : Prisma.sql`1 = 1`})
@@ -132,7 +134,7 @@ export async function readLibraryDirectory(db: Prisma.TransactionClient, session
   if (['project', 'user'].includes(q.sort)) {
     const spool = await usageRowSpool<NameRow>((a, b) => a.sortName.localeCompare(b.sortName, 'zh-CN') || b.created - a.created || a.identity.localeCompare(b.identity));
     try {
-      for await (const keys of catalogKeyBatches(db, 'library', user.id)) await spool.add(await readLibraryDirectory(db, session, q, { keys, marker, access, collapse }));
+      for await (const keys of catalogKeyBatches(db, 'library', user.id)) await spool.add(await readLibraryDirectory(db, session, q, { keys, marker, access, collapse, legacyIds }));
       const sorted = await spool.finish(); selected = [];
       for await (const row of sorted.values((page - 1) * q.limit, q.limit)) selected.push({ identity: row.identity, receipt_key: row.receipt_key });
     } finally { await spool.dispose(); }

@@ -9,6 +9,7 @@ const both: CatalogDomain[] = ['templates', 'assets'];
 const modelDomains: Record<string, CatalogDomain[]> = {
   Asset: both, User: both, ImageStudioPreset: both, ImageStudioModule: both,
   ContentReaction: both, ReferenceAlbum: ['assets'], ReferenceImage: ['assets'], AlbumShare: ['assets'],
+  Feedback: ['assets'], WorkspaceAsset: ['assets'], AssetCollection: ['assets'], AssetCollectionItem: ['assets'],
   Project: ['assets'], ProjectMember: ['assets'], MultiviewWork: ['assets'], MultiviewSource: ['assets'],
   MultiviewShare: ['assets'], MultiviewShareRecipient: ['assets'], VideoTask: ['assets'],
 };
