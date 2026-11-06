@@ -119,17 +119,33 @@
     const link = doc.createElement('link');
     link.rel = 'stylesheet';
     link.href = new URL(`${variant}.css?v=${variant === 'c' ? 'r05-generation' : 'r02'}`, location.href).href;
-    link.onload = () => {
+    let pendingAssets = variant === 'c' ? 3 : 1;
+    const assetReady = () => {
       if (version !== navigationVersion || frame.contentDocument !== doc) return;
+      if (--pendingAssets) return;
       status.textContent = `${pages[variant].label} · 真实内容，页面操作在原站生效。`;
       frame.classList.add('is-ready');
     };
-    link.onerror = () => {
+    const assetError = () => {
       if (version !== navigationVersion || frame.contentDocument !== doc) return;
-      status.textContent = '样式未能载入，请重新载入。';
+      status.textContent = '预览样式或控件未能载入，请重新载入。';
       frame.classList.add('is-ready');
     };
+    link.onload = assetReady;
+    link.onerror = assetError;
     doc.head.appendChild(link);
+    if (variant === 'c') {
+      const uxStyle = doc.createElement('link');
+      uxStyle.rel = 'stylesheet';
+      uxStyle.href = new URL('ux-r06.css', location.href).href;
+      uxStyle.onload = assetReady;
+      uxStyle.onerror = assetError;
+      const uxScript = doc.createElement('script');
+      uxScript.src = new URL('ux-r06.js', location.href).href;
+      uxScript.onload = assetReady;
+      uxScript.onerror = assetError;
+      doc.head.append(uxStyle, uxScript);
+    }
   });
   for (const button of variants) button.addEventListener('click', () => {
     if (button.dataset.variant !== variant) openPage(button.dataset.variant);

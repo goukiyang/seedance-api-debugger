@@ -9,3 +9,5 @@ The controller is published as a versioned compare script with the existing prev
 Authentication is never shown inside the iframe. A user-activated top-level original login preserves the selected sample and viewport in its same-origin return path. Existing CSP and OAuth/state permissions remain unchanged.
 
 C opens the original /generate video generation page. Its route-only candidate stylesheet is scoped by .mj-generation-page, which the comparison controller adds only to that iframe root. Formal app styles, APIs and submission logic are unchanged. A/B styles remain on their original branches. The r05-generation HTML references versioned controller and chrome assets; r04 files remain available to existing open documents.
+
+The r06 C preview additionally loads ux.js/css: a presentation adapter for the resource picker, Feishu notice and project section. It groups duplicate folder names without changing albums, keeps original React-owned controls in place, and adds only its own disclosure buttons and data attributes. Source share records, actual files, permissions and all business handlers remain unchanged. Image generation follows after these two UX work packages.
