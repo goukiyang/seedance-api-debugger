@@ -1,7 +1,7 @@
 <!-- BR-FEEDBACK02-MATERIALS-20261105 -->
 ## BR-FEEDBACK02 反馈截图用途隔离（2026-11-06接续）
 
-[原单§12](../../tasks/todo/2026-11-02-plugin-feedback-entry.md#12-br-feedback02-反馈截图与素材目录隔离2026-11-05实施中)；[私有证据入口](2026-11-05-plugin-feedback-material-isolation/README.md)。来源为本聊天用户缺陷反馈、定向后端授权、当前运行源只读核对与隔离工程。7组真实SQLite、原raw13项、旧请求接续、主/guard16运行文件及4脚本哈希、插件五包/95源/签名有证；待合并0.134.4后端实际部署再开放0.6.17更新。无新用户媒体附件，无生产反馈/飞书测试；原件、用户资料、凭据和DB不复制公开Git，页面效果待用户手验。
+[原单§12](../../tasks/todo/2026-11-02-plugin-feedback-entry.md#12-br-feedback02-反馈截图与素材目录隔离2026-11-05实施中)；[私有证据入口](2026-11-05-plugin-feedback-material-isolation/README.md)。后端0.134.4/dd570保护部署、插件0.6.17于2026-11-06T10:23:47Z签名发布，待用户手验。7组真实SQLite、原raw13项、旧请求接续、主/guard16运行及4脚本哈希、两份完整构建、最终部署与公网反馈layout同SHA、五包/95源/清单验签有证；失败探针/恢复与06收口原证均保留。无新用户媒体附件、生产反馈/飞书试发或收费生成；私有资料、凭据和DB不复制公开Git。
 <!-- /BR-FEEDBACK02-MATERIALS-20261105 -->
 
 <!-- ASSET-TOP01-PUBLIC-20261105 -->

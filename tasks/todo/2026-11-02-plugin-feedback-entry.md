@@ -227,6 +227,8 @@ D-20261102-02：网站现有反馈POST无耐久提交幂等，重试机制可能
 
 ## 12. BR-FEEDBACK02 反馈截图与素材目录隔离（2026-11-05，实施中）
 
+**当前状态（2026-11-06收口）：后端0.134.4已部署，插件0.6.17已发布，待用户手动验收。** 实际源/运行/公网证据见§12.4；下文候选、等待与失败状态保留为历史，不代表当前仍受阻。
+
 用户已明确授权本次定向修改后端，替代原桌面工单在此项上的禁改边界。上文旧前置状态保留历史；R02实施与发布原证在正式根同名原单§11。本轮基于线上aff41ac30/v0.134.1，在`codex/feedback-material-isolation-20261105`隔离修复，插件沿原`cc/desktop-app`接续。候选后端0.134.3、插件0.6.17，尚未部署。
 
 - 新反馈上传把用途冻结到原编号/指纹/nonce/核对和恢复，网站与三站插件同口径；服务器未确认用途时不降级发送字节。旧版未知raw/direct上传仍查原合同，不换号重发。
@@ -251,6 +253,24 @@ D-20261102-02：网站现有反馈POST无耐久提交幂等，重试机制可能
 后继运行证据：上一价格批7dc33318/0.134.3及新相容0e84已正式部署并释放窗口，本批guard相应更新至`0d5ada21bc4423de91a36cb09cbacbe534747790`。相对44ae，本模块16运行文件与4脚本SHA均未变，原模块证据继续有效。合并批服务器`video-reuse-image26-20261105/attempt04`主native完整门已通过；Next类型检查随后在同批`src/app/api/tasks/[id]/reuse/route.ts:340`报`draft`声明前使用，由原视频复用批修正，未部署失败候选。最终源/构建与实际切版仍待回执；截图隔离尚未上线，插件仍仅私有暂存。
 
 修正后候选为主`dd570b07346690eb5dfcd8b31554c8e756f13855`、guard`f351f2df54050b09a8e952fcc17b3ed18546dadb`，两者均已推送。原批已补实际route的两条426分支红绿检查，完整Linux tsc通过；本模块已实际从两个Git归档逐项核对16运行文件与4脚本SHA，均与冻结证据一致，无需重跑模块夹具。私有原证`integration/runtime-v1/corrected-final-source-confirmation.json`。服务器attempt05正在执行最终完整工程/构建，尚未切版；attempt04失败原证和原通过记录保留，不跨源冒用候选构建结果。
+
+### 12.3 保护切版失败与恢复（2026-11-06，待重试）
+
+attempt05主/guard完整native、Next/types/lint均通过，分别为`dd570b07 / t2AGRROw2FDxROyB39UAi`与`f351f2df / luHNe4Re7_5rjC-MGXf_K`。主程序6启动门/7服务已启动通过；后续公网探针把不存在的`GET /api/tasks`之404误判成必须401，触发保护恢复。原批已核无该route，模块、设置、真实reuse-status三项匿名401成立，非已证鉴权回归。
+
+控制器原证：`cutover-exit.txt=1`、`program-recovery-exit.txt=0`、`rollback-complete.json`在`2026-11-06T10:06:38.760632+00:00`确认f351保护程序运行、`businessDataRestored=false`。本项新上传用途仍关闭，插件0.6.17继续私有暂存，不能冒完整生效。调度中曾把guard运行误解为计划启动核验；随后按控制器退出码与恢复回执纠正，未据单一服务状态发布插件。复制的脱敏恢复回执为私有`integration/runtime-v1/attempt05-program-recovery.json`。
+
+原批接续attempt06：只移除无效GET探针、保留三个真实401检查，以实际f351作为新baseline，复用相同dd/f351完整构建与原时间。不改变业务代码、权限或本模块16运行/4适配文件，不跨源重标构建；重新备份、保护切版与公网核对后再交付实际回执。最终主版部署及0.6.17公开发布仍待完成，未执行生产反馈/创作或飞书试发。
+
+### 12.4 最终部署、插件发布与未验边界（2026-11-06）
+
+- 后端attempt06 / run `a37d72d2-968b-442b-8136-5a40baf3598f`于`10:21:13Z`完成保护部署。实际主源`dd570b07346690eb5dfcd8b31554c8e756f13855`、版本`0.134.4`、BUILD `t2AGRROw2FDxROyB39UAi`；相容guard保留`f351f2df54050b09a8e952fcc17b3ed18546dadb / luHNe4Re7_5rjC-MGXf_K`。主/guard完整native/Next/types/lint和原构建时间保留，06不伪造或重复模块工程。
+- 原发布批已核6启动检查、7服务4timer、4JS公网同SHA、3有效API匿名401及价格全字段194e保持，无DDL、数据恢复或收费生成。原证`/data/video-api-debugger/release-staging/video-reuse-image26-20261105/attempt06/public-deployed.json`；本模块私有副本`integration/runtime-v1/backend-public-deployed-attempt06.json`。05错误探针及保护恢复记录完整保留。
+- 本模块独立复核：实际服务WorkingDirectory为dd570、package/BUILD一致、反馈用途开关为true；公网`/api/release`返回0.134.4、health ok，含反馈用途的layout文件公网200且SHA `e11232f7772926de6d838fbe93ce9f5dd0c64ad2ab6cb6d4b219e0863fcb02f7`与最终编译产物相同。原证`integration/runtime-v1/backend-public-verified.json`，未执行生产写入。
+- 后端实际完成后，插件0.6.17于`2026-11-06T10:23:47.949629+00:00`正式发布。运行源`e93363f93aee1ceb21245ac6703ac9dbb3a76538`，已推送`cc/desktop-app`；五包大小/SHA、95源、Mac免费签名/架构/版本、插件及清单签名通过。公网清单200/验签/原始字节与候选相同，SHA `81fcdec703e8db771c4b292aa4677a49271d3aa6949efbee3f8051f3d4d15d03`；五包匿名HEAD401保原登录下载保护。
+- 静态插件发布沿原锁、旧索引SHA/版本核对及原子替换；服务器回执`/data/sd2b-release-private/published-0.6.17.json`，旧索引`latest.before-0.6.17.json`及0.6.16包保留。没有操作原批的Web服务窗口或强推/并入cc/integration；插件本地回执在指定worktree的`dist/local-test/feedback-0617-published.json`、`feedback-0617-public-check.json`。
+- 用户需更新插件并刷新SD2/插件旧页面，按§12.2手验。新反馈用途隔离与正常素材可用已完成代码/隔离工程及发布检查；不把它们当真实反馈、Cookie、原图下载、飞书实收或Windows原生功能验收。旧在途原号合同继续保留，历史兼容只排除可确证插件反馈专用截图，不批量删图或猜测普通导入意图。
+- 设置页一键更新UPDATE-UX01仍沿原独立工单，当前不冒该项已完成。发布过程中已处理的同批类型/探针问题留原记录，不新增重复任务或全局规则。
 
 ### 12.2 用户手验与当前范围
 
