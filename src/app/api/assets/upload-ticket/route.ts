@@ -16,6 +16,7 @@ export const dynamic = 'force-dynamic';
 
 type UploadTicketBody = {
   mode?: 'raw';
+  purpose?: 'feedback';
   previousNonce?: string;
   ownerId?: string;
   requestId?: string;
@@ -48,7 +49,7 @@ export async function POST(request: NextRequest) {
     fileSize = Number(body.fileSize);
     if (body.mode === 'raw') {
       await uploadIdentity(user.id);
-      const identity = rawUploadIdentity(user.id, { requestId, hash, fileSize, mimeType });
+      const identity = rawUploadIdentity(user.id, { requestId, hash, fileSize, mimeType, purpose: body.purpose });
       return NextResponse.json(await prepareRawUpload(identity, body.previousNonce), { headers: { 'Cache-Control': 'private, no-store' } });
     }
     if (!Number.isFinite(fileSize) || fileSize < 0) {

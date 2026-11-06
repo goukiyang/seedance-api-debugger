@@ -1,3 +1,4 @@
+import { legacyFeedbackAssetIds, materialAssetWhere, materialAssetSql } from '@/lib/assets/upload-purpose';
 import { NextRequest, NextResponse } from 'next/server';
 import { createHash } from 'node:crypto';
 import { Prisma, type Prisma as PrismaTypes } from '@prisma/client';
@@ -665,7 +666,9 @@ async function loadAssetItems(options: {
     return { items: [] as LibraryItem[], total: 0 };
   }
 
+  const legacyIds = await legacyFeedbackAssetIds(prisma, options.role === 'admin' ? options.ownerUserId || undefined : options.userId);
   const where: PrismaTypes.AssetWhereInput = {
+    AND: [materialAssetWhere(legacyIds)],
     status: options.status === 'hidden' ? { in: ['hidden', 'deleted'] } : 'active',
     ...(options.multiviewOutputsOnly ? { metadata_json: { contains: '"multiviewOutput"' } } : {}),
   };
@@ -717,7 +720,7 @@ async function loadAssetItems(options: {
         ? Prisma.sql`AND asset."owner_id" = ${options.ownerUserId}`
         : Prisma.empty;
     const keywordFilter = options.keyword ? Prisma.sql`AND asset."file_name" LIKE ${`%${options.keyword}%`}` : Prisma.empty;
-    const privacyFilter = Prisma.sql`${hiddenUrls.length ? Prisma.sql`AND asset."original_url" NOT IN (${Prisma.join(hiddenUrls)})` : Prisma.empty} ${removedIds.length ? Prisma.sql`AND NOT (asset."id" IN (${Prisma.join(removedIds)}) AND asset."owner_id" = ${options.userId})` : Prisma.empty}`;
+    const privacyFilter = Prisma.sql`AND ${materialAssetSql(Prisma.sql`asset."metadata_json"`, Prisma.sql`asset."id"`, legacyIds)} ${hiddenUrls.length ? Prisma.sql`AND asset."original_url" NOT IN (${Prisma.join(hiddenUrls)})` : Prisma.empty} ${removedIds.length ? Prisma.sql`AND NOT (asset."id" IN (${Prisma.join(removedIds)}) AND asset."owner_id" = ${options.userId})` : Prisma.empty}`;
     const outputFlag = Prisma.sql`json_extract(CASE WHEN json_valid(asset."metadata_json") THEN asset."metadata_json" ELSE '{}' END, '$.multiviewOutput.schema') = 1`;
     const generatedFilter = options.multiviewOutputsOnly ? Prisma.sql`AND ${outputFlag}` : Prisma.sql`AND (${outputFlag} OR asset."id" IN (
       SELECT generated_task."asset_id" FROM "ImageStudioTask" generated_task

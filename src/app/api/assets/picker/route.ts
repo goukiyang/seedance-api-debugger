@@ -1,3 +1,4 @@
+import { legacyFeedbackAssetIds, materialAssetWhere } from '@/lib/assets/upload-purpose';
 import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -105,8 +106,9 @@ export async function GET(request: NextRequest) {
     const albumId = p.get('album');
     const projectId = p.get('project');
     const permittedAlbums = scopeAlbumIds.filter(id => (!albumId || id === albumId) && (!projectId || albums.some(a => a.id === id && a.project?.id === projectId)));
+    const legacyIds = await legacyFeedbackAssetIds(prisma, user.id);
     const assetWhere: Prisma.AssetWhereInput = {
-      owner_id: user.id, status: 'active', type: { in: imageStudio ? ['image'] : types },
+      owner_id: user.id, status: 'active', type: { in: imageStudio ? ['image'] : types }, AND: [materialAssetWhere(legacyIds)],
       ...(directory ? { id: { in: directory.directAssetIds } } : exactKeys ? { id: { in: exactIds('asset')! } } : {}),
       ...(hidden.length ? { original_url: { notIn: hidden } } : {}),
     };
