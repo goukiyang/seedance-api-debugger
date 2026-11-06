@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
 import type { UsageCoverage, UsageDistribution, UsageFact, UsagePage, UsageQuery, UsageReport, UsageSummary, UsageSourceKind } from './usage-types';
 import { readUsageFacts, type UsageCashEvent, type UsageFactSnapshot } from './usage-facts';
-import { usageCnyMicros, usageDecimalUnits, usageExchangeRate, usageInteger, usageMoneyTotals, usageUnitsText } from './usage-money';
+import { usageExchangeRate, usageInteger, usageMoneyTotals } from './usage-money';
 import { shiftUsageDate, usageLocalDate, usageQuerySearchParams } from './usage-query';
 import { iterateUsageCashBatches, iterateUsageFactBatches, readUsageDirectories, usageSourceCoverage, type UsageSourceDiagnostic } from '@/lib/usage/facts';
 import { UsageSummaryFold } from '@/lib/usage/summary-fold';
@@ -17,40 +17,10 @@ import type { Prisma } from '@prisma/client';
 const ZERO = BigInt(0);
 const failedStates = new Set(['failed', 'cancelled', 'canceled', 'rejected', 'not-submitted']);
 
-function pointSum(facts: UsageFact[], field: 'chargedPoints' | 'reservedPoints' | 'releasedPoints' | 'refundedPoints') {
-  let total = ZERO, known = false;
-  for (const fact of facts) {
-    if (!fact.leaf || fact[field] === null) continue;
-    const units = usageDecimalUnits(fact[field], 2);
-    if (units === null) throw new Error('Usage point precision invalid');
-    total += units; known = true;
-  }
-  return known ? usageUnitsText(total) : facts.some(fact => fact.leaf) ? null : '0';
-}
-
 export function summarizeUsageFacts(facts: UsageFact[]): UsageSummary {
-  const leaf = facts.filter(fact => fact.leaf);
-  const confirmedCost = usageMoneyTotals(leaf.flatMap(fact => fact.confirmedCost));
-  const calculated = leaf.filter(fact => fact.costStatus === 'calculated' && fact.accountingCost);
-  const calculatedCny = calculated.reduce((sum, fact) => sum + BigInt(fact.accountingCost!.amountCnyMicros), ZERO);
-  const confirmedCny = leaf.length ? usageCnyMicros(confirmedCost) : '0';
-  return {
-    usageCount: leaf.length, outputCount: leaf.reduce((sum, fact) => sum + fact.outputCount, 0),
-    flowCount: facts.filter(fact => !fact.leaf).length,
-    activeMemberCount: new Set(facts.map(fact => fact.ownerUserId).filter(Boolean)).size,
-    projectCount: new Set(facts.map(fact => fact.projectId).filter(Boolean)).size,
-    confirmedCost, confirmedCostCnyMicros: confirmedCny, calculatedCount: calculated.length,
-    calculatedCostCnyMicros: calculated.length ? calculatedCny.toString() : null,
-    accountedCostCnyMicros: confirmedCny === null && !calculated.length ? null : (BigInt(confirmedCny || '0') + calculatedCny).toString(),
-    chargedPoints: pointSum(facts, 'chargedPoints'), reservedPoints: pointSum(facts, 'reservedPoints'),
-    releasedPoints: pointSum(facts, 'releasedPoints'), refundedPoints: pointSum(facts, 'refundedPoints'),
-    pendingCount: leaf.filter(fact => fact.costStatus === 'pending').length,
-    conflictCount: facts.filter(fact => fact.attribution === 'conflict' || fact.leaf && fact.costStatus === 'conflict').length,
-    unknownCostCount: leaf.filter(fact => !['confirmed', 'calculated'].includes(fact.costStatus)).length,
-    unassignedCount: facts.filter(fact => !fact.projectId || !fact.ownerUserId).length,
-    failedCount: leaf.filter(fact => failedStates.has(fact.status)).length,
-    resultNotReadyCount: leaf.filter(fact => fact.resultReady === false).length,
-  };
+  const fold = new UsageSummaryFold();
+  for (const fact of facts) fold.add(fact);
+  return fold.value();
 }
 
 function matchesId(actual: string | null, expected: string | null) {
@@ -92,7 +62,7 @@ function cmpBig(a: bigint | null, b: bigint | null, descending = true) {
 
 function compareFact(a: UsageFact, b: UsageFact, sort: UsageQuery['sort']) {
   let comparison = 0;
-  if (sort === 'cost') comparison = cmpBig(usageInteger(a.accountingCost?.amountCnyMicros ?? a.confirmedCostCnyMicros), usageInteger(b.accountingCost?.amountCnyMicros ?? b.confirmedCostCnyMicros));
+  if (sort === 'cost') comparison = cmpBig(usageInteger(a.accountingCost?.amountCnyMicros), usageInteger(b.accountingCost?.amountCnyMicros));
   else if (sort === 'usage') comparison = Number(b.leaf) - Number(a.leaf) || b.outputCount - a.outputCount;
   else if (sort === 'name') comparison = a.ownerLabel.localeCompare(b.ownerLabel, 'zh-CN') || a.projectLabel.localeCompare(b.projectLabel, 'zh-CN');
   else comparison = sort === 'oldest' ? a.occurredAt.localeCompare(b.occurredAt) : b.occurredAt.localeCompare(a.occurredAt);
@@ -129,7 +99,7 @@ function sortedDistributions(values: Dimension[], sort: UsageQuery['sort'], sear
   const filtered = search ? values.filter(value => `${value.id || 'unassigned'} ${value.label}`.toLocaleLowerCase().includes(search.toLocaleLowerCase())) : values.slice();
   filtered.sort((a, b) => {
     let comparison = 0;
-    if (sort === 'cost') comparison = cmpBig(usageInteger(a.summary.accountedCostCnyMicros ?? a.summary.confirmedCostCnyMicros), usageInteger(b.summary.accountedCostCnyMicros ?? b.summary.confirmedCostCnyMicros));
+    if (sort === 'cost') comparison = cmpBig(usageInteger(a.summary.accountedCostCnyMicros), usageInteger(b.summary.accountedCostCnyMicros));
     else if (sort === 'usage') comparison = b.summary.usageCount - a.summary.usageCount || b.summary.flowCount - a.summary.flowCount;
     else if (sort === 'oldest') comparison = !a.first || !b.first ? Number(!a.first) - Number(!b.first) : a.first.localeCompare(b.first);
     else if (sort === 'newest') comparison = b.last.localeCompare(a.last);
@@ -248,7 +218,7 @@ export async function getUsageAnalyticsReferenceSnapshot(query: UsageQuery): Pro
         count: facts.filter(fact => fact.leaf && fact.status === status).length, href: drillHref(query, { status }) })),
       { key: 'pending-cost', label: '费用待核对', count: summary.pendingCount, href: drillHref(query, { cost_status: 'pending' }) },
       { key: 'conflicting-cost', label: '费用冲突', count: facts.filter(fact => fact.leaf && fact.costStatus === 'conflict').length, href: drillHref(query, { cost_status: 'conflict' }) },
-      { key: 'unconnected-cost', label: '费用未接入', count: facts.filter(fact => fact.leaf && fact.costStatus === 'unconnected').length, href: drillHref(query, { cost_status: 'unconnected' }) },
+      { key: 'unconnected-cost', label: '现金依据未接入', count: facts.filter(fact => fact.leaf && fact.costStatus === 'unconnected').length, href: drillHref(query, { cost_status: 'unconnected' }) },
       { key: 'result-not-ready', label: '结果文件未就绪', count: summary.resultNotReadyCount, href: drillHref(query, { result_ready: 'not_ready' }) },
       { key: 'unassigned-project', label: '未归属项目', count: facts.filter(fact => !fact.projectId).length, href: drillHref(query, { project_id: 'unassigned' }) },
       { key: 'unassigned-member', label: '成员未归属', count: facts.filter(fact => !fact.ownerUserId).length, href: drillHref(query, { owner_user_id: 'unassigned' }) },
@@ -434,7 +404,7 @@ async function foldUsageAnalytics(captured: Awaited<ReturnType<typeof captureUsa
         count: 0, href: drillHref(query, { status }) })),
       { key: 'pending-cost', label: '费用待核对', count: summary.pendingCount, href: drillHref(query, { cost_status: 'pending' }) },
       { key: 'conflicting-cost', label: '费用冲突', count: 0, href: drillHref(query, { cost_status: 'conflict' }) },
-      { key: 'unconnected-cost', label: '费用未接入', count: 0, href: drillHref(query, { cost_status: 'unconnected' }) },
+      { key: 'unconnected-cost', label: '现金依据未接入', count: 0, href: drillHref(query, { cost_status: 'unconnected' }) },
       { key: 'result-not-ready', label: '结果文件未就绪', count: summary.resultNotReadyCount, href: drillHref(query, { result_ready: 'not_ready' }) },
       { key: 'unassigned-project', label: '未归属项目', count: 0, href: drillHref(query, { project_id: 'unassigned' }) },
       { key: 'unassigned-member', label: '成员未归属', count: 0, href: drillHref(query, { owner_user_id: 'unassigned' }) },

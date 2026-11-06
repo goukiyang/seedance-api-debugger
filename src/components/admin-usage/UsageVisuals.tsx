@@ -16,19 +16,19 @@ export function UsageStats({ report, open, onToggle }: { report: UsageReport; op
   const summary = report.summary;
   return <>
     <dl className="au-stats" aria-label="全量使用统计">
-      <div><dt>费用合计</dt><dd>{summaryCost(summary)}</dd></div>
+      <div><dt>当前价核算</dt><dd>{summaryCost(summary)}</dd></div>
       <div><dt>使用次数</dt><dd>{summary.usageCount.toLocaleString('zh-CN')}<small>次</small></dd></div>
       <div><dt>有效产出</dt><dd>{summary.outputCount.toLocaleString('zh-CN')}<small>个</small></dd></div>
-      <div><dt>已实扣点数</dt><dd>{points(summary.chargedPoints)}<small>点</small></dd></div>
-      <div><dt>仍预留点数</dt><dd>{points(summary.reservedPoints)}<small>点</small></dd></div>
-      <div><dt>费用待核</dt><dd>{summary.pendingCount.toLocaleString('zh-CN')}<small>笔</small></dd></div>
+      <div><dt>折合点数</dt><dd>{points(summary.referencePoints)}<small>点</small></dd></div>
+      <div><dt>计入核算</dt><dd>{(summary.calculatedCount || 0).toLocaleString('zh-CN')}<small>笔</small></dd></div>
+      <div><dt>报价待核</dt><dd>{(summary.quoteMissingCount || 0).toLocaleString('zh-CN')}<small>笔</small></dd></div>
     </dl>
     <details className="au-calculation" open={open} onToggle={event => onToggle(event.currentTarget.open)}>
       <summary><Info size={14} />统计与费用口径</summary>
       <div className="au-explanation">
         <p>按原任务首次发生时间选取同一批记录，费用与点数截至本次读取。图片、视频和独立文字调用按叶子任务计次，流程 {summary.flowCount.toLocaleString('zh-CN')} 次单列，父批次与子任务不重复相加。</p>
-        <p>供应商真实成本、平台点数和当前余额分别计算。已释放预留 {points(summary.releasedPoints)} 点，已退还实扣 {points(summary.refundedPoints)} 点；未知不当作零。</p>
-        <p>供应商已确认：{originalMoney(summary.confirmedCost)}。核算费用 {summary.calculatedCount || 0} 笔，按视频资产费用或已确认费率计算，不是供应商实扣，不改历史点数。USD/CNY 展示汇率 {report.exchangeRate.USD_CNY}（{report.exchangeRate.source}）。</p>
+        <p>当前价核算 {summary.calculatedCount || 0} 笔，仅计入成功或已返回内容的报价；失败、取消、在途报价仅供参考，不计合计。折合点数不是实际扣点，不改历史收费。</p>
+        <p>供应商已确认：{originalMoney(summary.confirmedCost)}。实际扣点 {points(summary.chargedPoints)} 点，仍预留 {points(summary.reservedPoints)} 点，已释放预留 {points(summary.releasedPoints)} 点，已退还实扣 {points(summary.refundedPoints)} 点；现金待核 {summary.pendingCount} 笔。USD/CNY 展示汇率 {report.exchangeRate.USD_CNY}（{report.exchangeRate.source}）。</p>
         <p>活跃成员 {summary.activeMemberCount} 人，涉及项目 {summary.projectCount} 个。消费归属成员与操作者、付费主体分别记录；历史归属依据可在原记录中查看。</p>
       </div>
     </details>
@@ -36,14 +36,14 @@ export function UsageStats({ report, open, onToggle }: { report: UsageReport; op
 }
 
 type Metric = 'cost' | 'usage' | 'points';
-const METRIC_LABELS: Record<Metric, string> = { cost: '费用合计', usage: '使用次数', points: '已实扣点数' };
+const METRIC_LABELS: Record<Metric, string> = { cost: '当前价核算', usage: '使用次数', points: '折合点数' };
 function metricText(summary: UsageSummary, metric: Metric) {
-  return metric === 'cost' ? summaryCost(summary) : metric === 'points' ? `${points(summary.chargedPoints)} 点` : `${summary.usageCount.toLocaleString('zh-CN')} 次`;
+  return metric === 'cost' ? summaryCost(summary) : metric === 'points' ? `${points(summary.referencePoints)} 点` : `${summary.usageCount.toLocaleString('zh-CN')} 次`;
 }
 function chartValue(summary: UsageSummary, metric: Metric) {
   if (metric === 'usage') return summary.usageCount;
-  const text = metric === 'cost' ? summary.accountedCostCnyMicros ?? summary.confirmedCostCnyMicros : summary.chargedPoints;
-  if (text === null) return null;
+  const text = metric === 'cost' ? summary.accountedCostCnyMicros : summary.referencePoints;
+  if (text == null) return null;
   if (!/^-?\d+(\.\d+)?$/.test(text) || BigInt(text.split('.')[0]) > BigInt(Number.MAX_SAFE_INTEGER) || BigInt(text.split('.')[0]) < -BigInt(Number.MAX_SAFE_INTEGER)) return null;
   const value = Number(text) / (metric === 'cost' ? 1_000_000 : 1);
   return Number.isFinite(value) && Math.abs(value) <= Number.MAX_SAFE_INTEGER ? value : null;
@@ -81,8 +81,8 @@ export function UsageDistributionTable({ type, page, search, compact = false }: 
   const rows = compact ? page.rows.slice(0, 5) : page.rows;
   return <section className="au-section" data-usage-anchor={`${type}-distribution`}>
     <div className="au-section-head"><h2>{title}</h2><Link className="au-link" href={usageHref(type, search, { [`${type}_page`]: 1 })}>查看全部{type === 'members' ? '成员' : '项目'}<ArrowRight size={14} /></Link></div>
-    <div className="au-table-scroll"><table className="au-table"><thead><tr><th>{type === 'members' ? '成员' : '项目'}</th><th className="au-numeric">使用次数</th><th className="au-numeric">费用合计</th><th className="au-numeric">已实扣点数</th><th>待核</th><th><span className="au-sr-only">操作</span></th></tr></thead><tbody>
-      {rows.map(row => <tr key={row.id ?? 'unassigned'} data-usage-anchor={`${type}:${row.id || 'unassigned'}`}><td><Link className="au-name-link" href={usageHref(type, search, distributionPatch(type, row.id))}>{type === 'members' && row.id ? <UserIdentityBadge user={{ id: row.id, name: row.label, avatar_url: row.avatarUrl }} size="sm" /> : row.label}</Link></td><td className="au-numeric">{row.summary.usageCount.toLocaleString('zh-CN')}</td><td className="au-numeric">{summaryCost(row.summary)}</td><td className="au-numeric">{points(row.summary.chargedPoints)}</td><td>{row.summary.pendingCount}</td><td><Link className="au-link" href={usageHref(type, search, distributionPatch(type, row.id))}>查看<ArrowRight size={13} /></Link></td></tr>)}
+    <div className="au-table-scroll"><table className="au-table"><thead><tr><th>{type === 'members' ? '成员' : '项目'}</th><th className="au-numeric">使用次数</th><th className="au-numeric">当前价核算</th><th className="au-numeric">折合点数</th><th>报价待核</th><th><span className="au-sr-only">操作</span></th></tr></thead><tbody>
+      {rows.map(row => <tr key={row.id ?? 'unassigned'} data-usage-anchor={`${type}:${row.id || 'unassigned'}`}><td><Link className="au-name-link" href={usageHref(type, search, distributionPatch(type, row.id))}>{type === 'members' && row.id ? <UserIdentityBadge user={{ id: row.id, name: row.label, avatar_url: row.avatarUrl }} size="sm" /> : row.label}</Link></td><td className="au-numeric">{row.summary.usageCount.toLocaleString('zh-CN')}</td><td className="au-numeric">{summaryCost(row.summary)}</td><td className="au-numeric">{points(row.summary.referencePoints)}</td><td>{row.summary.quoteMissingCount || 0}</td><td><Link className="au-link" href={usageHref(type, search, distributionPatch(type, row.id))}>查看<ArrowRight size={13} /></Link></td></tr>)}
       {!rows.length && <tr><td colSpan={6} className="au-empty">这个范围没有{type === 'members' ? '成员' : '项目'}使用记录。未覆盖的来源请查看覆盖说明。</td></tr>}
     </tbody></table></div>
     <p className="au-table-foot">共 {page.total.toLocaleString('zh-CN')} {type === 'members' ? '位成员' : '个项目分组'}{compact && page.total > rows.length ? `，展示本页前 ${rows.length} 项` : ''}，统计不受当前分页影响。</p>
@@ -106,10 +106,10 @@ export function UsageDirectory({ type, report, search, selectedId, busy, update,
   return <aside className="au-directory" aria-label={type === 'members' ? '成员目录' : '项目目录'} data-usage-anchor="directory">
     <div className="au-directory-head"><h2>{type === 'members' ? '成员' : '项目'}</h2><span className="au-muted">共 {page.total} {type === 'members' ? '人' : '组'}</span></div>
     <form className="au-directory-search" onSubmit={event => { event.preventDefault(); update({ [searchKey]: keyword, [`${type}_page`]: 1 }, { pages: false }); }}><input className="input" type="search" maxLength={120} aria-label={type === 'members' ? '搜索成员姓名' : '搜索项目名称'} value={keyword} onChange={event => setKeyword(event.target.value)} placeholder={type === 'members' ? '搜索成员' : '搜索项目'} /><button className="btn btn-secondary" type="submit">查找</button>{currentSearch && <button className="au-text-button" type="button" onClick={() => update({ [searchKey]: null, [`${type}_page`]: 1 }, { pages: false })}>清除</button>}</form>
-    <label className="au-directory-sort"><span>排序</span><select className="input" value={params.get(`${type}_sort`) || params.get('sort') || 'newest'} onChange={event => update({ [`${type}_sort`]: event.target.value, [`${type}_page`]: 1 }, { pages: false })}><option value="usage">按使用次数</option><option value="cost">按费用合计</option><option value="name">按名称</option><option value="newest">最近使用</option><option value="oldest">最早使用</option></select></label>
+    <label className="au-directory-sort"><span>排序</span><select className="input" value={params.get(`${type}_sort`) || params.get('sort') || 'newest'} onChange={event => update({ [`${type}_sort`]: event.target.value, [`${type}_page`]: 1 }, { pages: false })}><option value="usage">按使用次数</option><option value="cost">按当前价核算</option><option value="name">按名称</option><option value="newest">最近使用</option><option value="oldest">最早使用</option></select></label>
     <button type="button" className={`au-directory-all${!selectedId ? ' is-selected' : ''}`} aria-current={!selectedId ? 'true' : undefined} onClick={onAll} disabled={busy}><Users size={16} />全部{type === 'members' ? '成员' : '项目'}</button>
     <ul className="au-directory-list">{page.rows.map(row => <li key={row.id || 'unassigned'}><button type="button" aria-current={selectedId === (row.id || 'unassigned') ? 'true' : undefined} className={`au-directory-item${selectedId === (row.id || 'unassigned') ? ' is-selected' : ''}`} onClick={() => onSelect(row)} disabled={busy}>
-      {type === 'members' && row.id ? <UserIdentityBadge user={{ id: row.id, name: row.label, avatar_url: row.avatarUrl }} size="sm" avatarOnly /> : <span className="au-avatar" aria-hidden="true">{type === 'projects' ? <Folder size={17} /> : <Users size={17} />}</span>}<span className="au-directory-name"><strong>{row.label}</strong><small>{row.summary.usageCount.toLocaleString('zh-CN')} 次使用 · {row.summary.pendingCount} 笔待核</small></span><span className="au-directory-cost">{summaryCost(row.summary)}</span>
+      {type === 'members' && row.id ? <UserIdentityBadge user={{ id: row.id, name: row.label, avatar_url: row.avatarUrl }} size="sm" avatarOnly /> : <span className="au-avatar" aria-hidden="true">{type === 'projects' ? <Folder size={17} /> : <Users size={17} />}</span>}<span className="au-directory-name"><strong>{row.label}</strong><small>{row.summary.usageCount.toLocaleString('zh-CN')} 次使用 · {row.summary.quoteMissingCount || 0} 笔报价待核</small></span><span className="au-directory-cost">{summaryCost(row.summary)}</span>
     </button></li>)}</ul>
     {!page.rows.length && <p className="au-empty">没有匹配的{type === 'members' ? '成员' : '项目'}，可清除搜索或调整范围。</p>}
     <PaginationControls page={page.page} pageSize={page.pageSize} total={page.total} totalPages={Math.max(1, Math.ceil(page.total / page.pageSize))} label={type === 'members' ? '成员' : '项目'} busy={busy} onPageChange={next => update({ [`${type}_page`]: next }, { pages: false })} />
@@ -118,7 +118,7 @@ export function UsageDirectory({ type, report, search, selectedId, busy, update,
 
 export function UsageCoverageDetails({ report, open, onToggle }: { report: UsageReport; open: boolean; onToggle: (open: boolean) => void }) {
   const incomplete = report.coverage.filter(item => item.status !== 'complete');
-  return <details className="au-section au-coverage" open={open} onToggle={event => onToggle(event.currentTarget.open)}><summary><Info size={15} />来源覆盖{incomplete.length ? ` · ${incomplete.length} 类来源部分接入或未接入` : '与历史依据'}</summary><div className="au-table-scroll"><table className="au-table"><thead><tr><th>来源</th><th>覆盖情况</th><th>记录</th><th>说明</th></tr></thead><tbody>{report.coverage.map(item => <tr key={item.source}><td>{item.label}</td><td>{item.status === 'complete' ? '已接入' : item.status === 'partial' ? '部分接入' : '未接入'}</td><td>{item.total}（原归属 {item.frozen} / 历史 {item.legacy}）</td><td>{item.detail}</td></tr>)}</tbody></table></div><p className="au-muted">未接入不等于没有使用。历史缺失与归属冲突保留原记录，不按当前成员、价格或模板作者补算。</p><p className="au-muted">本次读取：<RelativeTime value={report.dataAsOf} /></p></details>;
+  return <details className="au-section au-coverage" open={open} onToggle={event => onToggle(event.currentTarget.open)}><summary><Info size={15} />来源覆盖{incomplete.length ? ` · ${incomplete.length} 类来源部分接入或未接入` : '与历史依据'}</summary><div className="au-table-scroll"><table className="au-table"><thead><tr><th>来源</th><th>覆盖情况</th><th>记录</th><th>说明</th></tr></thead><tbody>{report.coverage.map(item => <tr key={item.source}><td>{item.label}</td><td>{item.status === 'complete' ? '已接入' : item.status === 'partial' ? '部分接入' : '未接入'}</td><td>{item.total}（原归属 {item.frozen} / 历史 {item.legacy}）</td><td>{item.detail}</td></tr>)}</tbody></table></div><p className="au-muted">未接入不等于没有使用。历史缺失与归属冲突保留原记录；当前参考价不补写历史归属、实扣或实际点数。</p><p className="au-muted">本次读取：<RelativeTime value={report.dataAsOf} /></p></details>;
 }
 
 export function UsageAttention({ report }: { report: UsageReport }) {

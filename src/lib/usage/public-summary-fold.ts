@@ -1,6 +1,6 @@
 import type { UsageFact } from '@/lib/admin/usage-types';
 import { usageCnyMicros, usageDecimalUnits, usageInteger, usageMoneyTotals, usageUnitsText } from '@/lib/admin/usage-money';
-import { preferProvenCnyEvents, usageSourceKey } from './aggregate';
+import { preferProvenCnyEvents, usageQuoteIncluded, usageSourceKey } from './aggregate';
 import type { UsageCashEvent } from './facts';
 import type { UsageCategorySummary, UsagePointsPartDTO, UsageRecordDTO } from './dto';
 
@@ -21,12 +21,19 @@ export class PublicUsageSummaryFold {
   private refunds = new Map<string, bigint>();
   private calculated = BigInt(0);
   private calculatedCount = 0;
+  private quoteMissing = false;
+  private referencePoints = BigInt(0);
+  private referencePointsMissing = false;
   private points = new Map<string, bigint>();
   add(fact: UsageFact, record: UsageRecordDTO, events: UsageCashEvent[]) {
     if (!fact.leaf) return;
     this.leaves++;
-    if (fact.costStatus === 'calculated' && fact.accountingCost) {
-      this.calculated += BigInt(fact.accountingCost.amountCnyMicros); this.calculatedCount++;
+    this.quoteMissing ||= !fact.accountingCost;
+    if (usageQuoteIncluded(fact)) {
+      this.calculated += BigInt(fact.accountingCost!.amountCnyMicros); this.calculatedCount++;
+      const points = usageDecimalUnits(fact.accountingCost!.points, 2);
+      if (points === null) this.referencePointsMissing = true;
+      else this.referencePoints += points;
     }
     for (const field of fields) this.counts.set(field, this.counts.get(field) === null || record[field] === null ? null : this.counts.get(field)! + record[field]!);
     this.pending += Number(['pending', 'unconnected'].includes(fact.costStatus));
@@ -65,11 +72,12 @@ export class PublicUsageSummaryFold {
     };
     const side = (values: typeof chargeOriginal) => values.length ? usageCnyMicros(values) : this.confirmed && basis !== 'UNAVAILABLE' ? '0' : null;
     const netCnyMicros = usageCnyMicros(netOriginal);
+    const calculated = this.calculatedCount || !this.quoteMissing ? this.calculated.toString() : null;
     return { taskCount: this.counts.get('taskCount')!, requestCount: this.leaves ? this.counts.get('requestCount')! : null,
       successfulCount: this.counts.get('successfulCount')!, outputCount: this.counts.get('outputCount')!, availableCount: this.counts.get('availableCount')!,
       cash: { chargeOriginal, refundOriginal, netOriginal, chargeCnyMicros: side(chargeOriginal), refundCnyMicros: side(refundOriginal), netCnyMicros, basis,
-        calculatedCnyMicros: this.calculatedCount ? this.calculated.toString() : null, calculatedCount: this.calculatedCount,
-        accountedCnyMicros: netCnyMicros === null && !this.calculatedCount ? null : (BigInt(netCnyMicros || '0') + this.calculated).toString(),
+        calculatedCnyMicros: calculated, calculatedCount: this.calculatedCount, accountedCnyMicros: calculated,
+        referencePoints: this.referencePointsMissing || !this.calculatedCount && this.quoteMissing ? null : usageUnitsText(this.referencePoints),
         state: this.conflicts || this.selectedConflict ? 'conflict' : this.confirmed ? this.unknown || this.selectedUnknown || basis === 'UNAVAILABLE' ? 'partial' : 'confirmed'
           : this.pendingCost ? 'pending' : 'unavailable' },
       points: { ...part('all'), personal: part('personal'), project: part('project'), unclassified: part('unclassified') },

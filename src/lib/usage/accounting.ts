@@ -1,151 +1,145 @@
 import { Prisma } from '@prisma/client';
 import type { UsageFact } from '@/lib/admin/usage-types';
-import { usageCnyMicros, usageDecimalUnits, usageInteger } from '@/lib/admin/usage-money';
-import { estimateNormalVideoCharge, loadNormalVideoChargeRates, type NormalChargeBill } from '@/lib/costs/normal-video-charge';
-import type { PricingAdminIdentity } from '@/lib/pricing/admin-contract';
-import { multiplyDecimal } from '@/lib/pricing/math';
+import { usageDecimalUnits, usageInteger } from '@/lib/admin/usage-money';
+import type { PricingRule, PricingPolicy } from '@/lib/pricing/types';
+import { multiplyDecimal, roundDecimal, sumDecimal, divideDecimal } from '@/lib/pricing/math';
 import { PricingRuleConflict, selectPricingRule } from '@/lib/pricing/resolve';
-import type { UsageDb } from './database';
+import { getDefaultReferenceSettings, parseReferenceSettings, type ReferencePricingKind, type ReferencePricingSettings } from '@/lib/pricing/reference-contract';
+import { usageDatabase, type UsageDb, type UsageDbSource } from './database';
 
-export type AccountingCost = { amountCnyMicros: string; source: 'asset' | 'asset_rate' | 'frozen_rate' | 'current_rate' | 'recorded_rate' | 'provider_response'; detail: string; revision: string | null };
+export type AccountingCost = {
+  amountCnyMicros: string;
+  source: 'current_rate' | 'historical_reference' | 'type_default' | 'asset' | 'asset_rate' | 'frozen_rate' | 'recorded_rate' | 'provider_response';
+  detail: string; revision: string | null;
+  unitCny?: string; unit?: 'image' | 'second' | 'call'; quantity?: string;
+  points?: string; pointsPerCny?: string; included?: boolean; estimated?: boolean;
+  ruleId?: string | null; mappingRevision?: string;
+};
 export type AccountingRow = Record<string, string | number | bigint | Date | boolean | null>;
-type Rule = { id: string; identity: PricingAdminIdentity; mode: string; baseCny: string | null };
-type Basis = { revision: string | null; rules: Rule[]; qualityRoutes: Record<string, Record<string, string>> };
-const contexts = new WeakMap<UsageDb, Promise<Basis>>();
-const videoRates = new WeakMap<UsageDb, ReturnType<typeof loadNormalVideoChargeRates>>();
+type Rule = PricingRule & { rounding?: string };
+export type CurrentRateBasis = {
+  revision: string | null; rules: Rule[]; qualityRoutes: Record<string, Record<string, string>>;
+  settings: ReferencePricingSettings; pointsPerCny: string | null;
+  standards?: PricingPolicy['standards'];
+};
+export type ReferenceFact = Pick<UsageFact, 'sourceKind' | 'model' | 'kind' | 'status' | 'outputCount'>;
+const contexts = new WeakMap<UsageDb, Promise<CurrentRateBasis>>();
+const positive = (value: unknown) => value !== null && value !== undefined && /^\d+(?:\.\d{1,8})?$/.test(String(value)) && Number(value) > 0;
 
-async function accountingBasis(db: UsageDb): Promise<Basis> {
+/** One public-price context per read snapshot; never read provider credentials or old cash here. */
+export async function readCurrentRateBasis(source: UsageDbSource): Promise<CurrentRateBasis> {
+  const db = usageDatabase(source);
   let context = contexts.get(db);
   if (!context) {
     context = (async () => {
-      // Only public monetary policy fields cross the read-snapshot boundary.
-      const rows = await db.$queryRaw<Array<{ revision: string; id: string; identity: string; mode: string; baseCny: string | null }>>(Prisma.sql`
-        SELECT json_extract(p.value_json, '$.revision') AS revision, json_extract(r.value, '$.id') AS id,
-          json_extract(r.value, '$.identity') AS identity, json_extract(r.value, '$.mode') AS mode,
-          json_extract(r.value, '$.baseCny') AS baseCny
+      const rows = await db.$queryRaw<Array<{ revision: string; standards: string; rule: string }>>(Prisma.sql`
+        SELECT json_extract(p.value_json, '$.revision') AS revision, json_extract(p.value_json, '$.standards') AS standards,
+          json_object('id', json_extract(r.value, '$.id'), 'identity', json_extract(r.value, '$.identity'),
+            'mode', json_extract(r.value, '$.mode'), 'baseCny', json_extract(r.value, '$.baseCny'),
+            'basisKind', json_extract(r.value, '$.basisKind'), 'customPointsPerCny', json_extract(r.value, '$.customPointsPerCny'),
+            'source', json_extract(r.value, '$.source'), 'rounding', json_extract(r.value, '$.rounding')) AS rule
         FROM PlatformSetting p, json_each(CASE WHEN json_valid(p.value_json) THEN p.value_json ELSE '{}' END, '$.rules') r
         WHERE p.key = 'pricing_policy_v1' AND json_extract(p.value_json, '$.schemaVersion') = 1
           AND (json_extract(r.value, '$.source.confirmedAt') IS NOT NULL OR json_extract(r.value, '$.mode') = 'free')`);
-      const defaults = await db.$queryRaw<Array<{ routes: string | null }>>(Prisma.sql`SELECT
-        json_extract(CASE WHEN json_valid(value_json) THEN value_json ELSE '{}' END, '$.qualityRoutes') AS routes
-        FROM PlatformSetting WHERE key = 'image_generation_model_defaults_v1'`);
-      const rules = rows.map(row => ({ id: row.id, identity: JSON.parse(row.identity) as PricingAdminIdentity, mode: row.mode, baseCny: row.baseCny }));
-      if (rules.some(rule => !rule.identity || typeof rule.identity.modelId !== 'string' || !rule.identity.specifications
+      const settings = await db.$queryRaw<Array<{ key: string; value: string | null }>>(Prisma.sql`
+        SELECT key, CASE WHEN key = 'image_generation_model_defaults_v1' THEN json_extract(value_json, '$.qualityRoutes')
+          WHEN key = 'pricing_authoring_v1' THEN json_extract(value_json, '$.globalPointsPerCny') ELSE value_json END AS value
+        FROM PlatformSetting WHERE key IN ('image_generation_model_defaults_v1', 'pricing_authoring_v1', 'usage_reference_pricing_v1')`);
+      const rules = rows.map(row => ({ ...JSON.parse(row.rule), exchangeRate: null } as Rule));
+      if (rules.some(rule => !rule.identity || !rule.identity.specifications || typeof rule.identity.modelId !== 'string'
         || rule.baseCny !== null && !/^\d+(?:\.\d{1,8})?$/.test(rule.baseCny))) throw new Error('usage_accounting_policy_invalid');
-      return { revision: rows[0]?.revision || null, rules, qualityRoutes: defaults[0]?.routes ? JSON.parse(defaults[0].routes) : {} };
+      const standards = rows[0]?.standards ? JSON.parse(rows[0].standards) : { site_base_cny: null, supplier_cost_cny: null };
+      const policy: PricingPolicy = { schemaVersion: 1, revision: rows[0]?.revision || 'unconfigured', rules, standards };
+      const raw = settings.find(row => row.key === 'usage_reference_pricing_v1')?.value;
+      const quality = settings.find(row => row.key === 'image_generation_model_defaults_v1')?.value;
+      return { revision: rows[0]?.revision || null, rules, standards, qualityRoutes: quality ? JSON.parse(quality) : {},
+        settings: raw ? parseReferenceSettings(JSON.parse(raw)) : getDefaultReferenceSettings(policy),
+        pointsPerCny: settings.find(row => row.key === 'pricing_authoring_v1')?.value || standards.site_base_cny };
     })();
     contexts.set(db, context);
   }
   return context;
 }
 
-async function assetRates(db: UsageDb) {
-  let rates = videoRates.get(db);
-  if (!rates) {
-    const groups = ['dreamina-seedance-2-0-260128', 'dreamina-seedance-2-5-260628'].flatMap(model => [false, true].map(referenceVideo => ({
-      model, provider: 'seedance', is_draft: false, reference_video_urls: referenceVideo ? '["reference"]' : null,
-    })));
-    rates = loadNormalVideoChargeRates(groups, async group => {
-      const bills = await db.$queryRaw<NormalChargeBill[]>(Prisma.sql`SELECT
-      provider, model, is_draft,
-      CASE WHEN reference_video_urls IS NOT NULL AND trim(reference_video_urls) NOT IN ('', '[]') THEN '["reference"]' ELSE NULL END AS reference_video_urls,
-      provider_final_amount_micros, provider_official_amount_micros, provider_final_amount_minor, provider_official_amount_minor,
-      json_object('completion_tokens', json_extract(CASE WHEN json_valid(provider_usage_snapshot) THEN provider_usage_snapshot ELSE '{}' END, '$.completion_tokens')) AS provider_usage_snapshot,
-      json_object('source', json_extract(CASE WHEN json_valid(provider_cost_snapshot) THEN provider_cost_snapshot ELSE '{}' END, '$.source')) AS provider_cost_snapshot
-      FROM VideoTask WHERE provider = 'seedance' AND model = ${group.model} AND is_draft = 0 AND local_status = 'succeeded'
-        AND provider_cost_currency = 'USD' AND provider_cost_status IN ('official_confirmed', 'reconciled') AND provider_usage_snapshot IS NOT NULL
-        AND ${group.referenceVideo ? Prisma.sql`reference_video_urls IS NOT NULL AND reference_video_urls NOT IN ('', '[]')`
-          : Prisma.sql`(reference_video_urls IS NULL OR reference_video_urls IN ('', '[]'))`}
-      ORDER BY provider_cost_confirmed_at DESC, created_at DESC LIMIT 8`);
-      // The read-only SQLite protocol preserves INTEGER as bigint, whereas the
-      // asset helper receives bounded Prisma Ints. Normalize at this boundary.
-      for (const bill of bills) for (const key of ['provider_final_amount_micros', 'provider_official_amount_micros', 'provider_final_amount_minor', 'provider_official_amount_minor'] as const) {
-        if (bill[key] !== null) bill[key] = Number(bill[key]);
-      }
-      return bills;
-    });
-    videoRates.set(db, rates);
-  }
-  return rates;
+function referenceKind(fact: ReferenceFact, row: AccountingRow): ReferencePricingKind {
+  return fact.kind === 'image' ? 'image' : fact.kind === 'text' ? 'text' : fact.kind === 'cutout' ? 'cutout'
+    : row.provider === 'h3' ? 'h3' : row.provider === 'volcengine_mediakit' ? 'enhance' : 'video';
 }
 
-export function calculateRateCost(fact: UsageFact, row: AccountingRow, basis: Basis): AccountingCost | null {
-  if (fact.status !== 'succeeded' || !fact.outputCount) return null;
-  const model = fact.model || '';
-  const image = fact.sourceKind === 'image_task';
-  const quantity = image ? '1' : String(row.frozen_quantity ?? row.duration ?? '');
-  if (!/^\d+(?:\.\d{1,8})?$/.test(quantity) || Number(quantity) <= 0) return null;
-  // Frozen points and actual-bill reservations are not monetary cost evidence.
-  if (row.frozen_billing_mode === 'fixed' && ['follow', 'custom', 'free'].includes(String(row.frozen_mode))) {
-    const base = row.frozen_mode === 'free' ? '0' : row.frozen_base;
-    if (typeof base === 'string' && /^\d+(?:\.\d{1,8})?$/.test(base)) {
-      const amount = usageDecimalUnits(multiplyDecimal([base, quantity]), 6);
-      if (amount !== null) return { amountCnyMicros: amount.toString(), source: 'frozen_rate', revision: String(row.frozen_revision || ''), detail: `任务冻结费率：¥${base} × ${quantity}${image ? ' 张' : ' 秒'}` };
-    }
-  }
-  if (row.is_draft || row.is_upgrade || !image && !['seedance', 'volcengine_ark', 'volcengine_mediakit'].includes(String(row.provider))) return null;
-  const quality = String(row.quality || '');
-  const historicalChannel = typeof row.channel_id === 'string' ? row.channel_id : null;
-  const channel = image ? historicalChannel || basis.qualityRoutes[model]?.[quality] : String(row.provider);
-  const kind = image ? 'image' : row.provider === 'volcengine_mediakit' ? 'enhance' : 'video';
-  if (kind === 'enhance' && (!Number.isFinite(Number(row.fps)) || Number(row.fps) <= 0
-    || !['standard', 'professional'].includes(String(row.tool_version)))) return null;
-  const specifications: Record<string, string> = image ? { quality, resolution: String(row.output_size || '') } : {
-    resolution: String(row.resolution || ''), referenceVideo: row.reference_video_urls ? 'present' : 'none', pricingPurpose: 'standard',
-    toolVersion: String(row.tool_version || ''), fpsTier: Number(row.fps) > 60 ? 'gt60' : Number(row.fps) > 30 ? 'gt30' : 'lte30',
+/** Current valuation only. Generation/settlement continue to use their original frozen contracts. */
+export function calculateRateCost(fact: ReferenceFact, row: AccountingRow, basis: CurrentRateBasis): AccountingCost | null {
+  const kind = referenceKind(fact, row), model = fact.model || '';
+  const fallback = basis.settings.defaults[kind];
+  const eligible = basis.rules.filter(rule => rule.identity.kind === kind && rule.identity.billingMode === 'fixed'
+    && (rule.mode === 'free' || ['follow', 'custom'].includes(rule.mode) && rule.baseCny !== null));
+  const quality = String(row.quality || ''), channel = String(row.channel_id || row.provider || '');
+  const specifications: Record<string, string> = kind === 'image' ? { quality, resolution: String(row.output_size || '') } : {
+    resolution: String(row.resolution || ''), referenceVideo: row.reference_video_urls ? 'present' : 'none',
+    pricingPurpose: row.is_upgrade ? 'draft_upgrade' : row.is_draft ? 'draft' : 'standard',
+    toolVersion: String(row.tool_version || ''),
+    ...(positive(row.fps) ? { fpsTier: Number(row.fps) > 60 ? 'gt60' : Number(row.fps) > 30 ? 'gt30' : 'lte30' } : {}),
   };
-  const candidates = basis.rules.filter(rule => rule.identity.kind === kind && rule.identity.modelId === model
-    && rule.identity.billingMode === 'fixed' && (!channel || rule.identity.channelId === channel));
-  const selected: Rule[] = [];
-  for (const channelId of Array.from(new Set(candidates.map(rule => rule.identity.channelId)))) {
-    try {
-      const rule = selectPricingRule(candidates, { kind, channelId, modelId: model, billingMode: 'fixed', unit: image ? 'image' : 'second', specifications });
-      if (rule) selected.push(rule);
-    } catch (error) { if (error instanceof PricingRuleConflict) return null; throw error; }
+  let ambiguous = false;
+  const find = (channelId: string): Rule | null => {
+    const sample = eligible.find(rule => rule.identity.modelId === model && rule.identity.channelId === channelId);
+    if (!sample) return null;
+    try { return selectPricingRule(eligible, { ...sample.identity, specifications }); }
+    catch (error) { if (error instanceof PricingRuleConflict) { ambiguous = true; return null; } throw error; }
+  };
+  let rule = channel ? find(channel) : null;
+  const routed = basis.qualityRoutes[model]?.[quality];
+  if (!rule && routed) rule = find(routed);
+  let source: AccountingCost['source'] = 'current_rate';
+  if (!rule) {
+    const exact = Array.from(new Set(eligible.filter(item => item.identity.modelId === model).map(item => item.identity.channelId)))
+      .map(find).filter((item): item is Rule => !!item);
+    if (exact.length === 1 || exact.length > 1 && new Set(exact.map(item => item.mode === 'free' ? '0' : item.baseCny)).size === 1) rule = exact[0];
   }
-  const amounts = selected.map(rule => rule.mode === 'free' ? '0' : ['follow', 'custom'].includes(rule.mode) ? rule.baseCny : null);
-  if (!amounts.length || amounts.some(amount => amount === null) || new Set(amounts).size !== 1) return null;
-  const amount = usageDecimalUnits(multiplyDecimal([amounts[0]!, quantity]), 6);
-  return amount === null ? null : { amountCnyMicros: amount.toString(), source: 'current_rate', revision: basis.revision,
-    detail: `当前已确认费率：¥${amounts[0]} × ${quantity}${image ? ' 张' : ' 秒'}；非供应商实扣` };
+  const same = eligible.filter(item => item.identity.modelId === model);
+  if (ambiguous) return null;
+  if (!rule && same.length) {
+    rule = same.find(item => item.id === fallback.ruleId) || (same.length === 1 ? same[0] : null);
+    if (rule) source = 'historical_reference';
+  }
+  if (!rule) {
+    const mapped = basis.settings.models.find(item => item.kind === kind && item.model === model);
+    rule = mapped ? eligible.find(item => item.id === mapped.ruleId) || null : null;
+    if (rule) source = 'historical_reference';
+  }
+  if (!rule) { rule = eligible.find(item => item.id === fallback.ruleId) || null; source = 'type_default'; }
+  if (rule && channel && rule.identity.channelId !== channel) source = 'historical_reference';
+  let unit: 'image' | 'second' | 'call' = rule ? rule.identity.unit === 'image' ? 'image' : 'second' : fallback.unit;
+  let base = rule ? rule.mode === 'free' ? '0' : rule.baseCny : fallback.amountCny;
+  let quantity = unit === 'image' || unit === 'call' ? '1' : positive(row.duration) ? String(row.duration) : fallback.defaultQuantity;
+  let estimated = source !== 'current_rate' || unit === 'second' && !positive(row.duration);
+  let tokenDetail = '';
+  const inputTokens = usageInteger(row.input_tokens), outputTokens = usageInteger(row.output_tokens);
+  if (kind === 'text' && inputTokens !== null && inputTokens >= BigInt(0) && outputTokens !== null && outputTokens >= BigInt(0)
+    && fallback.tokenInputCny != null && fallback.tokenOutputCny != null) {
+    base = sumDecimal([divideDecimal(multiplyDecimal([inputTokens.toString(), fallback.tokenInputCny]), '1000000', 8),
+      divideDecimal(multiplyDecimal([outputTokens.toString(), fallback.tokenOutputCny]), '1000000', 8)]);
+    quantity = '1'; unit = 'call'; estimated = false;
+    tokenDetail = `输入${row.input_tokens}×¥${fallback.tokenInputCny}/百万token＋输出${row.output_tokens}×¥${fallback.tokenOutputCny}/百万token`;
+  }
+  if (base === null || !/^\d+(?:\.\d{1,8})?$/.test(base) || !positive(quantity)) return null;
+  const exactCny = multiplyDecimal([base, quantity]), micros = usageDecimalUnits(exactCny, 6);
+  if (micros === null) return null;
+  const rate = rule && rule.mode !== 'free' ? rule.mode === 'follow' ? basis.standards?.[rule.basisKind] ?? basis.pointsPerCny
+    : rule.customPointsPerCny || basis.pointsPerCny : basis.pointsPerCny;
+  const included = fact.outputCount > 0 && ['succeeded', 'completed', 'received', 'adopted', 'recorded'].includes(fact.status);
+  const unitLabel = unit === 'image' ? '张' : unit === 'second' ? '秒' : '次';
+  return { amountCnyMicros: micros.toString(), source, revision: basis.revision,
+    unitCny: base, unit, quantity, ruleId: rule?.id || null, mappingRevision: basis.settings.revision,
+    ...(rate && positive(rate) ? { points: roundDecimal(multiplyDecimal([exactCny, rate]), rule?.rounding === 'half_up_integer' ? 0 : 1, 'half_up'), pointsPerCny: rate } : {}),
+    included, estimated,
+    detail: `${estimated ? '历史参考折算' : '当前费率'}：${tokenDetail || `¥${base} × ${quantity}${unitLabel}`}；${included ? '计入当前价核算' : '仅参考标价，不计入已发生费用'}；非历史实扣${kind === 'h3' ? '，不含算力分摊' : ''}` };
 }
 
 export async function attachAccountingCosts(db: UsageDb, items: Array<{ fact: UsageFact; raw: AccountingRow }>) {
-  const missing = items.filter(({ fact }) => fact.leaf && ['video_task', 'image_task'].includes(fact.sourceKind)
-    && fact.status === 'succeeded' && fact.outputCount > 0 && fact.costStatus !== 'conflict' && fact.confirmedCost.length === 0);
-  if (!missing.length) return;
-  const basis = await accountingBasis(db);
-  const rates = missing.some(({ fact }) => fact.sourceKind === 'video_task') ? await assetRates(db) : new Map<string, number>();
-  for (const { fact, raw } of missing) {
-    let cost: AccountingCost | null = null;
-    if (fact.sourceKind === 'video_task') {
-      const micros = usageInteger(raw.provider_final_amount_micros ?? raw.provider_official_amount_micros);
-      const minor = usageInteger(raw.provider_final_amount_minor ?? raw.provider_official_amount_minor);
-      const amount = micros ?? (minor === null ? null : minor * BigInt(10000));
-      const cny = amount !== null && amount >= BigInt(0) ? usageCnyMicros([{ currency: String(raw.provider_cost_currency), amountMicros: amount.toString() }]) : null;
-      if (cny !== null) cost = { amountCnyMicros: cny, source: 'asset', revision: null, detail: '资产管理已记录金额；供应商原账证明仍单独保留' };
-      else {
-        const estimate = estimateNormalVideoCharge({ provider: String(raw.provider), model: fact.model || '', is_draft: Boolean(raw.is_draft),
-          reference_video_urls: raw.reference_video_urls as string | null, provider_usage_snapshot: raw.provider_usage_snapshot as string | null,
-          raw_status_response: raw.raw_status_response as string | null }, rates);
-        const amount = estimate ? usageCnyMicros([{ currency: estimate.currency, amountMicros: String(estimate.amountMicros) }]) : null;
-        if (estimate && amount !== null) cost = { amountCnyMicros: amount, source: 'asset_rate', revision: null,
-          detail: `资产管理同口径：${estimate.completionTokens} completion tokens × US$${estimate.usdPerMillionTokens}/百万 tokens；非供应商实扣` };
-      }
-    }
-    cost ||= calculateRateCost(fact, raw, basis);
-    if (!cost && fact.sourceKind === 'image_task') {
-      const usd = usageDecimalUnits(raw.provider_cost_usd, 6);
-      const amount = usd !== null && usd > BigInt(0) ? usageCnyMicros([{ currency: 'USD', amountMicros: usd.toString() }]) : null;
-      if (amount !== null) cost = { amountCnyMicros: amount, source: 'recorded_rate', revision: null,
-        detail: `历史任务保存的美元参考单价：US$${raw.provider_cost_usd}/张；按站内展示汇率折算，非供应商实扣` };
-    }
-    if (!cost && raw.provider === 'h3' && raw.h3_billing_model === 'free_local'
-      && (raw.h3_billing_charged === false || usageInteger(raw.h3_billing_charged) === BigInt(0))
-      && usageInteger(raw.h3_billing_cost) === BigInt(0)) {
-      cost = { amountCnyMicros: '0', source: 'provider_response', revision: null,
-        detail: '原H3响应明确本地免费：API费用¥0；不包含服务器、显卡和电费成本' };
-    }
-    if (cost) { fact.accountingCost = cost; fact.costStatus = 'calculated'; }
+  if (!items.some(({ fact }) => fact.leaf)) return;
+  const basis = await readCurrentRateBasis(db);
+  for (const { fact, raw } of items) if (fact.leaf) {
+    const quote = calculateRateCost(fact, raw, basis);
+    if (quote) fact.accountingCost = quote;
   }
 }

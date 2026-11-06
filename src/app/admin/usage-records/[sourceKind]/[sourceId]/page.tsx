@@ -10,7 +10,7 @@ import { usageCashLedgerHref, usageRecordHref } from '@/lib/admin/usage-record-l
 import { sanitizeReturnTo } from '@/lib/navigation/return-to';
 import { RelativeTime } from '@/components/RelativeTime';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
-import { ATTRIBUTION_LABELS, COST_LABELS, SOURCE_LABELS, STATUS_LABELS, money, originalMoney, points } from '@/components/admin-usage/format';
+import { ATTRIBUTION_LABELS, COST_LABELS, SOURCE_LABELS, STATUS_LABELS, money, originalMoney, points, quoteLabel } from '@/components/admin-usage/format';
 import { release } from '@/lib/release';
 import '../../../admin-usage.css';
 
@@ -56,8 +56,12 @@ export default async function UsageRecordPage({ params, searchParams }: {
       <div><dt>操作者 / 付费主体</dt><dd>{record.actorUserId || '未记录'} / {record.billingSubject || '未记录'}</dd></div>
       <div><dt>模型 / 供应商 / 规格</dt><dd>{record.model || '未记录'} / {record.provider || '未记录'} / {record.resolution || '未记录'}</dd></div>
       <div><dt>执行 / 结果文件</dt><dd>{STATUS_LABELS[record.status] || record.status} / {record.resultReady === null ? '文件状态未接入' : record.resultReady ? '文件已登记' : '文件未就绪'}</dd></div>
-      <div><dt>供应商成本</dt><dd>{COST_LABELS[record.costStatus]} · {originalMoney(record.confirmedCost)}{record.confirmedCostCnyMicros !== null ? `（展示折算 ${money(record.confirmedCostCnyMicros)}）` : ''}</dd></div>
-      {record.accountingCost && <div><dt>核算费用</dt><dd>{money(record.accountingCost.amountCnyMicros)} · {record.accountingCost.detail}</dd></div>}
+      <div><dt>供应商成本</dt><dd>{record.leaf ? <>{COST_LABELS[record.costStatus]} · {originalMoney(record.confirmedCost)}{record.confirmedCostCnyMicros !== null ? `（展示折算 ${money(record.confirmedCostCnyMicros)}）` : ''}</> : '按子任务核算'}</dd></div>
+      {record.accountingCost && <>
+        <div><dt>{quoteLabel(record)}</dt><dd>{money(record.accountingCost.amountCnyMicros)} · 折合点数 {points(record.accountingCost.points)} · {record.accountingCost.detail}</dd></div>
+        <div><dt>单价 / 单位 / 数量</dt><dd>¥{record.accountingCost.unitCny ?? '待核'} / {record.accountingCost.unit ?? '待核'} × {record.accountingCost.quantity ?? '待核'}</dd></div>
+        <div><dt>费率 / 映射版本</dt><dd>{record.accountingCost.revision || '未记录'} / {record.accountingCost.mappingRevision || '未记录'}</dd></div>
+      </>}
       <div><dt>点数</dt><dd>已实扣 {points(record.chargedPoints)} · 仍预留 {points(record.reservedPoints)} · 已释放预留 {points(record.releasedPoints)} · 已退还实扣 {points(record.refundedPoints)}</dd></div>
       <div><dt>原账务凭据</dt><dd>{record.ledgerIds.length ? record.ledgerIds.map(id => {
         const href = usageCashLedgerHref(id);
@@ -68,7 +72,7 @@ export default async function UsageRecordPage({ params, searchParams }: {
       {record.href && !record.href.startsWith('/admin/usage-records/') && <div><dt>业务原入口</dt><dd><Link className="au-link" href={record.href}>查看原任务</Link></dd></div>}
     </dl></section>
     <section className="au-section"><div className="au-section-head"><h2>关联子记录</h2><span className="au-muted">共 {total} 条</span></div>
-      <div className="au-table-scroll"><table className="au-table"><thead><tr><th>来源</th><th>原记录</th><th>首次发生</th><th>执行状态</th><th>费用状态</th></tr></thead><tbody>{children.map(child => <tr key={child.sourceKind + child.sourceId}><td>{SOURCE_LABELS[child.sourceKind]}</td><td><Link className="au-link" href={`${usageRecordHref(child.sourceKind, child.sourceId)}?return_to=${encodeURIComponent(returnTo)}`}>{child.sourceId}</Link></td><td><RelativeTime value={child.occurredAt} /></td><td>{STATUS_LABELS[child.status] || child.status}</td><td>{COST_LABELS[child.costStatus]}</td></tr>)}{!children.length && <tr><td colSpan={5}>暂无本站已存关联子记录</td></tr>}</tbody></table></div>
+      <div className="au-table-scroll"><table className="au-table"><thead><tr><th>来源</th><th>原记录</th><th>首次发生</th><th>执行状态</th><th>当前价核算 / 折合点数</th></tr></thead><tbody>{children.map(child => <tr key={child.sourceKind + child.sourceId}><td>{SOURCE_LABELS[child.sourceKind]}</td><td><Link className="au-link" href={`${usageRecordHref(child.sourceKind, child.sourceId)}?return_to=${encodeURIComponent(returnTo)}`}>{child.sourceId}</Link></td><td><RelativeTime value={child.occurredAt} /></td><td>{STATUS_LABELS[child.status] || child.status}</td><td>{child.leaf ? <>{money(child.accountingCost?.amountCnyMicros)} · {points(child.accountingCost?.points)} 点<br /></> : null}{quoteLabel(child)}</td></tr>)}{!children.length && <tr><td colSpan={5}>暂无本站已存关联子记录</td></tr>}</tbody></table></div>
       {total > 30 && <nav className="au-actions" aria-label="关联记录分页">{page > 1 && <Link className="au-link" href={childHref(page - 1)}>上一页</Link>}<span>{page} / {Math.ceil(total / 30)}</span>{page * 30 < total && <Link className="au-link" href={childHref(page + 1)}>下一页</Link>}</nav>}
     </section>
   </main>;

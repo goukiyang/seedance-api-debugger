@@ -7,6 +7,17 @@ const ZERO = BigInt(0);
 export const usagePublicType = (fact: UsageFact): UsageType => fact.kind === 'video' ? 'video' : fact.kind === 'image' ? 'image' : 'other';
 export const usageSourceKey = (fact: UsageFact) => `${fact.sourceKind}:${fact.sourceId}`;
 
+export function usageQuoteIncluded(fact: UsageFact): boolean {
+  return fact.leaf && !!fact.accountingCost && (fact.accountingCost.included ?? fact.costStatus === 'calculated');
+}
+
+export function usageReferencePoints(facts: UsageFact[]): string | null {
+  const included = facts.filter(usageQuoteIncluded);
+  if (!included.length) return facts.some(fact => fact.leaf && !fact.accountingCost) ? null : '0';
+  const values = included.map(fact => usageDecimalUnits(fact.accountingCost!.points, 2));
+  return values.some(value => value === null) ? null : usageUnitsText((values as bigint[]).reduce((sum, value) => sum + value, ZERO));
+}
+
 export function preferProvenCnyEvents(events: UsageCashEvent[]): UsageCashEvent[] {
   const groups = new Map<string, UsageCashEvent[]>();
   for (const event of events) {
@@ -50,13 +61,14 @@ export function publicUsageCash(facts: UsageFact[], events: UsageCashEvent[]): U
   const basis: UsageCashDTO['basis'] = !currencies.size || Array.from(currencies).some(currency => !['CNY', 'USD'].includes(currency)) ? 'UNAVAILABLE'
     : currencies.size === 2 ? 'MIXED_CNY_USD' : currencies.has('USD') ? 'USD_CNY_DISPLAY' : 'CNY';
   const known = confirmed.length > 0;
-  const calculated = leaves.filter(fact => fact.costStatus === 'calculated' && fact.accountingCost);
-  const calculatedCnyMicros = calculated.length ? calculated.reduce((sum, fact) => sum + BigInt(fact.accountingCost!.amountCnyMicros), ZERO).toString() : null;
+  const calculated = leaves.filter(usageQuoteIncluded);
+  const calculatedCnyMicros = calculated.length || !leaves.some(fact => !fact.accountingCost)
+    ? calculated.reduce((sum, fact) => sum + BigInt(fact.accountingCost!.amountCnyMicros), ZERO).toString() : null;
   const netCnyMicros = usageCnyMicros(netOriginal);
   const emptySide = (values: ReturnType<typeof money>) => values.length ? usageCnyMicros(values) : known && basis !== 'UNAVAILABLE' ? '0' : null;
   return { chargeOriginal, refundOriginal, netOriginal,
-    calculatedCnyMicros, calculatedCount: calculated.length,
-    accountedCnyMicros: netCnyMicros === null && calculatedCnyMicros === null ? null : (BigInt(netCnyMicros || '0') + BigInt(calculatedCnyMicros || '0')).toString(),
+    calculatedCnyMicros, calculatedCount: calculated.length, referencePoints: usageReferencePoints(facts),
+    accountedCnyMicros: calculatedCnyMicros,
     chargeCnyMicros: emptySide(chargeOriginal), refundCnyMicros: emptySide(refundOriginal), netCnyMicros, basis,
     state: conflicts.size || selected.some(event => event.status === 'conflict') ? 'conflict'
       : known ? unknown || selected.some(event => event.status !== 'confirmed') || basis === 'UNAVAILABLE' ? 'partial' : 'confirmed'

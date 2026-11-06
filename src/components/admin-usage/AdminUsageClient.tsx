@@ -94,6 +94,29 @@ export default function AdminUsageClient({ viewerId, view, support, management }
   useEffect(() => { if (expanded.includes(supportId)) setSupportVisited(true); }, [expanded, supportId]);
 
   useEffect(() => {
+    const refresh = () => { if (current.current.viewerId === viewerId) setReload(value => value + 1); };
+    const pricingChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ ownerId?: string }>).detail;
+      if (!detail?.ownerId || detail.ownerId === viewerId) refresh();
+    };
+    const storageChanged = (event: StorageEvent) => {
+      if (event.key !== 'sd2-pricing-revision' || !event.newValue) return;
+      let owner: string | undefined;
+      try { owner = JSON.parse(event.newValue)?.ownerId; } catch { /* Plain revision signals are also supported. */ }
+      if (!owner || owner === viewerId) refresh();
+    };
+    const visible = () => { if (document.visibilityState === 'visible') refresh(); };
+    window.addEventListener('pricing-reference-updated', pricingChanged);
+    window.addEventListener('storage', storageChanged);
+    document.addEventListener('visibilitychange', visible);
+    return () => {
+      window.removeEventListener('pricing-reference-updated', pricingChanged);
+      window.removeEventListener('storage', storageChanged);
+      document.removeEventListener('visibilitychange', visible);
+    };
+  }, [viewerId]);
+
+  useEffect(() => {
     if (search === null) return;
     const controller = new AbortController();
     const requestEpoch = ++epoch.current;
@@ -215,7 +238,7 @@ export default function AdminUsageClient({ viewerId, view, support, management }
     {search !== null && <UsageFilters onCatalogChange={() => setReload(value => value + 1)} search={search} view={view} report={report} busy={busy} stale={!currentReport} update={update} reset={state.reset} advancedOpen={expanded.includes('filters')} onAdvanced={open => toggleExpanded('filters', open)} />}
     <div className="au-read-meta" role="status" aria-live="polite"><span>{busy ? report ? '正在更新，以下为上次读取结果。' : '正在读取使用记录…' : error ? report ? '本次读取未完成，以下仍为上次结果。' : '本次读取未完成。' : report ? <>数据更新于 <RelativeTime value={report.dataAsOf} /></> : '尚未取得报表。'}</span><button className="au-text-button" type="button" onClick={() => { state.preserveLayout(); setReload(value => value + 1); }} disabled={busy || search === null}><RefreshCw size={14} />重新读取</button></div>
     {error && <div className="au-read-error" role="status"><p>{error}</p><div className="au-actions"><button className="btn btn-secondary" type="button" onClick={() => setReload(value => value + 1)} disabled={busy}>重试读取</button>{readStatus === 400 && <button className="au-text-button" type="button" onClick={state.reset}>重置分析范围</button>}{(readStatus === 401 || readStatus === 403) && <Link className="au-link" href="/login">前往登录</Link>}</div></div>}
-    {(exportMessage || exportCutoff) && <div className="au-export-status" role="status"><span>{exportMessage}</span>{exportCutoff && <span>本次导出截至 <RelativeTime value={exportCutoff} /></span>}{exportedSummary && <span>文件汇总：{exportedSummary.usageCount.toLocaleString('zh-CN')} 次使用 · 费用合计 {summaryCost(exportedSummary)} · 已实扣 {points(exportedSummary.chargedPoints)} 点</span>}</div>}
+    {(exportMessage || exportCutoff) && <div className="au-export-status" role="status"><span>{exportMessage}</span>{exportCutoff && <span>本次导出截至 <RelativeTime value={exportCutoff} /></span>}{exportedSummary && <span>文件汇总：{exportedSummary.usageCount.toLocaleString('zh-CN')} 次使用 · 当前价核算 {summaryCost(exportedSummary)} · 折合点数 {points(exportedSummary.referencePoints)} 点</span>}</div>}
     {!report && !error && <div className="au-initial-loading"><LoadingSkeleton label="正在读取全量使用分析" /></div>}
     {report && search !== null && <div className={`au-report${!currentReport ? ' au-report-stale' : ''}`} aria-busy={busy} onClickCapture={event => { if (!currentReport) { event.preventDefault(); event.stopPropagation(); } }} onKeyDownCapture={event => { if (!currentReport && ['Enter', ' '].includes(event.key)) { event.preventDefault(); event.stopPropagation(); } }}>
       {view === 'overview' ? <>
