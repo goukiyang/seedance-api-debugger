@@ -56,8 +56,9 @@ async function run() {
       }
       evidence.push('G11: real helper preserves normal/IP/H3 legacy formulas and every enhancement price group; low resolutions retain their original group');
       let snapshot = await getAdminPricingSnapshot(actor, tx);
-      const save = async (action: PricingAdminAction) => {
-        const input: PricingAdminPreviewInput = { expectedRevision: snapshot.revision, catalogFingerprint: snapshot.catalogFingerprint, action };
+      const save = async (action: PricingAdminAction, modern = false) => {
+        const input: PricingAdminPreviewInput = { expectedRevision: snapshot.revision, catalogFingerprint: snapshot.catalogFingerprint, action,
+          ...(modern ? { expectedAuthoringRevision: snapshot.authoring!.revision } : {}) };
         const preview = await previewAdminPricing(actor, input, tx);
         const operation = await saveAdminPricing(actor, { ...input, operationId: randomUUID(), previewToken: preview.previewToken }, tx);
         assert.equal(operation.state, 'succeeded'); assert.ok(operation.snapshot); snapshot = operation.snapshot!;
@@ -80,7 +81,9 @@ async function run() {
       assert.equal(current.pricing.estimatedCost, 0.8); assert.equal(current.revision, snapshot.revision);
       assert.equal((await quoteVideoPricing(ip, tx)).pricing.estimatedCost, 0.8);
       assert.equal((await quoteVideoPricing(h3, tx)).pricing.estimatedCost, 0.3);
-      assert.equal((await quoteVideoPricing(enhance, tx)).pricing.estimatedCost, 0.5);
+      const monetaryEnhance = await quoteVideoPricing(enhance, tx);
+      assert.equal(monetaryEnhance.pricing.estimatedCost, 0.3);
+      assert.equal(monetaryEnhance.quantity, '2.2', 'Monetary enhancement uses measured duration independently of point rounding');
       assert.throws(() => requireVideoPricingRevision(current, undefined));
       assert.throws(() => requireVideoPricingRevision(current, 'old-revision'));
       await assertVideoPricingAcceptance(current, current.revision, tx);
@@ -115,7 +118,8 @@ async function run() {
       assert.deepEqual(calculateEstimatedCost('720p', 5, normal.model), legacy.pricing, 'synchronous legacy function remains unchanged');
       evidence.push('G13/G21: changed current revision rejects stale creation while the accepted frozen contract remains unchanged');
       const oldEnhance = (await quoteVideoPricing(enhance, tx)).charge!;
-      assert.equal(oldEnhance.quantity, '3', 'Previously adopted tenth-point contracts retain ceil-second metering');
+      assert.equal(oldEnhance.quantity, '2.2', 'New monetary contracts retain exact duration without an integer-rounding marker');
+      const historicCeilEnhance = { ...oldEnhance, quantity: '3' };
       await assert.rejects(() => quoteVideoPricing({ ...enhance, fps: null, sourceFps: 60, sourceDuration: 2.2 }, tx),
         { code: 'pricing_scope_unmatched' }, 'New source facts must not bypass an unmatched partially adopted scope');
       const enhanceRows = snapshot.rows.filter(row => row.identity.kind === 'enhance');
@@ -152,12 +156,29 @@ async function run() {
         'Explicit output FPS overrides source FPS, not the source duration');
       assert.deepEqual(enhanceVideoSourcePricing({ raw_status_response: '{' }), { sourceDuration: undefined, sourceFps: undefined });
       await assert.rejects(() => quoteVideoPricing({ ...estimateInput, fps: null }, tx), /帧率尚未确认/);
-      assert.equal(frozenPricingCredits(oldEnhance).credits, 0.5, 'Adopting public RMB prices never recharges a prior frozen task');
+      assert.equal(frozenPricingCredits(oldEnhance).credits, 0.3, 'Adopting public RMB prices never recharges a prior frozen task');
+      assert.equal(frozenPricingCredits(historicCeilEnhance).credits, 0.5, 'Historical ceil-second frozen contracts retain their original quantity');
       const preview = await previewAdminPricing(actor, { expectedRevision: snapshot.revision,
         catalogFingerprint: snapshot.catalogFingerprint, action: { kind: 'save', changes: { rows: [] } },
         scenarios: [{ rowId: exactEnhance.charge!.ruleId, quantity: '2.2' }] }, tx);
       assert.equal(preview.scenarios?.[0].currentCredits, '6', 'Admin preview and accepted task use the same metering');
       evidence.push('Public enhancement adoption: thirty scopes, millisecond estimates and final integer rounding agree with the admin preview; prior frozen contracts remain unchanged');
+      await save({ kind: 'save', changes: { authoring: { globalPointsPerCny: '100' },
+        rows: enhanceRows.map(row => ({ id: row.id, authoringRateMode: 'follow_global' })) } }, true);
+      const scaledInput = { expectedRevision: snapshot.revision, expectedAuthoringRevision: snapshot.authoring!.revision,
+        catalogFingerprint: snapshot.catalogFingerprint, action: { kind: 'save' as const, changes: {
+          authoring: { globalPointsPerCny: '10' }, rows: [],
+        } }, scenarios: [{ rowId: exactEnhance.charge!.ruleId, quantity: '2.2' }] };
+      const scaledPreview = await previewAdminPricing(actor, scaledInput, tx);
+      const scaledOperation = await saveAdminPricing(actor, { ...scaledInput, operationId: randomUUID(), previewToken: scaledPreview.previewToken }, tx);
+      assert.equal(scaledOperation.state, 'succeeded'); snapshot = scaledOperation.snapshot!;
+      const scaledEnhance = await quoteVideoPricing(estimateInput, tx);
+      assert.equal(scaledEnhance.quantity, '2.2');
+      assert.equal(scaledEnhance.pricing.estimatedCost, 0.6);
+      assert.equal(scaledPreview.scenarios?.[0].adjustedCredits, '0.6');
+      assert.equal((await quoteVideoPricing({ ...estimateInput, ...sourceFacts, fps: null, duration: 3 }, tx)).pricing.estimatedCost, 1.1);
+      assert.equal(frozenPricingCredits(exactEnhance.charge!).credits, 6, 'Scaling future prices preserves accepted integer contracts');
+      evidence.push('RATE-10 enhancement: preview and runtime keep millisecond duration and measured FPS at 10 points/CNY; original frozen integer and ceil-second contracts retain their prices');
       completed = true; throw rolledBack;
     }, { maxWait: 10000, timeout: 120000 });
   } catch (error) { if (error !== rolledBack) throw error; }
