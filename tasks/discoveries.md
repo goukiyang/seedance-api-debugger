@@ -46,3 +46,8 @@
 - 小修沿既有授权及项目工程检查执行；结构性、大范围及影响不明事项先出方案等用户确认。功能验收仍由用户手动完成，不以构建、推送或健康检查冒充通过。
 
 - **D-20261104-TEMPLATE-MARK-LIST-SCALE｜个人收藏列表先全量解析再分页｜待核线索 / P3**：`/api/content-reactions` 的模板组织列表沿 `listReactions` 先读取本账号全部有效标记，逐条 `resolveReactionContent` 后再截取页；分组统计也读本账号模板标记。实现事实已核，当前收藏数量、请求耗时和瓶颈未测，不能判成已发生的性能故障，也不把它归因于本次统一标记。CP01/ARCH03封面目录的有限SQL分页仍保留。本轮不扩为重构；后续如列表卡顿，先固定真实账号、标记量、权限条件，测一次请求耗时/查询数，再决定是否将组织列表接入相同授权投影与分页，不能先分页后漏权限/搜索结果。来源：TEMPLATE-MARK01，`src/lib/content-reactions/service.ts:listReactions`、`template-favorites.ts:favoriteOrganization`；未做浏览器或生产规模测试。
+
+
+## D-20261106-WORKSPACE-V2-CATALOG｜同站维护任务已定位的作品读取缺陷
+
+已确认缺陷（来源：作品修复线程原证）：合法`studio_shared_reproduction_v1:workspace:<moduleId>`的v2 taskSettings被旧catalogVisibilitySql按全部v1权限快照解析，导致作品读取503；本轮私有测试模块沿正常业务API触发，无越权或无效设置证据。现有作品维护任务负责共享读取器/相容guard修复，本轮保留设置、原号和账，不删除数据绕过。[原作品单](todo/2026-11-02-team-works-implementation.md)接续，实际修复/发布由该单记录；不扩大为全站重构。
