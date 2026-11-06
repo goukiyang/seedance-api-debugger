@@ -1,3 +1,9 @@
+<!-- ALL-MODELS-CONNECTIVITY-20261106 -->
+## MODEL-ALL01 全部模型连通与修复（2026-11-06）
+
+[本次工单](todo/2026-11-06-all-model-connectivity.md)：范围仅生图。共享v0.134.8已含合法0.6/0.7固定点数修复；Banana2.1、2.5 Flare、Sunburst最高真实出图/原PNG解码，结算共6.6点。Pro及Sunburst中等原号待核，预留共1.2点、未重发；GPT2停用，2.6缺通道/价格/许可，旧Banana2仅历史。另修模型下拉误用当前通道及响应证据root软链相容，8bfffee05待共享发布；22项真实DTO/JSX渲染与私有文件系统检查通过，不冒全测通。范围误判前两视频已结算48.2点，文字费用未核，不计图片成绩。
+<!-- /ALL-MODELS-CONNECTIVITY-20261106 -->
+
 <!-- SHARE-READBACK02-20261105 -->
 ## SHARE-READBACK02 过度帧首次共享回读失败
 
