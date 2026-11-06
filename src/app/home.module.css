@@ -621,6 +621,7 @@
 
 @media (max-width: 940px) {
   .page > .workspaceContent { padding: 0; }
+  .sidebar { z-index: 10; }
   .page {
     display: block;
     min-height: calc(100dvh - var(--composer-topbar-height, 48px));

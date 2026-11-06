@@ -76,6 +76,10 @@ export default function WorkspaceSidebar({ accountId, internal, images, worksEna
     const section = workspaceSection(href);
     return section && returnLinks.identity === identity ? returnLinks.links[section] || href : href;
   };
+  const onLinkClick = (event: React.MouseEvent<HTMLAnchorElement>, href: string) => {
+    if (window.location.pathname === href && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) event.preventDefault();
+    setOpen(false);
+  };
 
   const links = [
     { title: '作品广场', href: '/', icon: LayoutTemplate, visible: worksEnabled && Boolean(identity), current: activeView === 'works' },
@@ -102,13 +106,13 @@ export default function WorkspaceSidebar({ accountId, internal, images, worksEna
     <div ref={workspace} id="home-workspace-links" className={styles.workspaceLinks} data-open={workspaceOpen ? 'true' : 'false'}>
       <h1>工作区</h1>
       <nav aria-label="工作区">
-        {links.filter(link => link.visible).map(link => <Link key={link.href} href={destination(link.href)} aria-current={link.current ? 'page' : undefined} className={link.icon === Plus ? styles.createLink : styles.sideLink} onClick={() => setOpen(false)}>
+        {links.filter(link => link.visible).map(link => <Link key={link.href} href={destination(link.href)} aria-current={link.current ? 'page' : undefined} className={link.icon === Plus ? styles.createLink : styles.sideLink} onClick={event => onLinkClick(event, link.href)}>
           <link.icon size={18} aria-hidden="true" /><span>{link.title}</span>
         </Link>)}
       </nav>
       <details className={styles.sidebarMore} open={accountLinks.some(link => link.current)}>
         <summary>账户与帮助<ChevronDown size={15} aria-hidden="true" /></summary>
-        <nav aria-label="账户与帮助">{accountLinks.map(link => <Link key={link.href} href={destination(link.href)} className={styles.sideLink} aria-current={link.current ? 'page' : undefined} onClick={() => setOpen(false)}>
+        <nav aria-label="账户与帮助">{accountLinks.map(link => <Link key={link.href} href={destination(link.href)} className={styles.sideLink} aria-current={link.current ? 'page' : undefined} onClick={event => onLinkClick(event, link.href)}>
           <link.icon size={18} aria-hidden="true" /><span>{link.title}</span>
         </Link>)}</nav>
       </details>
