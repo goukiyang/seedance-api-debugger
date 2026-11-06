@@ -101,6 +101,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
   const [configDraft, setConfigDraft] = useState<CharacterLabPromptFields | null>(null);
   const [configError, setConfigError] = useState('');
   const promptDialog = useRef<HTMLDialogElement>(null);
+  const recipeTrigger = useRef<HTMLElement | null>(null);
   const viewSignature = useRef('');
   viewSignature.current = JSON.stringify([facePreviewId, bodyPreviewId, resultPreviewId, viewPreviews, recipeTarget, compositionSlot, inspectionId, refinement]);
   const initialized = useRef(false);
@@ -194,8 +195,13 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
         if (remembered.tab === 'next') setRecipeTab('next');
         if (remembered.composition && ['mainFace', 'side', 'front', 'back'].includes(remembered.composition.slot)
           && value.workspace.compositions?.some(item => item.id === remembered.composition.id && item.sources)) setCompositionSlot(remembered.composition);
-        if (remembered.refinement && ['refine-face', 'refine-side'].includes(remembered.refinement.operation)
-          && readable(remembered.refinement.target?.planId) && typeof remembered.refinement.text === 'string' && remembered.refinement.text.length <= 3000) setRefinement(remembered.refinement);
+        const refinement = remembered.refinement, target = refinement?.target;
+        if (refinement && ['refine-face', 'refine-side'].includes(refinement.operation) && readable(target?.planId)
+          && (target.cell === undefined || Number.isInteger(target.cell) && target.cell >= 0 && target.cell <= 8)
+          && typeof refinement.text === 'string' && refinement.text.length <= 3000) setRefinement({
+          operation: refinement.operation, target: { planId: target.planId, ...(target.cell !== undefined ? { cell: target.cell } : {}) },
+          text: refinement.text, ...(readable(refinement.planId) ? { planId: refinement.planId } : {}),
+        });
       }
     } catch { /* Optional browsing state never replaces saved selections or submits a task. */ }
     let remembered: string[] = [];
@@ -265,7 +271,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
       sourceAssetId: draft.sourceAssetId, face: facePreviewId, body: bodyPreviewId, result: resultPreviewId,
       views: viewPreviews, target: recipeTarget, tab: recipeTab, refinement, composition: compositionSlot, inspection: inspectionId,
     })); } catch { /* Server-saved input and selected images remain available. */ }
-  }, [ownerId, workspace, draft?.sourceAssetId, loading, sessionReady, facePreviewId, bodyPreviewId, resultPreviewId, viewPreviews, recipeTarget, recipeTab, refinement, compositionSlot, inspectionId]);
+  }, [ownerId, workspace, draft, loading, sessionReady, facePreviewId, bodyPreviewId, resultPreviewId, viewPreviews, recipeTarget, recipeTab, refinement, compositionSlot, inspectionId]);
   async function saveDraft() {
     assertActive();
     if (savePromise.current) await savePromise.current;
@@ -831,7 +837,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
   </main></CharacterLabMediaProvider>;
 
   function renderPromptButton(target: PromptTarget) {
-    return <button type="button" className={styles.promptTrigger} aria-expanded={recipeTarget === target} aria-label={promptTitles[target]} disabled={locked} onClick={() => { setCompositionSlot(null); setRecipeTab('current'); setRecipeTarget(previous => previous === target ? null : target); }}>
+    return <button type="button" data-character-prompt={target} className={styles.promptTrigger} aria-expanded={recipeTarget === target} aria-label={promptTitles[target]} disabled={locked} onClick={event => { recipeTrigger.current = event.currentTarget; setCompositionSlot(null); setRecipeTab('current'); setRecipeTarget(previous => previous === target ? null : target); }}>
       <Settings2 size={15} />{target === 'faces' ? '人脸提示词' : target === 'result' ? '整图提示词' : '提示词'}
     </button>;
   }
@@ -858,7 +864,10 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
       .filter(plan => tasks[plan.id]?.asset);
     const siblingIndex = siblings.findIndex(plan => plan.id === reference?.planId);
     return <CharacterLabPromptPanel ownerId={ownerId} workspaceId={workspace.id} title={savedComposition ? `成品来源 · ${recipeTarget === 'front' ? '正脸' : viewTitles[recipeTarget as CharacterLabView] || '生成记录'}` : recipeTarget === 'front' ? '正脸' : promptTitles[target].replace('提示词', '')}
-      reference={reference} tab={recipeTab} onTab={setRecipeTab} onClose={() => setRecipeTarget(null)} isAdmin={isAdmin} disabled={locked}
+      reference={reference} tab={recipeTab} onTab={setRecipeTab} onClose={() => {
+        setRecipeTarget(null);
+        requestAnimationFrame(() => { const button = recipeTrigger.current?.isConnected ? recipeTrigger.current : document.querySelector<HTMLElement>('[data-character-prompt]'); button?.focus({ preventScroll: true }); });
+      }} isAdmin={isAdmin} disabled={locked}
       previewPayload={{ action: 'preview-prompt', workspaceId: workspace.id, workspaceRevision: workspace.revision, kind, operation, draft, description }}
       previous={siblingIndex >= 0 ? siblings[siblingIndex + 1]?.id : undefined} next={siblingIndex > 0 ? siblings[siblingIndex - 1]?.id : undefined}
       onBrowse={id => {

@@ -20,6 +20,7 @@ type Props = {
 
 export function CharacterLabPromptPanel(props: Props) {
   const { ownerId, workspaceId, reference, tab, onClose } = props;
+  const planId = reference?.planId;
   const [recipe, setRecipe] = useState<CharacterLabRecipe | null>(null);
   const [detailError, setDetailError] = useState('');
   const [preview, setPreview] = useState<{ revision: number; prompt: string | null; personalText: string } | null>(null);
@@ -31,16 +32,16 @@ export function CharacterLabPromptPanel(props: Props) {
   useEffect(() => {
     const controller = new AbortController();
     setRecipe(null); setDetailError(''); setFeedback('');
-    if (reference) void (async () => {
+    if (planId) void (async () => {
       try {
-        const response = await fetch(`/api/character-lab?recipe=${encodeURIComponent(reference.planId)}`, { cache: 'no-store', signal: controller.signal });
+        const response = await fetch(`/api/character-lab?recipe=${encodeURIComponent(planId)}`, { cache: 'no-store', signal: controller.signal });
         const value = await readJsonResponse<CharacterLabRecipe & { error?: string }>(response);
         if (!response.ok) throw new Error(value.error || '生成记录读取失败');
         if (!controller.signal.aborted) setRecipe(value);
       } catch (cause) { if (!controller.signal.aborted) setDetailError(cause instanceof Error ? cause.message : '生成记录读取失败'); }
     })();
     return () => controller.abort();
-  }, [ownerId, workspaceId, reference?.planId]);
+  }, [ownerId, workspaceId, planId]);
   useEffect(() => {
     if (tab !== 'next') return;
     const controller = new AbortController();
@@ -73,7 +74,7 @@ export function CharacterLabPromptPanel(props: Props) {
     try { await action(); } catch (cause) { setFeedback(cause instanceof Error ? cause.message : '操作未完成，输入保留'); }
     finally { setActing(false); }
   }
-  return <aside className={styles.recipePanel} aria-label={`${props.title}提示词`}>
+  return <aside id="character-recipe-panel" className={styles.recipePanel} aria-label={`${props.title}提示词`}>
     <header><h2>{props.title}提示词</h2><button type="button" className={styles.iconButton} aria-label="关闭提示词面板" onClick={onClose}><X size={18} /></button></header>
     <div className={styles.segmented} role="group" aria-label="提示词用途">
       <button type="button" aria-pressed={tab === 'current'} onClick={() => props.onTab('current')}>当前图片</button>
