@@ -673,7 +673,7 @@ export default function ProjectDetailPage() {
   const [viewerId, setViewerId] = useState('');
   const [sectionPagination, setSectionPagination] = useState<ProjectPagination | null>(null);
   const [sectionPaginationQueryKey, setSectionPaginationQueryKey] = useState('');
-  useWorkspaceScroll(currentUserId, `project:${activeSectionQueryKey}`, !loading && !sectionLoading && loadedDataIdentity === identityKey && sectionPaginationQueryKey === activeSectionQueryKey);
+  useWorkspaceScroll(currentUserId, `project:${activeSectionQueryKey}`, workspace.section !== 'finance' && !loading && !sectionLoading && loadedDataIdentity === identityKey && sectionPaginationQueryKey === activeSectionQueryKey);
   const [activePreviewTask, setActivePreviewTask] = useState<ProjectVideoPreviewTask | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');

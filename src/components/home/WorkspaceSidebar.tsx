@@ -74,7 +74,7 @@ export default function WorkspaceSidebar({ accountId, internal, images, worksEna
   const current = activeView || workspaceSection(pathname);
   const destination = (href: string) => {
     const section = workspaceSection(href);
-    return section && returnLinks.identity === identity ? returnLinks.links[section] || href : href;
+    return section && section !== 'assets' && returnLinks.identity === identity ? returnLinks.links[section] || href : href;
   };
   const onLinkClick = (event: React.MouseEvent<HTMLAnchorElement>, href: string) => {
     if (window.location.pathname === href && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) event.preventDefault();
