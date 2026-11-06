@@ -4488,7 +4488,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           <div className={styles.dnaReferenceLine}>
             {images.length > 0 && <div className={styles.dnaInputPreviews} aria-label="本次主图">
               {images.slice(0, 4).map((image, index) => <button type="button" key={`${image.id}:${index}`} title={`预览主图${index + 1}`} aria-label={`预览主图${index + 1}`} onClick={() => previewReference(image, index + 1, false)}>
-                {image.thumbnailUrl || image.originalUrl ? <img src={image.thumbnailUrl || image.originalUrl} alt={`主图${index + 1}`} /> : <ImagePlus size={20} />}
+                {image.thumbnailUrl || image.originalUrl ? <img src={image.thumbnailUrl || image.originalUrl || undefined} alt={`主图${index + 1}`} /> : <ImagePlus size={20} />}
               </button>)}
               {images.length > 4 && <span>+{images.length - 4}</span>}
             </div>}
