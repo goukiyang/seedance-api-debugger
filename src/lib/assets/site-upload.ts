@@ -317,8 +317,9 @@ export async function uploadSiteAsset(
   ownerId: string,
   mediaMetadata?: SiteUploadMediaMetadata | null,
   requestId?: string,
+  purpose?: 'feedback',
 ): Promise<SiteUploadResult> {
-  const localResult = await uploadAsset(buffer, fileName, mimeType, ownerId, mediaMetadata, requestId);
+  const localResult = await uploadAsset(buffer, fileName, mimeType, ownerId, mediaMetadata, requestId, undefined, purpose);
   const sameOriginPublicUrl = sameOriginPublicUrlForLocalUpload(localResult.originalUrl);
   if (sameOriginPublicUrl) {
     const sameOriginThumbnailUrl = localResult.thumbnailUrl

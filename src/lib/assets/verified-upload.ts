@@ -12,13 +12,14 @@ import { siteUploadPathFromUrl } from './site-url';
 import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
 import { configuredUploadObjectKey } from './upload-object-key';
 import { registerCommittedAssetHd } from '@/lib/media/hd-registration';
+import { isFeedbackOnlyAsset } from './upload-purpose';
 
 export class VerifiedUploadError extends Error {
   constructor(readonly code: string, message: string, readonly status = 409) { super(message); }
 }
 export type VerifiedUpload = { file: string; hash: string; bytes: number; mimeType: string; type: 'image' | 'video' | 'audio';
   width: number | null; height: number | null; version: string; extension: string; sourceVersion?: string; temporary?: boolean };
-export type UploadReceipt = { requestId: string; verified: true; assetDisposition: 'new' | 'reused'; sourceVersion: string };
+export type UploadReceipt = { purpose?: 'feedback'; requestId: string; verified: true; assetDisposition: 'new' | 'reused'; sourceVersion: string };
 const limits = { image: 30 * 1024 * 1024, video: 200 * 1024 * 1024, audio: 15 * 1024 * 1024 };
 const formats: Record<string, string> = { jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp' };
 const execFileAsync = promisify(execFile);
@@ -532,7 +533,7 @@ export async function readVerifiedUploadReceipt(ownerId: string, requestId: stri
   return { asset, proof, reused: receipt.disposition === 'reused' };
 }
 export async function registerVerifiedUpload(input: { ownerId: string; proof: VerifiedUpload; fileName: string; originalUrl: string;
-  thumbnailUrl: string | null; requestId?: string; fingerprint?: string; width?: number | null; height?: number | null }) {
+  thumbnailUrl: string | null; requestId?: string; fingerprint?: string; width?: number | null; height?: number | null; purpose?: 'feedback' }) {
   await uploadIdentity(input.ownerId);
   const existing = await prisma.asset.findUnique({ where: { owner_id_hash: { owner_id: input.ownerId, hash: input.proof.hash } } });
   const existingProof = existing ? await verifyExistingUpload(existing, input.ownerId) : null;
@@ -545,7 +546,13 @@ export async function registerVerifiedUpload(input: { ownerId: string; proof: Ve
     return result;
   };
   const key = input.requestId ? receiptKey(input.ownerId, input.requestId) : null;
-  const fingerprint = input.fingerprint || uploadDigest(JSON.stringify([input.proof.hash, input.proof.bytes, input.proof.mimeType]));
+  const fingerprint = input.fingerprint || uploadDigest(JSON.stringify([input.proof.hash, input.proof.bytes, input.proof.mimeType, ...(input.purpose ? [input.purpose] : [])]));
+  // Only an ordinary import promotes a feedback-only original to material.
+  const ordinaryUse = async (db: Prisma.TransactionClient, asset: Asset) => {
+    if (input.purpose || (!isFeedbackOnlyAsset(asset.metadata_json) && !/^反馈截图\.(png|jpg|webp)$/.test(asset.file_name))) return asset;
+    const metadata = asset.metadata_json ? JSON.parse(asset.metadata_json) : {}; delete metadata.feedbackOnly; metadata.materialImported = true;
+    return db.asset.update({ where: { id: asset.id }, data: { metadata_json: JSON.stringify(metadata) } });
+  };
   const register = async (db: Prisma.TransactionClient) => {
     const currentUser = await db.user.findUnique({ where: { id: input.ownerId } });
     if (!currentUser || currentUser.status !== 'active') throw new VerifiedUploadError('UPLOAD_OWNER_UNAVAILABLE', '当前账号不可上传', 403);
@@ -554,11 +561,12 @@ export async function registerVerifiedUpload(input: { ownerId: string; proof: Ve
     if (fresh && fresh.id !== existing?.id) throw new VerifiedUploadError('UPLOAD_CONCURRENT_WINNER', '同时上传结果待核实，请查询原上传');
     if (fresh && (fresh.original_url !== existing?.original_url || fresh.hash !== input.proof.hash || fresh.mime_type !== input.proof.mimeType
       || fresh.file_size !== input.proof.bytes)) throw new VerifiedUploadError('UPLOAD_SOURCE_CHANGED', '原上传记录已变化，未覆盖');
-    const asset = fresh || await db.asset.create({ data: { id: randomUUID(), owner_id: input.ownerId, type: input.proof.type,
+    let asset = fresh || await db.asset.create({ data: { id: randomUUID(), owner_id: input.ownerId, type: input.proof.type,
       original_url: input.originalUrl, thumbnail_url: input.thumbnailUrl, file_name: path.basename(input.fileName || 'upload.bin'),
       mime_type: input.proof.mimeType, file_size: input.proof.bytes, hash: input.proof.hash,
       width: input.proof.width ?? input.width ?? null, height: input.proof.height ?? input.height ?? null, status: 'active',
-      metadata_json: JSON.stringify({ uploadIntegrity: { version: 'verified-upload-v2', hash: input.proof.hash } }) } });
+      metadata_json: JSON.stringify({ uploadIntegrity: { version: 'verified-upload-v2', hash: input.proof.hash }, ...(input.purpose === 'feedback' ? { feedbackOnly: true } : { materialImported: true }) }) } });
+    asset = await ordinaryUse(db, asset);
     let reused = Boolean(fresh);
     if (key) {
       const found = await db.platformSetting.findUnique({ where: { key } });
@@ -584,6 +592,7 @@ export async function registerVerifiedUpload(input: { ownerId: string; proof: Ve
       const fresh = await db.asset.findUnique({ where: { id: winner.asset.id } });
       if (!currentUser || currentUser.status !== 'active' || !fresh || fresh.owner_id !== input.ownerId || fresh.status !== 'active'
         || fresh.hash !== input.proof.hash || fresh.original_url !== winner.asset.original_url || !await canReadStudioAsset(currentUser, fresh, db)) throw new VerifiedUploadError('UPLOAD_CONCURRENT_UNCONFIRMED', '同时上传结果已变化');
+      await ordinaryUse(db, fresh);
       await db.platformSetting.create({ data: { key, value_json: JSON.stringify({ assetId: winner.asset.id, fingerprint, disposition: 'reused', hash: input.proof.hash, bytes: input.proof.bytes, mimeType: input.proof.mimeType }), updated_by: input.ownerId } });
     }).catch(async failure => {
       if ((failure as { code?: string }).code !== 'P2002') throw failure;
