@@ -7,7 +7,7 @@ import { parsePrivateCredentials, stringifyPrivateCredentials } from '@/lib/secu
 import { isPrivatePromptError } from '@/lib/security/private-prompts.server';
 import { privateCredentialFetch } from '@/lib/security/private-prompt-send.server';
 import { createHash, randomUUID } from 'node:crypto';
-import { prisma } from '@/lib/prisma';
+import { prisma, retrySqliteBusy } from '@/lib/prisma';
 import { imageOutputSize, normalizeImageResolution, assertImageResolutionSupported, isGeminiImageModel, isValidImageDimension, supportsStudioFourToOne } from '@/lib/image-generation/resolution';
 import {
   IMAGE_STUDIO_MODELS,
@@ -2202,7 +2202,7 @@ export async function saveImageApiGroupForm(input: Record<string, unknown>, acto
     if (typeof patch.baseUrl === 'string' && patch.baseUrl.trim()) validatedBases[model] = await validateManagedBaseUrl(patch.baseUrl);
   }
   try {
-    return await prisma.$transaction(async tx => {
+    return await retrySqliteBusy(() => prisma.$transaction(async tx => {
       const existing = await replay(tx);
       if (existing) return existing;
       const defaultRow = await tx.platformSetting.findUnique({ where: { key: IMAGE_GENERATION_MODEL_DEFAULTS_SETTING_KEY } });
@@ -2279,9 +2279,10 @@ export async function saveImageApiGroupForm(input: Record<string, unknown>, acto
         action: 'image_generation_group_api_save', target_type: 'PlatformSetting', target_id: source.copyId,
         detail: JSON.stringify({ requestHash, receipt }) } });
       return { receipt, replayed: false };
-    }, { timeout: 15000 });
+    }, { maxWait: 10000, timeout: 15000 }));
   } catch (error) {
     if (isRecord(error) && ['P2002', 'P2034', 'P1008', 'P2028'].includes(String(error.code))) {
+      console.warn('[ImageApiGroupSave]', JSON.stringify({ mutationId, group, code: String(error.code) }));
       const receipt = await replay(prisma);
       if (receipt) return receipt;
       throw new ImageGenerationChannelError('保存结果尚未确认，请查询原保存回执，不要重复提交', 409, 'image_group_save_unknown');

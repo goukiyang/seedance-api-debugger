@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '角色历史补充与正脸版本', outline: [
-  '历史记录可单独恢复补充内容到输入框',
-  '正脸支持查看候选与微调版本，再明确选用',
-  '正脸、侧脸和全身图框保持对齐',
+const notice = { title: '生图接口与返图修复', outline: [
+  '修复 Pro 图片地址缺少类型声明时的返图处理',
+  '生图 API 设置正确识别已确认的原生模型配置',
+  '配置保存保留原操作回执并改善繁忙时的处理',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

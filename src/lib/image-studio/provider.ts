@@ -598,7 +598,7 @@ async function requestGeminiStudioImages(params: {
         const file = (part.fileData || part.file_data) as { mimeType?: unknown; mime_type?: unknown; fileUri?: unknown; file_uri?: unknown } | undefined;
         if (!file) return null;
         const mime = file.mimeType ?? file.mime_type;
-        if (typeof mime !== 'string' || !['image/png', 'image/jpeg', 'image/webp', 'image/avif', 'image/tiff'].includes(mime)) {
+        if (mime != null && (typeof mime !== 'string' || !['image/png', 'image/jpeg', 'image/webp', 'image/avif', 'image/tiff'].includes(mime))) {
           throw new StudioProviderError('response', 'unsupported_output', response.status);
         }
         const source = file.fileUri ?? file.file_uri;
