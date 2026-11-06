@@ -155,7 +155,7 @@ async function main() {
     }
 
     const storedQuote = JSON.parse((await db.platformSetting.findUniqueOrThrow({ where: { key: quoteKey(newPlan.id) } })).value_json);
-    assert.equal(storedQuote.characterLabSourceVersion, 1);
+    assert.equal(storedQuote.characterLabSourceVersion, 2);
     assert.equal(quote.unitCredits, expectedTask.unit_credits); assert.equal(quote.estimatedCredits, expectedTask.unit_credits);
     const submitted = await service.submitLab(user, { planId: newPlan.id, billingQuoteId: quote.billingQuoteId,
       pricingRevision: quote.pricingRevision, maxEstimatedCost: quote.estimatedCredits,
@@ -205,7 +205,7 @@ async function main() {
     const legacyQuotePlan = plan(randomUUID(), 'LEGACY_QUOTE_PROMPT');
     await createPlan(legacyQuotePlan);
     await db.platformSetting.create({ data: { key: quoteKey(legacyQuotePlan.id), value_json: JSON.stringify({
-      billingQuoteId: null, estimatedCredits: 5, expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      billingQuoteId: null, estimatedCredits: 5, expiresAt: new Date(Date.now() + 60_000).toISOString(), characterLabSourceVersion: 1,
     }), updated_by: owner } });
     const legacyPlanBytes = (await db.platformSetting.findUniqueOrThrow({ where: { key: planKey(legacyQuotePlan.id) } })).value_json;
     const legacyReceiptBytes = (await db.platformSetting.findUniqueOrThrow({ where: { key: receiptKey(legacyQuotePlan.id) } })).value_json;

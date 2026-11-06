@@ -243,7 +243,7 @@ export async function quoteLab(user: SessionUser, id: string) {
     ?? await captureImageGenerationChannel(plan.model, 'original');
   const quote = await prepareImageBillingQuote(user.id, { ...submission(plan), imageChannel }, undefined, undefined, undefined, 0, plan.id);
   const key = quoteKey(user.id, plan.id);
-  const value_json = JSON.stringify({ ...quote, characterLabSourceVersion: 1 });
+  const value_json = JSON.stringify({ ...quote, characterLabSourceVersion: 2 });
   await prisma.platformSetting.upsert({ where: { key }, create: { key, value_json, updated_by: user.id }, update: { value_json, updated_by: user.id } });
   return quote;
 }
@@ -258,7 +258,7 @@ export async function submitLab(user: SessionUser, body: Record<string, unknown>
   const storedQuote = await prisma.platformSetting.findUnique({ where: { key: quoteKey(user.id, plan.id) } });
   if (!storedQuote) throw new StudioError('请先获取本次生成报价');
   const quote = JSON.parse(storedQuote.value_json) as CharacterLabQuote & { characterLabSourceVersion?: number };
-  if (quote.characterLabSourceVersion !== 1) throw new StudioError('角色工具报价来源已更新，请重新获取本次报价；原提交编号与输入保留', 409);
+  if (quote.characterLabSourceVersion !== 2) throw new StudioError('角色工具报价来源已更新，请重新获取本次报价；原提交编号与输入保留', 409);
   if (Date.parse(quote.expiresAt) <= Date.now() || (body.billingQuoteId || null) !== quote.billingQuoteId
     || (body.pricingRevision || undefined) !== quote.pricingRevision || body.maxEstimatedCost !== quote.estimatedCredits) throw new StudioError('报价已过期或与本次确认不一致，请重新报价', 409);
   // A durable send marker prevents an unknown transport result being resent after reload.
