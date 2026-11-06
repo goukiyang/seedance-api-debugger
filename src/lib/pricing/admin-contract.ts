@@ -51,6 +51,7 @@ export type PricingAdminExchange = PricingAdminExchangeInput & {
 };
 
 export type PricingAdminRow = {
+  pricingEnabled?: boolean;
   rounding?: typeof RMB_INTEGER_ROUNDING;
   authoringRateMode?: PricingAuthoringRateMode;
   authoringEntry?: PricingAuthoringEntry | null;
@@ -106,6 +107,7 @@ export type PricingAdminSnapshot = {
 };
 
 export type PricingAdminRowChange = {
+  pricingEnabled?: boolean;
   rounding?: typeof RMB_INTEGER_ROUNDING;
   specifications?: Record<string, string>;
   authoringRateMode?: 'follow_global' | 'custom';
@@ -141,7 +143,7 @@ export type PricingAdminPreviewInput = {
   simulation?: PricingAdminSimulationInput;
   scenarios?: PricingAdminSimulationInput[];
 };
-export type PricingAdminPriceView = Pick<PricingAdminRow, 'mode' | 'baseCny' | 'basisKind'
+export type PricingAdminPriceView = Pick<PricingAdminRow, 'pricingEnabled' | 'mode' | 'baseCny' | 'basisKind'
   | 'currentPointsPerCny' | 'currentUnitCredits' | 'relativeMultiplier' | 'differencePercent'
   | 'confirmation' | 'hasDifference' | 'exchangeRate' | 'authoringRateMode' | 'authoringEntry' | 'rounding'>;
 export type PricingAdminSimulation = {

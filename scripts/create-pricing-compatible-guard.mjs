@@ -26,6 +26,19 @@ try {
   git(['read-tree', source], { env });
   const changes = { [modePath]: 'export const PRICING_ADMIN_WRITES_ENABLED: boolean = false;\n',
     'package.json': `${JSON.stringify(pkg, null, 2)}\n`, 'package-lock.json': `${JSON.stringify(lock, null, 2)}\n` };
+  // Preserve the existing recovery restrictions as well as the new pricing reader.
+  for (const [file, names] of [
+    ['src/lib/character-lab/service.ts', ['CHARACTER_LAB_BODY_PAIRS_ENABLED', 'CHARACTER_LAB_RECIPE_WRITES_ENABLED']],
+    ['src/lib/cutout/access.ts', ['CUTOUT_MEMBERS_ENABLED']],
+  ]) {
+    let bytes = read(file);
+    for (const name of names) {
+      const before = `export const ${name} = true;`;
+      assert.ok(bytes.includes(before), `Expected current main recovery flag: ${name}`);
+      bytes = bytes.replace(before, `export const ${name} = false;`);
+    }
+    changes[file] = bytes + '\n';
+  }
   for (const [file, bytes] of Object.entries(changes)) {
     const blob = git(['hash-object', '-w', '--stdin'], { input: bytes });
     git(['update-index', '--add', '--cacheinfo', `100644,${blob},${file}`], { env });

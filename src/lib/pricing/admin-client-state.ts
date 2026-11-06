@@ -3,8 +3,8 @@ import type {
   PricingAdminPreview, PricingAdminPreviewInput, PricingAdminRow, PricingAdminRowChange, PricingAdminSaveInput, PricingAdminSimulation,
 } from './admin-contract';
 import type { PricingEnhanceGroup } from './pricing-authoring-contract';
-import { RMB_INTEGER_ROUNDING } from './admin-contract';
-import { compareDecimal, divideDecimal, multiplyDecimal, normalizeDecimal } from './math';
+import { PRICING_ADMIN_LIMITS, RMB_INTEGER_ROUNDING } from './admin-contract';
+import { compareDecimal, divideDecimal, multiplyDecimal, normalizeDecimal, PricingNumberError } from './math';
 import { pricingDisplayName } from './admin-display';
 
 export type PricingAdminDraft = { revision: string; authoringRevision?: string; catalogFingerprint?: string; changes: PricingAdminChanges };
@@ -63,6 +63,51 @@ export function pricingAdminScenarioDifference(scenario: Pick<PricingAdminSimula
   return `差额 ${delta} 点${percent}`;
 }
 
+export function pricingAdminEnabled(row: Pick<PricingAdminRow, 'mode' | 'pricingEnabled'>): boolean {
+  return row.pricingEnabled ?? row.mode !== 'unset';
+}
+
+export function stagePricingAdminEnabled(changes: PricingAdminChanges, row: PricingAdminRow, enabled: boolean): PricingAdminChanges {
+  const next = { ...changes.rows.find(item => item.id === row.id), id: row.id };
+  if (enabled === pricingAdminEnabled(row)) delete next.pricingEnabled;
+  else next.pricingEnabled = enabled;
+  return { ...changes, rows: [...changes.rows.filter(item => item.id !== row.id), ...(Object.keys(next).length > 1 ? [next] : [])] };
+}
+
+export function restorePricingAdminMoneyRow(changes: PricingAdminChanges, id: string): PricingAdminChanges {
+  const existing = changes.rows.find(row => row.id === id);
+  // Compact money edits include their automatic follow/rounding fields, not the switch.
+  return { ...changes, rows: [...changes.rows.filter(row => row.id !== id),
+    ...(existing?.pricingEnabled !== undefined ? [{ id, pricingEnabled: existing.pricingEnabled }] : [])] };
+}
+
+export function isSimplePricingAdminMoneyDraft(changes: PricingAdminChanges, sourceReference: string): boolean {
+  return !Object.keys(changes.standards || {}).length && !Object.keys(changes.authoring || {}).length && changes.rows.every(row => {
+    if (!row.base) return typeof row.pricingEnabled === 'boolean' && Object.keys(row).every(key => ['id', 'pricingEnabled'].includes(key));
+    return row.base.source.type === 'admin_defined' && row.base.source.reference === sourceReference && row.baseRelation == null
+      && Object.keys(row).every(key => ['id', 'base', 'baseRelation', 'authoringRateMode', 'rounding', 'pricingEnabled'].includes(key))
+      && (row.authoringRateMode === undefined || row.authoringRateMode === 'follow_global');
+  });
+}
+
+export function canEnablePricingAdminRow(row: PricingAdminRow, change?: PricingAdminRowChange): boolean {
+  if (!row.enabled || row.availability === 'disabled' || row.availability === 'unconfigured') return false;
+  const mode = change?.mode ?? row.mode;
+  if (change?.base) {
+    try {
+      normalizeDecimal(change.base.amount, { max: PRICING_ADMIN_LIMITS.baseMax, maxScale: PRICING_ADMIN_LIMITS.baseScale, allowZero: false });
+      return true;
+    } catch (error) {
+      if (error instanceof PricingNumberError) return false;
+      throw error;
+    }
+  }
+  if (row.availability === 'needs_review') return false;
+  if (mode === 'free') return true;
+  if (mode === 'unset') return false;
+  return row.identity.billingMode === 'actual' || row.baseCny !== null || row.currentUnitCredits !== null;
+}
+
 export function pricingAdminPreviewForSource(preview: Pick<PricingAdminPreview, 'changes' | 'scenarios' | 'simulation'> | null | undefined, sourceRowId: string, materializedRowId?: string) {
   const change = preview?.changes.find(item => item.sourceRowId === sourceRowId && (materializedRowId === undefined || item.id === materializedRowId));
   const actualId = materializedRowId ?? change?.id;
@@ -72,7 +117,9 @@ export function pricingAdminPreviewForSource(preview: Pick<PricingAdminPreview, 
 }
 
 export function stagePricingAdminMemberExit(changes: PricingAdminChanges, id: string): PricingAdminChanges {
-  return { ...changes, rows: [...changes.rows.filter(row => row.id !== id), { id, authoringRateMode: 'custom' }] };
+  const pricingEnabled = changes.rows.find(row => row.id === id)?.pricingEnabled;
+  return { ...changes, rows: [...changes.rows.filter(row => row.id !== id), { id, authoringRateMode: 'custom',
+    ...(pricingEnabled !== undefined ? { pricingEnabled } : {}) }] };
 }
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -178,6 +225,10 @@ export function parsePricingAdminWorkspace(raw: string | null, actorId: string):
     for (const row of value.draft.changes.rows) {
       if (!row || !text(row.id, 500)) return null;
       const clean: PricingAdminRowChange = { id: row.id };
+      if (row.pricingEnabled !== undefined) {
+        if (typeof row.pricingEnabled !== 'boolean') return null;
+        clean.pricingEnabled = row.pricingEnabled;
+      }
       if (row.authoringRateMode !== undefined) {
         if (!['follow_global', 'custom'].includes(row.authoringRateMode)) return null;
         clean.authoringRateMode = row.authoringRateMode;

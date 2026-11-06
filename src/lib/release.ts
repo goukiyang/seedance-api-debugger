@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '工作区侧栏统一', outline: [
-  '项目、任务和图集统一使用作品广场侧栏',
-  '补齐用量、费率、账户与帮助入口',
-  '保留筛选、分页和返回浏览位置',
+const notice = { title: '费率支持逐项启停', outline: [
+  '费率每项增加开关，保存后生效',
+  '关闭后不接受新任务，保留原价格',
+  '已受理任务与历史账本不受影响',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
