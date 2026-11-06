@@ -549,7 +549,9 @@ export async function POST(
       ...candidates.flatMap((candidate) => candidate.assetId ? [candidate.assetId] : []),
       ...Array.from(authorizedReferenceById.values(), (image) => image.assetId),
     ]);
-    const allCandidateUrls = uniquePreserveOrder(candidates.flatMap((candidate) => candidate.url ? [candidate.url] : []));
+    const frozenUrls = new Set(snapshotAssets.map(asset => asset.original_url));
+    const allCandidateUrls = uniquePreserveOrder(candidates.flatMap((candidate) => candidate.url ? [candidate.url] : []))
+      .filter(url => !frozenUrls.has(url));
     const assetFilters = [
       ...(allCandidateAssetIds.length > 0 ? [{ id: { in: allCandidateAssetIds } }] : []),
       ...(allCandidateUrls.length > 0 ? [{ original_url: { in: allCandidateUrls } }] : []),

@@ -26,7 +26,8 @@ async function routeCases() {
     generationTaskSnapshot: { findUnique: async () => state.snapshot ? {
       asset_mapping_json: '{"图1":"original"}', content_json: '[{"type":"image_url","role":"reference_image","image_url":{"url":"https://fixture.invalid/image.png"}}]' } : null },
     workspaceAsset: { findMany: async () => [] },
-    asset: { findMany: async ({ where }) => where.id ? state.assets.filter(a => where.id.in.includes(a.id)) : state.assets },
+    asset: { findMany: async ({ where }) => where.id ? state.assets.filter(a => where.id.in.includes(a.id))
+      : state.assets.filter(a => where.OR.some(filter => filter.id?.in.includes(a.id) || filter.original_url?.in.includes(a.original_url))) },
     referenceImage: { findMany: async () => [] } };
   const mod = load('src/app/api/tasks/[id]/reuse/route.ts', {
     'next/server': { NextResponse: { json: (body, options = {}) => ({ body, status: options.status || 200 }) } },
@@ -90,6 +91,13 @@ async function receiptCases() {
   state.canView = true; state.workspaceConflict = true;
   result = await mod.finishTaskReuseOperation(actor, task.id, { ...request, requestId: 'conflict' }, input);
   assert.equal(result.body.code, 'REUSE_WORKSPACE_CONFLICT'); assert.equal(result.body.draft, undefined); assert.equal(state.mutations, 0);
+  state.workspaceConflict = false;
+  const appliedRequest = { ...request, requestId: 'applied' };
+  const accepted = { sourceStamp: input.sourceStamp, items: [], payload: input.payload };
+  result = await mod.finishTaskReuseOperation(actor, task.id, appliedRequest, accepted);
+  assert.equal(result.body.reuse.status, 'applied'); assert.equal(state.mutations, 1);
+  result = await mod.finishTaskReuseOperation(actor, task.id, appliedRequest, accepted);
+  assert.equal(result.body.reuse.status, 'applied'); assert.equal(state.mutations, 1, 'original receipt must not repeat workspace replacement');
 }
 async function modelCases() {
   const Module = require('node:module'), original = Module._load;
