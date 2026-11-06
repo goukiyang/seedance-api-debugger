@@ -1,3 +1,14 @@
+<!-- IMAGE-MODEL-CONNECTIVITY-20261106 -->
+## MODEL-ALL01 生图模型实测与小数价准入
+
+[唯一工单](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-06-all-model-connectivity.md)；[当前私有实测原证索引](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-11-06-image-model-connectivity/current-results.json)。v0.134.11已部署，6/7新选型号实际PNG解码/结算通过；GPT2供应商503及Sunburst中档旧单仍待核，不冒全部测通。私有目录不随源码上传，业务状态以原单为准。
+<!-- /IMAGE-MODEL-CONNECTIVITY-20261106 -->
+
+- MODEL-ALL01 v8阶段原证：[生图原号/原图解码与站内费用](2026-11-06-image-model-connectivity/banana-v8-results.json)、[实际DTO/选项JSX渲染](2026-11-06-image-model-connectivity/option-render-results.json)、[Pro旧原号安全诊断](2026-11-06-image-model-connectivity/pro-original-diagnostics.json)。保留原3型成功和早期缺口记录，实际后继结果见当前原证索引与原单。
+- MODEL-ALL01 v9至v11前的接续原证：[两个2.6公开美元报价](2026-11-06-image-model-connectivity/vendor-26-public-quotes.json)、[Pro缺MIME结构证据](2026-11-06-image-model-connectivity/pro-v9-response-evidence.json)、[原API保存第一次接续回执](2026-11-06-image-model-connectivity/image2-26-api-original-replay-result.json)。保留当时三条1.9点待核状态，公开价不当账号实扣或本站点数。
+- MODEL-ALL01 v11实际交付：[发布/公网检查](2026-11-06-image-model-connectivity/public-deployed.json)、[两个2.6真实PNG解码与结算](2026-11-06-image-model-connectivity/image26-v11-success-audit.json)、[Pro2K原图与结算](2026-11-06-image-model-connectivity/pro-v11-success-audit.json)、[3行新价/其余116行保持](2026-11-06-image-model-connectivity/image2-26-price-readback-audit.json)、[GPT2原503安全诊断](2026-11-06-image-model-connectivity/gpt-image2-original-provider-diagnostics.json)、[原任务费用核对](2026-11-06-image-model-connectivity/image-fees-final-audit.json)。新增实扣10.7，旧1.9＋GPT2新5共6.9待核；该证据不代表其余功能手验或供应商现金账单。
+
+
 <!-- ASSET-TOP01-PUBLIC-20261105 -->
 ## ASSET-TOP01 资产管理顶部重构
 

@@ -12,6 +12,7 @@
 
 | 编号 | 类别 / 优先级 | 事实、潜在影响与证据边界 | 来源与证据 | 状态 / 下一步 |
 | --- | --- | --- | --- | --- |
+| D-20261106-BSK-SESSION-CLOSE | 浏览器工具收尾待核 / P3 | MODEL-ALL01独立Agent Window会话grcq/vvbk的session stop持续extension timeout，最终list仍列两项；doctor证实daemon身份/协议及1个Chrome扩展连接正常，具体根因未知。未借用用户页签、未杀Chrome或手管daemon，不冒已清理。 | [生图原单收尾](todo/2026-11-06-all-model-connectivity.md#浏览器收尾待核线索)；正式根私有材料browser-cleanup-status.json，CLI脱敏日志与doctor结果。 | 仅工具清理回执缺口；生图/费用证据已完成，后续工具维护再核，不扩大本次模型修复。 |
 | D-20261106-PRICING-BOOT-READ | 恢复后的待核线索 / P3 | v0.134.7切版后第一次管理员费率GET为503，未提交保存；原503正文未保留，随后GET200、正常CAS和独立只读核对均完成。所采服务日志仅见启停，细因未证，不当成持续故障或核验通过。 | [原单运行记录](todo/2026-11-05-ledger-rate-accounting.md#rate-video01-最终交付)；13:03切版后的首次配置读取，最终13:06:26Z保存成功。 | 已恢复、不阻本次交付；复发再保响应正文和关联日志，不扩成冷启动优化。 |
 | D-20261106-RELEASE-FINALIZE | 工程包装层待核 / P3 | RATE-10 guard完整Next、类型/lint和源码校验已成功并写原证，但包装层退出120，链接/权限/ready未执行；原控制器已退出而本机SSH仍未返回。仅核证后补齐原收尾，未重编或改旧失败。输出连接为疑似原因，尚未证实细因，不是生产功能复现。 | [原单最终交付](todo/2026-11-06-points-scale10-welcome.md#最终交付)；服务器points-scale10-20261106/attempt01/build-progress.json与guard-finalization-recovered.json | 发布已完成且数据未回；后续若复发补采原stdout/stderr与连接状态，不因此重跑已成功构建或扩改发布引擎。 |
 | D-20261106-HD-GATE-STATE | 待核线索 / P2 | 费率启停候选的原有HD检查相同源码输入一次通过、一次E06执行响应身份失配用例得到queued而非failed（22/23）。不是生产复现，根因尚未确认；本轮不修改HD模块。 | RATE-ENABLE01；服务器pricing-item-activation-20261105/attempt02原失败报告及hd-chain-ub4HpD/child-1.log，和attempt01通过回执逐字段源码hash相同。 | 待独立核查用例时序和执行状态；保留失败原证，不以重跑掩盖。 |

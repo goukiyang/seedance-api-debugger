@@ -1,3 +1,9 @@
+<!-- ALL-MODELS-CONNECTIVITY-20261106 -->
+## MODEL-ALL01 全部模型连通与修复（2026-11-06）
+
+[本次工单](todo/2026-11-06-all-model-connectivity.md#v013411最终上线与生图结果2026-11-06)：v0.134.11／main9ee22969f／BUILD IpZ4sqJsRBpDm7vqeO5TF已19:43:17Z保护上线，guardd7f2e9e53／oMnXg2OZGgKwCrUocfBOk；双完整构建、实际启动/服务/公网检查通过。当前6/7新选生图型号已有原图解码和结算：Banana2.1、Pro、2.5 Flare、Sunburst最高、两2.6；GPT2实际供应商503、5点原号待核，已恢复原停用，Sunburst中档旧请求仍未测通。只3个新价格行5点正常预览/CAS保存，原116行与统一标准保持；defaults12、policy6c9e49fd。新增实扣10.7点，生图累计17.3点，旧1.9＋新GPT2的5共6.9待核预留不重发。两个2.6公开1K价均0.019美元/张，对接组0.01美元/张须开通，账号现金实扣未核。原失败/恢复证据保留；本轮文字/视频零调用，其余功能待用户手验，未冒全部测通。
+<!-- /ALL-MODELS-CONNECTIVITY-20261106 -->
+
 <!-- VIDEO-SUBMIT01-20261106 -->
 ## VIDEO-SUBMIT01 视频生成按钮置灰（2026-11-06）
 
