@@ -1,6 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import type { PricingAdminIdentity } from './admin-contract';
+import { PRICING_POLICY_KEY, type PricingAdminIdentity } from './admin-contract';
 import { resolvePricingCharge, type PricingMenuContext } from './policy';
 import { normalizeDecimal } from './math';
 import { assertPricingImageConsumerReady } from './runtime';
@@ -11,6 +11,7 @@ export type { FrozenPricingCharge } from './frozen-charge';
 type Client = Prisma.TransactionClient | typeof prisma;
 
 export async function quotePricingCharge(identity: PricingAdminIdentity, quantity: string, client: Client = prisma, menu?: PricingMenuContext) {
+  if (menu ? menu.inputs.policy === null : !await client.platformSetting.findUnique({ where: { key: PRICING_POLICY_KEY }, select: { id: true } })) return null;
   const resolved = await resolvePricingCharge(identity, client, menu);
   if (!resolved) return null;
   const row = resolved.row;
