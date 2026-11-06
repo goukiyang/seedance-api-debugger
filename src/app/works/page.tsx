@@ -4,7 +4,6 @@ import { isNavItemVisible } from '@/lib/navigation';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import HomeWorkspace from '@/components/home/HomeWorkspace';
 import { canUseWorksPreview } from '@/lib/works/rollout.server';
-import './mj-style.css';
 
 export const dynamic = 'force-dynamic';
 

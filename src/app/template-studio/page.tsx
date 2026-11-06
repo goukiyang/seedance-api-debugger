@@ -3,6 +3,7 @@ import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { isExternalUser, externalFallbackPath } from '@/lib/access/external-role';
 import { getSession } from '@/lib/auth/session';
 import TemplateStudioShell from '@/components/template-studio/TemplateStudioShell';
+import './mj-style.css';
 
 export const dynamic = 'force-dynamic';
 

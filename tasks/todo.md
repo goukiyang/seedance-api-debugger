@@ -1080,3 +1080,15 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 - 本轮额外发现已登记到[统一发现清单](discoveries.md)：D-20261101-01 至 04 分别保留生产 bundle 共享身份待核、目录全局失效放大、报表 Web 计算量和跨能力计价故障范围；均未实施额外重构，原任务与手验边界不变。
 
 - 封面媒体定点接续仅增短时日志并已恢复原配置；同一B/640/revision2自然点击5.256s、媒体TTFB2.390s，对应Nginx上游头/完整响应均113ms、总时长888ms，Node响应构造89.7ms。已把主要等待缩到观察的上游处理区间之外，公网/前置代理/浏览器等细因仍未证；不冒新修复或全站改善。[原代理计时](../docs/materials/2026-11-01-admin-usage-read-snapshot/media-edge-diagnostic/attempt02/timing-snapshot.jsonl)、[配置恢复证明](../docs/materials/2026-11-01-admin-usage-read-snapshot/media-edge-diagnostic/attempt02/automatic-restore.json)保留；App未重启、源88/v0.125.2不变。
+
+
+<!-- MJ-STYLE-PREVIEW-20261105 -->
+
+## MJ-STYLE03 Reference fidelity correction, two different pages (2026-11-05)
+
+The user identified that the prior candidates did not follow the reference closely and requested a different second page. A now restyles the real Works gallery; B removes its Works override and restyles `/template-studio?type=image`. Both use the same reference-derived left navigation, neutral dark surfaces, quiet controls and orange selection language. The original API, permissions, media geometry and actions remain unchanged.
+
+[Compare the two pages](https://sd2.youdooart.com/__style-preview/mj-20261105/) applies the exact branch CSS to the original authenticated pages. Normal actions affect the original app. A logged-in layout inspection caught and corrected the actual Works container and ModuleGallery selectors. No generation, account change, database copy or formal application style rollout was performed. Full acceptance remains manual; private reference images and screenshots remain in the formal project root.
+
+Method: [pixel-perfect-replication](https://github.com/Yu-369/VibeCurb/blob/main/skills/pixel-perfect/SKILL.md), installed and read for this task. Branches remain `codex/mj-style-a-20261105` and `codex/mj-style-b-20261105`.
+<!-- /MJ-STYLE-PREVIEW-20261105 -->

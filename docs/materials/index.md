@@ -477,3 +477,15 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 - [六项限定Ego观察](2026-11-01-admin-usage-read-snapshot/ego-stage2-observation-summary.json)、[独立B媒体补样](2026-11-01-admin-usage-read-snapshot/ego-stage2-B-supplement-summary.json)及[统计CSV](2026-10-31-navigation-performance/post-snapshot-statistics.csv)已归档，原用户页保留；旧缺口不补造。四向调查与[统一实施方案](2026-11-01-admin-usage-read-snapshot/implementation-plan.md)已完成，三项已随v0.125.2/88a73464保护部署：展示菜单解除长写事务、回执精确失效归类、明确失效后省旧版往返。B handler外等待及四结构残留如实保留；当前源码已提交推送，Linux完整工程、真实非零菜单/DTO等价/fresh charge、30断言有效consumer与两段索引计划有证；原采集FAIL和writer非重叠保留。[本批部署回执](2026-11-01-admin-usage-read-snapshot/release/stage3-attempt01/deployment-result.json)可接续；本批无DDL，59fb仅程序回退保表/数据，[部署后两项限定观察](2026-11-01-admin-usage-read-snapshot/ego-stage3/summary.json)已完成：设置正文1.424s且无旧计价事务，目录主区仍7.380s；B点击7.097s、首字节3.578s/handler61.5ms，外段继续诊断。其他功能待手验，CHAR02只规划、SUNBURST上游原因未证且不造4K；原证本机私有，公开仅脱敏固定记录。
 
 - 封面媒体定点接续仅增短时日志并已恢复原配置；同一B/640/revision2自然点击5.256s、媒体TTFB2.390s，对应Nginx上游头/完整响应均113ms、总时长888ms，Node响应构造89.7ms。已把主要等待缩到观察的上游处理区间之外，公网/前置代理/浏览器等细因仍未证；不冒新修复或全站改善。[原代理计时](2026-11-01-admin-usage-read-snapshot/media-edge-diagnostic/attempt02/timing-snapshot.jsonl)、[配置恢复证明](2026-11-01-admin-usage-read-snapshot/media-edge-diagnostic/attempt02/automatic-restore.json)保留；App未重启、源88/v0.125.2不变。
+
+
+<!-- MJ-STYLE-PREVIEW-MATERIALS-20261105 -->
+
+## MJ-STYLE03 Reference fidelity correction, two different pages (2026-11-05)
+
+The user identified that the prior candidates did not follow the reference closely and requested a different second page. A now restyles the real Works gallery; B removes its Works override and restyles `/template-studio?type=image`. Both use the same reference-derived left navigation, neutral dark surfaces, quiet controls and orange selection language. The original API, permissions, media geometry and actions remain unchanged.
+
+[Compare the two pages](https://sd2.youdooart.com/__style-preview/mj-20261105/) applies the exact branch CSS to the original authenticated pages. Normal actions affect the original app. A logged-in layout inspection caught and corrected the actual Works container and ModuleGallery selectors. No generation, account change, database copy or formal application style rollout was performed. Full acceptance remains manual; private reference images and screenshots remain in the formal project root.
+
+Method: [pixel-perfect-replication](https://github.com/Yu-369/VibeCurb/blob/main/skills/pixel-perfect/SKILL.md), installed and read for this task. Branches remain `codex/mj-style-a-20261105` and `codex/mj-style-b-20261105`.
+<!-- /MJ-STYLE-PREVIEW-MATERIALS-20261105 -->
