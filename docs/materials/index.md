@@ -8,6 +8,13 @@
 
 # 项目资料索引
 
+<!-- RATE-ENABLE01-20261105 -->
+## RATE-ENABLE01 费率单项启停
+
+[原单](../../tasks/todo/2026-11-05-pricing-item-activation.md)与[资料说明](2026-11-05-pricing-item-activation/README.md)：v0.134.3/7dc33318a及新相容guard0e840e2d已保护部署，主/guard完整工程、类型和构建通过，7服务4timer与公网资源有证；原价格、旧冻结合同及账本保留，功能待用户手验。失败尝试和HD工程待核线索保原证，不含数据库、环境或媒体原件。
+<!-- /RATE-ENABLE01-20261105 -->
+
+
 <!-- LEDGER-RATE-ACCOUNTING-MATERIALS-20261105 -->
 ## COST-CHECK01 账本费用核算接入（2026-11-05）
 
