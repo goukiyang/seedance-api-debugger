@@ -1,9 +1,15 @@
 <!-- VIDEO-SUBMIT01-20261106 -->
 ## VIDEO-SUBMIT01 视频生成按钮置灰（2026-11-06）
 
-用户明确反馈按钮无法点击，非费用问题。实际线上8b6c49f/v0.134.7；截图239.1点符合现价，禁用条件不含金额/余额判断。已确认一个反馈缺陷：普通生成将creation.loading/error标成外部原因，GenerationComposer却刻意返回message:null/tone:ok，同时保持禁用；已有原因和重读入口在提交栏下方，截图不可见。已删除这个仅用于隐藏原因的父子prop，复用原状态行显示真实原因，不改变canValidatePrompt/canSubmit/handleSubmit、项目/素材权限、报价/审批或费用。
+用户明确反馈按钮无法点击，非费用问题。排查基线8b6c49f/v0.134.7；截图239.1点符合现价，禁用条件不含金额/余额判断。已确认一个反馈缺陷：普通生成将creation.loading/error标成外部原因，GenerationComposer却刻意返回message:null/tone:ok，同时保持禁用；已有原因和重读入口在提交栏下方，截图不可见。已删除这个仅用于隐藏原因的父子prop，复用原状态行显示真实原因，不改变canValidatePrompt/canSubmit/handleSubmit、项目/素材权限、报价/审批或费用。
 
-实际源码片段红→绿工程检查：`node scripts/test-video-generation-submit-state.cjs`，覆盖上下文错误/加载仍禁用且原因可见、恢复后无陈旧提示、素材阻断、提交中、1080审批和旧版报价门；纯合成、零网络/数据库/收费。此补丁不代表原截图的具体阻断原因已定位。当前Chrome自有新草稿/admin/v7按钮正常（未点击生成）；用户授权只读的Ego2也只有作品广场/样式页，原样交还，待用户打开原页或提供同事身份后继续。尚未功能验收、构建或部署；拟合入同批v8，沿新965a保护版/当前e52费率，不回旧3234/03db。前序视频复用手验及Image2.6通道/报价仍保留。
+实际源码片段红→绿工程检查：`node scripts/test-video-generation-submit-state.cjs`，覆盖上下文错误/加载仍禁用且原因可见、恢复后无陈旧提示、素材阻断、提交中、1080审批和旧版报价门；纯合成、零网络/数据库/收费。此补丁不代表原截图的具体阻断原因已定位。排查时Chrome自有新草稿/admin/v7按钮正常（未点击生成）；用户授权只读的Ego2也只有作品广场/样式页，原样交还，待用户打开原页或提供同事身份后继续。补丁c204已推送并整合；统一v8已封源主源d5d77d6e8d19e96fb0b96211ade96b82861d072f／保护源be92a5e9ff6d83ea8cd9587411df887c450f5ba4，已完成保护部署，原例尚未验收，详实际发布追加。合批含Gemini小数准入修复，新guard必须继承worker判定；不能用旧965a回退新受理0.6/0.7点任务，e52费率保持。前序视频复用手验及Image2.6通道/报价仍保留。
+
+补充隔离核对：执行实际完整输入阻断回调，使用合成15秒/720p/7张就绪图/2056字提示词与可用2.5型号，返回无输入阻断。只证明参数组合本身合法，不证明原截图素材、项目、会话、恢复状态或点击遮罩正常；未调用浏览器/模型/数据库。原页面缺口暂缓，不因规则或合批将原按钮问题标记完成。
+
+实际发布追加：已部署，待用户手动验收（仅提示缺陷）。UTC 2026-11-06T15:50:19Z随统一v8保护发布：主源d5d77d6e8d19e96fb0b96211ade96b82861d072f／0.134.8／BUILD 3UohRWHsr0d-Om8LwPXc0；相容源be92a5e9ff6d83ea8cd9587411df887c450f5ba4／0.134.8+pricing-editor-guard.1／BUILD muaBZZWQ0CSgrh81FCHIH，继承小数任务worker准入，不回旧965a。主/保护版完整原生、计价、Next/types/lint通过；本组3文件线上SHA与c204原7组完全一致，原证复用，未重跑。独立公网核对release=0.134.8、health200/ok=true；统一发布原证保留服务器`/data/video-api-debugger/release-staging/pricing-editor-focus-20261106/attempt01`的public-deployed、source-pair-contract和additional-public-proof，原费用e52、持久数据与原请求保护保持。
+
+本例未闭环：当前可确认并已上线的是保存位置加载/失败时禁用原因不再被吞。截图原页面的实际阻断条件仍未取得，不能把合成参数核对、本人新草稿按钮可用、构建/健康或提示修复当成该按钮已恢复。原页现场暂缓，入口是顶部“生成”或 https://sd2.youdooart.com/generate 。本次排查未提交生成、未调用供应商或扣费；未新增范围外产品缺陷。
 <!-- /VIDEO-SUBMIT01-20261106 -->
 
 <!-- WORKS-FEISHU01-20261106 -->
