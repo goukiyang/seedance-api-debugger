@@ -31,8 +31,11 @@ export async function prepareImagePrivateMigration(db: PrismaClient, selection: 
     if (originals.length !== ids.length) throw new PrivatePromptError();
     const kind = type === 'modules' ? 'image-module' : 'image-preset';
     for (const original of originals) {
-      const origins = studioDefinitionOrigins(kind, original);
-      const cells = ['prompt', 'context'].flatMap(field => cell(original[field as 'prompt' | 'context'], field, [], kind, original.id, field, origins));
+      const cells = ['prompt', 'context'].flatMap(field => {
+        const raw = original[field as 'prompt' | 'context'];
+        return cell(raw, field, [], kind, original.id, field,
+          isStoredPrivatePrompt(raw) ? [] : studioDefinitionOrigins(kind, original));
+      });
       if (!cells.length) { unclassifiedRows++; continue; }
       const next = preparePrivateMigrationRow(type === 'modules' ? 'ImageStudioModule' : 'ImageStudioPreset', original, cells, options);
       if (next) rows.push(next); else unchangedRows++;
