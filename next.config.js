@@ -1,8 +1,10 @@
 const distDir = process.env.NEXT_DIST_DIR?.trim();
+const previewBasePath = process.env.NEXT_PUBLIC_MJ_PREVIEW_BASE_PATH?.trim();
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   ...(distDir ? { distDir } : {}),
+  ...(previewBasePath ? { basePath: previewBasePath } : {}),
 
   // 允许访问 public 目录下的上传文件
   // 文件保存到 public/uploads/，通过 /uploads/... 路径访问

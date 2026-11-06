@@ -1379,7 +1379,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     setPendingModuleScroll(null); setCoverView(true);
   };
   const imageSectionOpen = imageGenerationExpanded;
-  return <>{productDialog}{deletion.productDialog}{(<main ref={pageRef} className={`${styles.page} ${templateWorkbench ? styles.templateWorkbench : ''}`}>
+  return <>{productDialog}{deletion.productDialog}{(<main ref={pageRef} className={`${styles.page} ${templateWorkbench ? `${styles.templateWorkbench} ${styles.dnaWorkbench}` : ''}`}>
     <aside className={styles.moduleRail} data-sidebar-scroll="pane" data-remember-scroll="image-groups" aria-label={templateWorkbench ? '模板导航' : '分组快捷栏'}>
       {templateWorkbench ? <>
         <div className={styles.moduleRailTitle}>模板工作台</div>
@@ -4250,11 +4250,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     onActivate();
     if (draftRestoring || !draftLoaded) beginCurrentInput();
   }
-  return <>{productDialog}{(<section ref={section} hidden={hidden} id={`module-${module.id}`} className={styles.module} aria-label={name} data-active={active}
-    onPointerDownCapture={activateDraft} onFocusCapture={activateDraft}>
-    {!draftLoaded && <p role="status">正在恢复工作区…</p>}
-    <div hidden={!draftLoaded}>
-    {sharedLive?.methodDraft && <p className={styles.sharedOrigin} role="status">复用草稿 · 本次设置单独保存。<a href={`/template-studio?type=image&presetId=${encodeURIComponent(sharedLive.intent.presetId)}`}>打开原模板</a></p>}
+  const dnaModuleContext = <>
     <header className={styles.header}>
       <TemplateFavoriteTitle className={styles.moduleTitleRow} contentKey={sharedLive?.available ? `image_template:${sharedLive.intent.presetId}` : module.saved && !sharedLive ? `image_module:${module.id}` : undefined}>
         {!definitionReady ? <strong className={styles.moduleNameDisplay}>{name}</strong> : nameEditing ? <input ref={nameInput} className={styles.moduleName} aria-label="模块名称" value={name} maxLength={80} onChange={event => setName(event.target.value)} onBlur={() => setNameEditing(false)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); setNameEditing(false); } }} /> : <button type="button" className={styles.moduleNameDisplay} title={name} aria-label={`编辑模块标题：${name}`} onClick={() => setNameEditing(true)}>{name}</button>}
@@ -4262,7 +4258,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         {sharedLive && (!sharedLive.available || module.sourcePresetShared === true) && <small className={styles.sharedOrigin}>{sharedLive.available ? '共享模板' : '历史保留'}</small>}
       </TemplateFavoriteTitle>
       <div className={styles.counts}>
-        {templateWorkbench ? <VideoFeishuToggle state={imageFeishu} label="完成后发飞书" disabled={!draftLoaded || draftRestoring || submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} /> : sharingControls}
+        {!templateWorkbench && sharingControls}
         <ModuleGroupPicker value={groupName} groups={groups} protectedGroups={protectedGroups} disabled={!definitionReady || !draftLoaded || draftRestoring || moduleSaving || !sharedLive && automaticDirty || moduleDeleting || submitting || uploading || Boolean(pendingSubmission)} deleting={groupDeleting}
           onChange={value => void changeGroup(value)} onDelete={onDeleteGroup} />
         {(canViewTemplateContext || templateWorkbench && (canManageTemplateSharing || sharingPending)) && <span className={styles.contextEntry}><button type="button" disabled={!draftLoaded || draftRestoring} aria-label={moduleSaveError ? '模板上下文，保存失败，打开查看并重试' : undefined} onClick={() => definitionEditable || module.privateDefinition ? openModuleDialog() : setReadingDefinition(true)}><Settings size={17} />模板上下文</button></span>}
@@ -4287,13 +4283,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       </> : definitionReady ? <button type="button" className={styles.bannerEmpty} disabled={bannerUploading || submitting} onClick={() => openImageSource('banner')}><ImagePlus size={20} />{bannerUploading ? '上传中' : templateWorkbench ? '添加模块横幅' : '添加模块横幅'}</button> : <span className={styles.bannerEmpty}>暂无横幅</span>}
     </div>
     {bannerProgress && <UploadProgressIndicator {...bannerProgress} />}
-    {bannerCrop && <BannerCropDialog source={bannerCrop} onCancel={closeBannerCrop} onCropped={file => { closeBannerCrop(); void uploadBanner(file); }} />}
-    <div className={styles.workspace}>
-      <section className={styles.inputs} aria-label="生成参数">
-        {globalContextMode === 'historical' && <p role="status" className={styles.appliedSource}>使用历史设置
-          <button type="button" disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending) || moduleSaving || draftRestoring}
-            onClick={useCurrentGlobalSettings}>改用当前通用设置</button>
-        </p>}
+  </>;
+
+  const dnaMaterialContent = <>
         <div className={templateWorkbench ? styles.materialCluster : undefined}>
         <section className={`${styles.materialSection} ${templateWorkbench ? styles.primaryMaterials : ''}`} aria-label="主图">
           {!templateWorkbench && <header className={styles.materialHeading}><h3>主图</h3>
@@ -4365,6 +4357,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           <button type="button" title="清空本次风格组和参考图，保留主图与文字" disabled={uploading || submitting || Boolean(pendingSubmission) || !auxiliaryCount} onClick={clearAllReferences}><X size={14} />清空参考</button>
         </div>}
         </div>
+  </>;
+
+  const dnaMaterialFeedback = <>
         {uploadProgress && <UploadProgressIndicator busy {...uploadProgress} />}
         {!!uploadedSummary.length && <UploadSimilarityReview ownerId={userId} assets={uploadedSummary}
           chooseExistingTarget={asset => {
@@ -4378,62 +4373,68 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden onChange={event => {
           void addImages(Array.from(event.target.files || [])); event.target.value = '';
         }} />
-        <div className={styles.generationToolbar}>
-          <div className={styles.generationActions}>
-            <div className={styles.generationModes} role="group" aria-label="生成方式"><button type="button" aria-pressed={batch.mode === 'single'} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending) || batch.busy || batch.previewing} onClick={() => batch.setMode('single')}>单次</button><button type="button" aria-pressed={batch.mode === 'batch'} disabled={submitting || Boolean(pendingSubmission) || batch.busy || batch.previewing} onClick={() => batch.setMode('batch')}>批量</button></div>
-            <button type="button" className={`${styles.generate} sd2-loading-surface`} data-busy={submitting || queryingSubmission || batch.busy} disabled={Boolean(generationFeedback)} title={generationFeedback?.message} aria-describedby={generationFeedback ? `generation-blocker-${module.id}` : undefined} onClick={() => void (pendingSubmission && !pendingPriceContinuation ? querySubmission() : submit())}>{queryingSubmission ? '正在查询' : submitting ? '正在提交' : pendingPriceContinuation ? '确认价格并生成' : pendingSubmission || batch.pending ? '查询这次提交' : batch.mode === 'batch' ? '开始批量生成' : Number.isInteger(count) && count >= 1 && count <= 8 ? `生成 ${count} 张` : '生成图片'}</button>
-          </div>
-          {batch.mode === 'single' && <div className={`${styles.counts} ${styles.generationQuantity}`} role="group" aria-label="单次生成张数">
+  </>;
+
+    const dnaModeControl = <><div className={styles.generationModes} role="group" aria-label="生成方式"><button type="button" aria-pressed={batch.mode === 'single'} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending) || batch.busy || batch.previewing} onClick={() => batch.setMode('single')}>单次</button><button type="button" aria-pressed={batch.mode === 'batch'} disabled={submitting || Boolean(pendingSubmission) || batch.busy || batch.previewing} onClick={() => batch.setMode('batch')}>批量</button></div></>;
+  const dnaSubmitButton = <><button type="button" className={`${styles.generate} sd2-loading-surface`} data-busy={submitting || queryingSubmission || batch.busy} disabled={Boolean(generationFeedback)} title={generationFeedback?.message} aria-describedby={generationFeedback ? `generation-blocker-${module.id}` : undefined} onClick={() => void (pendingSubmission && !pendingPriceContinuation ? querySubmission() : submit())}>{queryingSubmission ? '正在查询' : submitting ? '正在提交' : pendingPriceContinuation ? '确认价格并生成' : pendingSubmission || batch.pending ? '查询这次提交' : batch.mode === 'batch' ? '开始批量生成' : Number.isInteger(count) && count >= 1 && count <= 8 ? `生成 ${count} 张` : '生成图片'}</button></>;
+  const dnaQuantityControl = <>{batch.mode === 'single' && <div className={`${styles.counts} ${styles.generationQuantity}`} role="group" aria-label="单次生成张数">
             <label htmlFor={`studio-count-${module.id}`}>张数</label>
             {[1, 2, 4, 8].map(n => <button type="button" disabled={submitting || Boolean(pendingSubmission)} key={n} aria-pressed={count === n} onClick={() => setCount(n)}>{n}</button>)}
             <input id={`studio-count-${module.id}`} disabled={submitting || Boolean(pendingSubmission)} type="number" min={1} max={8} step={1} value={count} onChange={event => setCount(Number(event.target.value))} />
-          </div>}
-          {batch.mode === 'batch' && batch.controls}
-          {batch.mode === 'single' && <p className={styles.generationEstimate}>
+          </div>}</>;
+  const dnaBatchControl = <>{batch.mode === 'batch' && batch.controls}</>;
+  const dnaPriceAndNotices = <>{batch.mode === 'single' && <p className={styles.generationEstimate}>
             {visibleQuote && Number.isFinite(visibleQuote.estimatedCredits)
               ? imageUiQuotePriceText(visibleQuote)
               : templateWorkbench && displayedFixedCredits !== null ? imageUiQuotePriceText({ billingMode: 'fixed', estimatedCredits: displayedFixedCredits })
               : !legacyImageRoute && !selectedChannelModel?.billingMode ? '费用未配置'
                 : pricingBySpecification ? '按规格计费，费用待报价' : '费用待估算'}
           </p>}
-          {generationFeedback && <p id={`generation-blocker-${module.id}`} role="status" className={styles.generationFeedback} data-tone={generationFeedback.tone}>{generationFeedback.message}</p>}
-          {settingsError && <button type="button" onClick={() => onReloadSettings(true)}><RefreshCw size={16} />重新读取设置</button>}
-          {sourceSharingBlocked && <TaskNotice kind="recoverable">{sharedLive?.unavailableReason || '模板已不可用，不能新建任务；本人输入、已提交任务和历史结果仍保留。'} <button type="button" onClick={() => { setResultView('images'); document.getElementById(`studio-results-${module.id}`)?.scrollIntoView({ block: 'start' }); }}>查看本人历史</button>{definitionReady && repairDefinition && <button type="button" onClick={() => openModuleDialog()}>修复模板</button>}</TaskNotice>}
-          {sharingPending && <p role="status" className={styles.muted}>{sharingMessage || '共享结果待确认，只查询原请求，不会重新提交。'}</p>}
-          {pendingSubmission && <p className={styles.muted}>{pendingSubmission.confirmationRequired === true ? '价格待确认，保留原提交编号；确认后仅沿原号继续。' : pendingSubmission.accepted === true ? '原请求已受理，结果待核对；保留原号，只查询原结果。' : '提交结果待确认，只查询原请求，不会再次生成。'}<button type="button" disabled={submitting || queryingSubmission} onClick={() => void querySubmission(true)}>核对并结束本次提交</button></p>}
-          {!ready && !settingsError && !channelIssue && <p className={styles.muted}>{!selectedProviderReady ? '图片服务尚未就绪' : '请管理员完成模型积分设置'}</p>}
-        </div>
-        {evolution && <div className={styles.counts} role="group" aria-label="演化方向">{(['increase', 'decrease'] as const).map(direction => <button type="button" key={direction} aria-pressed={(evolutionInput.manual ? evolutionInput.direction : bodyDirection || evolution.defaultDirection) === direction} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} onClick={() => setEvolutionInput({ direction, manual: true })}>{direction === 'increase' ? '递进' : '递减'}</button>)}{evolutionInput.manual && <button type="button" title="按正文和模板默认方向" onClick={() => setEvolutionInput({ direction: evolution.defaultDirection, manual: false })}><RotateCcw size={14} /></button>}</div>}
+{generationFeedback && <p id={`generation-blocker-${module.id}`} role="status" className={styles.generationFeedback} data-tone={generationFeedback.tone}>{generationFeedback.message}</p>}
+{settingsError && <button type="button" onClick={() => onReloadSettings(true)}><RefreshCw size={16} />重新读取设置</button>}
+{sourceSharingBlocked && <TaskNotice kind="recoverable">{sharedLive?.unavailableReason || '模板已不可用，不能新建任务；本人输入、已提交任务和历史结果仍保留。'} <button type="button" onClick={() => { setResultView('images'); document.getElementById(`studio-results-${module.id}`)?.scrollIntoView({ block: 'start' }); }}>查看本人历史</button>{definitionReady && repairDefinition && <button type="button" onClick={() => openModuleDialog()}>修复模板</button>}</TaskNotice>}
+{sharingPending && <p role="status" className={styles.muted}>{sharingMessage || '共享结果待确认，只查询原请求，不会重新提交。'}</p>}
+{pendingSubmission && <p className={styles.muted}>{pendingSubmission.confirmationRequired === true ? '价格待确认，保留原提交编号；确认后仅沿原号继续。' : pendingSubmission.accepted === true ? '原请求已受理，结果待核对；保留原号，只查询原结果。' : '提交结果待确认，只查询原请求，不会再次生成。'}<button type="button" disabled={submitting || queryingSubmission} onClick={() => void querySubmission(true)}>核对并结束本次提交</button></p>}
+{!ready && !settingsError && !channelIssue && <p className={styles.muted}>{!selectedProviderReady ? '图片服务尚未就绪' : '请管理员完成模型积分设置'}</p>}</>;
+  const dnaGenerationExtras = <>{evolution && <div className={styles.counts} role="group" aria-label="演化方向">{(['increase', 'decrease'] as const).map(direction => <button type="button" key={direction} aria-pressed={(evolutionInput.manual ? evolutionInput.direction : bodyDirection || evolution.defaultDirection) === direction} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} onClick={() => setEvolutionInput({ direction, manual: true })}>{direction === 'increase' ? '递进' : '递减'}</button>)}{evolutionInput.manual && <button type="button" title="按正文和模板默认方向" onClick={() => setEvolutionInput({ direction: evolution.defaultDirection, manual: false })}><RotateCcw size={14} /></button>}</div>}</>;
+  const dnaGenerationControls = <><div className={styles.generationToolbar}><div className={styles.generationActions}>{dnaModeControl}{dnaSubmitButton}</div>{dnaQuantityControl}{dnaBatchControl}{dnaPriceAndNotices}</div>{dnaGenerationExtras}</>;
+
+
+  const dnaPromptContent = <>
         <label className={styles.label} htmlFor={`studio-prompt-${module.id}`}>{evolution ? '演化内容' : '补充'} {!evolution && <span>有图片时选填</span>}</label>
         <textarea id={`studio-prompt-${module.id}`} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} value={prompt} maxLength={20000} onChange={event => { setPrompt(event.target.value); setPersonalPromptNotice(''); }} placeholder={evolution ? '什么发生变化' : '补充想生成的画面'} rows={9} />
         {personalPromptNotice && <TaskNotice kind="recoverable">{personalPromptNotice}</TaskNotice>}
         {evolutionConflict && <TaskNotice kind="recoverable">{evolutionConflict}</TaskNotice>}
-        <RatioPicker value={aspectRatio} onChange={setAspectRatio} reference={generationReferences.find(image => Number(image.width) > 0 && Number(image.height) > 0) || null} model={moduleModel} resolution={resolution} onEditing={setRatioEditing} disabled={submitting || Boolean(pendingSubmission)} {...ratios} />
-        <div className={`${styles.modelQualityRow} ${templateWorkbench ? styles.templateModelQualityRow : ''}`}>
-          <label className={styles.compactField} htmlFor={`studio-model-${module.id}`}><strong>生成模型</strong>
+  </>;
+
+    const dnaRatioControl = <><RatioPicker value={aspectRatio} onChange={setAspectRatio} reference={generationReferences.find(image => Number(image.width) > 0 && Number(image.height) > 0) || null} model={moduleModel} resolution={resolution} onEditing={setRatioEditing} disabled={submitting || Boolean(pendingSubmission)} {...ratios} /></>;
+  const dnaModelControl = <><label className={styles.compactField} htmlFor={`studio-model-${module.id}`}><strong>生成模型</strong>
             <select id={`studio-model-${module.id}`} title={templateWorkbench ? `${IMAGE_STUDIO_MODEL_LABELS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || moduleModel}${imageChannelReady && !imageStudioChannelReadyForModel(selectedChannel, moduleModel, settings?.modelReady?.[moduleModel] ?? settings?.providerReady) ? '（未就绪）' : ''}` : undefined} disabled={!draftLoaded || draftRestoring || submissionRecoveryScope !== pendingKey || !batch.recoveryKnown || submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} value={moduleModel} onChange={event => selectModuleModel(event.target.value)}>
               {modelChoices.map(model => <option key={model} value={model} disabled={model === 'gemini-3.1-flash-image-preview'}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || model}{imageChannelReady && !imageStudioChannelReadyForModel(selectedChannel, model, settings?.modelReady?.[model] ?? settings?.providerReady) ? '（未就绪）' : ''}</option>)}
             </select>
-          </label>
-          {!templateWorkbench && !qualityRouted && <label className={styles.compactField} htmlFor={`studio-channel-${module.id}`}><strong>供应商</strong>
+          </label></>;
+  const dnaProviderControl = <>{!templateWorkbench && !qualityRouted && <label className={styles.compactField} htmlFor={`studio-channel-${module.id}`}><strong>供应商</strong>
             <ImageGenerationChannelSelect id={`studio-channel-${module.id}`} channels={imageChannels} value={imageChannelId} disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} onChange={onImageChannelChange} model={moduleModel} legacyReady={settings?.modelReady?.[moduleModel] ?? settings?.providerReady} />
-          </label>}
-          <label className={styles.compactField} htmlFor={`studio-quality-${module.id}`}><strong>图片质量</strong>
+          </label>}</>;
+  const dnaQualityControl = <><label className={styles.compactField} htmlFor={`studio-quality-${module.id}`}><strong>图片质量</strong>
             <select id={`studio-quality-${module.id}`} title={templateWorkbench ? `${IMAGE_STUDIO_QUALITY_LABELS[quality as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || quality}${!qualitySupportUnconfirmed && !qualityChoices.includes(quality) ? qualityChoices.length ? '（当前供应商不支持）' : '（支持范围待确认）' : ''}` : undefined} disabled={submitting || Boolean(pendingSubmission)} value={quality} onChange={event => setQuality(event.target.value)}>
               {!qualityChoices.includes(quality) && <option value={quality} disabled={!qualitySupportUnconfirmed}>{qualityRouted ? '原质量待选择' : `${IMAGE_STUDIO_QUALITY_LABELS[quality as keyof typeof IMAGE_STUDIO_QUALITY_LABELS] || quality}${!qualitySupportUnconfirmed ? qualityChoices.length ? '（当前供应商不支持）' : '（支持范围待确认）' : ''}`}</option>}
               {qualityChoices.map(option => <option key={option} value={option}>{imageStudioQualityLabel(moduleModel, option)}</option>)}
             </select>
-          </label>
-          <label className={styles.compactField} htmlFor={`studio-resolution-${module.id}`}><strong>分辨率</strong>
+          </label></>;
+  const dnaResolutionControl = <><label className={styles.compactField} htmlFor={`studio-resolution-${module.id}`}><strong>分辨率</strong>
             <select id={`studio-resolution-${module.id}`} title={templateWorkbench ? `${resolution}${!resolutionSupportUnconfirmed && !resolutionChoices.includes(resolution) ? resolutionChoices.length ? '（当前供应商不支持）' : '（支持范围待确认）' : ''}` : undefined} disabled={submitting || Boolean(pendingSubmission)} value={resolution} onChange={event => setResolution(event.target.value as ImageResolution)}>
               {!resolutionChoices.includes(resolution) && <option value={resolution} disabled={!resolutionSupportUnconfirmed}>{resolution}{!resolutionSupportUnconfirmed ? resolutionChoices.length ? '（当前供应商不支持）' : '（支持范围待确认）' : ''}</option>}
               {resolutionChoices.map(option => <option key={option} value={option}>{option}</option>)}
             </select>
-          </label>
-        </div>
-        <ImageUsageProjectSelect ownerId={userId} value={usageProject.projectId} onChange={usageProject.setProjectId}
-          storageIssue={usageProject.storageIssue} disabled={!usageProject.ready || submitting || Boolean(pendingSubmission) || Boolean(batch.pending) || !batch.recoveryKnown} />
-        {!allowsUnconfirmedParameters && qualityChoices.length > 0 && !qualityChoices.some(option => option !== 'auto') && <p className={styles.muted}>当前供应商只配置了模型默认质量。</p>}
+          </label></>;
+  const dnaProjectControl = <><ImageUsageProjectSelect ownerId={userId} value={usageProject.projectId} onChange={usageProject.setProjectId}
+          storageIssue={usageProject.storageIssue} disabled={!usageProject.ready || submitting || Boolean(pendingSubmission) || Boolean(batch.pending) || !batch.recoveryKnown} /></>;
+  const dnaQualityNotice = <>{!allowsUnconfirmedParameters && qualityChoices.length > 0 && !qualityChoices.some(option => option !== 'auto') && <p className={styles.muted}>当前供应商只配置了模型默认质量。</p>}</>;
+  const dnaParameterControls = <>{dnaRatioControl}<div className={`${styles.modelQualityRow} ${templateWorkbench ? styles.templateModelQualityRow : ''}`}>{dnaModelControl}{dnaProviderControl}{dnaQualityControl}{dnaResolutionControl}</div>{dnaProjectControl}{dnaQualityNotice}</>;
+
+
+  const dnaTemplateActions = <>
         <div className={styles.moduleQuickActions} aria-label="模板快捷设置">
           <div className={styles.quickPresetRow}>
             <button type="button" title="管理模板" data-tip="管理已保存的快捷模板" aria-label="管理模板" onClick={onManagePresets}><FolderCog size={16} /></button>
@@ -4447,6 +4448,57 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} title={definitionSaveReason || undefined} disabled={!personalSettingsOpen && definitionSaveBlocked || !sharedReady && !definitionReady || moduleSaving || sharingPreferenceSaving || presetSaving || Boolean(quickPresetApplying) || uploading || bannerUploading || !settingsDirty && !unpublishedSharing} onClick={() => void saveModule()}><Save size={16} />{globalContextMode === 'historical' ? '保存历史复现设置' : sharedLive ? definitionEditable ? '保存共享模板' : '保存本次设置' : unpublishedSharing ? '保存并共享模板' : templateWorkbench ? '保存设置' : '保存上下文'}</button>
           <button type="button" title={!contextEditable && !recoverableDraft ? '共享模板的内部配置只能由创建者另存；当前草稿仍可生成' : undefined} disabled={presetSaving || Boolean(quickPresetApplying) || draftRestoring || moduleSaving || uploading || bannerUploading || submitting || Boolean(pendingSubmission) || (!recoverableDraft && (!contextEditable || !generationChanged && !authorDefinitionDirty || !authorDefinitionDirty && generationDraft === savedAsSignature))} className={recoverableDraft || (contextEditable && (generationChanged || authorDefinitionDirty) && generationDraft !== savedAsSignature) ? styles.saveReady : ''} onClick={() => recoverableDraft ? restoreTemporaryDraft() : void saveAsPreset()}><Save size={16} />{recoverableDraft ? '恢复上一次' : templateWorkbench ? '另存为模板' : '另存为'}</button>
         </div>
+  </>;
+  return <>{productDialog}{(<section ref={section} hidden={hidden} id={`module-${module.id}`} className={styles.module} aria-label={name} data-active={active}
+    onPointerDownCapture={activateDraft} onFocusCapture={activateDraft}>
+    {!draftLoaded && <p role="status">正在恢复工作区…</p>}
+    <div hidden={!draftLoaded}>
+    {sharedLive?.methodDraft && <p className={styles.sharedOrigin} role="status">复用草稿 · 本次设置单独保存。<a href={`/template-studio?type=image&presetId=${encodeURIComponent(sharedLive.intent.presetId)}`}>打开原模板</a></p>}
+    {templateWorkbench ? <div className={styles.dnaModuleBar}>
+      <strong className={styles.dnaModuleTitle} title={name}>{name}</strong>
+      <div className={styles.dnaContextActions}><VideoFeishuToggle state={imageFeishu} label="完成后发飞书" disabled={!draftLoaded || draftRestoring || submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} />
+        <details className={styles.dnaTemplateTools}><summary>模板与预设<ChevronDown size={14} /></summary>
+          <div className={styles.dnaTemplateBody}>{dnaModuleContext}{dnaTemplateActions}</div>
+        </details>
+      </div>
+    </div> : dnaModuleContext}
+    {bannerCrop && <BannerCropDialog source={bannerCrop} onCancel={closeBannerCrop} onCropped={file => { closeBannerCrop(); void uploadBanner(file); }} />}
+    <div className={styles.workspace}>
+      <section className={styles.inputs} aria-label="生成参数">
+        {globalContextMode === 'historical' && <p role="status" className={styles.appliedSource}>使用历史设置
+          <button type="button" disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending) || moduleSaving || draftRestoring}
+            onClick={useCurrentGlobalSettings}>改用当前通用设置</button>
+        </p>}
+        {templateWorkbench ? <>
+          <div className={styles.dnaPrompt}>{dnaPromptContent}</div>
+          <div className={styles.dnaControlBar}>
+            <div className={styles.dnaParameters}>{dnaModelControl}
+              <details className={styles.dnaSpecifications}><summary>{aspectRatio} · {resolution} · {imageStudioQualityLabel(moduleModel, quality)}<ChevronDown size={14} /></summary>
+                <div className={styles.dnaSpecificationBody}>{dnaRatioControl}{dnaQualityControl}{dnaResolutionControl}</div>
+              </details>
+              <details className={styles.dnaBatchOptions} open={batch.mode === 'batch' ? true : undefined}><summary>{batch.mode === 'batch' ? '批量' : `单次 · ${count}张`}<ChevronDown size={14} /></summary>
+                <div className={styles.dnaSpecificationBody}>{dnaModeControl}{dnaQuantityControl}{dnaBatchControl}</div>
+              </details>
+            </div>
+            <div className={styles.dnaPriceNotice}>{dnaPriceAndNotices}</div>
+            <div className={styles.dnaGeneration}>{dnaSubmitButton}</div>
+            {dnaGenerationExtras}
+          </div>
+          <div className={styles.dnaMetaLine}>{dnaProjectControl}{dnaQualityNotice}</div>
+          <div className={styles.dnaReferenceLine}>
+            {images.length > 0 && <div className={styles.dnaInputPreviews} aria-label="本次主图">
+              {images.slice(0, 4).map((image, index) => <button type="button" key={`${image.id}:${index}`} title={`预览主图${index + 1}`} aria-label={`预览主图${index + 1}`} onClick={() => previewReference(image, index + 1, false)}>
+                {image.thumbnailUrl || image.originalUrl ? <img src={image.thumbnailUrl || image.originalUrl} alt={`主图${index + 1}`} /> : <ImagePlus size={20} />}
+              </button>)}
+              {images.length > 4 && <span>+{images.length - 4}</span>}
+            </div>}
+            <details className={styles.dnaMaterials}>
+              <summary><ImagePlus size={17} />素材与风格<span>主图 {images.length} · 参考 {auxiliaryCount}</span><ChevronDown size={14} /></summary>
+              <div className={styles.dnaMaterialBody}>{dnaMaterialContent}</div>
+            </details>
+          </div>
+          {dnaMaterialFeedback}
+        </> : <>{dnaMaterialContent}{dnaMaterialFeedback}{dnaGenerationControls}{dnaPromptContent}{dnaParameterControls}{dnaTemplateActions}</>}
         {quickPresetsLoading && <p role="status" className={styles.muted}>正在读取快捷模板…</p>}
         {quickPresetsError && <p role="alert" className={styles.error}>{quickPresetsError}<button type="button" disabled={quickPresetsLoading} onClick={() => void loadQuickPresets()}>重试</button></p>}
         {saveStatus && <p role="status" className={styles.muted}>{saveStatus}</p>}

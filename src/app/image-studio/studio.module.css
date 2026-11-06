@@ -484,3 +484,117 @@
 .resolutionTargets { padding: 0; list-style: none; max-height: 240px; overflow: auto; }
 .resolutionTargets li { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; border-bottom: 1px solid var(--border, #dedee3); }
 .sharedOrigin { color: var(--text-secondary, #9ca3af); font-size: 12px; font-weight: 400; white-space: nowrap; flex-shrink: 0; }
+
+
+/* DNA workbench: create at the top, browse across the full content area. */
+.dnaWorkbench .primary { border-color: #ef411f; background: #c9361b; color: #fdf2ee; }
+.dnaWorkbench .primary:hover:not(:disabled) { background: #d0361a; }
+.dnaWorkbench .muted { color: #9ba1af; }
+.dnaWorkbench .moduleNameDisplay:hover { color: #ebecef; }
+.dnaWorkbench a { color: #cdd0da; }
+
+.dnaWorkbench .generationHeader { justify-content: flex-end; margin-bottom: 8px; gap: 8px; }
+.dnaWorkbench .generationHeader > div:first-child { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.dnaWorkbench .generationHeader .counts { gap: 4px; }
+.dnaWorkbench .generationHeader button { min-height: 32px; padding: 5px 9px; border-color: transparent; background: transparent; color: #a7aab6; font-size: 12px; font-weight: 400; }
+.dnaWorkbench .module { padding: 0 0 32px; border: 0; }
+.dnaWorkbench .workspace { display: block; }
+.dnaWorkbench .inputs { padding: 0; border: 0; background: transparent; }
+.dnaModuleBar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 20px; margin-bottom: 12px; }
+.dnaModuleTitle { min-width: 0; color: #cdd0da; font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+.dnaContextActions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-left: auto; }
+.dnaTemplateTools > summary { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 0; list-style: none; cursor: pointer; color: #a7aab6; font-size: 12px; }
+.dnaTemplateTools[open] { width: 100%; flex-basis: 100%; }
+.dnaContextActions:has(.dnaTemplateTools[open]) { flex-basis: 100%; }
+.dnaTemplateBody { padding: 18px; margin: 4px 0 8px; border: 1px solid #30333d; border-radius: 12px; background: #16181d; }
+.dnaTemplateBody .header { margin-bottom: 16px; }
+.dnaTemplateBody .moduleQuickActions { margin-bottom: 0; }
+.dnaTemplateBody .moduleBanner { margin: 0 0 14px; }
+.dnaPrompt { padding: 0; border: 1px solid #30323b; border-radius: 13px; background: #1e1f25; }
+.dnaPrompt:focus-within { border-color: #626776; }
+.dnaPrompt > .label { position: absolute; width: 1px; height: 1px; padding: 0; margin: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.page .dnaPrompt textarea { display: block; width: 100%; min-height: 80px; max-height: 280px; margin: 0; padding: 16px 18px; border: 0; border-radius: 13px; background: transparent; color: #ebecef; font-size: 16px; line-height: 1.6; resize: vertical; }
+.dnaPrompt textarea::placeholder { color: #9b9fac; }
+.dnaControlBar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 10px 0; }
+.dnaParameters { display: flex; flex: 1 1 560px; flex-wrap: wrap; align-items: center; gap: 8px 14px; min-width: 0; }
+.dnaParameters .modelQualityRow { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0; }
+.dnaParameters .compactField { display: flex; flex-direction: row; align-items: center; gap: 6px; min-width: 0; margin: 0; }
+.dnaParameters .compactField:first-child { flex: 1 1 220px; }
+.dnaParameters .compactField strong { color: #9b9fac; font-size: 11px; font-weight: 400; }
+.dnaParameters .compactField select { width: auto; min-width: 0; min-height: 36px; max-width: 260px; padding: 6px 22px 6px 6px; border-color: transparent; border-radius: 8px; background: transparent; color: #d8dbe4; font-size: 13px; }
+.dnaParameters .compactField select:focus { border-color: #626776; background: #1e1f25; }
+.dnaGeneration { flex: 0 1 auto; min-width: 0; }
+.dnaGeneration .generationToolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0; }
+.dnaGeneration .generationActions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.dnaGeneration .generationModes { border: 0; background: transparent; padding: 0; }
+.dnaGeneration .generationModes button { min-height: 34px; min-width: 0; padding: 6px 9px; border-radius: 18px; font-size: 12px; }
+.dnaGeneration .generationModes button[aria-pressed=true], .dnaGeneration .generationQuantity button[aria-pressed=true] { color: #ff967b; border-color: #653023; background: #331a15; }
+.page .dnaGeneration .generate { width: auto; min-width: 104px; margin: 0; padding: 8px 16px; border: 1px solid #ef411f; border-radius: 10px; background: #c9361b; color: #fdf2ee; font-size: 14px; font-weight: 600; }
+.page .dnaGeneration .generate:hover:not(:disabled) { background: #d0361a; }
+.page .dnaGeneration .generate:disabled { background: #35231f; border-color: #4c302b; color: #c1a49b; opacity: 1; }
+.dnaGeneration .generationQuantity { gap: 4px; }
+.dnaGeneration .generationQuantity label { font-size: 12px; }
+.dnaGeneration .generationQuantity button { min-height: 32px; padding: 4px 7px; border-color: transparent; border-radius: 7px; font-size: 12px; }
+.dnaGeneration .generationQuantity input { width: 48px; min-height: 32px; padding: 4px; border-color: #30323b; background: #16181d; font-size: 12px; }
+.dnaGeneration .generationEstimate { color: #b8bdca; font-size: 12px; }
+.dnaGeneration .generationFeedback { flex-basis: 100%; }
+.dnaReferenceLine { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 16px; }
+.dnaInputPreviews { display: flex; align-items: center; gap: 6px; }
+.page .dnaInputPreviews button { width: 48px; height: 48px; padding: 0; border: 1px solid #393c47; border-radius: 7px; background: #16181d; overflow: hidden; }
+.dnaInputPreviews img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.dnaInputPreviews > span { color: #a7aab6; font-size: 12px; }
+.dnaMaterials { min-width: 0; flex: 1 1 240px; }
+.dnaMaterials > summary { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 36px; padding: 6px 8px; border-radius: 8px; color: #b4b8c5; font-size: 12px; list-style: none; cursor: pointer; }
+.dnaMaterials > summary > span { color: #8f95a4; font-size: 11px; }
+.dnaMaterials > summary:hover { background: #1e1f25; }
+.dnaMaterials[open] { flex-basis: 100%; }
+.dnaMaterialBody { margin-top: 8px; padding: 16px; border: 1px solid #30333d; border-radius: 12px; background: #16181d; }
+.dnaMaterialBody .materialCluster { padding: 0; margin: 0; }
+.dnaWorkbench .outputs { padding-top: 6px; border-top: 1px solid #24262e; }
+.dnaWorkbench .resultHeader { gap: 12px; margin: 8px 0 14px; }
+.dnaWorkbench .resultHeader h2 { color: #a7aab6; font-size: 13px; font-weight: 500; }
+.dnaWorkbench .resultHeader .counts { gap: 4px; }
+.dnaWorkbench .resultHeader button { min-height: 34px; padding: 6px 10px; border-color: transparent; border-radius: 18px; background: transparent; color: #a7aab6; font-size: 12px; font-weight: 400; }
+.dnaWorkbench .resultHeader button[aria-pressed=true] { color: #ebecef; background: #22242c; }
+.dnaWorkbench .resultHeader [aria-label="返回当前模板全部结果"][aria-pressed=true] { color: #ef4444; }
+@media (max-width: 980px) {
+  .dnaWorkbench .generationHeader { margin-bottom: 4px; }
+  .dnaModuleBar { margin-bottom: 10px; }
+  .dnaParameters { flex-basis: 100%; }
+  .dnaGeneration { width: 100%; }
+  .dnaGeneration .generationToolbar { justify-content: space-between; }
+}
+@media (max-width: 640px) {
+  .dnaModuleTitle { font-size: 13px; }
+  .dnaContextActions { gap: 8px; }
+  .page .dnaPrompt textarea { min-height: 88px; padding: 12px; font-size: 16px; }
+  .dnaParameters .compactField:first-child { flex-basis: 100%; }
+  .dnaParameters .compactField select { min-height: 40px; }
+  .dnaGeneration .generationQuantity button, .dnaGeneration .generationQuantity input { min-height: 40px; }
+  .dnaMaterialBody, .dnaTemplateBody { padding: 12px; }
+  .dnaWorkbench .resultHeader { flex-wrap: wrap; }
+}
+
+/* Low-frequency controls expand from their actual current-value summaries. */
+.dnaParameters { flex: 1 1 460px; gap: 6px 12px; }
+.dnaParameters > .compactField { display: inline-flex; flex: 0 1 280px; }
+.dnaParameters > .compactField strong { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.dnaSpecifications > summary, .dnaBatchOptions > summary { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; padding: 6px 8px; border-radius: 8px; color: #c1c5d0; font-size: 12px; list-style: none; cursor: pointer; }
+.dnaSpecifications > summary:hover, .dnaBatchOptions > summary:hover { background: #1e1f25; }
+.dnaSpecifications[open], .dnaBatchOptions[open] { width: 100%; flex-basis: 100%; }
+.dnaSpecificationBody { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-top: 8px; padding: 12px; border: 1px solid #30333d; border-radius: 10px; background: #16181d; }
+.dnaSpecificationBody .generationModes { border-color: #393c47; background: transparent; }
+.dnaSpecificationBody .generationModes button[aria-pressed=true], .dnaSpecificationBody .generationQuantity button[aria-pressed=true] { background: #331a15; border-color: #653023; color: #ff967b; }
+.dnaPriceNotice { flex: 0 1 320px; min-width: 0; color: #c1c5d0; font-size: 12px; }
+.dnaPriceNotice p { margin: 0; }
+.dnaMetaLine { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 6px; }
+.dnaMetaLine > div { width: min(360px, 100%); }
+.dnaMetaLine > div > div > label { color: #9298a7; font-size: 12px; }
+.dnaMetaLine select, .dnaMetaLine button { min-height: 32px; padding-block: 5px; border-color: transparent; font-size: 12px; }
+@media (max-width: 640px) {
+ .dnaParameters { flex-basis: 100%; }
+ .dnaParameters > .compactField { flex-basis: 100%; }
+ .dnaPriceNotice { flex: 1 1 160px; }
+ .dnaGeneration { width: auto; }
+ .dnaSpecifications > summary, .dnaBatchOptions > summary { min-height: 40px; }
+}

@@ -1,7 +1,9 @@
 export function replaceImageModuleLocation(moduleId: string | null, covers = false) {
   const url = new URL(window.location.href);
-  if (!['/template-studio', '/image-studio'].includes(url.pathname) || url.searchParams.get('type') === 'video') return;
-  if (url.pathname === '/template-studio') url.searchParams.set('type', 'image');
+  const prefix = process.env.NEXT_PUBLIC_MJ_PREVIEW_BASE_PATH || '';
+  const pathname = prefix && url.pathname.startsWith(`${prefix}/`) ? url.pathname.slice(prefix.length) : url.pathname;
+  if (!['/template-studio', '/image-studio'].includes(pathname) || url.searchParams.get('type') === 'video') return;
+  if (pathname === '/template-studio') url.searchParams.set('type', 'image');
   if (moduleId) url.searchParams.set('moduleId', moduleId);
   else url.searchParams.delete('moduleId');
   url.searchParams.delete('presetId');

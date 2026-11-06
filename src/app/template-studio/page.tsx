@@ -3,6 +3,7 @@ import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { isExternalUser, externalFallbackPath } from '@/lib/access/external-role';
 import { getSession } from '@/lib/auth/session';
 import TemplateStudioShell from '@/components/template-studio/TemplateStudioShell';
+import './dna-preview.css';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,11 +46,11 @@ export default async function TemplateStudioPage({ searchParams = {} }: { search
   const initialType = allowedTypes.includes(requestedType) ? requestedType : allowedTypes[0];
 
   return (
-    <TemplateStudioShell
+    <div className={initialType === 'image' ? 'mj-dna-layout' : undefined}><TemplateStudioShell
       userId={user.id}
       isAdmin={user.role === 'admin'}
       allowedTypes={allowedTypes}
       initialType={initialType}
-    />
+    /></div>
   );
 }
