@@ -152,6 +152,10 @@ v0.121.4双构建与v0.121.5单主完整Next/类型/lint、实际服务与公网
 
 ## CHAR02 角色差异与独立视图重规划
 
+<!-- CHARACTER-RECIPE-BINDING-20261105 -->
+2026-11-05 七点图片/提示词绑定已保护部署 **v0.134.0 / 765b3b1c2 / BYbuEzysCmXTtkfqMUyNv**，相容guard d2eea332d / sFx7NvYa1dkHeWkz9fOx3。当前图片/下次输入、切换同步、两种复用、四槽来源、报价及权限/草稿已实现；继承2dc线上共享/入口修复。主/guard双15组与双完整工程/Next/types/lint、备份/6启动门、7服务/4timer、公网chunk/3匿名401及health通过，价格/数据保持。**已部署，待用户手动验收**；原第五组未知与10点预留未重发。详见[原单§11.3](todo/2026-10-31-character-reference-replan.md#113-发布完成2026-11-05)。
+<!-- /CHARACTER-RECIPE-BINDING-20261105 -->
+
 2026-11-05 “全身正反面”独立制作页与全工具HD展示已部署 **v0.132.3 / 4b679e4c0**，BUILD V5usaUOiwn_qrka4Rvoxp。四步流程、正背独立生成/选用/历史、素材及候选/微调/合成/素材弹窗高清预览已实现，生成与显式导出保原精度。完整工程、Next/类型/lint、七服务四timer、页面JS SHA/两匿名401及health通过，价格与数据保持。承接dd937两个UI组件，从已恢复d2d8 guard保护发布。**已部署，待用户手动验收**，详见[原单§8.2](todo/2026-10-31-character-reference-replan.md#82-发布完成2026-11-05)。
 
 ## CHAR01 角色参考图工作台（2026-10-30）

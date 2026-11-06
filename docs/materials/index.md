@@ -64,6 +64,12 @@ v0.121.5已部署，运行源`6a0d74f2b5782a52b797cdf99434bb48e15e7bf4` / BUILD`
 
 已部署 **v0.121.1** / `9b55cf22c5a9b76df09ccb71870fb980dcac51b8` / BUILD `i8f8NqmDpzIPlFtgvCO2B`，2026-10-31T08:46:45Z公网收口，待用户手验。范围与原号未知边界见[工单](../../tasks/todo/2026-10-31-image-studio-personal-prompt-recovery.md)。原图、工程/失败原证、主/guard完整构建、证据复用、数据备份与部署回执保正式根私有 `docs/materials/2026-10-31-studio-personal-prompt-receipts/implementation/deployment-result.json`，不随源码外发；没有工程代清pending、重发或收费测试。
 
+## CHAR02 角色差异与独立视图重规划（2026-10-31）
+
+<!-- CHARACTER-RECIPE-BINDING-20261105 -->
+图片与提示词七点绑定已部署v0.134.0 / 765b3b1c2 / BYbuEzysCmXTtkfqMUyNv，guard d2eea332d / sFx7NvYa1dkHeWkz9fOx3。实际冻结context/prompt、切换、两种复用、四槽来源与权限/草稿已实现，功能待手验。主/guard双15组及双完整native/定价/Next/types/lint、公网/健康与数据保护有证；原失败、被替代构建和cutout真实导入范围复用均如实留存。[本轮原单§11.3](../../tasks/todo/2026-10-31-character-reference-replan.md#113-发布完成2026-11-05)为权威入口；私有原证2026-11-05-character-prompt-binding/implementation/attempt01–03及服务器对应目录，不随源码外发。
+<!-- /CHARACTER-RECIPE-BINDING-20261105 -->
+
 ## CHAR01 角色参考图工作台（2026-10-30）
 
 已部署 **v0.121.0**，应用源 `3b19c1d438e2ddf876c594b4fc22184f69268fcd`、BUILD `dtT-BETLiEPv83lK9Daq6`；2026-10-31T05:50:35Z切换，05:50:58Z公网收口。[工具入口](https://sd2.youdooart.com/tools/character-lab)，管理员在同页“提示词管理”编辑上下文并保存版本。按定稿完成原图与4/9差异人脸、主辅方案选择、2:3成品预览及直接保存/PNG或ZIP导出；滑杆只影响下一次主动生成，保存导出不生成。本人草稿/历史、管理员规则与原请求/费用快照分别保留。
