@@ -6,7 +6,6 @@ import { normalizeDecimal, multiplyDecimal, roundDecimal } from './math';
 import { normalizeCredits } from '@/lib/credits/precision';
 import { isSeedanceVideoDuration } from '@/lib/provider/seedance-models';
 import type { PricingAdminIdentity } from './admin-contract';
-import { RMB_INTEGER_ROUNDING } from './admin-contract';
 import { videoPricingRequiresContext, VideoPricingContextError, type VideoPricingContext } from './video-context';
 import type { PricingReferenceVideo, PricingVideoPurpose } from './pricing-authoring-contract';
 
@@ -43,13 +42,13 @@ export async function quoteVideoPricing(input: VideoPricingInput, client: Client
     { maxScale: 8, min: '0', max: '3600', allowZero: false });
   let current = await quotePricingCharge(identity, quantity, client);
   if (!current) return { identity, quantity, pricing: legacy, revision: null, charge: null };
-  if (identity.kind === 'enhance' && current.charge.rounding === RMB_INTEGER_ROUNDING) {
+  if (identity.kind === 'enhance' && ['follow', 'custom'].includes(current.charge.mode)) {
     if (!(input.fps ?? input.sourceFps)) throw new PricingChargeError('源视频帧率尚未确认，请选择输出帧率后重新报价；原视频和参数已保留');
     const preciseIdentity = videoPricingIdentity(input);
     if (preciseIdentity.specifications.fpsTier !== identity.specifications.fpsTier) {
       identity = preciseIdentity;
       current = await quotePricingCharge(identity, quantity, client);
-      if (!current || current.charge.rounding !== RMB_INTEGER_ROUNDING) throw new PricingChargeError('源视频对应帧率的人民币计价尚未登记，请先确认该档单价');
+      if (!current || !['follow', 'custom'].includes(current.charge.mode)) throw new PricingChargeError('源视频对应帧率的人民币计价尚未登记，请先确认该档单价');
     }
     quantity = normalizeDecimal(roundDecimal(String(input.sourceDuration ?? input.duration), 3, 'half_up'), { maxScale: 3, max: '3600', allowZero: false });
     const charge = { ...current.charge, quantity };

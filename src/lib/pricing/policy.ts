@@ -426,7 +426,7 @@ function simulationPrice(row: PricingAdminRow, quantity: string, example?: strin
     if (compareDecimal(perTask, PRICING_ADMIN_LIMITS.maxImageCredits) > 0) fail('单个账单示例超过图片原授权边界');
     return { exact: multiplyDecimal([exact, quantity]), credits: multiplyDecimal([perTask, quantity]) };
   }
-  const measured = row.identity.kind === 'enhance' && row.rounding === RMB_INTEGER_ROUNDING && ['follow', 'custom'].includes(row.mode)
+  const measured = row.identity.kind === 'enhance' && ['follow', 'custom'].includes(row.mode)
     ? roundDecimal(quantity, 3, 'half_up')
     : row.identity.kind === 'enhance' || row.identity.kind === 'h3' ? roundDecimal(quantity, 0, 'ceil') : quantity;
   const exact = row.mode === 'legacy_fixed' && row.currentUnitCredits !== null ? multiplyDecimal([row.currentUnitCredits, measured])
@@ -652,6 +652,8 @@ async function prepare(actor: PricingAdminActor, input: PricingAdminPreviewInput
       if (rule.identity.billingMode === 'actual' ? !rule.exchangeRate : !rule.baseCny || !rule.source) {
         fail(`${current.label}：请先补齐计费依据，再跟随统一费率`);
       }
+      if (rule.rounding && state.authoring.globalPointsPerCny && compareDecimal(state.authoring.globalPointsPerCny, '100') === 0
+        && compareDecimal(authoring.globalPointsPerCny, '100') !== 0) delete rule.rounding;
       if (rule.mode !== 'custom' || rule.customPointsPerCny !== authoring.globalPointsPerCny) rule.updatedAt = now;
       rule.mode = 'custom'; rule.customPointsPerCny = authoring.globalPointsPerCny; put(rule);
     }

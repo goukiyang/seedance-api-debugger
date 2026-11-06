@@ -1,10 +1,10 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '模板共享与视频复用修复', outline: [
-  '修复过度帧首次共享后无法打开的问题',
-  '修复视频复用误判原素材缺失，保留参数恢复',
-  '新增 GPT Image 2.6 配置项，待通道与价格确认后启用',
-  '反馈截图不再混入素材库',
+const notice = { title: '点数换算调整为每元10点', outline: [
+  '人民币单价不变，按金额自动换算点数',
+  '单次扣点最多保留一位小数',
+  '历史余额、流水和已受理任务保持原样',
+  '新用户暂不自动赠送积分',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

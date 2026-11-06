@@ -430,6 +430,26 @@ export async function runPricingAuthoringContractFixture(): Promise<{
       equal(parseImageBillingContract(JSON.stringify({ ...wrapped, authorizedCredits: 5.5 })), null);
       equal(parseFrozenPricingCharge({ ...actual, rounding: RMB_INTEGER_ROUNDING }), null);
       evidence.push('RATE-100: signed preview, saved policy, runtime quote and frozen readers agree on whole-task rounding; amount-only edits retain it, old quotes and actual-bill prices remain unchanged.');
+      await save({ kind: 'save', changes: { rows: [{ id: unverifiedActual!.id, authoringRateMode: 'custom' }] } });
+      await save({ kind: 'save', changes: { authoring: { globalPointsPerCny: '100' }, rows: [
+        { id: parent.id, authoringRateMode: 'follow_global' },
+      ] } });
+      const baseBeforeScale = row(parent.id).baseCny;
+      const oldWholeContract = await quoteVideoPricing(normal, tx);
+      await save({ kind: 'save', changes: { authoring: { globalPointsPerCny: '10' }, rows: [] } });
+      equal(row(parent.id).baseCny, baseBeforeScale);
+      equal(row(parent.id).rounding, undefined);
+      equal(row(parent.id).currentPointsPerCny, '10');
+      equal(row(unverifiedActual!.id).currentPointsPerCny, actualBefore);
+      const tenthQuote = await quoteVideoPricing(normal, tx);
+      equal(tenthQuote.charge!.rounding, 'half_up_tenth');
+      equal(tenthQuote.pricing.estimatedCost, 0.6);
+      for (const [amount, expected] of [['0.10', 1], ['0.05', 0.5], ['0.06', 0.6], ['0.07', 0.7]] as const) {
+        equal(frozenPricingCredits({ ...tenthQuote.charge!, identity: image.identity, quantity: '1', baseCny: amount }).credits, expected);
+      }
+      equal(frozenPricingCredits(oldWholeContract.charge!).credits, 6, 'Scale changes never reprice an accepted whole-point contract');
+      equal(await tx.creditLedger.count(), 0);
+      evidence.push('RATE-10: global100 to10 clears only member integer markers; yuan bases/custom outsiders stay fixed, four image prices yield1/0.5/0.6/0.7, original frozen contracts and ledgers are untouched.');
       completed = true;
       throw rollback;
     }, { maxWait: 10000, timeout: 120000 });
