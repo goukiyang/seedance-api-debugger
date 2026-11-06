@@ -123,7 +123,7 @@ with sqlite3.connect(sys.argv[1]) as db:
     const { requestWorkPreview } = await import('../src/lib/works/preview-request');
     const { processWorksRegistrationPass } = await import('../src/lib/works/ingestion');
     const { setWorksControl, freezeWorkSourcePolicy } = await import('../src/lib/works/source-policy');
-    const { canUseWorksPreview } = await import('../src/lib/works/rollout.server');
+    const { canUseWorksPreview, canUseWorksRecommendationTrial } = await import('../src/lib/works/rollout.server');
     const { isNavItemVisible } = await import('../src/lib/navigation');
     const previewActor = { id: 'synthetic-preview-owner', account_type: 'internal' };
     delete process.env.WORKS_PREVIEW_USER_ID;
@@ -140,7 +140,27 @@ with sqlite3.connect(sys.argv[1]) as db:
     assert.equal(isNavItemVisible(previewNav, { role: 'admin', account_type: 'internal', works_preview: true }), true);
     assert.equal(isNavItemVisible({ label: '资产', href: '/assets' }, { role: 'user', account_type: 'internal' }), true);
     delete process.env.WORKS_PREVIEW_USER_ID;
-    metrics.previewRollout = { exactAccountOnly: true, unsetClosed: true, otherAdminDenied: true, externalDenied: true, navigationCapabilityRequired: true };
+    const feishuActor = { id: 'synthetic-feishu-colleague', account_type: 'internal',
+      feishu: { tenant_key: 'synthetic-tenant', open_id: 'synthetic-feishu-open-id' } };
+    assert.equal(canUseWorksPreview(feishuActor), true);
+    assert.equal(canUseWorksPreview({ ...feishuActor, feishu: { tenant_key: 'synthetic-tenant', user_id: 'synthetic-feishu-user-id' } }), true);
+    assert.equal(canUseWorksPreview({ ...feishuActor, feishu: { tenant_key: 'synthetic-tenant', union_id: 'synthetic-feishu-union-id' } }), true);
+    assert.equal(canUseWorksPreview({ ...feishuActor, account_type: 'external' }), false);
+    assert.equal(canUseWorksPreview({ ...feishuActor, feishu: { ...feishuActor.feishu, tenant_key: 'different-tenant' } }), false);
+    assert.equal(canUseWorksPreview({ ...feishuActor, feishu: { open_id: 'identity-without-tenant' } }), false);
+    assert.equal(canUseWorksPreview({ ...feishuActor, feishu: { tenant_key: 'synthetic-tenant' } }), false);
+    assert.equal(canUseWorksPreview({ ...feishuActor, feishu: null }), false);
+    assert.equal(canUseWorksRecommendationTrial(feishuActor), false);
+    process.env.WORKS_PREVIEW_USER_ID = previewActor.id;
+    assert.equal(canUseWorksRecommendationTrial(previewActor), true);
+    assert.equal(canUseWorksPreview(feishuActor), true);
+    assert.equal(canUseWorksRecommendationTrial(feishuActor), false);
+    delete process.env.WORKS_PREVIEW_USER_ID;
+    const { readWorkRecommendationBatch: restrictedRecommendationBatch } = await import('../src/lib/works/recommendation-shadow');
+    await assert.rejects(restrictedRecommendationBatch({} as never, feishuActor as never, ''), /restricted to the existing preview account/);
+    assert.equal(isNavItemVisible(previewNav, { role: 'user', ...feishuActor, works_preview: canUseWorksPreview(feishuActor) }), true);
+    metrics.previewRollout = { internalFeishuEnabled: true, configuredTenantRequired: true, externalDenied: true,
+      legacyPreviewRetained: true, recommendationTrialStillExactAccount: true, navigationCapabilityRequired: true };
     const actor = async (id: string, accountType = 'internal', feishu = true, role = 'user') => {
       const user = await database.user.create({ data: { id, name: id === 'owner' ? 'owner@example.invalid' : '同事', username: `fixture-${id}`,
         email: `${id}@example.invalid`, password_hash: 'synthetic-not-a-credential', account_type: accountType, role,
