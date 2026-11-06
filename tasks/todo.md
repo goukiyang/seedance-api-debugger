@@ -9,7 +9,7 @@
 
 实际发布追加：已部署，待用户手动验收（仅提示缺陷）。UTC 2026-11-06T15:50:19Z随统一v8保护发布：主源d5d77d6e8d19e96fb0b96211ade96b82861d072f／0.134.8／BUILD 3UohRWHsr0d-Om8LwPXc0；相容源be92a5e9ff6d83ea8cd9587411df887c450f5ba4／0.134.8+pricing-editor-guard.1／BUILD muaBZZWQ0CSgrh81FCHIH，继承小数任务worker准入，不回旧965a。主/保护版完整原生、计价、Next/types/lint通过；本组3文件线上SHA与c204原7组完全一致，原证复用，未重跑。独立公网核对release=0.134.8、health200/ok=true；统一发布原证保留服务器`/data/video-api-debugger/release-staging/pricing-editor-focus-20261106/attempt01`的public-deployed、source-pair-contract和additional-public-proof，原费用e52、持久数据与原请求保护保持。
 
-本例未闭环：当前可确认并已上线的是保存位置加载/失败时禁用原因不再被吞。截图原页面的实际阻断条件仍未取得，不能把合成参数核对、本人新草稿按钮可用、构建/健康或提示修复当成该按钮已恢复。原页现场暂缓，入口是顶部“生成”或 https://sd2.youdooart.com/generate 。本次排查未提交生成、未调用供应商或扣费；未新增范围外产品缺陷。
+本例未闭环：当前可确认并已上线的是保存位置加载/失败时禁用原因不再被吞。截图原页面的实际阻断条件仍未取得，不能把合成参数核对、本人新草稿按钮可用、构建/健康或提示修复当成该按钮已恢复。原页现场暂缓，入口是顶部“生成”或 https://sd2.youdooart.com/generate 。本次排查未提交生成请求或进行收费测试；未新增范围外产品缺陷。
 <!-- /VIDEO-SUBMIT01-20261106 -->
 
 <!-- WORKS-FEISHU01-20261106 -->
