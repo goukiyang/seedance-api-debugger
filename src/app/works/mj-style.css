@@ -1,0 +1,196 @@
+/* A: reference-led gallery. Scoped to the real works surface and its portals. */
+body:has([class*="Works_page__"]) {
+  --bg-primary: #0d0e12;
+  --bg-panel: #16181d;
+  --bg-input: #1e1f25;
+  --bg-hover: #282a32;
+  --border-color: #30323b;
+  --text-primary: #ebecef;
+  --text-secondary: #a7aab6;
+  --text-muted: #989daa;
+  --tone-info-bg: #351c17;
+  --tone-info-text: #ff8565;
+  --tone-info-border: #714032;
+  --tone-danger-text: #ff7180;
+  --mj-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--mj-font);
+}
+body:has([class*="Works_page__"]) .composer-topbar {
+  background: #0d0e12;
+  border-bottom: 1px solid #1d1f26;
+  box-shadow: none;
+}
+body:has([class*="Works_page__"]) .composer-topbar-nav-btn {
+  border-radius: 20px;
+  color: #a7aab6;
+}
+body:has([class*="Works_page__"]) .composer-topbar-nav-btn.active {
+  background: #2b1c19;
+  color: #ff8565;
+}
+body:has([class*="Works_page__"]) .composer-topbar-nav-btn:hover {
+  background: #21232b;
+  color: #ebecef;
+}
+body:has([class*="Works_page__"]) [class*="home_page__"] {
+  grid-template-columns: 224px minmax(0, 1fr);
+  background: #0d0e12;
+  font-family: var(--mj-font);
+}
+body:has([class*="Works_page__"]) [class*="home_sidebar__"] {
+  background: #0d0e12;
+  border-right-color: transparent;
+}
+body:has([class*="Works_page__"]) [class*="home_workspaceLinks__"] {
+  padding: 25px 16px 20px;
+}
+body:has([class*="Works_page__"]) [class*="home_workspaceLinks__"] h1 {
+  margin: 0 12px 18px;
+  color: #878c99;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: .04em;
+}
+body:has([class*="Works_page__"]) nav[aria-label="工作区"] {
+  gap: 7px;
+}
+body:has([class*="Works_page__"]) nav[aria-label="工作区"] a {
+  min-height: 44px;
+  padding: 10px 13px;
+  margin: 0;
+  gap: 11px;
+  border: 1px solid transparent;
+  border-radius: 24px;
+  background: transparent;
+  color: #ced0d7;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+body:has([class*="Works_page__"]) nav[aria-label="工作区"] a:hover {
+  background: #1b1d24;
+  color: #f3f3f6;
+}
+body:has([class*="Works_page__"]) nav[aria-label="工作区"] a[aria-current="page"] {
+  border-color: #653026;
+  background: #351c17;
+  color: #ff8565;
+}
+body:has([class*="Works_page__"]) nav[aria-label="工作区"] svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.8;
+}
+body:has([class*="Works_page__"]) [class*="home_content__"] {
+  padding: 22px 24px 48px 16px;
+}
+body:has([class*="Works_page__"]) [class*="Works_page__"] {
+  padding: 0;
+  font-family: var(--mj-font);
+}
+body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px auto;
+  align-items: center;
+  gap: 16px 10px;
+  min-height: 0;
+  margin: 0 0 18px;
+  padding: 0;
+  white-space: normal;
+}
+body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] > form {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  width: 100%;
+  max-width: none;
+  min-height: 56px;
+  border: 1px solid #30323b;
+  border-radius: 15px;
+  background: #1e1f25;
+  box-shadow: 0 5px 20px #08090b40;
+}
+body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] input[type="search"] {
+  min-height: 54px;
+  padding: 14px 18px;
+  font-size: 15px;
+}
+body:has([class*="Works_page__"]) input[type="search"]::placeholder {
+  color: #9b9eaa;
+}
+body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] > select {
+  grid-column: 1;
+  grid-row: 2;
+  width: 138px;
+  justify-self: start;
+  padding: 8px 10px;
+  border-color: transparent;
+  border-radius: 9px;
+  background: #0d0e12;
+  color: #ebecef;
+  font-size: 14px;
+  font-weight: 500;
+}
+body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] > [aria-haspopup="dialog"] {
+  grid-column: 2;
+  grid-row: 2;
+  margin-left: 0;
+}
+body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] > [aria-label="添加作品"] {
+  grid-column: 3;
+  grid-row: 2;
+  padding: 8px 15px;
+  border: 1px solid #653026;
+  border-radius: 22px;
+  background: #351c17;
+  color: #ff967b;
+}
+body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] > [aria-label="添加作品"]:hover {
+  filter: brightness(1.12);
+}
+body:has([class*="Works_page__"]) [class*="Works_mediaButton__"] {
+  border-radius: 4px;
+  background: #16181d;
+}
+body:has([class*="Works_page__"]) [class*="Works_cardOverlay__"] button,
+body:has([class*="Works_page__"]) [class*="Works_imageCardDetails__"] [data-result-details] {
+  background: #121319ed;
+  color: #ebecef;
+  box-shadow: 0 1px 6px #08090b55;
+}
+body:has([class*="Works_page__"]) [class*="Works_filtersPopover__"] {
+  border-radius: 13px;
+  border-color: #343640;
+  box-shadow: 0 16px 48px #07080b80;
+}
+body:has([class*="Works_page__"]) [class*="Works_types__"] button[aria-pressed="true"] {
+  background: #351c17;
+  color: #ff967b;
+  border-radius: 20px;
+}
+@media (max-width: 940px) {
+  body:has([class*="Works_page__"]) [class*="home_page__"] {
+    display: block;
+    padding: 16px;
+  }
+  body:has([class*="Works_page__"]) [class*="home_content__"] { padding: 0; }
+  body:has([class*="Works_page__"]) [class*="home_sidebar__"] { background: transparent; }
+  body:has([class*="Works_page__"]) [class*="home_workspaceLinks__"][data-open="true"] {
+    padding: 16px;
+    background: #16181d;
+    border-radius: 14px;
+  }
+}
+@media (max-width: 640px) {
+  body:has([class*="Works_page__"]) [class*="home_page__"] { padding: 12px; }
+  body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] { gap: 12px 6px; }
+  body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] > form { min-height: 50px; }
+  body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] input[type="search"] {
+    min-height: 48px;
+    padding: 12px 14px;
+    font-size: 16px;
+  }
+  body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] > select { width: 124px; min-height: 44px; }
+  body:has([class*="Works_page__"]) [aria-label="作品浏览工具栏"] > button { min-height: 44px; }
+}
