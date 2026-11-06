@@ -4,4 +4,6 @@ Controller for the existing same-origin SD2 style preview. A opens the authentic
 
 Explicit nginx 502/503/504 documents show reconnect feedback and receive at most three read-only readiness probes. Only the failed iframe document is reopened with GET. Healthy pages, drafts, generation and business operations are never retried. Switching pages cancels a pending reconnect.
 
-The controller is published as `compare.js` with the existing preview HTML/CSS. Source styles remain on the A/B candidate branches; private reference images and incident evidence stay outside the public artifacts.
+The controller is published as a versioned compare script with the existing preview HTML/CSS. Source styles remain on the A/B candidate branches; private reference images and incident evidence stay outside the public artifacts.
+
+Authentication is never shown inside the iframe. A user-activated top-level original login preserves the selected sample and viewport in its same-origin return path. Existing CSP and OAuth/state permissions remain unchanged.

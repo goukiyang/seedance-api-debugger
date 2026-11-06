@@ -3,6 +3,8 @@
   const stage = document.getElementById('stage');
   const status = document.getElementById('status');
   const original = document.querySelector('.site-link');
+  const loginGate = document.getElementById('login-gate');
+  const loginLink = document.getElementById('login-link');
   const variants = Array.from(document.querySelectorAll('[data-variant]'));
   const viewports = Array.from(document.querySelectorAll('button[data-viewport]'));
   const query = new URL(location.href).searchParams;
@@ -53,6 +55,16 @@
     url.searchParams.set('variant', variant);
     if (viewport === 'mobile') url.searchParams.set('viewport', viewport); else url.searchParams.delete('viewport');
     history.replaceState(null, '', url);
+    const loginUrl = new URL('/login', location.href);
+    loginUrl.searchParams.set('next', url.pathname + url.search + url.hash);
+    loginLink.href = loginUrl.pathname + loginUrl.search;
+  }
+
+  function requireLogin() {
+    clearTimeout(reconnectTimer);
+    frame.hidden = true;
+    loginGate.hidden = false;
+    status.textContent = '请先在整页完成原站登录，登录后会返回当前样板。';
   }
 
   function openPage(name) {
@@ -61,6 +73,8 @@
     reconnectAttempts = 0;
     variant = name;
     sync();
+    loginGate.hidden = true;
+    frame.hidden = false;
     frame.classList.remove('is-ready');
     status.textContent = `正在载入${pages[variant].label}。页面操作在原站生效。`;
     frame.src = pages[variant].href;
@@ -84,20 +98,22 @@
       }
       reconnectAttempts = 0;
       if (current.pathname === '/login' || current.pathname === '/register') {
-        status.textContent = '请在“打开原站”完成登录，再回这里重新载入。';
-        frame.classList.add('is-ready');
+        requireLogin();
         return;
       }
       if (current.pathname !== pages[variant].path) {
+        loginGate.hidden = true;
+        frame.hidden = false;
         status.textContent = '当前为原站其他页面；原访问权限保持，点击A/B可返回样板。';
         frame.classList.add('is-ready');
         return;
       }
     } catch {
-      status.textContent = '请在原站完成登录，再重新载入。';
-      frame.classList.add('is-ready');
+      requireLogin();
       return;
     }
+    loginGate.hidden = true;
+    frame.hidden = false;
     const link = doc.createElement('link');
     link.rel = 'stylesheet';
     link.href = new URL(`${variant}.css?v=r02`, location.href).href;
@@ -120,6 +136,7 @@
     viewport = button.dataset.viewport;
     sync();
   });
+  document.getElementById('login-reload').addEventListener('click', () => openPage(variant));
   document.getElementById('reload').addEventListener('click', () => openPage(variant));
   openPage(variant);
 })();
