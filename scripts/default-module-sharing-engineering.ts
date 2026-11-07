@@ -214,8 +214,8 @@ async function main() {
     const colleague = { id: 'colleague', role: 'user', account_type: 'internal', feishu_tenant_key: 'fixture-tenant', feishu_open_id: 'colleague-subject' };
     await prisma.user.create({ data: { ...colleague, name: 'colleague', username: 'colleague', email: 'colleague@fixture.invalid', password_hash: 'fixture-only' } });
     const encryptedSource = await prisma.imageStudioPreset.create({ data: {
-      ...storage.writePrivateStudioDefinition('image-preset', { id: 'module-source:encrypted-source', owner_id: author.id,
-        prompt: 'synthetic protected prompt', context: 'synthetic protected context' }), name: 'encrypted shared template', scope: 'admin', is_shared: true, model: 'gpt-image-1',
+      ...storage.writePrivateStudioDefinition('image-preset', { id: 'module-source:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', owner_id: author.id,
+        prompt: 'synthetic protected prompt', context: 'synthetic protected context' }), name: 'encrypted shared template', scope: 'admin', is_shared: true, model: saved.model,
     } });
     const openRequestId = randomUUID();
     const opened = await sharing.openSharedStudioModule(colleague, encryptedSource.id, openRequestId, undefined, { explicitSelection: true });
