@@ -1127,6 +1127,11 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 - 用户明确要求：右上图钉换成省略号，点击后有详细信息和置顶；下方不要卡内滚动条，删除用作主图按钮。按实际生产9ee22969f/v0.134.11/BUILD IpZ4sqJsRBpDm7vqeO5TF建立同一工作树新分支codex/result-card-more-menu-20261106，保护原分支/数据。
 - 仅compactInformation图片模板/批次结果采用新入口，非compact消费者保原详情入口。复用现有ImageResultStatusDetails、Radix Popper与useDialogDismiss；省略菜单内选择详细信息后显示原完整信息，置顶显示原状态/权限/费用可见范围提示，关闭菜单或进入详情仍保原pin组件挂载，不丢在途锁及未知原操作。底部保原下载/删除/复制参数/恢复/飞书，不改变双击直接输入主图回填、上下文菜单或其他页面。
 - 解除compact工具栏的高度上限与auto滚动，按原图标/触控尺寸自然换行；移除详情入口与用作主图后避免拥挤，不把信息搬到图下。默认作品与原操作优先、右上更多常显，错误说明仍可达。支持外点/Esc与键盘，真实菜单与详情呈现仍用户手验。
-- 已有工程证据：原结果布局合同通过，7项原置顶/发布/未知同号操作检查通过；更新原布局脚本加入菜单开关/详情/保挂载、compact顶部归位与非compact保留、无卡内滚动合同。完整类型及定向lint进行中。计划v0.134.12及同源相容guard，沿既有attempt05机制在独立result-card-menu-20261106/attempt01构建发布；不改DB/schema/模型/费用，不自动浏览器或收费验收。
+- 已有工程证据：原结果布局合同通过，7项原置顶/发布/未知同号操作检查通过；更新原布局脚本加入菜单开关/详情/保挂载、compact顶部归位与非compact保留、无卡内滚动合同。完整类型及定向lint已通过，发布前计划及最终交付见下；沿既有attempt05机制在独立result-card-menu-20261106/attempt01完成v0.134.12及相容guard构建发布；不改DB/schema/模型/费用，不自动浏览器或收费验收。
 - 前项VIDEO-SUBMIT01原视频按钮现场缺口保持，不以本UI修改冒已闭环。本轮未新增范围外问题。
+
+- 最终交付：已部署v0.134.12，待用户手动验收。洛杉矶时间2026-11-06 20:12完成公网收口（UTC 2026-11-07T04:12:26.129034Z）；实际main `f02e0a1503df27fd8e69f239e92486174092df74`／BUILD `fIktSNzFk6k4JH1jRKGbc`，相容guard `0985d9008639bac17cb9b20332ddc798f5150f45`／v0.134.12+result-card-menu-guard.1／BUILD `X-sp1uRUSy30X8aTZv-Pm`。两分支已推origin；无回退，cutover-exit=0，窗口已交还，只做记录/Git收口。
+- 工程与复核：更新后的原JSX/CSS合同通过，7项原置顶/发布/未知同号操作检查通过；定向lint通过但保留原有img/hook警告，完整tsc与主/guard完整原生、计价、Next/types/lint构建通过。对比实证pin save函数与v11字节一致，main无后端/schema差量；原7应用/工程文件SHA线上逐字匹配，未重跑已有检查，不冒浏览器/视觉验收。
+- 发布证据：`/data/video-api-debugger/release-staging/result-card-menu-20261106/attempt01`保留双源码/构建、source-pair-contract、6启动门、writer自然停止与一致DB备份、public-deployed及程序回退入口。7服务、4timer、2公网资源与2匿名401检查通过；独立Web CWD/BUILD、release200=0.134.12与health200/ok=true核对通过。两定价键全字段SHA `8f4ab818b0baae2bcfffa8d86456e6c190c7865fad7f195b12735648cef36c17`、原private policy与数据链接保持，无schema迁移、业务数据恢复、收费请求或浏览器验收。聚焦/独立线上证据同步保留stage的focused-final-engineering和deployed-evidence；本机原件在`/tmp/sd2-result-card-menu-20261106/attempt01`。
+- 手验入口：`https://sd2.youdooart.com/template-studio?type=image`，刷新原模板结果页查看右上省略号菜单、详细信息/置顶、底部无卡内滚条及无用作主图按钮；喜欢结果/只读置顶/批次/窄列与键盘交互同属待手验，不把源码/工程/发布通过冒已视觉达标。前项视频按钮现场缺口仍保留。本轮未新增范围外问题。
 <!-- /RESULT-MENU01-20261106 -->
