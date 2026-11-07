@@ -46,6 +46,11 @@ async function main() {
     const status = await studioModuleSharingStatus(author.id, { ...command, action: 'share-saved-module' });
     assert.equal(status.status, 'completed');
     assert.equal(await prisma.imageStudioPreset.count(), 1);
+    const rejected = { ...command, revision: command.revision + 100, requestId: randomUUID() };
+    await assert.rejects(shareSavedStudioModule(author.id, rejected), (cause: unknown) => {
+      const outcome = (cause as { commandOutcome?: { status: string; actorId: string; requestId: string } }).commandOutcome;
+      return outcome?.status === 'not-applied' && outcome.actorId === author.id && outcome.requestId === rejected.requestId;
+    });
     checks.push('lost publication response is recovered by authenticated receipt read without another write');
     const workspace = await openSharedStudioModule(member, rootId, randomUUID(), undefined, { explicitSelection: true });
     const adminWorkspace = await openSharedStudioModule(admin, rootId, randomUUID(), undefined, { explicitSelection: true });

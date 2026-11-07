@@ -66,6 +66,12 @@ assert.equal(legacy.calls[1].action, 'share-saved-module');
 const missing = setup(); missing.transport(success);
 await assert.rejects(missing.render().submit('missing-original', 0, false, true), /本次未发送/);
 assert.equal(missing.calls.length, 0, 'automatic original query cannot become a write when local record disappeared');
+const rejected = setup(); rejected.transport(async command => ({ ok: false, status: 409, json: async () => ({ error: '版本已变化', commandOutcome: { status: 'not-applied', actorId: 'author', moduleId: command.id, requestId: command.requestId } }) }));
+await assert.rejects(rejected.render().submit('stale-module', 1, true), /版本已变化/);
+assert.equal(Object.keys(rejected.localStorage).some(key => key.startsWith('sd2:')), false, 'only a matched server not-applied proof can retire a rejected command');
+const unconfirmed = setup(); unconfirmed.transport(async () => ({ ok: false, status: 409, json: async () => ({ error: '读取未确认' }) }));
+await assert.rejects(unconfirmed.render().submit('unknown-module', 1, true));
+assert.equal(Object.keys(unconfirmed.localStorage).some(key => key.startsWith('sd2:')), true, 'HTTP409 alone cannot retire a potentially committed write');
 const switchSource = ts.transpileModule(fs.readFileSync('src/components/TemplateSharingSwitch.tsx', 'utf8'),
   { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
 const switchExports = {};
@@ -107,8 +113,8 @@ const runCover = vm.runInNewContext(ts.transpileModule(`const handler = ${coverH
 });
 runCover(); assert.deepEqual(coverCalls, ['query-original']);
 preference.pending = {}; runCover(); assert.deepEqual(coverCalls, ['query-original', 'withdraw']);
-console.log(JSON.stringify({ passed: 12, checks: ['persist_before_send', 'lost_response_queries_original_receipt',
+console.log(JSON.stringify({ passed: 13, checks: ['persist_before_send', 'lost_response_queries_original_receipt',
   'storage_failure_sends_nothing', 'parallel_click_sends_once', 'account_switch_drops_late_response', 'refresh_queries_original_command',
-  'new_click_publishes_saved_template', 'legacy_pending_queries_preference_before_explicit_new_publication', 'automatic_query_never_becomes_write', 'only_actual_shared_state_checks_switch',
+  'new_click_publishes_saved_template', 'legacy_pending_queries_preference_before_explicit_new_publication', 'automatic_query_never_becomes_write', 'only_matched_not_applied_proof_retires_command', 'only_actual_shared_state_checks_switch',
   'editor_queries_pending_original_after_binding_changes', 'cover_queries_pending_original_after_binding_changes'],
   productionWrites: 0, networkCalls: 0, generatedTasks: 0 }));

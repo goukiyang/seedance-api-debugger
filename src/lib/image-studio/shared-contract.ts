@@ -672,8 +672,9 @@ export async function openSharedStudioModule(user: ImageStudioIdentity, presetId
       if (!source || !canManageStudioPreset(actor, source)) throw error;
       sourceOwnerId = source.owner_id;
     }
-    const publisherId = sourceOwnerId === actor.id ? await studioPublisherModule(actor.id, presetId, tx) : null;
-    const mode = sourceOwnerId === actor.id ? 'publisher' as const : 'live' as const;
+    const ownsDefinition = !isParameterCopyId(presetId) && sourceOwnerId === actor.id;
+    const publisherId = ownsDefinition ? await studioPublisherModule(actor.id, presetId, tx) : null;
+    const mode = ownsDefinition ? 'publisher' as const : 'live' as const;
     let moduleId = publisherId || deletedSource?.reopenedModuleId || automaticStudioModuleId(actor.id, presetId);
     let existing = await tx.imageStudioModule.findUnique({ where: { id: moduleId } });
     if (!existing) {

@@ -57,6 +57,8 @@ export function useModuleSharingPreference(userId: string, onSettled: (module: M
       const value = await response.json();
       if (active.current !== owner || isClientSessionBlocked()) throw new Error('账号已变化，原操作仍待确认');
       if (!response.ok) {
+        const outcome = value.commandOutcome;
+        if (!retained && outcome?.status === 'not-applied' && outcome.actorId === owner && outcome.moduleId === id && outcome.requestId === command.requestId) clear();
         throw new Error(value.error || '共享选择保存未确认，请核对原操作');
       }
       if (retained && value.status !== 'completed') throw new Error('尚未查到原共享回执，原操作保留');
