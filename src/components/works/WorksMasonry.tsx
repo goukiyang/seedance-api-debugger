@@ -16,17 +16,18 @@ import styles from './Works.module.css';
 const compactCount = new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 1 });
 
 export function visibleWorkAnchor(): WorkAnchor | null {
-  const card = Array.from(document.querySelectorAll<HTMLElement>('[data-work-card]')).filter(card => card.getBoundingClientRect().bottom > 100).sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)[0];
+  const card = Array.from(document.querySelectorAll<HTMLElement>('[data-work-card]')).filter(card => { const rect = card.getBoundingClientRect(); return rect.bottom > 100 && rect.top < window.innerHeight; }).sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)[0];
   const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const focusCard = active?.closest<HTMLElement>('[data-work-card]');
   const focusAction = focusCard ? active?.closest<HTMLElement>('[data-work-action]')?.dataset.workAction : undefined;
   return card ? { id: card.dataset.workCard!, offset: card.getBoundingClientRect().top, ...(focusAction && focusCard?.dataset.workCard ? { focusId: focusCard.dataset.workCard, focusAction } : {}) } : null;
 }
 type LogicalFocus = { workId: string; action: string; navigationEpoch: number };
-export function WorksMasonry({ items, playback, contextKey, detailOpen, busyKeys, operate, onClassify, onOpen, onFilter, restore, navigationEpoch, onRestored }: {
+export function WorksMasonry({ items, playback, contextKey, detailOpen, layoutKey, busyKeys, operate, onClassify, onOpen, onFilter, restore, navigationEpoch, onRestored }: {
   items: WorkCard[]; playback: AssetPlaybackCoordinator; contextKey: string; detailOpen: boolean; busyKeys: string[]; operate: WorkOperate;
   onClassify: (work: WorkCard) => void; onOpen: (work: WorkCard) => void; onFilter: (key: 'author' | 'project', id: string) => void;
   restore: WorkRestore | null; navigationEpoch: MutableRefObject<number>; onRestored: (generation: number) => void;
+  layoutKey?: string;
 }) {
   const container = useRef<HTMLDivElement>(null), [width, setWidth] = useState(0), [margin, setMargin] = useState(0), [focused, setFocused] = useState<string | null>(null);
   const resizeRestore = useRef<WorkRestore | null>(null), lastWidth = useRef(0), restorationGeneration = useRef(0), resizeGeneration = useRef(0), focus = useRef<LogicalFocus | null>(null), previousGeometry = useRef('');
@@ -49,7 +50,7 @@ export function WorksMasonry({ items, playback, contextKey, detailOpen, busyKeys
     update(); const observer = new ResizeObserver(update); observer.observe(element); window.addEventListener('resize', update);
     return () => { observer.disconnect(); window.removeEventListener('resize', update); };
   }, [navigationEpoch]);
-  useLayoutEffect(() => { const element = container.current; if (element) setMargin(element.getBoundingClientRect().top + window.scrollY); }, [items, busyKeys, detailOpen]);
+  useLayoutEffect(() => { const element = container.current; if (element) setMargin(element.getBoundingClientRect().top + window.scrollY); }, [items, busyKeys, detailOpen, layoutKey]);
   const lanes = width >= 1450 ? 5 : width >= 1100 ? 4 : width >= 760 ? 3 : 2, gap = width < 600 ? 10 : 18, columnWidth = Math.max(0, (width - gap * (lanes - 1)) / lanes);
   const focusedIndex = items.findIndex(work => work.id === (restore?.focusId || focused)), geometry = `${width}:${margin}:${items.map(work => `${work.id}:${work.width}:${work.height}`).join(',')}`;
   const getItemKey = useCallback((index: number) => itemsRef.current[index].id, []);

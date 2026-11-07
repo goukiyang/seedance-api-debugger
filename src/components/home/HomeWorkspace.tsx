@@ -4,13 +4,14 @@ import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
-import { ArrowRight, Clapperboard, Film, Folder, Image as ImageIcon, ListTodo, Network, Plus, RefreshCw, RotateCw, Scissors, UserRound } from 'lucide-react';
+import { ArrowRight, ChevronDown, Clapperboard, Film, Folder, Image as ImageIcon, ListTodo, Network, Plus, RefreshCw, RotateCw, Scissors, UserRound } from 'lucide-react';
 import { RelativeTime } from '@/components/RelativeTime';
 import WorkspaceSidebar from './WorkspaceSidebar';
 import LikeButton from '@/components/content-reactions/LikeButton';
 import { cachedReactionState, watchReactionChanges, writeReaction } from '@/components/content-reactions/ContentReactions';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
+import { savedWorkView } from '@/lib/works/view-state';
 import type { HomeProject, HomeTemplate, HomeTemplates } from '@/lib/home/types';
 import styles from '@/app/home.module.css';
 
@@ -35,8 +36,8 @@ function CardSkeletons({ className, count }: { className: string; count: number 
   </div>;
 }
 
-export default function HomeWorkspace({ accountId, internal, images, admin, worksEnabled, showWorks }: {
-  accountId: string; internal: boolean; images: boolean; admin: boolean; worksEnabled: boolean; showWorks: boolean;
+export default function HomeWorkspace({ accountId, internal, images, admin, worksEnabled, showWorks, detailOpen = false }: {
+  accountId: string; internal: boolean; images: boolean; admin: boolean; worksEnabled: boolean; showWorks: boolean; detailOpen?: boolean;
 }) {
   const { user, hasLoadedUser } = useAppSession();
   const router = useRouter();
@@ -55,7 +56,10 @@ export default function HomeWorkspace({ accountId, internal, images, admin, work
   const [templateLoading, setTemplateLoading] = useState(false);
   const [templateLoaded, setTemplateLoaded] = useState(false);
   const [templateError, setTemplateError] = useState('');
-  const [needed, setNeeded] = useState(false);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [preferencesIdentity, setPreferencesIdentity] = useState('');
+  const [restoreGallery, setRestoreGallery] = useState(false);
+  const needed = templatesOpen && preferencesIdentity === identity;
   const [preferencesReady, setPreferencesReady] = useState(false);
   const [writeErrors, setWriteErrors] = useState<Record<string, string>>({});
   const [busyKeys, setBusyKeys] = useState<string[]>([]);
@@ -63,26 +67,27 @@ export default function HomeWorkspace({ accountId, internal, images, admin, work
   const writing = useRef(new Set<string>());
   const projectsRequest = useRef<AbortController | null>(null);
   const templatesRequest = useRef<AbortController | null>(null);
-  const templateSection = useRef<HTMLElement>(null);
-  const resetScroll = useRememberedScroll(`home:${identity}`, Boolean(overviewIdentity && preferencesReady && (!internal || projectLoaded)), { localFallback: true });
+  const resetScroll = useRememberedScroll(`home:${identity}`, Boolean(overviewIdentity && !detailOpen && preferencesReady && preferencesIdentity === identity && (!internal || projectLoaded)), { localFallback: true, skipRestore: worksEnabled && restoreGallery });
 
   useEffect(() => {
     if (hasLoadedUser && user?.id !== accountId) router.refresh();
   }, [accountId, hasLoadedUser, router, user?.id]);
 
   useEffect(() => {
-    const section = templateSection.current;
-    if (!section || !images) return;
-    if (typeof IntersectionObserver === 'undefined') { setNeeded(true); return; }
-    const observer = new IntersectionObserver(entries => {
-      if (entries.some(entry => entry.isIntersecting)) {
-        setNeeded(true);
-        observer.disconnect();
-      }
-    }, { rootMargin: '160px' });
-    observer.observe(section);
-    return () => observer.disconnect();
-  }, [images, showWorks]);
+    setTemplatesOpen(false);
+    setPreferencesIdentity('');
+    setRestoreGallery(false);
+    if (!identity) return;
+    try { setTemplatesOpen(localStorage.getItem(`sd2-home-favorites:v1:${identity}`) === 'open'); } catch { /* Default to collapsed. */ }
+    setRestoreGallery(Boolean(savedWorkView(identity)?.anchor));
+    setPreferencesIdentity(identity);
+  }, [identity]);
+
+  function toggleTemplates() {
+    const next = !templatesOpen;
+    setTemplatesOpen(next);
+    try { localStorage.setItem(`sd2-home-favorites:v1:${identity}`, next ? 'open' : 'closed'); } catch { /* Still usable without optional preferences. */ }
+  }
 
   const loadProjects = useCallback(async () => {
     projectsRequest.current?.abort();
@@ -90,7 +95,6 @@ export default function HomeWorkspace({ accountId, internal, images, admin, work
     const requestIdentity = identity;
     const controller = new AbortController();
     projectsRequest.current = controller;
-    setProjects([]);
     setProjectError('');
     setProjectLoading(true);
     try {
@@ -116,7 +120,6 @@ export default function HomeWorkspace({ accountId, internal, images, admin, work
     templatesRequest.current = controller;
     setTemplateError('');
     setTemplateLoading(true);
-    if (!after) { setTemplates([]); setCursor(null); }
     let items = retained;
     let next = after;
     try {
@@ -198,7 +201,7 @@ export default function HomeWorkspace({ accountId, internal, images, admin, work
   }, [overviewIdentity, images, needed, loadTemplates]);
 
   useEffect(() => {
-    if (!overviewIdentity) return;
+    if (!overviewIdentity || detailOpen) return;
     const refresh = () => {
       if (document.visibilityState !== 'visible') return;
       void loadProjects();
@@ -214,7 +217,7 @@ export default function HomeWorkspace({ accountId, internal, images, admin, work
       window.removeEventListener('focus', refresh);
       document.removeEventListener('visibilitychange', refresh);
     };
-  }, [overviewIdentity, loadProjects, loadTemplates, needed]);
+  }, [overviewIdentity, detailOpen, loadProjects, loadTemplates, needed]);
 
   async function cancelFavorite(item: HomeTemplate) {
     if (!identity || !authorized) return;
@@ -262,6 +265,7 @@ export default function HomeWorkspace({ accountId, internal, images, admin, work
       activeView={showWorks ? 'works' : 'overview'} onReset={showWorks ? undefined : resetScroll} onReadyChange={setPreferencesReady} />
 
     {showWorks ? <div className={styles.gallery}><Suspense fallback={<div className="container" role="status">正在读取作品…</div>}><WorksWorkspace /></Suspense></div> : <div className={styles.content}>
+      <div hidden={detailOpen}>
       {internal && <section className={styles.canvasSection} aria-labelledby="home-canvas-title">
         <Link href="/tools/ultimate-canvas" className={styles.canvas}>
           <span className={styles.canvasIcon}><Network size={28} strokeWidth={1.7} aria-hidden="true" /></span>
@@ -303,11 +307,12 @@ export default function HomeWorkspace({ accountId, internal, images, admin, work
         {(!authorized || !accountDataReady) && <span className={styles.visuallyHidden} role="status">正在确认账号…</span>}
       </section>}
 
-      {images && <section ref={templateSection} className={styles.section} aria-labelledby="home-templates-title" aria-busy={templateLoading} data-remember-scroll-anchor="home-templates">
+      {images && <section className={styles.section} aria-labelledby="home-templates-title" aria-busy={templateLoading} data-remember-scroll-anchor="home-templates">
         <header className={styles.sectionHeader}>
-          <h2 id="home-templates-title">收藏模板</h2>
+          <h2 id="home-templates-title"><button type="button" className={styles.sectionToggle} aria-expanded={needed} aria-controls="home-favorite-templates" disabled={!identity || preferencesIdentity !== identity} onClick={toggleTemplates}>收藏模板<ChevronDown size={17} aria-hidden="true" /></button></h2>
           <Link href="/template-studio?type=image&view=covers">模板工作台<ArrowRight size={14} aria-hidden="true" /></Link>
         </header>
+        <div id="home-favorite-templates" hidden={!needed}>
         {authorized && accountDataReady && !templateError && (templateLoading || !needed) && !templates.length && <>
           {needed && <span className={styles.visuallyHidden} role="status">正在读取收藏…</span>}
           <CardSkeletons className={styles.templates} count={5} />
@@ -332,7 +337,7 @@ export default function HomeWorkspace({ accountId, internal, images, admin, work
           })}
         </div>}
         {authorized && accountDataReady && templateError && <div className={styles.sectionState} role="status">
-          <span>{templateError}</span><button type="button" onClick={() => { setNeeded(true); void loadTemplates(); }}><RefreshCw size={16} aria-hidden="true" />重试</button>
+          <span>{templateError}</span><button type="button" onClick={() => void loadTemplates()}><RefreshCw size={16} aria-hidden="true" />重试</button>
         </div>}
         {authorized && accountDataReady && templateLoaded && !templateLoading && !templateError && !templates.length && !cursor && <div className={styles.sectionState}>
           <span>还没有收藏模板</span><Link href="/template-studio?type=image&view=covers">去模板工作台<ArrowRight size={16} aria-hidden="true" /></Link>
@@ -341,6 +346,12 @@ export default function HomeWorkspace({ accountId, internal, images, admin, work
           <RefreshCw size={16} aria-hidden="true" />继续读取收藏
         </button>}
         {(!authorized || !accountDataReady) && <span className={styles.visuallyHidden} role="status">正在确认账号…</span>}
+        </div>
+      </section>}
+      </div>
+      {worksEnabled && <section id="home-works" className={detailOpen ? styles.gallery : styles.section} aria-labelledby="home-works-title" data-remember-scroll-anchor="home-works">
+        <header className={styles.sectionHeader} hidden={detailOpen}><h2 id="home-works-title">作品广场</h2></header>
+        <Suspense fallback={<div role="status">正在读取作品…</div>}><WorksWorkspace embedded layoutReady={detailOpen || preferencesIdentity === identity && (!internal || projectLoaded) && (!needed || templateLoaded)} layoutKey={`${detailOpen}:${projectLoaded}:${needed}:${templateLoaded}`} /></Suspense>
       </section>}
     </div>}
   </div>;

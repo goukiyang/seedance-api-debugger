@@ -5,7 +5,7 @@ import type { WorkQuery } from './types';
 
 export type WorkAnchor = { id: string; offset: number; focusId?: string; focusAction?: string };
 export type WorkRestore = WorkAnchor & { navigationEpoch: number; generation: number };
-export type SavedWorkView = { query: WorkQuery & { work?: string }; window: string; anchor: WorkAnchor | null };
+export type SavedWorkView = { query: WorkQuery & { work?: string }; window: string; anchor: WorkAnchor | null; atStart?: boolean };
 const sessionKey = (viewerId: string) => `sd2:works:view:v1:${viewerId}`;
 const fallbackKey = (viewerId: string) => `sd2:works:last-view:v1:${viewerId}`;
 const safeId = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,120}$/.test(value);
@@ -18,7 +18,7 @@ function snapshot(value: unknown): SavedWorkView | null {
   const query: SavedWorkView['query'] = parseWorksQuery(params);
   if (safeId(source.work)) query.work = source.work;
   const anchor = raw.anchor as Record<string, unknown> | null;
-  return { query, window: raw.window, anchor: anchor && safeId(anchor.id) && typeof anchor.offset === 'number' && Number.isFinite(anchor.offset) ? { id: anchor.id, offset: anchor.offset, ...(safeId(anchor.focusId) ? { focusId: anchor.focusId } : {}), ...(typeof anchor.focusAction === 'string' && /^[a-z-]{1,40}$/.test(anchor.focusAction) ? { focusAction: anchor.focusAction } : {}) } : null };
+  return { query, window: raw.window, atStart: raw.atStart === true, anchor: anchor && safeId(anchor.id) && typeof anchor.offset === 'number' && Number.isFinite(anchor.offset) ? { id: anchor.id, offset: anchor.offset, ...(safeId(anchor.focusId) ? { focusId: anchor.focusId } : {}), ...(typeof anchor.focusAction === 'string' && /^[a-z-]{1,40}$/.test(anchor.focusAction) ? { focusAction: anchor.focusAction } : {}) } : null };
 }
 function sessionViews(viewerId: string): SavedWorkView[] {
   try { const raw: unknown = JSON.parse(sessionStorage.getItem(sessionKey(viewerId)) || '[]'); return Array.isArray(raw) ? raw.map(snapshot).filter((view): view is SavedWorkView => Boolean(view)).slice(0, 6) : []; }
