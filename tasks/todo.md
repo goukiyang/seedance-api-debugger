@@ -192,6 +192,10 @@ v0.121.4双构建与v0.121.5单主完整Next/类型/lint、实际服务与公网
 
 ## CHAR02 角色差异与独立视图重规划
 
+<!-- CHARACTER-AVATAR-BATCHES-20261106 -->
+C头像框按候选/微调批次选图、头像及全身历史个人补充回填、原图文件名移除已保护部署 **v0.134.13 / 9e2fa52beb / 3rYRnUoKkHJlBXbffJNvG**。主完整工程/Next/types/lint、公网JS/11CSS/3匿名401和health通过；guard0985原产物复用，价格/历史/数据保持。**已部署，待用户手动验收**；侧脸4/9已给设计，生成链路尚未改，详见[原单§13.3](todo/2026-10-31-character-reference-replan.md#133-发布完成2026-11-06-洛杉矶时间)。
+<!-- /CHARACTER-AVATAR-BATCHES-20261106 -->
+
 2026-11-05 “全身正反面”独立制作页与全工具HD展示已部署 **v0.132.3 / 4b679e4c0**，BUILD V5usaUOiwn_qrka4Rvoxp。四步流程、正背独立生成/选用/历史、素材及候选/微调/合成/素材弹窗高清预览已实现，生成与显式导出保原精度。完整工程、Next/类型/lint、七服务四timer、页面JS SHA/两匿名401及health通过，价格与数据保持。承接dd937两个UI组件，从已恢复d2d8 guard保护发布。**已部署，待用户手动验收**，详见[原单§8.2](todo/2026-10-31-character-reference-replan.md#82-发布完成2026-11-05)。
 
 ## CHAR01 角色参考图工作台（2026-10-30）

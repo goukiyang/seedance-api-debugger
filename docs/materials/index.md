@@ -83,6 +83,12 @@ v0.121.5已部署，运行源`6a0d74f2b5782a52b797cdf99434bb48e15e7bf4` / BUILD`
 
 已部署 **v0.121.1** / `9b55cf22c5a9b76df09ccb71870fb980dcac51b8` / BUILD `i8f8NqmDpzIPlFtgvCO2B`，2026-10-31T08:46:45Z公网收口，待用户手验。范围与原号未知边界见[工单](../../tasks/todo/2026-10-31-image-studio-personal-prompt-recovery.md)。原图、工程/失败原证、主/guard完整构建、证据复用、数据备份与部署回执保正式根私有 `docs/materials/2026-10-31-studio-personal-prompt-receipts/implementation/deployment-result.json`，不随源码外发；没有工程代清pending、重发或收费测试。
 
+## CHAR02 角色差异与独立视图重规划（2026-10-31）
+
+<!-- CHARACTER-AVATAR-BATCHES-20261106 -->
+[本轮原单§13.3](../../tasks/todo/2026-10-31-character-reference-replan.md#133-发布完成2026-11-06-洛杉矶时间)：C分批头像框、头像全身历史补充回填、隐藏原图名已部署v0.134.13 / 9e2fa52beb / 3rYRnUoKkHJlBXbffJNvG，待用户手验；侧脸4/9仅方案。[用户截图](2026-11-06-character-avatar-batches/user-reference/codex-clipboard-bc20a705-54d1-4db7-b723-b8e2da8ce563.png)、[四方案预览](2026-11-06-character-avatar-batches/user-reference/four-options-preview.png)及attachments.json保原件SHA。私有工程/归档/历史只读审计/公网CSS/健康证据沿implementation/attempt01–02和服务器同名stage，不随源码外发。
+<!-- /CHARACTER-AVATAR-BATCHES-20261106 -->
+
 ## CHAR01 角色参考图工作台（2026-10-30）
 
 已部署 **v0.121.0**，应用源 `3b19c1d438e2ddf876c594b4fc22184f69268fcd`、BUILD `dtT-BETLiEPv83lK9Daq6`；2026-10-31T05:50:35Z切换，05:50:58Z公网收口。[工具入口](https://sd2.youdooart.com/tools/character-lab)，管理员在同页“提示词管理”编辑上下文并保存版本。按定稿完成原图与4/9差异人脸、主辅方案选择、2:3成品预览及直接保存/PNG或ZIP导出；滑杆只影响下一次主动生成，保存导出不生成。本人草稿/历史、管理员规则与原请求/费用快照分别保留。
