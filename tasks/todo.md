@@ -1138,3 +1138,7 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 <!-- CHARACTER-CELL-COPY-20261107 -->
 角色单格右键复制＋历史候选左下：**已部署，待用户手验**。v0.134.18 / aa9e34763 / tEZbib4hTHkvbIbGYVZKU，13:19:13Z上线；各部位/批次左下列表保补充独立回填，单格真实HD裁切PNG。主fresh原生/完整Next/types/lint及匹配窄工程过，恢复guard841沿原完整产物；3JS+14CSS同SHA/4匿名401、七服务四timer、health200/控制器0，价格8f4和最终rev14配置/33行hash保持。合包IMAGE-UX04并修fullRows范围，不回数据；窗口已交后继19，余纯文档。[原单§16.5](todo/2026-10-31-character-reference-replan.md#165-已部署2026-11-07)。
 <!-- /CHARACTER-CELL-COPY-20261107 -->
+
+<!-- CHARACTER-SINGLE-WORKBENCH-DESIGN-20261107 -->
+角色单一成品工作台：用户要求先思考更轻的完整UX；推荐取消1—4阶段导航，进入即四格成品，左下当前部位批次历史、中央成品/候选比较、右侧独立补充与实际生成。浏览与采用分明；侧脸依赖正脸、身体原图成对且可独立制作。侧脸4/9与身体局部微调须补真实生成链，旧历史/原号/费用/HD和手验边界保留。**仅方案，尚未实施/部署，不冒用户已批准布局**。[原单§17](todo/2026-10-31-character-reference-replan.md#17-单一成品编辑工作台ux重设建议2026-11-07仅方案)。
+<!-- /CHARACTER-SINGLE-WORKBENCH-DESIGN-20261107 -->
