@@ -1134,3 +1134,9 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 <!-- CHARACTER-INDEPENDENT-CONTEXT-20261107 -->
 **已部署，待用户手验。** 2026-11-07 01:12（洛杉矶）v0.134.16 / 16c57e550 / RfviUaNpEBzDe5Tdvrg-L上线；正脸、侧脸、前后身补充/历史恢复/风格/预览/生成独立，旧共用原文只读保留。新guard2d3ab523 / yB9pJkJEDy0F4ZeLa1cvZ保持新字段；两版各18组隔离、fresh原生/价格、完整Next/types/lint及七服务/四timer/公网JS+11CSS/health通过。首轮fixture类型错误已修，实际最终attempt02；旧原号/数据保持。原单[§15](todo/2026-10-31-character-reference-replan.md#15-正脸侧脸与前后身上下文独立2026-11-07)含发布/手验/恢复入口，侧脸4/9仍设计项。
 <!-- /CHARACTER-INDEPENDENT-CONTEXT-20261107 -->
+
+<!-- ALL-MODELS-CONNECTIVITY-20261106 -->
+## MODEL-ALL01 生图模型连通与修复（2026-11-06，11-07接续）
+
+[原单](todo/2026-11-06-all-model-connectivity.md#v013417-已上线与实际生图2026-11-07)：v0.134.19 / 6f8106 / QzkN1fJzfaLVWPG1TbnLY 已13:37:27Z保护上线，继承18实际运行源。Sunburst中档真实PNG1536²/0.5点已全链路通过；2.6 Sunburst最高4K真实PNG2880²/5点通过，实页合法选项、无质量/尺寸阻断、生成按钮可用。GPT2 high原async明确失败实扣0，另medium503无asyncID待核5，已正常停回/default14；不冒已测通。原四单6.9的快照/合同/账本SHA均保持、未重发；新实扣5.5、生图累计22.8，待核共11.9（旧6.9＋新5分列）。三行价格/其它116行与8f4保持，文字/视频新调用0。GPT2最高切换小修已验证上线，最高意图转合法high、分辨率保持；main完整native/pricing/Next/types/lint通过，841保护版沿用原真实产物/时间。attempt01因既有通知oneshot退出1拦截及恢复旧baseline误配，原18已安全重启；attempt02复用同产物修精确发布判据后切版0，原失败保留，health200。两2.6公开1K各0.019美元/张，账号现金实扣仍未核，不混站内5点。其余功能用户手验，原失败/未知记录保留。
+<!-- /ALL-MODELS-CONNECTIVITY-20261106 -->

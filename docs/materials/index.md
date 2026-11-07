@@ -500,3 +500,13 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 <!-- CHARACTER-INDEPENDENT-CONTEXT-20261107 -->
 [角色上下文独立原单§15](../../tasks/todo/2026-10-31-character-reference-replan.md#15-正脸侧脸与前后身上下文独立2026-11-07)：v0.134.16主16c57e550/guard2d3ab523已保护部署，待用户手验。私有2026-11-07-character-independent-context/implementation/attempt02保存精确源码/Git delta、两版18组读者/原生摘要/完整构建、source-pair-contract、public-deployed/public-character-css/service-health及切换/备份原证；attempt01保首轮类型失败与修正检查，未将失败冒成功。服务器同名stage含原始日志/回退入口/备份；无新用户附件，无浏览器或收费生成。
 <!-- /CHARACTER-INDEPENDENT-CONTEXT-20261107 -->
+
+<!-- IMAGE-MODEL-CONNECTIVITY-20261106 -->
+## MODEL-ALL01 生图模型实测与费用证据
+
+[原单](../../tasks/todo/2026-11-06-all-model-connectivity.md)统一保存决策与真实结果。原证存于本机私有排除Git目录`2026-11-06-image-model-connectivity/`，目录0700/文件0600，媒体、凭据、签名token不上传。Nov7中档与2.6最高4K成功；GPT2供应商失败/503，未冒全部接通。旧原号快照/合同/账本只读前后保持，新实扣5.5、旧6.9及新5待核分别列明。
+<!-- /IMAGE-MODEL-CONNECTIVITY-20261106 -->
+
+- MODEL-ALL01 Nov7原证：[v17实际发布](2026-11-06-image-model-connectivity/public-deployed-v17.json)、[两成功任务原图解码/结算](2026-11-06-image-model-connectivity/final7-poll3.json)、[GPT2两新样本安全诊断](2026-11-06-image-model-connectivity/gpt2-samples-provider-diagnostics7.json)、[旧四单前后保持与本轮费用](2026-11-06-image-model-connectivity/image-final-audit7.json)、[最高4K实页按钮可用](2026-11-06-image-model-connectivity/ui7-v17-max4k-proof-afterfill.json)、[最终配置14脱敏hash](2026-11-06-image-model-connectivity/final-image-config7.json)、[最高模型切换9条检查与源hash](2026-11-06-image-model-connectivity/quality-switch-focused19.json)。旧v8/v11材料保留；[v19实际发布](2026-11-06-image-model-connectivity/release19-attempt02/public-deployed.json)、[相同产物复用](2026-11-06-image-model-connectivity/release19-attempt02/reused-build-evidence.json)、[首次失败恢复原18](2026-11-06-image-model-connectivity/release19-attempt01/baseline-restart-complete.json)、[发布判据8项检查](2026-11-06-image-model-connectivity/release19-attempt02/release-fix-focused.json)补齐，未覆盖旧失败。
+
+- MODEL-ALL01 v19最高切换实页：[从2.6最高4K切GPT2保最高high/4K](2026-11-06-image-model-connectivity/ui7-v19-after-gpt2-switch.json)，未生成；GPT2最终停用/供应商未通边界保留。
