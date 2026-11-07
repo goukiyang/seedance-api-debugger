@@ -27,6 +27,7 @@ const sourceFiles = [fixtureFile, 'src/lib/performance/request-trace.ts', 'src/l
   'src/lib/image-studio/workspace-deletion.ts', 'src/lib/image-studio/preset-lifecycle.ts',
   'src/lib/image-studio/context-version.ts', 'src/lib/image-studio/access.ts',
   'src/lib/image-studio/parameter-copy.ts', 'src/lib/image-studio/model-catalog.ts', 'src/lib/image-studio/ratios.ts', 'src/lib/image-studio/preset-id.ts',
+  'src/lib/image-generation/resolution.ts',
   'src/lib/security/private-prompts.server.ts', 'src/lib/security/private-prompt-fields.server.ts', 'scripts/server-runtime.cjs',
   'src/lib/image-studio/dimension-mismatch.ts', 'src/lib/image-studio/pricing-state.ts',
   'src/lib/assets/site-url.ts', 'src/lib/access/external-role.ts', 'src/lib/users/profiles.ts', 'src/lib/users/display.ts'];
@@ -152,8 +153,9 @@ async function main() {
   }, declarations('src/lib/image-studio/shared-contract.ts', sharedNames));
   const lifecycle = evaluate('src/lib/image-studio/preset-lifecycle.ts', { '@/lib/prisma': { prisma } });
   const display = evaluate('src/lib/users/display.ts', {});
-  const copyCatalog = evaluate('src/lib/image-studio/model-catalog.ts', {});
   const copyRatios = evaluate('src/lib/image-studio/ratios.ts', {});
+  const copyResolution = evaluate('src/lib/image-generation/resolution.ts', { '@/lib/image-studio/ratios': copyRatios });
+  const copyCatalog = evaluate('src/lib/image-studio/model-catalog.ts', { '@/lib/image-generation/resolution': copyResolution });
   const copyIds = evaluate('src/lib/image-studio/preset-id.ts', {});
   const parameterCopy = evaluate('src/lib/image-studio/parameter-copy.ts', { './model-catalog': copyCatalog, './ratios': copyRatios, './preset-id': copyIds });
   const author = evaluate('src/lib/image-studio/template-author.ts', { 'server-only': {}, '@/lib/prisma': { prisma },
