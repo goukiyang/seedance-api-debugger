@@ -160,7 +160,7 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
   const supplement = renderSupplement?.(item);
   const groupedDelete = coverDeleteWithContextActions ? renderDelete?.(item) : null;
   const hasCommonActions = Boolean(groupedDelete || item.media && (!coverDeleteWithContextActions || item.download && (!contextActionsEnabled || !readOnly)));
-  const hasMediaDetails = Boolean(item.media && (metadata || supplement || statusDetail));
+  const hasMediaDetails = Boolean((item.media || compactInformation) && (metadata || supplement || statusDetail || primaryActions));
   const moreMenu = compactInformation && hasMediaDetails;
   const showNextActions = Boolean(item.media && nextEnabled && !contextActionsEnabled);
   const coverReactions = Boolean(renderReactionAction && item.media?.contentKey);
@@ -188,16 +188,21 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
         <div className={styles.pendingStatusMain}>
           {waitDisplay && item.pending ? <ImageGenerationWaiting display={waitDisplay} visible={visible} inline />
             : <span role="status" className={styles.phase}>{waitDisplay?.label || item.status}</span>}
-          {statusDetail && <div className={styles.pendingStatusIssue}>
-            <ImageResultStatusDetails detail={statusDetail} reason={Boolean(resultError)} active={menuActive} scopeKey={identity} />
-          </div>}
         </div>
       </div>}
       {coverReactions ? <div className={styles.coverReactions}>{reactions}{!moreMenu && <div className={styles.coverPin}>{renderReactionAction?.(item)}</div>}</div> : reactions}
       {moreMenu && <div className={styles.moreSlot}>
         <ImageResultStatusDetails detail={statusDetail || undefined} reason={Boolean(resultError)} active={menuActive} scopeKey={`${identity}:details`}
           label="详细信息" heading={resultError ? '原因与结果详情' : '结果详情'} moreActions={renderReactionAction?.(item) ?? null}>
-          <div className={styles.resultDetailsContent}>{metadata}{supplement && <div className={styles.resultSupplement}>{supplement}</div>}</div>
+          <div className={styles.resultDetailsContent}>{metadata}
+            {primaryActions && <ExperienceActions label="当前任务操作" className={styles.actions}>{primaryActions}</ExperienceActions>}
+            {supplement && <div className={styles.resultSupplement}>{supplement}</div>}
+          </div>
+        </ImageResultStatusDetails>
+      </div>}
+      {compactInformation && statusDetail && <div className={styles.issueSlot}>
+        <ImageResultStatusDetails detail={statusDetail} reason={Boolean(resultError || item.outputIssue)} active={menuActive} scopeKey={`${identity}:issue`}>
+          {primaryActions && <ExperienceActions label="当前任务操作" className={styles.actions}>{primaryActions}</ExperienceActions>}
         </ImageResultStatusDetails>
       </div>}
       {renderOverlay?.(item, { openPreview: () => changePreview(item) })}
@@ -221,14 +226,14 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
         </div>}
         {secondaryActions && <div className={styles.specialtyActions}>{secondaryActions}</div>}
         {deliveryAction && <div className={styles.deliveryAction}>{deliveryAction}</div>}
-        {item.media && primaryActions && <ExperienceActions label="继续使用结果" className={styles.mediaPrimaryActions}>{primaryActions}</ExperienceActions>}
+        {item.media && primaryActions && !compactInformation && <ExperienceActions label="继续使用结果" className={styles.mediaPrimaryActions}>{primaryActions}</ExperienceActions>}
         {showNextActions && <ImageResultNextActionButtons controller={controller} iconOnly className={styles.mediaNextActions} />}
       </div>}
     </div>
     {item.media && nextEnabled && <ImageResultNextActionFeedback controller={controller} anchorRef={cardRef} />}
     {feedback?.id === item.id && <ImageResultOperationFeedback feedback={feedback} anchorRef={feedbackAnchor} onDismiss={dismissFeedback}
       onRetry={feedback.phase === 'error' ? () => void operate(item, feedback.action === '复制' ? 'copy' : 'download') : undefined} />}
-    {!item.media && <>
+    {!item.media && !compactInformation && <>
       {metadata}
       {primaryActions && <ExperienceActions label="继续使用结果" className={styles.actions} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>{primaryActions}</ExperienceActions>}
       {!compactInformation && item.notice && <TaskNotice kind="status" className={styles.notice}>{item.notice}</TaskNotice>}

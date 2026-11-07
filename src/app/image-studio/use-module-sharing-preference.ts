@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 import type { StudioModuleSharingPreference } from '@/lib/image-studio/module-sharing-preference';
 import type { SharedStudioLiveDTO } from '@/lib/image-studio/shared-types';
 
@@ -12,6 +13,9 @@ type Command = { id: string; revision: number; isShared: boolean; requestId: str
 export function useModuleSharingPreference(userId: string, onSettled: (module: ModuleSharingResult) => void) {
   const active = useRef(userId); active.current = userId;
   const lock = useRef(false);
+  const settled = useRef(onSettled); settled.current = onSettled;
+  const reconnectAttempts = useRef(new Map<string, number>());
+  const [reconnect, setReconnect] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pending, setPending] = useState<Record<string, boolean>>({});
   useEffect(() => {
@@ -19,14 +23,20 @@ export function useModuleSharingPreference(userId: string, onSettled: (module: M
     const saved: Record<string, boolean> = {};
     try { for (const key of Object.keys(localStorage)) if (key.startsWith(prefix)) saved[decodeURIComponent(key.slice(prefix.length))] = true; }
     catch { /* Submitting remains disabled by the durable-storage check. */ }
-    setPending(saved); setBusyId(null);
+    reconnectAttempts.current.clear(); setPending(saved); setBusyId(null);
+    const resume = () => { if (!document.hidden && !isClientSessionBlocked()) { reconnectAttempts.current.clear(); setReconnect(value => value + 1); } };
+    window.addEventListener('online', resume); document.addEventListener('visibilitychange', resume);
+    return () => { window.removeEventListener('online', resume); document.removeEventListener('visibilitychange', resume); };
   }, [userId]);
-  async function submit(id: string, revision: number, isShared: boolean) {
-    if (lock.current) throw new Error('请等当前共享设置完成');
+  async function submit(id: string, revision: number, isShared: boolean, queryOnly = false) {
+    if (lock.current || isClientSessionBlocked()) throw new Error('请等当前共享设置完成');
     const owner = userId, key = `sd2:module-sharing-preference:v1:${encodeURIComponent(owner)}:${encodeURIComponent(id)}`;
     let command: Command;
+    let retained = false;
     try {
       const saved = localStorage.getItem(key);
+      if (queryOnly && !saved) throw new Error('原操作记录已变化，本次没有发送');
+      retained = Boolean(saved);
       command = saved ? JSON.parse(saved) : { id, revision, isShared, requestId: crypto.randomUUID(), action: isShared ? 'share-saved-module' : 'set-sharing-preference' };
       if (command.id !== id || !Number.isSafeInteger(command.revision) || typeof command.isShared !== 'boolean'
         || typeof command.requestId !== 'string' || !/^[A-Za-z0-9_-]{16,100}$/.test(command.requestId)
@@ -40,13 +50,17 @@ export function useModuleSharingPreference(userId: string, onSettled: (module: M
     };
     lock.current = true; setBusyId(id); setPending(items => ({ ...items, [id]: true }));
     try {
-      const response = await fetch('/api/image-studio/modules', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: command.action || 'set-sharing-preference', ...command, entryPoint: 'workbench' }), signal: AbortSignal.timeout(15000) });
-      const result = await response.json();
+      const params = new URLSearchParams({ mode: 'sharing-status', id, requestId: command.requestId, revision: String(command.revision), isShared: String(command.isShared), action: command.action || 'set-sharing-preference' });
+      const response = await fetch(retained ? `/api/image-studio/modules?${params}` : '/api/image-studio/modules', {
+        method: retained ? 'GET' : 'PUT', cache: 'no-store', headers: { 'Content-Type': 'application/json', 'x-app-session-user': owner },
+        ...(retained ? {} : { body: JSON.stringify({ action: command.action || 'set-sharing-preference', ...command, entryPoint: 'workbench' }) }), signal: AbortSignal.timeout(15000) });
+      const value = await response.json();
+      if (active.current !== owner || isClientSessionBlocked()) throw new Error('账号已变化，原操作仍待确认');
       if (!response.ok) {
-        if ([400, 401, 403, 404, 409, 428].includes(response.status)) clear();
-        throw new Error(result.error || '共享选择保存未确认，请核对原操作');
+        throw new Error(value.error || '共享选择保存未确认，请核对原操作');
       }
+      if (retained && value.status !== 'completed') throw new Error('尚未查到原共享回执，原操作保留');
+      const result = retained ? value.result : value;
       const receipt = result.sharingCommandReceipt;
       if (receipt?.action !== (command.action || 'set-sharing-preference') || receipt.requestId !== command.requestId
         || receipt.moduleId !== id || receipt.expectedRevision !== command.revision) {
@@ -54,12 +68,25 @@ export function useModuleSharingPreference(userId: string, onSettled: (module: M
       }
       clear();
       if (active.current !== owner) throw new Error('账号已切换，请重新读取共享状态');
-      onSettled(result);
+      try { settled.current(result); } catch { /* A refresh failure never invalidates a confirmed receipt. */ }
       return result as ModuleSharingResult;
     } catch (cause) {
       if (cause instanceof TypeError || cause instanceof DOMException) throw new Error('共享结果待确认，请点击开关核对原操作，当前内容保留');
       throw cause;
     } finally { lock.current = false; if (active.current === owner) setBusyId(null); }
   }
+  const submitRef = useRef(submit); submitRef.current = submit;
+  useEffect(() => {
+    if (busyId || document.hidden || !navigator.onLine || isClientSessionBlocked()) return;
+    const id = Object.keys(pending).find(key => (reconnectAttempts.current.get(key) || 0) < 3);
+    if (!id) return;
+    const count = reconnectAttempts.current.get(id) || 0;
+    const timer = setTimeout(() => {
+      reconnectAttempts.current.set(id, count + 1);
+      // submit detects the persisted command and performs GET only.
+      void submitRef.current(id, 0, false, true).catch(() => {}).finally(() => setReconnect(value => value + 1));
+    }, [1000, 3000, 8000][count]);
+    return () => clearTimeout(timer);
+  }, [userId, pending, busyId, reconnect]);
   return { submit, busyId, pending };
 }

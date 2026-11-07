@@ -585,6 +585,10 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
       }
     }
     if (await studioSharedBinding(ownerId, id, tx)) throw new StudioModuleError('模块已绑定共享原件，请重新读取后明确保存个人输入或模板定义', 409);
+    if (current?.source_preset_id) {
+      const author = await tx.imageStudioPreset.findUnique({ where: { id: current.source_preset_id }, select: { owner_id: true } });
+      if (!author || author.owner_id !== ownerId) throw new StudioModuleError('只有原模板作者可以保存默认设置；请另存为自己的参数模板', 403);
+    }
     if ((current?.revision || 0) !== revision) throw new StudioModuleError('模块已在其他页面保存，请刷新后核对；当前草稿仍在本页', 409);
     const priorSettingsSource = await readStudioWorkspaceSource(tx, ownerId, id);
     assertStudioTaskSettingsWrite(priorSettingsSource?.taskSettings, taskSettings);
@@ -717,6 +721,22 @@ export async function shareSavedStudioModule(ownerId: string, body: Record<strin
   return { ...await studioModuleDTOForUser(actor, body.id), sharingPreference: null, canChooseSharing: false,
     sharingCommandReceipt: { action: 'share-saved-module', requestId: body.requestId, moduleId: body.id,
       expectedRevision: body.revision, revision: published.receipt.revision } };
+}
+
+export async function studioModuleSharingStatus(ownerId: string, command: { id: string; requestId: string; revision: number; isShared: boolean; action: string }) {
+  const { id, requestId, revision, isShared, action } = command;
+  if (!validStudioModuleId(id, ownerId) || !/^[A-Za-z0-9_-]{16,100}$/.test(requestId) || !Number.isSafeInteger(revision)
+    || !['set-sharing-preference', 'share-saved-module'].includes(action) || action === 'share-saved-module' && !isShared) throw new StudioModuleError('原共享查询参数无效', 400);
+  const actor = await assertStudioActor(ownerId);
+  const fingerprint = action === 'share-saved-module'
+    ? sharedCommandFingerprint(['publish-shared', id, { requestId, expectedRevision: revision, isShared: true,
+      publicationMode: 'saved-workspace-v1', prompt: '', templatePrompt: '', referenceIds: [], entryPoint: 'workbench' }])
+    : sharedCommandFingerprint(['set-sharing-preference', id, isShared, revision]);
+  const receipt = await readReceipt(prisma, actor.id, requestId, fingerprint);
+  if (!receipt) return { status: 'not-found' };
+  if (receipt.moduleId !== id || (action === 'share-saved-module' ? receipt.beforeRevision : receipt.expectedRevision) !== revision) throw new StudioModuleError('共享回执与原操作不一致', 409);
+  return { status: 'completed', result: { ...await studioModuleDTOForUser(actor, id),
+    sharingCommandReceipt: { action, requestId, moduleId: id, expectedRevision: revision, revision: receipt.revision } } };
 }
 
 export async function chooseStudioModuleSharing(ownerId: string, body: Record<string, unknown>) {

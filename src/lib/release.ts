@@ -1,8 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '最近项目紧凑展示', outline: [
-  '项目卡片与封面限制高度，单项目不再铺满',
-  '最近项目保持一排，窄屏可横向浏览',
+const notice = { title: '模板保存与封面体验优化', outline: [
+  '非作者另存个人参数，原模板由作者维护',
+  '模块封面保持三行，共享开关常显并自动核对',
+  '结果信息按需查看，通用费率默认折叠',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

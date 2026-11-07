@@ -1,0 +1,17 @@
+.rules { margin-block: 18px; border-block: 1px solid #354147; }
+.rules summary { padding: 14px 2px; cursor: pointer; font-weight: 650; }
+.body { padding-bottom: 14px; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; color: #aab6bd; font-size: 13px; }
+.toolbar a { color: #79daca; }
+.list { max-height: min(360px, 48dvh); overflow: auto; overscroll-behavior: contain; }
+.row { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding-block: 10px; border-top: 1px solid #303b40; }
+.name { min-width: 0; overflow-wrap: anywhere; }
+.name strong { font-size: 14px; font-weight: 550; }
+.name small { display: block; margin-top: 3px; color: #aab6bd; font-size: 12px; }
+.price { font-size: 13px; font-variant-numeric: tabular-nums; }
+.switch { position: relative; display: inline-block; width: 36px; height: 36px; }
+.switch::before { content: ''; position: absolute; left: 2px; top: 9px; width: 32px; height: 18px; border-radius: 12px; background: #697784; }
+.switch::after { content: ''; position: absolute; left: 4px; top: 11px; width: 14px; height: 14px; border-radius: 50%; background: white; }
+.switch[aria-checked=true]::before { background: #2583dd; }
+.switch[aria-checked=true]::after { transform: translateX(14px); }
+@media (max-width: 480px) { .row { column-gap: 6px; } .price { max-width: 88px; text-align: right; } }

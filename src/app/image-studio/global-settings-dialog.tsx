@@ -7,7 +7,7 @@ import { GenerationCompletionSettings } from '@/components/GenerationCompletion'
 import { useEffect, useId, useRef, useState, type ComponentProps } from 'react';
 import { RefreshCw, Save, X } from 'lucide-react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
-import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_NEW_REQUEST_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS,
+import { IMAGE_STUDIO_NEW_REQUEST_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS,
   IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality,
   imageStudioNewQualityOptions, imageStudioQualityLabel, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
@@ -20,6 +20,7 @@ import { useResolutionApply } from './use-resolution-apply';
 import { ResolutionApplyPanel } from './resolution-apply-panel';
 import type { ResolutionDelta } from '@/lib/image-studio/resolution-apply-types';
 import { PrivateDefinitionEditor } from './PrivateDefinitionEditor';
+import { StudioGlobalPricingRules } from './global-pricing-rules';
 
 export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, canEdit, ratios, getExcluded, onDeltas }: {
   open: boolean; onClose: () => void; editor: ReturnType<typeof useStudioSettings>; ownerId: string; canEdit: boolean;
@@ -181,13 +182,7 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
         {selectedModelReady === false && <p className={styles.muted}>所选模型的图片服务当前未就绪；这里仍可保存默认值，服务就绪后再使用。</p>}
         {conflictFields('templateDefaults')}
       </section>
-      <p className={styles.label}>通用模型积分规则</p>
-      {IMAGE_STUDIO_MODELS.map(model => <label className={styles.label} key={model}>{IMAGE_STUDIO_MODEL_LABELS[model]} 每张积分
-        <input type="number" min={0} max={100000} step={1} disabled={!canEdit || editor.loading}
-          placeholder={model === 'gemini-3-pro-image-preview' ? '未设置' : '20'} value={editor.draft?.prices[model] ?? ''}
-          onChange={event => { if (canEdit) editor.controller.editPrice(model, event.target.value === '' ? null : Number(event.target.value)); }} />
-      </label>)}
-      {conflictFields('prices')}
+      <StudioGlobalPricingRules key={ownerId} open={open} ownerId={ownerId} />
       <button type="button" className={styles.primary} disabled={!canEdit || editor.conflicts.length > 0 || (batch.scope ? !batch.canCommit || batch.busy : !editor.dirty) || editor.loading || editor.saving || batch.writing || ratios.busy || ratioEditing} onClick={save}><Save size={16} />{editor.saving || batch.writing ? '正在保存或应用' : batch.scope ? '保存并应用分辨率' : '保存设置'}</button>
     </>}
     <p role="status">{editor.status || '正在读取通用设置'}</p>

@@ -1,4 +1,5 @@
 import { templateUsageCounts } from '@/lib/template-studio/usage-counts';
+import { isParameterCopyId } from './parameter-copy';
 import 'server-only';
 import { readStudioModuleSharingPreference } from './module-sharing-preference';
 import { createHash } from 'node:crypto';
@@ -34,7 +35,7 @@ export function parseGalleryQuery(value: unknown): GalleryQuery {
     || input.sort !== undefined && !['created', 'updated', 'likes', 'recent', 'name', 'directory'].includes(input.sort)
     || input.authorKey != null && !knownKey(input.authorKey)
     || input.page !== undefined && (!Number.isSafeInteger(input.page) || input.page < 1)
-    || input.pageSize !== undefined && (!Number.isSafeInteger(input.pageSize) || input.pageSize < 12 || input.pageSize > 24)
+    || input.pageSize !== undefined && (!Number.isSafeInteger(input.pageSize) || input.pageSize < 12 || input.pageSize > 120)
     || input.catalogRevision !== undefined && (typeof input.catalogRevision !== 'string' || !/^[a-f0-9]{64}$/.test(input.catalogRevision))) {
     throw new StudioSharingError('封面查询条件无效', 400);
   }
@@ -187,7 +188,7 @@ export async function queryStudioGallery(user: ImageStudioIdentity, raw: unknown
       if (entry.available && target) {
         const workspace = target.kind === 'module' ? catalog.modules.find(row => row.id === target.id) : null;
         const source = catalog.sourceById.get(target.kind === 'preset' ? target.id : workspace?.source_preset_id || '');
-        if (source && canManageStudioPreset(catalog.actor, source) && !await studioPresetArchived(source.id, catalog.client)) {
+        if (source && !isParameterCopyId(source.id) && canManageStudioPreset(catalog.actor, source) && !await studioPresetArchived(source.id, catalog.client)) {
           sharing = { kind: 'preset', id: source.id, shared: source.is_shared, revision: source.updated_at.toISOString() };
         } else if (workspace && !workspace.source_preset_id && entry.objectKind === 'local') {
           const preference = await readStudioModuleSharingPreference(catalog.actor.id, workspace.id, catalog.client);

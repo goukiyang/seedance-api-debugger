@@ -29,6 +29,7 @@ import { parseStudioTaskSettings, studioTaskSettings, type StudioTaskSettings } 
 import { assertStudioTaskSettingsWrite, assertStudioTaskSettingsWriter, readStudioWorkspaceSource, writeStudioWorkspaceSource } from './task-settings-storage';
 import { assertRestoredStudioSourceRelation } from './restored-settings';
 import { readPrivateStudioDefinition, writePrivateStudioDefinition, protectStudioDefinitionPatch, transformPrivateImageTask } from './private-storage.server';
+import { isParameterCopyId, parameterCopyKey, readStudioParameterCopy, type StudioParameterCopy } from './parameter-copy';
 import { privateFieldOrigins, readPrivateFields, writePrivateFields, transferPrivateOrigins, transferPrivateFieldOrigin } from '@/lib/security/private-prompt-fields.server';
 import { privatePromptRequestCapabilities, requirePrivatePromptRequest } from '@/lib/security/private-prompt-request.server';
 import { privateOrigin, privatePromptIndex, privatePromptPolicy } from '@/lib/security/private-prompts.server';
@@ -211,12 +212,36 @@ export async function resolveSharedStudioDefinition(user: ImageStudioIdentity, p
   }
   catch (error) { throw normalizeSharedError(error); }
 }
-async function resolveSharedStudioDefinitionInternal(user: ImageStudioIdentity, presetId: string, client: SharedStudioClient) {
+async function resolveSharedStudioDefinitionInternal(user: ImageStudioIdentity, presetId: string, client: SharedStudioClient): Promise<{ definition: SharedStudioDefinition; publicDTO: SharedStudioPublicDefinition }> {
   const actor = await assertStudioActor(user.id, client);
   const storedSource = await client.imageStudioPreset.findUnique({ where: { id: presetId } });
   // An arbitrary id cannot reveal whether someone else's private source exists.
   // Verified owned bindings project their specific unavailable reason separately.
   if (!storedSource || !canViewStudioPreset(actor, storedSource)) throw new StudioSharingError('模板不存在或无权使用，本人历史结果仍保留', 404, 'access-revoked');
+  if (isParameterCopyId(presetId)) {
+    if (await studioPresetArchived(presetId, client)) throw new StudioSharingError('个人模板已删除，本人历史仍保留', 409, 'source-archived');
+    const copy = (await readStudioParameterCopy(client, storedSource))!;
+    const root = await resolveSharedStudioDefinitionInternal(actor, copy.rootPresetId, client);
+    const styles = await resolveStudioStyleReferences(actor, copy.styleGroupIds, client);
+    validateStudioReferenceCounts(root.definition.referencePolicy, root.definition.templateReferenceIds, root.definition.fixedReferences.length, styles.references.length);
+    const intent: SharedStudioIntent = { protocol: SHARED_STUDIO_PROTOCOL, presetId,
+      definitionToken: digest([storedSource.updated_at.toISOString(), copy, root.definition.intent.definitionToken,
+        styles.groups.map(group => [group.id, group.revision])]) };
+    const defaults = { ...root.definition.generationDefaults, ...copy.parameters };
+    const definition = { ...root.definition, intent, name: storedSource.name, groupName: storedSource.group_name || '未分组',
+      generationDefaults: defaults, sourceRevision: storedSource.updated_at.toISOString(), styleGroupIds: copy.styleGroupIds,
+      styleGroups: styles.groups, styleReferences: styles.references };
+    transferPrivateOrigins(root.definition, definition, ['prompt', 'templatePrompt', 'context']);
+    const state = projectSharedStudioCapabilities({ objectKind: 'live', lifecycle: 'active', sharing: 'private', dependency: 'ready',
+      sourceRevision: definition.sourceRevision, moduleRevision: null, definitionToken: intent.definitionToken,
+      actorAllowed: true, ownsWorkspace: false, canViewSource: true, canManageSource: false, canViewDefinition: false });
+    return { definition, publicDTO: { ...root.publicDTO, ...state, intent, presetId, revision: definition.sourceRevision,
+      name: definition.name, groupName: definition.groupName, defaults, isShared: false, ownedByViewer: false,
+      canManageSharing: false, contextEditable: false, templatePrompt: '', context: '', deletion: studioSourceDeletionCapability(actor, storedSource),
+      fixedReferences: [], styleGroupIds: copy.styleGroupIds, styleGroups: styles.groups.map(group => ({ id: group.id, name: group.name,
+        revision: group.revision, referenceCount: group.references.length, coverUrl: `/api/image-studio/style-groups/${group.id}/cover?revision=${group.revision}`,
+        canManage: group.ownerId === actor.id || actor.role === 'admin' })) } };
+  }
   const source = readPrivateStudioDefinition('image-preset', storedSource);
   if (await studioPresetArchived(presetId, client)) throw new StudioSharingError('模板已删除，本人历史结果仍保留', 409, 'source-archived');
   const intent: SharedStudioIntent = { protocol: SHARED_STUDIO_PROTOCOL, presetId, definitionToken: await sharedDefinitionToken(source, client) };
@@ -262,7 +287,8 @@ async function readSharedStudioDependencies(actor: ImageStudioIdentity, source: 
 // Catalogs reuse the exact dependency checks without constructing definitions or cover media.
 export async function sharedStudioAvailability(actor: ImageStudioIdentity, source: ImageStudioPreset, client: SharedStudioClient) {
   if (!canViewStudioPreset(actor, source) || await studioPresetArchived(source.id, client)) return false;
-  try { await readSharedStudioDependencies(actor, source, client); return true; }
+  try { if (isParameterCopyId(source.id)) await resolveSharedStudioDefinition(actor, source.id, client);
+    else await readSharedStudioDependencies(actor, source, client); return true; }
   catch (error) {
     const problem = normalizeSharedError(error);
     if (problem instanceof StudioSharingError && [400, 403, 404, 409].includes(problem.status)) return false;
@@ -823,6 +849,7 @@ export async function readPrivateStudioEditor(user: ImageStudioIdentity, moduleI
 export async function savePrivateStudioEditorDraft(user: ImageStudioIdentity, moduleId: string, input: Parameters<typeof savePrivatePromptDraft>[2]) {
   const actor = await assertStudioActor(user.id);
   const target = await privateEditorTarget(actor, moduleId, prisma);
+  if (target.source && target.source.owner_id !== actor.id) throw new StudioSharingError('只有原模板作者可以保存模板内容；请另存参数方案', 403);
   return savePrivatePromptDraft(actor.id, { kind: target.kind, id: target.row.id, origins: target.origins,
     fields: ['prompt', 'context'] }, input);
 }
@@ -852,6 +879,7 @@ export async function savePrivateStudioEditor(user: ImageStudioIdentity, moduleI
       input.sourceRevision, input.prompt, input.context]));
     const prior = await readReceipt(tx, actor.id, input.requestId, fingerprint);
     if (prior) return prior;
+    if (target.source && target.source.owner_id !== actor.id) throw new StudioSharingError('只有原模板作者可以保存模板内容；请另存参数方案', 403);
     if (target.workspace.revision !== input.revision || target.sourceRevision !== input.sourceRevision) {
       const rejected = { state: 'not-applied', action: 'private-definition-saved', moduleId, requestId: input.requestId };
       await writeReceipt(tx, actor.id, input.requestId, fingerprint, rejected);
@@ -1173,6 +1201,68 @@ export async function saveSharedStudioPresetAs(user: ImageStudioIdentity, input:
   });
 }
 
+// A personal parameter template uses the root's live definition, never copied private text.
+export async function saveStudioParameterCopy(user: ImageStudioIdentity, input: Record<string, unknown>) {
+  return inTransaction(undefined, async tx => {
+    const actor = await assertStudioActor(user.id, tx);
+    const fingerprint = digest(['save-parameter-copy', input]);
+    const receipt = await readReceipt(tx, actor.id, input.requestId, fingerprint);
+    if (receipt) return readStudioParameterCopyResult(actor, receipt, tx);
+    if (Object.keys(input).some(key => !['saveIntent', 'sourceModuleId', 'moduleRevision', 'expectedDefinitionToken', 'requestId', 'name',
+      'model', 'quality', 'resolution', 'count', 'aspectRatio', 'styleGroupIds', 'isShared'].includes(key)) || input.isShared !== false) {
+      throw new StudioSharingError('个人另存只保存生成参数，不包含原模板内部配置或共享内容', 400);
+    }
+    const name = typeof input.name === 'string' ? input.name.trim() : '';
+    if (!name || name.length > 80 || typeof input.sourceModuleId !== 'string') throw new StudioSharingError('请填写模板名称并确认来源', 400);
+    const workspace = await tx.imageStudioModule.findFirst({ where: { id: input.sourceModuleId, owner_id: actor.id } });
+    if (!workspace?.source_preset_id) throw new StudioSharingError('原模板来源无法确认，当前输入保留', 403);
+    await assertStudioWorkspaceNotDeleted(actor.id, workspace.id, tx);
+    if (workspace.revision !== input.moduleRevision) throw new StudioSharingError('工作区已更新，请重新读取后另存；当前输入保留', 409);
+    const source = await tx.imageStudioPreset.findUniqueOrThrow({ where: { id: workspace.source_preset_id } });
+    const original = await resolveSharedStudioDefinition(actor, source.id, tx);
+    if (input.expectedDefinitionToken !== undefined && input.expectedDefinitionToken !== original.definition.intent.definitionToken) {
+      throw new StudioSharingError('原模板已更新，请重新读取后另存；当前输入保留', 409);
+    }
+    const rootPresetId = (await readStudioParameterCopy(tx, source))?.rootPresetId ?? source.id;
+    const parameters = parseSharedStudioPersonalOverrides(Object.fromEntries(['model', 'quality', 'resolution', 'count', 'aspectRatio'].map(key => [key, input[key]])));
+    const id = `parameter-copy-${randomUUID()}`;
+    const metadata: StudioParameterCopy = { version: 1, ownerId: actor.id, presetId: id, rootPresetId,
+      styleGroupIds: input.styleGroupIds === undefined ? original.definition.styleGroupIds : parseStudioStyleIds(input.styleGroupIds),
+      parameters: parameters as StudioParameterCopy['parameters'] };
+    await assertStudioTaskSettingsWriter(tx);
+    await tx.imageStudioPreset.create({ data: { id, owner_id: actor.id, scope: 'creator', is_shared: false, name,
+      group_name: workspace.group_name || '未分组', prompt: '', context: '', reference_ids: '[]',
+      model: metadata.parameters.model, quality: metadata.parameters.quality, resolution: metadata.parameters.resolution,
+      count: metadata.parameters.count, aspect_ratio: metadata.parameters.aspectRatio, reference_limit: original.definition.generationDefaults.referenceLimit } });
+    await writeSetting(tx, parameterCopyKey(id), actor.id, metadata);
+    // Reader validates the stored record before a usable workspace is published.
+    await resolveSharedStudioDefinition(actor, id, tx);
+    const opened = await openSharedStudioModule(actor, id, `copy-open:${String(input.requestId)}`, tx, { explicitSelection: true });
+    const result = { action: 'save-parameter-copy', presetId: id, moduleId: opened.id };
+    await writeReceipt(tx, actor.id, input.requestId, fingerprint, result);
+    return { id, workspaceId: opened.id, isShared: false };
+  });
+}
+
+async function readStudioParameterCopyResult(actor: ImageStudioIdentity, receipt: Record<string, unknown>, tx: SharedStudioClient) {
+  if (receipt.action !== 'save-parameter-copy' || typeof receipt.presetId !== 'string' || typeof receipt.moduleId !== 'string') {
+    throw new StudioSharingError('原另存回执无法确认，请保留原请求编号', 409);
+  }
+  const preset = await tx.imageStudioPreset.findFirst({ where: { id: receipt.presetId, owner_id: actor.id, is_shared: false } });
+  const module = await tx.imageStudioModule.findFirst({ where: { id: receipt.moduleId, owner_id: actor.id, source_preset_id: receipt.presetId } });
+  if (!preset || !module || !await readStudioParameterCopy(tx, preset)) throw new StudioSharingError('原另存模板已不可用，不会重复创建', 409);
+  return { id: preset.id, workspaceId: module.id, isShared: false };
+}
+
+export async function studioParameterCopyStatus(user: ImageStudioIdentity, requestId: unknown) {
+  return readSharedStudioSnapshot(async tx => {
+    const actor = await assertStudioActor(user.id, tx);
+    const receipt = await readOwnedReceipt(tx, actor.id, requestId);
+    return receipt ? { status: 'completed', result: await readStudioParameterCopyResult(actor, receipt.result, tx) }
+      : { status: 'not-found' };
+  }, 'sharing-status');
+}
+
 export async function replaceSharedStudioPreset(user: ImageStudioIdentity, presetId: string, input: Record<string, unknown>) {
   const outerActor = await assertStudioActor(user.id), outerFingerprint = digest(['replace-preset', presetId, input]);
   const originalReceipt = await readReceipt(prisma, outerActor.id, input.requestId, outerFingerprint);
@@ -1243,6 +1333,10 @@ export async function saveSharedStudioPersonal(user: ImageStudioIdentity, module
     }
     const binding = await studioSharedBinding(actor.id, moduleId, tx);
     if (!binding) throw new StudioSharingError('该模块不是实时共享工作区', 400);
+    const source = await tx.imageStudioPreset.findUnique({ where: { id: binding.presetId } });
+    if (binding.mode !== 'publisher' || !source || source.owner_id !== actor.id || await studioPublisherModule(actor.id, source.id, tx) !== moduleId) {
+      throw new StudioSharingError('只有原模板作者可以保存默认设置；请另存为自己的参数模板', 403, 'access-revoked');
+    }
     const workspace = await tx.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: actor.id } });
     if (!workspace || workspace.revision !== body.revision) throw new StudioSharingError('个人设置已在其他页面保存，当前草稿仍保留', 409);
     const forbidden = ['sourcePresetId', 'source_preset_id', 'ownerId', 'owner_id', 'templatePrompt', 'context', 'globalContext', 'fixedReferences', 'fixedReferenceRepairs', 'styleGroupIds', 'skillIds', 'isShared'];

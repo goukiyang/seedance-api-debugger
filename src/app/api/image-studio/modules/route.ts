@@ -1,7 +1,7 @@
 import { traceHttpRequest, tracePhase } from '@/lib/performance/request-trace';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { listStudioModules, saveStudioModule, shareSavedStudioModule, chooseStudioModuleSharing, deleteStudioModule, deleteStudioGroup, studioModuleDeletionStatus, studioModuleDTOForUser, StudioModuleError } from '@/lib/image-studio/modules';
+import { listStudioModules, saveStudioModule, shareSavedStudioModule, studioModuleSharingStatus, chooseStudioModuleSharing, deleteStudioModule, deleteStudioGroup, studioModuleDeletionStatus, studioModuleDTOForUser, StudioModuleError } from '@/lib/image-studio/modules';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { openSharedStudioModule, studioSharedOpenStatus, StudioSharingError } from '@/lib/image-studio/shared-contract';
 import { StudioStyleError } from '@/lib/image-studio/style-groups';
@@ -56,6 +56,12 @@ export async function GET(request: NextRequest) {
   if (ids && (ids.length > 12 || ids.some(id => !id || id.length > 100))) return NextResponse.json({ error: '模块读取参数无效' }, { status: 400, headers: privateHeaders });
   try {
     const mode = request.nextUrl.searchParams.get('mode');
+    if (mode === 'sharing-status') {
+      const params = request.nextUrl.searchParams;
+      if (!['true', 'false'].includes(params.get('isShared') || '')) throw new StudioModuleError('原共享查询参数无效', 400);
+      return NextResponse.json(await studioModuleSharingStatus(user.id, { id: params.get('id') || '', requestId: params.get('requestId') || '',
+        revision: Number(params.get('revision')), isShared: params.get('isShared') === 'true', action: params.get('action') || '' }), { headers: privateHeaders });
+    }
     if (mode === 'private-save-status' || mode === 'private-draft-status') return NextResponse.json(await tracePhase('resolve', () => privateStudioEditorStatus(user,
       request.nextUrl.searchParams.get('id') || '', request.nextUrl.searchParams.get('requestId') || '', mode === 'private-draft-status')), { headers: privateHeaders });
     if (mode === 'private-editor') return NextResponse.json(await tracePhase('resolve', () => readPrivateStudioEditor(user,

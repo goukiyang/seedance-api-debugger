@@ -4,7 +4,7 @@ import { applyStudioPreset, canUseCompanyTemplates, linkStudioQuickPreset, listS
 import { StudioModuleError } from '@/lib/image-studio/modules';
 import { StudioTaskSettingsError } from '@/lib/image-studio/task-settings';
 import { StudioStyleError } from '@/lib/image-studio/style-groups';
-import { StudioSharingError } from '@/lib/image-studio/shared-contract';
+import { StudioSharingError, studioParameterCopyStatus } from '@/lib/image-studio/shared-contract';
 import { StudioFixedReferenceError } from '@/lib/image-studio/fixed-references';
 import { StudioReferencePolicyError } from '@/lib/image-studio/reference-policy';
 import { ModuleCoverError } from '@/lib/image-studio/module-cover';
@@ -22,6 +22,7 @@ export async function GET(request: NextRequest) {
     const presetId = request.nextUrl.searchParams.get('presetId') ?? undefined;
     if (presetId && presetId.length > 160 || moduleId && moduleId.length > 160) return NextResponse.json({ error: '模板读取参数无效' }, { status: 400, headers: privateHeaders });
     const mode = request.nextUrl.searchParams.get('mode');
+    if (mode === 'parameter-copy-status') return NextResponse.json(await studioParameterCopyStatus(user, request.nextUrl.searchParams.get('requestId')), { headers: privateHeaders });
     if (mode === 'definition') {
       if (Boolean(presetId) === Boolean(moduleId)) return NextResponse.json({ error: '模板定义读取参数无效' }, { status: 400, headers: privateHeaders });
       return NextResponse.json(await readStudioTemplateDefinition(user, { presetId, moduleId }), { headers: privateHeaders });
