@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '角色头像版本与历史补充', outline: [
-  '头像框展开图片选择，候选和微调按批次分组',
-  '点击历史候选同步恢复补充要求，选脸时也能编辑',
+const notice = { title: '生成按钮跟随补充输入', outline: [
+  '头部、侧脸与全身的生成按钮统一放在补充框下方',
+  '微调和提示词面板使用相同操作布局',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

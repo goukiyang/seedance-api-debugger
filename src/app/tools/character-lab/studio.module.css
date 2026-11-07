@@ -307,3 +307,5 @@
 .root .avatarChoice[data-adopted='true'] { border-color: var(--lab-green); }
 .avatarCellLabel { position: absolute; left: 3px; bottom: 3px; min-width: 19px; padding: 1px 4px; background: var(--lab-panel); border-radius: 3px; font-size: 11px; }
 .avatarAdopted { position: absolute; right: 3px; top: 3px; display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px; border-radius: 3px; background: var(--lab-green); color: var(--lab-green-ink); font-size: 10px; }
+
+.root .generateAfterInput { width: 100%; margin: 8px 0 12px; }
