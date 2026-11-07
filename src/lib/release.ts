@@ -1,9 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '创作首页与作品广场合并', outline: [
-  '作品广场放在收藏模板下方，收藏默认收起',
-  '可见作品自动更新，保留筛选和浏览位置',
-  '创作入口与作品交流集中在同一页',
+const notice = { title: '最近项目紧凑展示', outline: [
+  '项目卡片与封面限制高度，单项目不再铺满',
+  '最近项目保持一排，窄屏可横向浏览',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
