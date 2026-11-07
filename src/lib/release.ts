@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '图片结果操作整理', outline: [
-  '详细信息与置顶统一放入图片右上角更多菜单',
-  '移除卡内操作滚动条和用作主图按钮',
+const notice = { title: '角色头像版本与历史补充', outline: [
+  '头像框展开图片选择，候选和微调按批次分组',
+  '点击历史候选同步恢复补充要求，选脸时也能编辑',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
