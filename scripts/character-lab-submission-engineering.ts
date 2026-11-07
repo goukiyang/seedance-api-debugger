@@ -225,7 +225,7 @@ async function main() {
     const compositions = await import('../src/lib/character-lab/composition');
     const workspaceId = randomUUID();
     const workspace = await store.createLabWorkspace(owner, workspaceId, '独立四格', 'gpt-image-2');
-    const draft = { ...workspace.draft, faceDescription: 'FACE_ONLY_SENTINEL', sideDescription: 'SIDE_ONLY_SENTINEL', bodyDescription: 'BODY_ONLY_SENTINEL', context: 'UNASSIGNED_LEGACY_SENTINEL', sourceAssetId, count: 9, diversity: 0, quality: 'medium', resolution: '2K' };
+    const draft = { ...workspace.draft, faceDescription: 'FACE_ONLY_SENTINEL', sideDescription: 'SIDE_ONLY_SENTINEL', bodyDescription: 'BODY_ONLY_SENTINEL', context: 'UNASSIGNED_LEGACY_SENTINEL', sourceAssetId, count: 9 as const, diversity: 0, quality: 'medium', resolution: '2K' };
     const prepare = (kind: 'faces' | 'result', operation?: string, overrides?: Record<string, unknown>) =>
       service.prepareLab(user, { workspaceId, requestId: randomUUID(), workbench: 2, contextProtocol: 1, kind, operation, draft, ...overrides });
     const first = await prepare('faces');
