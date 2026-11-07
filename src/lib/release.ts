@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '优化角色图片复制与历史候选', outline: [
-  '单格支持右键复制图片，历史候选统一放在左下方',
-  '完善图片结果浏览、本人项目选择和素材价格展示',
+const notice = { title: '修复生图最高质量切换', outline: [
+  '切换到 GPT Image2 时保留最高质量意图，不再因参数名称不同卡住生成',
+  '保持当前分辨率、输入素材和原任务记录',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
