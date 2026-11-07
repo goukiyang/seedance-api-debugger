@@ -323,5 +323,24 @@ v20是阶段交付，默认共享模板完整生成尚不能结案。继续从�
 
 本轮实际CJS/ESM双加载复现同一模块getter不同、跨模块原快照指针丢失，导致原image-private-snapshot工程的raw/runtime断言失败；已按项目现有Symbol.for模式共享进程弱引用来源/原行/解读缓存，私密错误加不可JSON伪造的跨加载品牌，不以普通Error.code/status冒该错误。真实跨加载6组、原加密冻结与恢复4组、动态来源12组、内容ID34、普通/恢复风格22组、完整类型已通过，未放宽原始冻结断言。
 
-21主版及新相容guard正在准备：旧841不识别新默认共享任务ID，不再拿它冒后继相容。新guard从最终21主源生成，只保原五项写门关闭，读者及消费者同源，整对完整构建后正常保护发布。当前仍运行v20/9ae7/NWJKE_YesaMnvCSTysJFY，费率/配置不变，未新生成或自动结束未知请求。新原证docs/materials/2026-11-07-template-sharing-generation/，前两轮构建失败及20真实发布证据仍在原资料目录。原视频现场与截图原号归属缺口继续保留。
+已部署，待用户手动验收。实际主源bb1e2a8a52bbbd9229e215ab1c5ab23b6563b565，v0.134.21，BUILD qk3KkN_2IPMDDo88rP3HW；UTC 2026-11-07T18:22:51.005155+00:00公网核对成功，2026-11-07T18:23:20.198345+00:00健康收口。相容guard a3eb7d5187d2c90bede8039dbd9d1014da1cd9b9 / 0.134.21+sharing-guard.1 / BUILD LmuG-gXhGygd9yW5-bBSt，原完整构建时间2026-11-07T17:35:55.923969+00:00；main与guard原生/计价/Next/types/lint均独立新构建通过，guard不复用841。不含新schema/迁移/配置/媒体/费用写入，价格两键全字段8f4保持。
+
+新证据：全库42模板ID（35模块源/6普通/1默认），34共享标记记录及41工作区来源编号，旧提交规则各拒1个默认ID，新规则拒0；此为编号协议盘点，不把is_shared当成完整生命周期权限或真实出图证明。发布6实际启动检查、7服务4timer、1公网JS同SHA和3匿名401、内外health200；两目标模板源与工作区原四字段和切换前一致。新相容guard回退入口：bash /data/video-api-debugger/release-staging/template-sharing-generation-20261107/attempt02/program-recovery.sh /data/video-api-debugger/release-staging/template-sharing-generation-20261107/attempt02/release-input.json；只回程序，不回DB/媒体/账本/回执，未实演回退。
+
+首轮native整门拒绝是新preset-id依赖未加入聚合sources：实际子项status0/22组，聚合hash undefined被拒，其余29/30含pricing通过；补同一行登记后新main/guard全门通过，不降验证、不改原失败。初始私有材料style回执属性/陈旧hash探针错误修正并重核真实最终文件，无生产影响。原前两轮20类型构建失败仍在旧目录；21 attempt01失败及attempt02完整发布证据都保留于docs/materials/2026-11-07-template-sharing-generation/。原视频现场、截图原号归属和同事实页手验缺口仍保留，未新生成或自动关闭旧未知请求。
+
+用户追加同类排查后，已确认API漏StudioStyleError（实际无效skill400无耐久拒绝），以及image worker5处/jimeng provider1处尚用单模块私密错误instanceof，正补统一品牌识别与隔离旧新对照，沿本原单下一节接续。来源静态迁移维护与skills局部WeakMap未见同类实际故障，未扩大改造。另登记同机CPU待核线索D-20261107-SHARED-CPU，不杀进程或冒本次模板根因。
 <!-- /SHARE-GEN21-20261107 -->
+
+
+<!-- SHARE-SIM22-20261107 -->
+### 16.5 SHARE-SIM22 用户追加同类排查（2026-11-07）
+
+范围沿编号→共享权限/私密来源→报价/任务冻结→worker→结果与恢复→明确拒绝回执，不扩大生成通道或价格。全库ID盘点沿§16.4原证复用；现存42模板和41工作区来源新规则拒0。shared-live、报价、持久批次的所有提交消费者均复用parseSharedStudioIntent；维护迁移中的静态名册是显式选单/未知拒绝边界，不改迁移或回写历史。skills的局部storedJson WeakMap在同模块get→save/delete闭环，未见跨模块传参故障，不类推全局化；报价/费用JSON.parse只取通道/合同，未不加区别替换为解密。
+
+确认漏项一：parseSkillIds及fresh风格/提示词权限reader抛StudioStyleError，API expected清单遗漏，真实隔离SQLite实际API无效skill400却无耐久拒绝。两API只补该具体类，复用fresh证据事务；普通Error仅带status409仍unknown、部分受理/费用/证据读取失败仍不封原号。新增实际skill/style单张和batch具体类，原14组扩15组。
+
+确认漏项二：image worker5处及jimeng create catch1处仍用单模块PrivatePromptError instanceof，CJS/ESM同文件错误构造器不同，会进普通故障处理。改用已通过跨加载品牌的isPrivatePromptError，保原queued/uncertain、lease/快照/费用路径及原错误对象。原18组私密工程用实际另一ESM错误＋原worker函数、真实SQLite补before-send不结算；不引入通用error.code解锁。
+
+本小批准备v0.134.22，基实际21/bb1e继承，计划复用21新相容guard原产物（来源/BUILD/原构建时间不改），数据格式不变。原stage21已成功，旧截图原号/视频原页与功能手验缺口保持。最初窄查私密工程临时目录先在/tmp不符合真实data盘，再置cwd中被密钥外置保护拒绝，均属探针环境错误；按两条保护选data盘且cwd外的既有engineering fixture根后18组通过，保原日志不绕过保护，不冒前两次为业务红对照。
+<!-- /SHARE-SIM22-20261107 -->

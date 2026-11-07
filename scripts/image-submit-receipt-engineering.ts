@@ -132,6 +132,29 @@ async function main() {
     }
     check('real_shared_restored_and_task_settings_validation_errors_return_durable_rejections');
 
+    for (const kind of ['skill', 'style']) {
+      const id = request(`invalid-${kind}`);
+      const draft = kind === 'skill' ? { skillIds: ['invalid'] } : { styleGroupIds: ['invalid'] };
+      const response = await taskApi.POST(post('/api/image-studio/tasks', {
+        requestId: id, prompt: 'synthetic-personal', count: 1, revision: 0, referenceIds: [], draft,
+      }));
+      const payload = await response.json();
+      assert.equal(response.status, 400); assert.equal(payload.receipt?.state, 'rejected');
+      assert.equal((await receipts.readStudioSubmitReceipt(owner, id)).state, 'rejected');
+      await assert.rejects(receipts.assertStudioRequestWritable(db, owner, id));
+    }
+    const { StudioStyleError } = require(path.join(root, 'src/lib/image-studio/style-groups.ts')) as typeof import('@/lib/image-studio/style-groups');
+    const staleGroup = new StudioStyleError('Synthetic selected group no longer available', 409);
+    const invalidBatchApi = apiSource<typeof batchApi>('src/app/api/image-studio/batches/route.ts', {
+      '@/lib/image-studio/batches': { ...batches, createStudioBatch: async () => { throw staleGroup; } },
+    });
+    const invalidBatchId = request('stale-batch-style');
+    const invalidBatchResponse = await invalidBatchApi.POST(post('/api/image-studio/batches', { requestId: invalidBatchId }));
+    assert.equal(invalidBatchResponse.status, 409);
+    assert.equal((await invalidBatchResponse.json()).receipt?.state, 'rejected');
+    assert.equal((await receipts.readStudioSubmitReceipt(owner, invalidBatchId)).state, 'rejected');
+    check('real_skill_style_and_batch_group_errors_keep_durable_rejection_without_provider');
+
     const genericId = request('http-only'), genericError = Object.assign(new Error('Synthetic status alone'), { status: 409 });
     const genericApi = apiSource<typeof taskApi>('src/app/api/image-studio/tasks/route.ts', { '@/lib/image-studio/tasks': { ...tasks, submitStudioBatch: async () => { throw genericError; } } });
     const genericResponse = await genericApi.POST(post('/api/image-studio/tasks', { requestId: genericId, prompt: 'safe' }));
