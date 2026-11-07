@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '生成按钮跟随补充输入', outline: [
-  '头部、侧脸与全身的生成按钮统一放在补充框下方',
-  '微调和提示词面板使用相同操作布局',
+const notice = { title: '修复默认共享模板状态读取', outline: [
+  '过度帧等默认模板不再误报内容编号无效',
+  '保留模板共享设置和原有查看权限',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
