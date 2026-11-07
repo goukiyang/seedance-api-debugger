@@ -161,6 +161,7 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
   const groupedDelete = coverDeleteWithContextActions ? renderDelete?.(item) : null;
   const hasCommonActions = Boolean(groupedDelete || item.media && (!coverDeleteWithContextActions || item.download && (!contextActionsEnabled || !readOnly)));
   const hasMediaDetails = Boolean(item.media && (metadata || supplement || statusDetail));
+  const moreMenu = compactInformation && hasMediaDetails;
   const showNextActions = Boolean(item.media && nextEnabled && !contextActionsEnabled);
   const coverReactions = Boolean(renderReactionAction && item.media?.contentKey);
   const reactions = item.media?.contentKey ? <ContentReactions contentKey={item.media.contentKey} imageSharing={item.media.imageSharing}
@@ -192,13 +193,19 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
           </div>}
         </div>
       </div>}
-      {coverReactions ? <div className={styles.coverReactions}>{reactions}<div className={styles.coverPin}>{renderReactionAction?.(item)}</div></div> : reactions}
+      {coverReactions ? <div className={styles.coverReactions}>{reactions}{!moreMenu && <div className={styles.coverPin}>{renderReactionAction?.(item)}</div>}</div> : reactions}
+      {moreMenu && <div className={styles.moreSlot}>
+        <ImageResultStatusDetails detail={statusDetail || undefined} reason={Boolean(resultError)} active={menuActive} scopeKey={`${identity}:details`}
+          label="详细信息" heading={resultError ? '原因与结果详情' : '结果详情'} moreActions={renderReactionAction?.(item) ?? null}>
+          <div className={styles.resultDetailsContent}>{metadata}{supplement && <div className={styles.resultSupplement}>{supplement}</div>}</div>
+        </ImageResultStatusDetails>
+      </div>}
       {renderOverlay?.(item, { openPreview: () => changePreview(item) })}
       {!contextActionsEnabled && !coverDeleteWithContextActions && renderDelete && <div className={styles.deleteSlot} data-result-secondary onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>{renderDelete(item)}</div>}
-      {(hasCommonActions || secondaryActions || deliveryAction || item.media && primaryActions || hasMediaDetails || showNextActions) && <div className={styles.mediaActions}
-        data-cover-context-delete={coverDeleteWithContextActions || undefined} data-has-status-detail={Boolean(item.media && statusDetail) || undefined}
+      {(hasCommonActions || secondaryActions || deliveryAction || item.media && primaryActions || hasMediaDetails && !moreMenu || showNextActions) && <div className={styles.mediaActions}
+        data-cover-context-delete={coverDeleteWithContextActions || undefined} data-compact-actions={compactInformation || undefined} data-has-status-detail={Boolean(item.media && statusDetail) || undefined}
         data-result-secondary aria-busy={feedback?.id === item.id && feedback.busy || Boolean(controller.busy) || undefined} onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
-        {hasMediaDetails && <div className={styles.mediaDetailAction}>
+        {hasMediaDetails && !moreMenu && <div className={styles.mediaDetailAction}>
           <ImageResultStatusDetails detail={statusDetail || undefined} reason={Boolean(resultError)} active={menuActive} scopeKey={`${identity}:details`}
             label={resultError ? '查看原因与结果详情' : '查看结果详情'} heading={resultError ? '原因与结果详情' : '结果详情'}>
             <div className={styles.resultDetailsContent}>{metadata}{supplement && <div className={styles.resultSupplement}>{supplement}</div>}</div>

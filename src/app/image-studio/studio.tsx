@@ -4498,9 +4498,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           }}
           onQuickUse={item => { if (item.task) void replaceMainFromResult(item.task.id); }}
           renderReactionAction={templateWorkbench ? item => item.task?.asset?.id
-            ? <StudioResultPinButton userId={userId} moduleId={module.id} taskId={item.task.id} assetId={item.task.asset.id} state={visibleFeed?.pinState || null} onSaved={refreshResults}
+            ? <StudioResultPinButton showLabel userId={userId} moduleId={module.id} taskId={item.task.id} assetId={item.task.asset.id} state={visibleFeed?.pinState || null} onSaved={refreshResults}
               onPublish={unpublishedSharing && module.canChooseSharing ? () => openModuleDialog() : undefined} />
-            : item.sharedPin ? <StudioResultPinnedIndicator /> : null : undefined}
+            : item.sharedPin ? <StudioResultPinnedIndicator showLabel /> : null : undefined}
           paginationSlot={templateWorkbench ? resultPaginationSlot : undefined}
           navigationIntent={completionNavigation}
           latestPageRequest={latestResultsRequestId}
@@ -4558,12 +4558,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           </div>
 </> : sharedPin ? <><div className={styles.resultHeading}><p className={styles.prompt}>{name} · 置顶图片</p><span className={styles.resultOwner}>{sharedPin.owner?.name || '模板使用者'}</span></div>
             <div className={styles.resultMeta}><span className={styles.muted}>查看与点赞</span><RelativeTime className={styles.resultTime} value={sharedPin.createdAt} /></div></> : null}
-          renderPrimaryActions={({task, viewOnly}, waitDisplay) => {
+          renderPrimaryActions={({task}, waitDisplay) => {
             if (!task) return null;
-            if (templateWorkbench && !viewOnly && task.asset?.id && studioTaskHasViewableImage(task) && taskDisplay(task)?.sourceAvailable) {
-              return <button type="button" disabled={submitting || Boolean(pendingSubmission) || hidden || !active || sessionChanged}
-                onClick={() => void replaceMainFromResult(task.id)}><ImagePlus size={15} />用作主图</button>;
-            }
             const recovery = studioTaskAsyncRecovery(task), feedback = taskRecheckFeedback(task);
             if (recovery?.canRequestRecheck) return <button type="button" className="sd2-loading-surface" data-busy={feedback?.busy || undefined}
               disabled={Boolean(feedback?.busy) || sessionChanged || isClientSessionBlocked() || sessionUser?.id !== userId || hidden || !active || !(task.delivery?.requestId || recovery.binding)} aria-busy={feedback?.busy || undefined}
