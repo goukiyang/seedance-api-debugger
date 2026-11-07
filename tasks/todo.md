@@ -1139,6 +1139,5 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 <!-- SHARE-COLLEAGUE01-20261107 -->
 ### SHARE-COLLEAGUE01 同事共享模板打开与正常风格生成
 
-已部署v0.134.21 / bb1e2a8a5 / qk3KkN_2IPMDDo88rP3HW，待用户手动验收。原共享单§16.3/16.4：20恢复空live工作区打开、正常风格选择及明确拒绝回执；21补统一默认模板编号、私密任务来源/原冻结快照跨加载，并新构建相容guard a3eb7d518 / LmuG-gXhGygd9yW5-bBSt。全库42模板和41工作区来源编号新规则拒0、旧拒1；真实生产两模块四字段保持。独立main/guard native/pricing/Next/types/lint、6启动门、7服务4timer、1公网JS/3匿名401与health200，价格8f4不变，无本轮生成或收费。21首轮聚合依赖登记漏项已修且原失败保持；源码与配置无新schema，回退只回程序不回数据。用户追加同类排查：API漏StudioStyleError、worker/provider私密错误单模块识别继续补；旧截图原号归属、视频现场和同事功能手验缺口保持，不自动结束或重发。资料docs/materials/2026-11-07-template-sharing-generation/attempt02；新范围外CPU线索已登记D-20261107-SHARED-CPU。
-同类尾批v22按原单§16.5接续：明确风格/提示词错误回执与跨加载私密错误识别；原21已健康，待小批构建和保护发布。
+已部署v0.134.22 / 9a116be26 / a11zrypusif8s0CqQWHY8，待用户手动验收。原共享单§16.3–16.5：20修空live工作区503、普通风格409与明确拒绝回执；21统一默认模板编号、任务私密来源/原冻结快照跨加载，新建相容guard a3eb7d518/LmuG-gXhGygd9yW5-bBSt；22补API漏StudioStyleError及worker5＋provider1处跨加载私密错误漏认。42模板/41工作区来源编号新规则拒0，旧拒1；生产同源快照过度帧503→200、技能03200→200，同事原文0字。15回执/18私密、完整types、fresh native/pricing/Next通过；6启动门/7服务4timer/1公网JS/3匿名401与health200。管理正常两次保存使价6c9更新14260367，停服前旧价检查拒绝后只读核history/回执并继承新价，未写业务价；最终两键SHA7d8e及源/工作区四字段保持，无新生成/费用或schema/迁移。guard原完整产物/时间复用，只回程序不回数据。旧截图原号归属、视频现场及同事手验仍缺，不自动结束或重发。原失败/环境误配与最终证据在docs/materials/2026-11-07-template-colleague-open、template-sharing-generation、template-sharing-similar，范围表见后者audit-scope.md。已有D-20261107-SHARED-CPU待核，不冒本模板根因；尾批未新增范围外线索。
 <!-- /SHARE-COLLEAGUE01-20261107 -->

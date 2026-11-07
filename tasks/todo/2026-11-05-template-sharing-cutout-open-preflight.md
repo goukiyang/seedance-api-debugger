@@ -342,5 +342,11 @@ v20是阶段交付，默认共享模板完整生成尚不能结案。继续从�
 
 确认漏项二：image worker5处及jimeng create catch1处仍用单模块PrivatePromptError instanceof，CJS/ESM同文件错误构造器不同，会进普通故障处理。改用已通过跨加载品牌的isPrivatePromptError，保原queued/uncertain、lease/快照/费用路径及原错误对象。原18组私密工程用实际另一ESM错误＋原worker函数、真实SQLite补before-send不结算；不引入通用error.code解锁。
 
-本小批准备v0.134.22，基实际21/bb1e继承，计划复用21新相容guard原产物（来源/BUILD/原构建时间不改），数据格式不变。原stage21已成功，旧截图原号/视频原页与功能手验缺口保持。最初窄查私密工程临时目录先在/tmp不符合真实data盘，再置cwd中被密钥外置保护拒绝，均属探针环境错误；按两条保护选data盘且cwd外的既有engineering fixture根后18组通过，保原日志不绕过保护，不冒前两次为业务红对照。
+已部署，待用户手动验收。实际主源9a116be260a9aae51ecab18fc3c6ac8dccb01050 / v0.134.22 / BUILD a11zrypusif8s0CqQWHY8；2026-11-07T18:53:05Z公网成功，18:54:18Z健康收口。基实际21/bb1e继承全部修复，原相容guard a3eb7d5187d2c90bede8039dbd9d1014da1cd9b9 / 0.134.21+sharing-guard.1 / BUILD LmuG-gXhGygd9yW5-bBSt，保原完整构建时间2026-11-07T17:35:55.923969Z；不改原产物。读者/格式合同相容，5原写门关闭；回退只回程序，不回DB/账本/媒体/回执，guard中不冒本批错误分类已修。回退入口：bash /data/video-api-debugger/release-staging/template-sharing-similar-20261107/attempt01/program-recovery.sh /data/video-api-debugger/release-staging/template-sharing-similar-20261107/attempt01/release-input.json；未线上演练。
+
+工程证据：15组实际SQLite/API拒绝及原号保护、18组私密保护、完整tsc退出0，正式源fresh native/pricing/Next/types/lint通过。最终旧worker负对照因实际另一ESM错误进入普通delivery/settlement保护禁区而被夹具拒绝，新worker保原queued/uncertain及费用；最初负对照缺readStudioDelivery注入的ReferenceError不冒最终证明，已用禁止普通分支的真实依赖重跑窄对照。临时目录起初在/tmp不符真实data盘，改cwd内又被密钥外置保护拒绝，均属探针误配；最终选data盘且cwd外engineering fixture根通过，保原日志，不改业务保护。
+
+构建期间18:24:02Z及18:25:27Z两次正常管理员save，使6c9经6ce2834f更新到policy14260367-319b-41bb-bf60-7a3f98c8165c、authoring9a82ad7b-41e4-40d2-90f8-7b61a5132c26，capability f4保持。首次旧价capture在停服前拒绝，单跳history准备断言也拒绝；后只读追两条history、核current/revision/authoringAfter及成功operation一致，重绑release-input两revision和source-pair配置SHA，原配置/契约及preparation-input/构建证据保持。未写业务价格，切换前后两键SHA7d8ea02c291679e895b5c839d213afc0ac74b9bfdefcbc59888d4dbaaa541047保持。切换exit0，6实际启动门、7服务4timer、1公网JS同SHA/3匿名401、内外health200、发布控制器0；两目标源与工作区原四字段保持。
+
+本批9应用输入，无新schema/迁移或收费生成；原截图原号归属、视频原页及同事实页手验缺口保持，不自动关闭旧未知或重发。资料docs/materials/2026-11-07-template-sharing-similar/含audit-scope.md范围表、原失败与旧新对照、配置重叠和完整发布原证；20/21原证保留。已有D-20261107-SHARED-CPU只待核，本小批未新增范围外线索。
 <!-- /SHARE-SIM22-20261107 -->
