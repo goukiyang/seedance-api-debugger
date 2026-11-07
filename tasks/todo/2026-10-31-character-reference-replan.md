@@ -450,3 +450,59 @@ attempt01主原生/价格门通过，但完整Next在新增fixture第315行发�
 - 私有原证本主题implementation/attempt02及服务器同名stage保main/guard-source、精确Git delta、两版18组读者/原生摘要/完整构建、source-pair-contract、public-deployed/public-character-css/service-health、startup-pair-checks/writers-stopped/database-protected、cutover.log。首轮失败与类型修正原证沿attempt01保留，原始native/Next日志及回退/备份留服务器。源码两分支已推并核16c57/2d3，窗口已交还；后续仅3文档Git收口，不为文档重建或重启。
 
 手验：刷新到v0.134.16，在正脸、侧脸和前后身分别输入不同要求并来回切换，核三个输入和“下次生成”规则预览分别保留；切换各自历史批次/成品来源，核只回填本部位，历史空值如实为空；分别改管理员风格，核另两阶段不受影响。旧共用文字在“模型与项目”可复制，原记录按原设置重做仍显示原冻结提示词。实际出图/键盘/小屏由用户手验。侧脸4/9仍为§13设计方案，未夹入本次上下文修复；原test第五组未知沿§7不自动重发。本轮未新增任务外问题。
+
+## 16. 单格右键复制实际单格图片（2026-11-07）
+
+用户反馈“单格子的图像右键复制可以复制这个单格的图像，现在好像是做不到的，看看原因”，沿常规缺陷修复授权排查/实现/推送与必要发布，实际操作由用户手验。当前实际16c57/v0.134.16；并行模型参数修复17由原owner负责，正在因真实返图尺寸处理补必要修复/重冻，不能把未定d48当最终基线；本轮只改角色images展示层，和其业务文件不重叠。
+
+根因：CharacterLabImage将格子显示为SVG viewBox/clipPath，SVG内部image.href仍是整张已授权HD blob，浏览器没有独立单格img可供原生“复制图片”；只有放大预览已有canvas实际裁切，但编码为WebP。对应接口原本可裁原图PNG，却会绕开本页已读HD并增加服务端裁切，不作为此次展示修复路径。
+
+修法与共享影响：把既有预览的裁切effect收进本地useCharacterLabImage，两处消费者共享真正的PNG单格；普通单格改用原生img，预览沿同一PNG。保现有HD鉴权/读取去重/账号与源key隔离、裁切坐标、卸载/切图时取消旧回调并回收URL；不新增原图读取、剪贴板权限、右键定制菜单、服务器/生成/提示词/费用或数据库变化。覆盖正脸4/9候选、头像批次/选脸、微调单格、身体正背两半、旧整图单格与放大预览，整图展示不变。原生右键复制/粘贴、视觉和触摸/键盘仍用户手验，不以源码/构建冒浏览器实测；必要工程与发布检查按最终源执行。
+
+CodeGraph实际8ce工作区1944文件无差异，新context补查25秒超时，沿已明确本地组件和共享HD读取调用直接核源码。不会因图工具卡住扩成全站图像重构。本轮未新增任务外问题；当前未写应用源码或发布。
+
+### 16.1 同轮追加：所有页面历史候选归左下
+
+用户继续明确“历史候选都像2方案选择一样，放左下方”。沿其认可的Step2左栏图文批次列表复用，扩到正背面、侧脸/成品与旧整图；最终成品页在同一左下区按正脸/侧脸/前后身/旧整图分组。顶栏“历史记录”也在该栏显示全部原记录，含旧原图、微调、未提交/待确认/失败项；保组号与状态/近时，不删除历史。移除右侧正背面下拉、图上侧脸/全身版本下拉及旧整图条，保已认可的紧凑正脸头像快速选择和微调/提示词局部操作。
+
+复用原历史打开回调：点击批次只预览并回填本部位补充，明确选用仍原按钮；旧原图先inspection不改当前原图/输入。候选编号按原operation/kind计数，避免不同部位和微调批次合并混号。调整仅studio.tsx和局部CSS，无模型、费用、上下文存储或接口变动。单格PNG修复8d1fb63d5已完成单文件提交，定向lint进行中，尚未发布。新增两个布局文件后一起完成必要工程和发布检查，用户手验位置/滚动/选择/复制。
+
+### 16.2 实现完成与定向工程检查
+
+三文件角色UI改动已完成：真实HD裁切PNG与原生img共用本地hook，依赖使用源URL及裁切四个标量，普通轮询/父组件编辑不反复重建PNG；切图/账号失效按原HD读取结果隐藏旧图并回收URL。纯编号/状态角标pointer-events:none，不截右键目标；保contain和原点击/选用/放大流程。左侧统一批次历史，成品按部位筛选，顶部全部历史也归该栏，相关旧下拉/条移除；旧原图或其他正脸对应的侧脸沿只读inspection，不套当前选择；正背旧单面可分别标记当前显示项。新增批次序号一次按kind/operation计算，不混号，不增加后台查询或生成。
+
+本机定向lint在依赖读取阶段长时间无结果，已停止自身进程，未记通过；改用服务器独立preflight源目录：正式16源码集合＋精确三文件、仅只读复用已安装依赖、无.env/storage，NEXT_TELEMETRY_DISABLED=1并nice15。12:11:34Z定向lint及全仓tsc --noEmit --incremental false均退出0，三文件SHA与当前工作区一致；lint只剩既有studio hook警告，images无新警告。productionWrites/paidRequests/browserRuns均0，这不代表原生右键或页面功能验收。原证本主题implementation/attempt01/preflight-passed.json、lint.log/types.log；源图/历史数据未改。后续正式候选仍按最终继承源完成必要native/Next及保护发布，不因补文档重复已过的定向检查。
+
+并行版本：17由模型参数/完整返图修复owner封源并发布，本轮18沿最终17继承；另一已授权UI批次若在18封源前具不可变补丁和相容证据，可评估同批以免重复构建，封源后不插新差量。没有等待用户确认或请求权限；此为同站点发布基线核对。
+
+### 16.3 同批源码整合与未部署候选
+
+角色两项UI已提交8d1fb63d5＋69d5d5ddc；另外沿canonical已授权IMAGE-UX04整合不可变5d33ac494（本支6fea0d84b），其11文件和独立三组窄工程原证SHA匹配。本人核GET owned绑定真实session/优先于include_all、返回原owner字段、原project POST以下写行为未变；选项沿原children为准，旧非本人归属只保留为禁选当前值不清空。相容旧guard仍只给原授权列表，新客户端owner过滤，程序回退只恢复旧UI，不改变任何持久数据。其原检查时间未知为null保留，捕获时间独立，未将记录转存冒新执行。17图片studio的6行菜单变更不涉原requestId/导航段，已核实际diff；容量/菜单/owned相同字节直接复用原证，最终18完整Next仍覆盖全类型/lint。
+
+初次18整合源3868b8fb32076a5cd1f3007bba1b8fea1bca8186 / 0.134.18已推，基于17的8437暂定父源；20文件delta包含14文件本轮UI/窄fixture、3版本及3既有角色记录文档。17在原生门最后发现一条旧image-spec测试断言不符本次标准low要求，仅补测试会重冻最终源；3868未构建或部署，必须继承其后续新测试源与新guard后更新18源码身份，不以旧8437为实际已发基线。14个已过窄检查输入文件SHA保持，自己的PNG/历史业务实现未因此变化。
+
+本轮发布包装沿用已有单主＋相容guard机制，后继17完整产物/原始native与读者/全类型构建证据可复用，不改原ops发布核心。18依赖/Prisma/缓存全私有；可先做隔离准备/native，完整Next等17 guard结束，实际切版还需17成功部署且其原请求/配置操作结束交窗。未进行生产切换/收费/浏览器操作，没有让用户等待确认；源码/记录与实际发布状态严格区分。
+
+### 16.4 最终候选与范围修正
+
+最终18主aa9e34763c7a5cc5b15989a79187eddd20177bf9 / 0.134.18继承17最终ce3ecc1ea9599388e8eb389d3f3fefe452ca6579；恢复使用17新guard841ad62a9e4b59ee8f1f903c2c67f27c745f71d7/attempt03，原读者/native/完整构建时间保留，不冒本轮重跑。3868仅未构建中间源，包装保留provisional-3868。主对最终17恰21文件，无依赖/schema/migrations变化；角色三文件SHA与12:11 lint/全仓类型证据相同。
+
+合包复查发现IMAGE-UX04将fullRows绑定compactInformation，而普通batch-results同样compact，可能误放开24上限；原owner确认是候选范围问题。现独立fullRows默认false，仅模板主工作台显式传templateWorkbench。新layout反例核compact无opt-in仍false、模板显式true；12:51:11Z独立scope-preflight的pagination/layout两项退出0，真实绑定当前15文件。owned-project/cache/选择器字节未变，沿原执行证据复用，不冒新全量重跑。一次编辑中的fixture括号错误在运行前修正4d2090a5d，未构建/部署该中间源。
+
+CodeGraph最终aa9实际1946文件、32690节点/110702边，12:53:10Z零missing/extra/hashMismatch/parseError；额外context查询超时按§16保留，关键调用核源码。17 main完整构建12:50:16Z通过后，18开始独立私有依赖/native准备；完整Next等17 guard资源释放，切版等必要操作交窗。本节为候选状态，尚未上线；功能仍用户手验。
+
+Final native proof: source aa9, fresh native and pricing completed 2026-11-07T13:01:46.830Z, productionDatabaseCopied=false, servicesChanged=false. Original recipe readers remain inherited for byte-identical backend; focused evidence binds 15 actual inputs. Guard17 full Next completed 13:03:00.494Z / Al_ZSWzar0oc5c7xDQE3R, build-controller0. Own full Next/publication still pending at this record.
+
+### 16.5 已部署（2026-11-07）
+
+**已部署，待用户手动验收。** UTC 13:19:13.758（洛杉矶05:19）主aa9e34763c7a5cc5b15989a79187eddd20177bf9 / v0.134.18 / BUILD tEZbib4hTHkvbIbGYVZKU上线，入口 https://sd2.youdooart.com/tools/character-lab 。单格从现有已授权HD实际裁为PNG，普通显示与放大预览共用本格内容，原生右键可针对该格；此前SVG只裁视觉窗口，底层仍是整张宫格。人脸、侧脸、正背面和旧整图历史统一复用左下批次列表，保各部位/操作组号；全部历史也在同栏，旧原图/旧正脸先只读查看，提示词及个人补充仍各自独立回填。保已认可C头像选择、明确选用、按钮位于补充框下及原生成/报价/原号合同。
+
+主fresh原生/定价于13:01:46Z完成，完整Next/types/lint于13:10:30.522Z通过；角色三文件独立lint/全类型与最终scope分页/layout检查沿匹配SHA原证复用，没有浏览器、收费生成或自动功能验收。主对17最终ce3恰21文件，业务生成执行/费用/冻结合同/角色JSON后端保持，新增项目范围仅原授权GET owned投影，原POST以下写代码逐字节一致；无schema/migrations/依赖变化。合包IMAGE-UX04四项界面改动一并上线，fullRows只由模板显式开启，普通批次24上限保持；原11文件窄证据未篡改，新范围反例另有真实执行记录。
+
+13:18:26Z接到17最终revision14后才捕获保护快照；一致SQLite备份、11 writer自然退出/旧进程归零、6实际启动检查、12消费者切换、七服务/四timer完成，cutover0，无强杀/恢复执行。三页面公网JS及14份CSS200且同候选SHA，四匿名入口401；13:20:37Z内外health200/ok、七服务同源、控制器0。价格两key全字段8f4ab818保持（policy6c9e / authoring b869 / cap f4），三项模型配置全字段及交窗proof全部33行value SHA保持revision14；私有策略、环境及持久链接保持。未作模型/费用配置写入，也未回灌DB/素材/账本/原请求回执。
+
+恢复固定相容guard841ad62a9e4b59ee8f1f903c2c67f27c745f71d7 / 0.134.17+image-parameters-guard.1 / Al_ZSWzar0oc5c7xDQE3R，完整构建13:03:00.494Z等原17证据直接继承，不冒18重跑；具同源新字段读者，原五写门关闭。程序恢复入口 /data/video-api-debugger/release-staging/character-cell-copy-20261107/attempt01/program-recovery.sh 及同目录release-input.json/source-pair-contract.json，仅回程序/消费者配置，不回业务数据；未做真实回退演练。13:20:37后窗口已交还后继19，自己只补文档，不再碰运行态。
+
+本主题私有implementation/attempt01保源码/delta、三文件preflight、最终scope与继承IMAGE-UX04原证、main/guard完整构建/source-pair、public-deployed/public-character-css/service-health、配置hash保护/33行继承核对、切版/启动/备份元证；原始完整日志和DB备份留服务器，未导出环境或设置值。中间3868未构建包仍保provisional-3868。CodeGraph最终aa9实际1946文件零差异，超时结构查询仍按§16保留；源码已推并核远端aa9，后续文档HEAD不当运行源码，不为文档重建或重启。
+
+手验：刷新工作台，在人脸/方案选择、正背面与成品页确认左下历史布局和部位/批次区分；切换同部位历史核对应补充恢复、选用和其他部位输入保留；在四/九宫格候选、头像版本、微调、正背两半或旧整图单格右键复制，再粘贴核只有该格；放大、键盘及小屏实际体验待手验。侧脸4/9仍原设计项，未夹入本次两项修复；原test第五组未知仍不重发。本轮新发现仅候选fullRows范围耦合，已上线前修正，沿discoveries原条记录。

@@ -500,3 +500,7 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 <!-- CHARACTER-INDEPENDENT-CONTEXT-20261107 -->
 [角色上下文独立原单§15](../../tasks/todo/2026-10-31-character-reference-replan.md#15-正脸侧脸与前后身上下文独立2026-11-07)：v0.134.16主16c57e550/guard2d3ab523已保护部署，待用户手验。私有2026-11-07-character-independent-context/implementation/attempt02保存精确源码/Git delta、两版18组读者/原生摘要/完整构建、source-pair-contract、public-deployed/public-character-css/service-health及切换/备份原证；attempt01保首轮类型失败与修正检查，未将失败冒成功。服务器同名stage含原始日志/回退入口/备份；无新用户附件，无浏览器或收费生成。
 <!-- /CHARACTER-INDEPENDENT-CONTEXT-20261107 -->
+
+<!-- CHARACTER-CELL-COPY-20261107 -->
+[角色单格复制/左下候选原单§16.5](../../tasks/todo/2026-10-31-character-reference-replan.md#165-已部署2026-11-07)：v0.134.18主aa9/tEZ已保护部署，待手验；[简要发布证据](2026-11-07-character-cell-copy/README.md)。私有implementation/attempt01保匹配定向原证、最终15文件scope检查、继承IMAGE-UX04原证、主完整构建/guard继承source-pair、3JS+14CSS/4匿名401/health、最新rev14配置与价格hash、启动/切换/备份元证；服务器同名stage保完整原日志/DB备份/程序恢复。中间包provisional-3868保留，无新用户附件、浏览器或收费生成。
+<!-- /CHARACTER-CELL-COPY-20261107 -->

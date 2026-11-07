@@ -47,3 +47,9 @@
 - 小修沿既有授权及项目工程检查执行；结构性、大范围及影响不明事项先出方案等用户确认。功能验收仍由用户手动完成，不以构建、推送或健康检查冒充通过。
 
 - **D-20261104-TEMPLATE-MARK-LIST-SCALE｜个人收藏列表先全量解析再分页｜待核线索 / P3**：`/api/content-reactions` 的模板组织列表沿 `listReactions` 先读取本账号全部有效标记，逐条 `resolveReactionContent` 后再截取页；分组统计也读本账号模板标记。实现事实已核，当前收藏数量、请求耗时和瓶颈未测，不能判成已发生的性能故障，也不把它归因于本次统一标记。CP01/ARCH03封面目录的有限SQL分页仍保留。本轮不扩为重构；后续如列表卡顿，先固定真实账号、标记量、权限条件，测一次请求耗时/查询数，再决定是否将组织列表接入相同授权投影与分页，不能先分页后漏权限/搜索结果。来源：TEMPLATE-MARK01，`src/lib/content-reactions/service.ts:listReactions`、`template-favorites.ts:favoriteOrganization`；未做浏览器或生产规模测试。
+
+### D-20261107-IMAGE-UX04-COMPACT-PAGING：候选分页范围耦合（上线前已修正）
+
+已确认候选问题：fullRows绑定compactInformation会使同样compact的普通batch-results也突破24上限。原owner确认后改独立prop默认false，仅模板主工作台显式启用；补compact批次反例，12:51:11Z两项定向工程通过。该候选未上线，不作为生产缺陷。后续实际发布沿[角色合包原单§16.4](todo/2026-10-31-character-reference-replan.md#164-最终候选与范围修正)及IMAGE-UX04原单接续，不另起台账；实际功能待用户手验。
+
+部署补记：v0.134.18/aa9于13:19:13Z上线，13:20:37Z健康/资源核对通过；此候选范围修正已随整包发布，实际交互仍待用户手验。

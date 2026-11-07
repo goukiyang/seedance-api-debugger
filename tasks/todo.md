@@ -1134,3 +1134,7 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 <!-- CHARACTER-INDEPENDENT-CONTEXT-20261107 -->
 **已部署，待用户手验。** 2026-11-07 01:12（洛杉矶）v0.134.16 / 16c57e550 / RfviUaNpEBzDe5Tdvrg-L上线；正脸、侧脸、前后身补充/历史恢复/风格/预览/生成独立，旧共用原文只读保留。新guard2d3ab523 / yB9pJkJEDy0F4ZeLa1cvZ保持新字段；两版各18组隔离、fresh原生/价格、完整Next/types/lint及七服务/四timer/公网JS+11CSS/health通过。首轮fixture类型错误已修，实际最终attempt02；旧原号/数据保持。原单[§15](todo/2026-10-31-character-reference-replan.md#15-正脸侧脸与前后身上下文独立2026-11-07)含发布/手验/恢复入口，侧脸4/9仍设计项。
 <!-- /CHARACTER-INDEPENDENT-CONTEXT-20261107 -->
+
+<!-- CHARACTER-CELL-COPY-20261107 -->
+角色单格右键复制＋历史候选左下：**已部署，待用户手验**。v0.134.18 / aa9e34763 / tEZbib4hTHkvbIbGYVZKU，13:19:13Z上线；各部位/批次左下列表保补充独立回填，单格真实HD裁切PNG。主fresh原生/完整Next/types/lint及匹配窄工程过，恢复guard841沿原完整产物；3JS+14CSS同SHA/4匿名401、七服务四timer、health200/控制器0，价格8f4和最终rev14配置/33行hash保持。合包IMAGE-UX04并修fullRows范围，不回数据；窗口已交后继19，余纯文档。[原单§16.5](todo/2026-10-31-character-reference-replan.md#165-已部署2026-11-07)。
+<!-- /CHARACTER-CELL-COPY-20261107 -->
