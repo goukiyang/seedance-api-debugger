@@ -78,9 +78,13 @@ export const IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS: Record<ImageStudioModel, imp
   'gpt-image-2.6-sunburst': ['1K', '2K', '4K'],
 };
 
+export function isGptImageStudioModel(model: string) {
+  return model.startsWith('gpt-image-') && IMAGE_STUDIO_MODELS.includes(model as ImageStudioModel);
+}
+
 /** GPT parameters are passed through; supplier metadata does not narrow platform choices. */
 export function isStandardGptImageParameter(model: string, parameter: 'quality' | 'resolution', value: string | undefined) {
-  if (value === undefined || !model.startsWith('gpt-image-') || !IMAGE_STUDIO_MODELS.includes(model as ImageStudioModel)) return false;
+  if (value === undefined || !isGptImageStudioModel(model)) return false;
   const options = parameter === 'quality' ? IMAGE_STUDIO_MODEL_QUALITY_OPTIONS : IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS;
   return (options[model as ImageStudioModel] as readonly string[]).includes(value);
 }
