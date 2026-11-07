@@ -11,6 +11,7 @@ import * as restoredContract from '../src/lib/image-studio/restored-settings';
 import { isEncryptedStudioPersonalPrompt } from '../src/lib/image-studio/personal-prompt';
 import { serverStudioPersonalPromptProjection } from '../src/lib/image-studio/personal-prompt.server';
 import * as taskSettingsContract from '../src/lib/image-studio/task-settings';
+import { validStudioPresetId } from '../src/lib/image-studio/preset-id';
 import { CURRENT_STUDIO_SIZE_POLICY_VERSION } from '../src/lib/image-studio/ratios';
 import { normalizeImageFeishuChoice } from '../src/lib/image-studio/feishu-contract';
 import { historicalStudioStyles } from '../src/lib/image-studio/style-history';
@@ -22,7 +23,7 @@ async function main() {
   assert.equal(process.env.PRIVATE_PROMPTS_POLICY_FILE, undefined, 'Legacy restoration fixture must not load an external policy');
   const destination = path.resolve(process.argv[2] || '');
   assert.ok(destination.startsWith(path.join(root, '.role-tests') + path.sep));
-  const files = ['src/lib/image-studio/restored-settings.ts', 'src/lib/image-studio/tasks.ts',
+  const files = ['src/lib/image-studio/restored-settings.ts', 'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/preset-id.ts',
     'src/lib/image-studio/task-settings.ts', 'src/lib/image-studio/task-settings-storage.ts', 'src/lib/image-studio/skills.ts',
     'src/lib/image-studio/private-storage.server.ts', 'src/lib/security/private-prompts.server.ts',
     'src/lib/security/private-prompt-fields.server.ts', 'scripts/server-runtime.cjs',
@@ -126,7 +127,7 @@ async function main() {
     assert.ok(Object.hasOwn(storageImports, name), `Unexpected private storage dependency: ${name}`); return storageImports[name];
   } });
   const sandbox: Record<string, any> = { exports: {}, createHash, randomUUID, ...restoredContract, ...taskSettingsContract, CURRENT_STUDIO_SIZE_POLICY_VERSION,
-    isEncryptedStudioPersonalPrompt, serverStudioPersonalPromptProjection,
+    isEncryptedStudioPersonalPrompt, serverStudioPersonalPromptProjection, validStudioPresetId,
     assertStudioRequestWritable: async () => {}, markStudioSubmitFailure: () => {},
     ...storageExports, ...privateFields, ...privatePrompts, normalizeImageFeishuChoice, historicalStudioStyles,
     freezeImageFeishuChoice: async (_tx: unknown, _owner: unknown, choice: unknown) => { assert.equal(choice, undefined); return null; },
@@ -201,6 +202,12 @@ async function main() {
   assert.equal(parse(body).personalPrompt, '');
   const old = { ...body, restoredSettings: undefined, draft: undefined };
   assert.equal(Object.hasOwn(parse(old), 'restoredSettings'), false);
+  const defaultIntent = { ...intent, presetId: 'module-source:default-author' };
+  assert.equal(parse({ ...old, sharedLive: defaultIntent }).sharedLive.presetId, defaultIntent.presetId);
+  for (const presetId of ['module-source:default-', 'module-source:default-../author', 'module-source:default-author:extra', 'module-source:unrecognized']) {
+    assert.throws(() => parse({ ...old, sharedLive: { ...intent, presetId } }));
+  }
+  checks.push('default_published_template_uses_the_same_valid_id_in_generation_protocol_and_content_keys');
   for (const sharedLive of [undefined, intent]) {
     for (const selection of [{ styleGroupIds: [], styleGroupVersions: {} },
       { styleGroupIds: [styleId], styleGroupVersions: { [styleId]: 2 } }]) {

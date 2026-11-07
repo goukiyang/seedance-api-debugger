@@ -55,6 +55,33 @@ function load(relative) {
     const identity = load('src/lib/security/private-prompt-identity.server.ts');
     assert.equal(identity.privatePromptCapabilities({ id: 'coworker', role: 'user', account_type: 'internal' }, [original]).canReadPrivatePrompt, false);
     checks.push('shared copy retains original authorship and gives no raw-text capability to another user');
+    const sharedTask = { id: 'dynamic-shared-task', owner_id: 'coworker', source_preset_id: preset.id,
+      prompt: source.prompt, context: source.context, snapshot_json: JSON.stringify({ sourcePresetId: preset.id,
+        sharedSourceOwnerId: 'author', moduleContext: source.context, templatePrompt: source.prompt, personalPrompt: 'ordinary supplement' }) };
+    const definitionOrigins = [...fields.privateFieldOrigins(source, 'context'), ...fields.privateFieldOrigins(source, 'prompt')];
+    const frozen = storage.transformPrivateImageTask(sharedTask, true, definitionOrigins);
+    const frozenSnapshot = JSON.parse(frozen.snapshot_json);
+    for (const value of [frozen.prompt, frozen.context, frozenSnapshot.moduleContext, frozenSnapshot.templatePrompt]) assert.equal(crypto.isStoredPrivatePrompt(value), true);
+    assert.equal(frozenSnapshot.personalPrompt, 'ordinary supplement');
+    const thawed = storage.transformPrivateImageTask(frozen, false);
+    const thawedSnapshot = storage.readPrivateImageTaskSnapshot(thawed);
+    assert.equal(thawedSnapshot.moduleContext, source.context); assert.equal(thawedSnapshot.templatePrompt, source.prompt);
+    assert.deepEqual(fields.privateFieldOrigins(thawedSnapshot, 'moduleContext'), [original]);
+    assert.equal(fields.privateStoredValue(thawed), frozen);
+    assert.equal(identity.privatePromptCapabilities({ id: 'coworker', role: 'user' }, fields.privateFieldOrigins(thawedSnapshot, 'moduleContext')).canReadPrivatePrompt, false);
+    checks.push('dynamic shared task seals authenticated template origins while keeping personal supplement plain; compatible read preserves raw freeze');
+    const legacy = storage.transformPrivateImageTask(sharedTask, false);
+    const legacySnapshot = storage.readPrivateImageTaskSnapshot(legacy);
+    assert.equal(fields.privateStoredValue(legacy), sharedTask);
+    assert.equal(legacy.snapshot_json, sharedTask.snapshot_json);
+    assert.deepEqual(fields.privateFieldOrigins(legacySnapshot, 'moduleContext'), [{ kind: 'image-preset', id: preset.id, ownerId: 'author' }]);
+    assert.equal(storage.privateImageTaskOrigins(legacy).some(origin => origin.ownerId === 'coworker'), false);
+    assert.equal(identity.privatePromptCapabilities({ id: 'coworker', role: 'user' }, fields.privateFieldOrigins(legacySnapshot, 'moduleContext')).canReadPrivatePrompt, false);
+    checks.push('legacy frozen author protects dynamic-source plaintext on read without rewriting the historical row or assigning authorship to consumer');
+    assert.throws(() => storage.transformPrivateImageTask({ ...frozen, id: 'wrong-task' }, false), crypto.PrivatePromptError);
+    const spoofed = storage.transformPrivateImageTask({ ...frozen, snapshot_json: JSON.stringify({ ...frozenSnapshot, sharedSourceOwnerId: 'coworker' }) }, false);
+    assert.deepEqual(fields.privateFieldOrigins(storage.readPrivateImageTaskSnapshot(spoofed), 'moduleContext'), [original]);
+    checks.push('task row binding and authenticated ciphertext origins remain authoritative over claimed snapshot author');
     // Live workspaces store only their source binding, not a private definition.
     const live = { id: 'live-coworker', owner_id: 'coworker', source_preset_id: preset.id, prompt: '', context: '' };
     const liveRead = storage.readPrivateStudioDefinition('image-module', live);
