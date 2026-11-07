@@ -53,3 +53,9 @@
 已确认候选问题：fullRows绑定compactInformation会使同样compact的普通batch-results也突破24上限。原owner确认后改独立prop默认false，仅模板主工作台显式启用；补compact批次反例，12:51:11Z两项定向工程通过。该候选未上线，不作为生产缺陷。后续实际发布沿[角色合包原单§16.4](todo/2026-10-31-character-reference-replan.md#164-最终候选与范围修正)及IMAGE-UX04原单接续，不另起台账；实际功能待用户手验。
 
 部署补记：v0.134.18/aa9于13:19:13Z上线，13:20:37Z健康/资源核对通过；此候选范围修正已随整包发布，实际交互仍待用户手验。
+
+### D-20261107-CHARACTER-COMPOSITION-REGISTRATION：PNG落盘与版本登记分步（待核线索）
+
+来源为角色优化方向思考中的定向源码复核，已核工作树src/lib/character-lab/composition.ts:saveLabComposition。代码先将合成PNG重命名到最终私有路径，再用workspace旧值CAS登记compositions；若CAS未接受且fresh workspace也不含同ID，返回409，未回收先前最终PNG。此条件路径是源码事实；是否实际发生、频率、遗留数量及存储影响均未核，不判成已发生丢图、保存假成功或性能瓶颈。当前成功分支已保存真实PNG与四格来源，继续复用。
+
+本轮不执行保存/并发复现、不查生产存量、不加清理器或删除文件；以后相关保存/版本登记实施时按原请求/幂等/资料保护一并核对是否已有接续或回收需求，不把它变成单页UX方案的前置大修。方向和边界沿[原角色单§17.9](todo/2026-10-31-character-reference-replan.md#179-调整优化方向角色模块架构交互与连续使用2026-11-07仅方案)，不新增平行任务台账。
