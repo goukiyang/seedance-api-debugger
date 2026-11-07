@@ -4473,7 +4473,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         {!likedResults.liked && batch.busy && batch.localPreviews.length > 0 && <div className={styles.grid} aria-label="本批准备素材">{batch.localPreviews.map((src, index) => <article key={src} className={styles.result}><div className={styles.batchInputPreview}><img src={src} alt={`本批主图 ${index + 1}`} /></div><p role="status">准备中</p></article>)}</div>}
         {resultView === 'batch' ? batch.id ? <BatchResults key={`${userId}:${batch.id}`} id={batch.id} userId={userId} autoPack={batch.pack} visible={visible && active && !hidden} onSourceChanged={onSharedRefresh} onQuickUse={taskId => void replaceMainFromResult(taskId)} onInputMainSource={source => void replaceMainFromResult(source)} /> : <p>暂无选中批次，可开始批量生成或从<a href="/assets">资产库的“我的批次”</a>找回。</p> : <>
         {downloadReady && <p role="status">已交给浏览器下载。<a href={downloadReady.url} download={downloadReady.name}>再次下载</a></p>}
-        <GeneratedImageResults key={likedResults.liked ? 'liked' : 'all'} items={sharedResults} compactInformation={templateWorkbench}
+        <GeneratedImageResults key={likedResults.liked ? 'liked' : 'all'} items={sharedResults} compactInformation={templateWorkbench} fullRows={templateWorkbench}
           onVisibleItemsChange={items => { visibleTaskIds.current = items.flatMap(item => item.task ? [item.task.id] : []); }}
           onPreviewInputMain={item => { if (item.task?.inputMainPreview) setInputPreviewSource(item.task.inputMainPreview.source); }}
           contextActionsEnabled={templateWorkbench}

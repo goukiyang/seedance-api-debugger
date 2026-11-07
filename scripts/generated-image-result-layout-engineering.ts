@@ -190,7 +190,7 @@ function card(item: Props, options: Props = {}) {
   return render(child.type, child.props);
 }
 
-const ready = card({ id: 'ready', completionTaskId: 'task-ready', label: '结果', status: '已完成', media: { src: '/fixture.png' }, download: () => undefined });
+const ready = card({ id: 'ready', completionTaskId: 'task-ready', label: '结果', status: '已完成', media: { src: '/fixture.png' }, download: () => undefined , { fullRows: true });
 assert.equal(pageOptions?.fullRows, true, 'template results opt into complete rows');
 const readyArticle = nodes(ready).find(node => node.type === 'article')!;
 assert.equal(readyArticle.props['data-result-ready'], '');
@@ -202,6 +202,10 @@ assert.ok(nodes(actionGroups.at(-1)).some(node => node.props['data-delivery']));
 assert.ok(byClass(ready, 'moreSlot'));
 assert.equal(nodes(actions).some(node => node.type === StatusDetails), false, 'details leave the lower toolbar');
 assert.equal(actions.props['data-compact-actions'], true);
+card({ id: 'compact-batch', label: '批次结果', media: { src: '/fixture.png' } });
+assert.equal(pageOptions?.fullRows, false, 'compact batch cards retain bounded paging without an explicit template opt-in');
+assert.ok(read('src/app/image-studio/studio.tsx').includes('fullRows={templateWorkbench}'), 'only template workbench results explicitly request complete rows');
+
 const legacy = card({ id: 'legacy', label: '结果', media: { src: '/fixture.png' } }, { compactInformation: false });
 assert.equal(pageOptions?.fullRows, false, 'other consumers retain bounded paging');
 assert.ok(byClass(legacy, 'mediaDetailAction'), 'non-compact consumers retain their existing details entry');
