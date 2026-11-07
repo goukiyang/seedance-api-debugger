@@ -117,7 +117,8 @@ async function main() {
       { restoredSettings: null }, { taskSettings: null }, { personalOverrides: null },
       { restoredSettings: { protocol: 'task-settings-v1', sourceTaskId: 'synthetic-source' }, draft: { styleGroupIds: ['11111111-1111-4111-8111-111111111111'] } },
     ];
-    for (const [index, invalid] of invalidSettings.entries()) {
+    for (let index = 0; index < invalidSettings.length; index++) {
+      const invalid = invalidSettings[index];
       const id = request(`invalid-settings-${index}`);
       const response = await taskApi.POST(post('/api/image-studio/tasks', {
         requestId: id, prompt: 'synthetic-personal', count: 1, revision: 0, referenceIds: [], ...invalid,
