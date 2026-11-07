@@ -1250,9 +1250,9 @@ async function readStudioParameterCopyResult(actor: ImageStudioIdentity, receipt
     throw new StudioSharingError('原另存回执无法确认，请保留原请求编号', 409);
   }
   const preset = await tx.imageStudioPreset.findFirst({ where: { id: receipt.presetId, owner_id: actor.id, is_shared: false } });
-  const module = await tx.imageStudioModule.findFirst({ where: { id: receipt.moduleId, owner_id: actor.id, source_preset_id: receipt.presetId } });
-  if (!preset || !module || !await readStudioParameterCopy(tx, preset)) throw new StudioSharingError('原另存模板已不可用，不会重复创建', 409);
-  return { id: preset.id, workspaceId: module.id, isShared: false };
+  const workspace = await tx.imageStudioModule.findFirst({ where: { id: receipt.moduleId, owner_id: actor.id, source_preset_id: receipt.presetId } });
+  if (!preset || !workspace || !await readStudioParameterCopy(tx, preset)) throw new StudioSharingError('原另存模板已不可用，不会重复创建', 409);
+  return { id: preset.id, workspaceId: workspace.id, isShared: false };
 }
 
 export async function studioParameterCopyStatus(user: ImageStudioIdentity, requestId: unknown) {
