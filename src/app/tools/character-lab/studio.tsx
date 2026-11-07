@@ -24,8 +24,9 @@ import { handImageDownloadToBrowser } from '@/lib/media/native-download';
 import { imageUiQuoteFields, imageUiQuotePriceText, validImageUiQuote } from '@/app/image-studio/use-studio-batch';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, imageStudioNewQualityOptions, imageStudioQualityLabel } from '@/lib/image-studio/model-catalog';
 import { imageStudioChannelModel, imageStudioChannelModels, imageStudioEffectiveChannelId, imageStudioUsesLegacyRoute, normalizeImageStudioChannels } from '@/lib/image-studio/channels';
-import { faceLabPrompt, labDefaultViewPrompts, labViewPrompt, labViewPromptFields } from '@/lib/character-lab/prompts';
+import { faceLabPrompt, labDefaultStageStyles, labDefaultViewPrompts, labStyleField, labViewPrompt, labViewPromptFields } from '@/lib/character-lab/prompts';
 import { characterLabMediaUrl, characterLabSlot, characterLabSlotsOverlap, characterLabReferenceSlot, characterLabStrength, sameLabReference, type CharacterLabRestoredSettings, type CharacterLabOperation, type CharacterLabReference, type CharacterLabView, type CharacterLabBootstrap, type CharacterLabConfig, type CharacterLabDraft, type CharacterLabFace, type CharacterLabPlan, type CharacterLabPromptFields, type CharacterLabQuote, type CharacterLabStage, type CharacterLabTask, type CharacterLabWorkspace, type CharacterLabWorkspacePayload } from '@/lib/character-lab/types';
+import { labPersonalFields } from '@/lib/character-lab/contexts';
 import styles from './studio.module.css';
 
 const stages: Array<{ id: CharacterLabStage | 'body'; label: string }> = [{ id: 'faces', label: '人脸生成' }, { id: 'selection', label: '方案选择' }, { id: 'body', label: '全身正反面' }, { id: 'result', label: '成品预览' }];
@@ -41,17 +42,17 @@ function pendingLabPlans(payload: CharacterLabWorkspacePayload, pending: string[
   return Array.from(new Set([...pending, ...payload.plans.filter(plan => payload.submissionByRequestId[plan.id] === 'submitting').map(plan => plan.id)]))
     .filter(id => !payload.taskByRequestId[id] && payload.submissionByRequestId[id] !== 'rejected');
 }
-const sharedStyleField = ['styleConstraints', '共用风格约束', '摄影质感、光线和统一画面要求'] as const;
+const faceStyleField = ['styleConstraints', '正脸风格约束', '仅用于正脸候选和正脸微调'] as const;
 const promptFields = {
   faces: [
     ['basePrompt', '明显变化 · 基础提示词', '明显变化档的候选生成规则'],
     ['characterContext', '角色上下文要求', '从原图理解角色时需要保留的身份与特征'],
     ['faceVariables', '明显变化 · 面部变量', '明显变化档的骨相和五官规则'],
-    sharedStyleField,
+    faceStyleField,
   ],
   result: [
     ['resultPrompt', '成品生成规则', '面部一致性、服装与四格构图要求'],
-    sharedStyleField,
+    ['resultStyleConstraints', '旧版整图风格约束', '仅用于旧版整图'],
   ],
 } as const;
 const sameFace = (a: CharacterLabFace | null, b: CharacterLabFace) => a?.planId === b.planId && a.cell === b.cell;
@@ -65,7 +66,7 @@ async function labApi<T>(body?: Record<string, unknown>, query = '') {
 }
 function fieldsOf(config: CharacterLabConfig): CharacterLabPromptFields {
   const { revision, updatedAt, ...fields } = config;
-  return { ...labDefaultViewPrompts, ...fields };
+  return { ...labDefaultStageStyles, ...labDefaultViewPrompts, ...fields };
 }
 export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceId, initialPrompts, initialBody }: { ownerId: string; isAdmin: boolean; initialWorkspaceId?: string; initialPrompts?: boolean; initialBody?: boolean }) {
   const session = useAppSession();
@@ -117,7 +118,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
   const activePromptTarget = promptTarget === 'current' ? (draft?.stage === 'result' ? 'result' : 'faces') : promptTarget;
   const activePromptFields: readonly (readonly [keyof CharacterLabPromptFields, string, string])[] =
     !activePromptTarget ? [] : activePromptTarget === 'faces' || activePromptTarget === 'result' ? promptFields[activePromptTarget]
-      : [[labViewPromptFields[activePromptTarget], '生成规则', '只用于当前设置'], sharedStyleField];
+      : [[labViewPromptFields[activePromptTarget], '生成规则', '只用于当前设置'], [labStyleField(activePromptTarget), activePromptTarget.startsWith('body-') ? '前后身风格约束' : activePromptTarget === 'refine-face' ? '正脸风格约束' : '侧脸风格约束', '只用于对应部位的生成与微调']];
   const savedPromptFields = bootstrap ? fieldsOf(bootstrap.config) : null;
   const promptOpen = Boolean(isAdmin && sessionReady && !loading && activePromptTarget && bootstrap && configDraft);
   const configDirty = Boolean(configDraft && bootstrap && JSON.stringify(configDraft) !== JSON.stringify(savedPromptFields));
@@ -396,9 +397,10 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
         action: 'reproduce', sourcePlanId: reproducePlanId, workspaceId: current.id, requestId: crypto.randomUUID(),
       } : {
         action: 'prepare', workspaceId: current.id, requestId: crypto.randomUUID(), workbench: operation || kind === 'faces' ? 2 : undefined,
-        kind, draft: input, operation, recipeProtocol: 1, ...(refine ? { input: refine.target, description: refine.text }
-          : operation === 'side' ? { description: input.sideDescription || '' } : operation?.startsWith('body-') ? { description: input.context } : {}),
+        kind, draft: input, operation, recipeProtocol: 1, contextProtocol: 1, ...(refine ? { input: refine.target, description: refine.text }
+          : operation === 'side' ? { description: input.sideDescription || '' } : operation?.startsWith('body-') ? { description: input.bodyDescription || '' } : {}),
       });
+      if (!reproducePlanId && plan.contextProtocol !== 1) throw new Error('当前服务器暂不支持独立上下文，请刷新页面；尚未提交生成。');
       if (plan.recipeProtocol !== 1) throw new Error('当前服务器暂不支持生成配方，请刷新页面；尚未提交生成。');
       assertActive(); if (capturedScope !== scope.current) return;
       const quote = await labApi<CharacterLabQuote>({ action: 'quote', planId: plan.id });
@@ -443,9 +445,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
   const facePlans = plans.filter(plan => plan.kind === 'faces' && !plan.operation);
   function restoreHistoryPersonal(plan: CharacterLabPlan) {
     if (plan.sourceAssetId !== draftRef.current?.sourceAssetId) return;
-    if (plan.operation?.startsWith('body-')) updateDraft({ context: plan.adjustment || plan.context });
-    else if (plan.operation === 'side') updateDraft({ sideDescription: plan.adjustment });
-    else if (!plan.operation) updateDraft({ context: plan.context, ...(plan.kind === 'result' ? { adjustment: plan.adjustment } : {}) });
+    updateDraft(labPersonalFields(plan));
   }
   function browseFace(plan: CharacterLabPlan) {
     setCompositionSlot(null); setInspectionId(null); setFacePreviewId(plan.id);
@@ -533,7 +533,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
     await run('config', async () => {
       try {
         const result = await labApi<{ config: CharacterLabConfig; configVersions: CharacterLabConfig[] }>({
-          action: 'save-config', revision: bootstrap.config.revision, fields,
+          action: 'save-config', contextProtocol: 1, revision: bootstrap.config.revision, fields,
         });
         if (!alive.current || !active.current) return;
         setBootstrap(current => current ? { ...current, ...result } : current);
@@ -654,6 +654,8 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
     if (!draftRef.current || plan.workspaceId !== workspaceRef.current?.id) throw new Error('当前角色已变化，请重新打开历史记录。');
     const target = recipeTarget === 'front' ? 'refine-face' : recipeTarget;
     if (!target) return false;
+    const family = (value: PromptTarget) => value.startsWith('body-') ? 'body' : value === 'side' || value === 'refine-side' ? 'side' : value === 'result' ? 'legacy' : 'face';
+    if (family(target) !== family(plan.operation || plan.kind)) throw new Error('这份补充属于其他部位，请在对应区域恢复。');
     if (target === 'refine-face' || target === 'refine-side') {
       const activeRefinement = recipeTarget === 'front' ? frontRefinement : refinement;
       const current = activeRefinement?.operation === target ? activeRefinement : null;
@@ -663,7 +665,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
     } else {
       updateDraft(target === 'side' ? { sideDescription: text } : target === 'result'
         ? !plan.operation && plan.kind === 'result' ? { context: plan.context, adjustment: plan.adjustment } : { adjustment: text }
-        : { context: text });
+        : target.startsWith('body-') ? { bodyDescription: text } : { faceDescription: text });
     }
     return true;
   }
@@ -771,7 +773,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
           {bodyOpen ? <>
             <section><div className={styles.settingsHeading}><h2>正反面生成设置</h2>{renderPromptButton('body-pair')}</div>
               {renderGenerationSettings()}
-              <label className={styles.field}><span>角色补充要求</span><textarea rows={5} maxLength={3000} value={draft.context} disabled={locked} onChange={event => updateDraft({ context: event.target.value })} placeholder="例如：保持原图头身比、腰带和靴子细节，双手自然下垂" /></label>
+              <label className={styles.field}><span>角色补充要求</span><textarea rows={5} maxLength={3000} value={draft.bodyDescription || ''} disabled={locked} onChange={event => updateDraft({ bodyDescription: event.target.value })} placeholder="例如：保持原图头身比、腰带和靴子细节，双手自然下垂" /></label>
               <button type="button" className={`${styles.primary} ${styles.generateAfterInput}`} disabled={locked || !draft?.sourceAssetId || pendingBlocks('result', 'body-pair')} onClick={() => void generate('result', 'body-pair')}>{bodyShown ? '重新生成正背面' : '一起生成正背面'}</button>
               <p className={styles.hint}>这些要求用于下一次正背面共同生成。</p>
             </section>
@@ -797,7 +799,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
             <button type="button" disabled={locked} onClick={() => updateDraft({ stage: 'selection' })}><ArrowLeft size={15} />返回选脸</button>
           </> : draft.stage === 'result' ? <><section className={styles.resultState}><strong>旧版成品 {shownResultPlan ? `v${resultPlans.length - resultPlans.findIndex(item => item.id === shownResultPlan.id)}` : ''}</strong><span>{selectedResult ? '已保存' : resultTask?.asset ? '已生成' : '待生成'}</span></section><section><h2>保存与导出</h2><label className={styles.field}><span>作品名称</span><input value={workName} placeholder={selectedResult?.name || workspace.name} maxLength={80} onChange={event => updateDraft({ resultName: event.target.value })} /></label><div className={styles.field}><span>导出内容</span><div className={styles.segmented}>{([['sheet', '整图'], ['cells', '单张'], ['all', '全部']] as const).map(([mode, label]) => <button type="button" key={mode} aria-pressed={exportMode === mode} onClick={() => setExportMode(mode)}>{label}</button>)}</div></div><div className={styles.exportDetails}><span>文件格式 <b>PNG{exportMode !== 'sheet' ? ' / ZIP' : ''}</b></span><span>图片尺寸 <b>原始尺寸</b></span></div><div className={styles.actionPair}><button type="button" className={styles.primary} disabled={locked || !shownResultPlan || !resultTask?.asset} onClick={() => void saveResult()}><Save size={16} />保存成品</button><button type="button" className={styles.outline} disabled={locked || !shownResultPlan || !resultTask?.asset} onClick={() => void exportResult()}><Download size={16} />导出图片</button></div><p className={styles.hint}>直接保存当前结果，无需重新生成。</p></section><details className={styles.adjustments}><summary><SlidersHorizontal size={16} />调整成品<ChevronDown size={15} /></summary><label className={styles.field}><span>调整位置</span><select value={draft.adjustmentCell ?? 'all'} onChange={event => updateDraft({ adjustmentCell: event.target.value === 'all' ? null : Number(event.target.value) })}><option value="all">全部四格</option>{['正面特写', '侧面特写', '正面全身', '背面全身'].map((label, index) => <option key={index} value={index}>{label}</option>)}</select></label>{renderPromptButton('result')}{renderGenerationSettings()}<label className={styles.field}><span>调整要求</span><textarea rows={4} value={draft.adjustment} maxLength={3000} onChange={event => updateDraft({ adjustment: event.target.value })} placeholder="例如：侧面保持平视，露出完整发型" /></label><button type="button" className={`${styles.outline} ${styles.generateAfterInput}`} disabled={locked || legacyPending || !draft.mainFace || faceSourceMismatch} onClick={() => void generate('result')}><RefreshCw size={15} />生成新版本</button></details><button type="button" disabled={locked} onClick={() => updateDraft({ stage: 'selection' })}><ArrowLeft size={15} />返回选择</button><button type="button" className={styles.outline} disabled={locked} onClick={showIndependentViews}>制作独立四格<ArrowRight size={15} /></button></> : <>
             {draft.stage === 'selection' && <section className={styles.selectedSection}><h2>已选 {selectedFaces.length} 个方案</h2>{faceSourceMismatch && <div className={styles.sourceMismatch}><p>这组候选来自另一张原图。</p><button type="button" disabled={locked} onClick={() => updateDraft({ sourceAssetId: shownFacePlan!.sourceAssetId, views: {} })}>使用本组原图</button></div>}{selectedFaces.length > 0 ? <div className={styles.selectedFaces}>{selectedFaces.map((face, index) => <div key={`${face.planId}:${face.cell}`} data-main={index === 0 && Boolean(draft.mainFace)}><button type="button" onClick={() => setPreview({ src: characterLabMediaUrl(face.planId, face.cell), alt: index === 0 && draft.mainFace ? '主面部' : '辅助参考' })}><ReturnedImage src={characterLabMediaUrl(face.planId, face.cell)} alt={index === 0 && draft.mainFace ? '主面部' : '辅助参考'} /></button><span>{index === 0 && draft.mainFace ? '主面部' : '辅助参考'} {String(face.cell + 1).padStart(2, '0')}</span>{index > 0 && <button type="button" className={styles.removeAux} aria-label={`移除辅助参考${face.cell + 1}`} onClick={() => toggleAuxiliary(face)}><X size={13} /></button>}</div>)}</div> : <p className={styles.hint}>点击候选确定主面部，可另外添加辅助参考。</p>}<label className={styles.field}><span>辅助特征</span><textarea rows={3} maxLength={1000} value={draft.auxiliaryFeatures} onChange={event => updateDraft({ auxiliaryFeatures: event.target.value })} placeholder="例如：参考辅助方案的鼻梁与眼部气质" /></label><p className={styles.hint}>主面部确定身份，辅助参考提供特征方向。</p></section>}
-            <section><div className={styles.settingsHeading}><h2>{draft.stage === 'faces' ? '生成设置' : '探索更多面孔'}</h2>{renderPromptButton('faces')}</div><div className={styles.segmented}>{([4, 9] as const).map(count => <button type="button" key={count} disabled={locked} aria-pressed={draft.count === count} onClick={() => updateDraft({ count })}><Grid2X2 size={16} />{count}宫格</button>)}</div><label className={styles.sliderLabel}><span>面部变化<b>{characterLabStrength(draft.diversity)}</b></span><input type="range" min="0" max="100" step="1" value={draft.diversity} aria-valuetext={characterLabStrength(draft.diversity)} disabled={locked} onChange={event => updateDraft({ diversity: Number(event.target.value) })} /><small><span>小幅</span><span>中等</span><span>明显</span></small></label><p className={styles.hint}>小幅围绕同一张脸做局部变化。设置用于下一批候选。</p>{renderGenerationSettings()}<label className={styles.field}><span>角色补充要求</span><textarea rows={4} maxLength={3000} value={draft.context} disabled={locked} onChange={event => updateDraft({ context: event.target.value })} placeholder="例如：黑发、细框眼镜，沉静气质" /></label><button type="button" className={`${shownFacePlan ? styles.outline : styles.primary} ${styles.generateAfterInput}`} disabled={locked || facePending || !draft.sourceAssetId} onClick={() => void generate('faces')}><RefreshCw size={15} />{shownFacePlan ? '重新生成' : '生成人脸候选'}</button></section>
+            <section><div className={styles.settingsHeading}><h2>{draft.stage === 'faces' ? '生成设置' : '探索更多面孔'}</h2>{renderPromptButton('faces')}</div><div className={styles.segmented}>{([4, 9] as const).map(count => <button type="button" key={count} disabled={locked} aria-pressed={draft.count === count} onClick={() => updateDraft({ count })}><Grid2X2 size={16} />{count}宫格</button>)}</div><label className={styles.sliderLabel}><span>面部变化<b>{characterLabStrength(draft.diversity)}</b></span><input type="range" min="0" max="100" step="1" value={draft.diversity} aria-valuetext={characterLabStrength(draft.diversity)} disabled={locked} onChange={event => updateDraft({ diversity: Number(event.target.value) })} /><small><span>小幅</span><span>中等</span><span>明显</span></small></label><p className={styles.hint}>小幅围绕同一张脸做局部变化。设置用于下一批候选。</p>{renderGenerationSettings()}<label className={styles.field}><span>角色补充要求</span><textarea rows={4} maxLength={3000} value={draft.faceDescription || ''} disabled={locked} onChange={event => updateDraft({ faceDescription: event.target.value })} placeholder="例如：黑发、细框眼镜，沉静气质" /></label><button type="button" className={`${shownFacePlan ? styles.outline : styles.primary} ${styles.generateAfterInput}`} disabled={locked || facePending || !draft.sourceAssetId} onClick={() => void generate('faces')}><RefreshCw size={15} />{shownFacePlan ? '重新生成' : '生成人脸候选'}</button></section>
             {frontReady && draft.mainFace && <section className={styles.refineEntry}>
               <ReturnedImage src={characterLabMediaUrl(draft.mainFace.planId, draft.mainFace.cell)} alt="选定正脸" />
               <div><h2>选定正脸</h2><button type="button" className={styles.outline} disabled={locked} onClick={() => openRefinement('refine-face', draft.mainFace!)}>微调这张脸</button></div>
@@ -853,7 +855,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
             <pre>{activePromptTarget === 'faces'
               ? faceLabPrompt(bootstrap.config, draft)
               : labViewPrompt(bootstrap.config, activePromptTarget, refinement?.operation === activePromptTarget ? refinement.text
-                : activePromptTarget === 'side' ? draft.sideDescription || '' : activePromptTarget.startsWith('body-') ? draft?.context || '' : '')}</pre>
+                : activePromptTarget === 'side' ? draft.sideDescription || '' : activePromptTarget.startsWith('body-') ? draft.bodyDescription || '' : '')}</pre>
           </details>}
           {activePromptFields.map(([field, title, placeholder]) => (
             <label className={styles.field} key={field}>
@@ -862,7 +864,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
                 const value = event.target.value;
                 setConfigDraft(previous => previous ? { ...previous, [field]: value } : previous);
               }} />
-              {field === 'styleConstraints' && <small>工作台各生成设置共用这条风格规则。</small>}
+              {field.endsWith('StyleConstraints') || field === 'styleConstraints' ? <small>仅影响对应部位的新生成与微调。</small> : null}
             </label>
           ))}
         </div>
@@ -901,7 +903,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
               : shownView(target));
     const kind = target === 'faces' || target === 'refine-face' || target === 'refine-side' ? 'faces' : 'result';
     const description = localRefinement && operation?.startsWith('refine-') ? localRefinement.text
-      : operation === 'side' ? draft.sideDescription || '' : operation?.startsWith('body-') || target === 'faces' ? draft.context : draft.adjustment;
+      : operation === 'side' ? draft.sideDescription || '' : operation?.startsWith('body-') ? draft.bodyDescription || '' : target === 'faces' ? draft.faceDescription || '' : draft.adjustment;
     const siblings = (recipeTarget === 'front' ? [] : target === 'faces' ? facePlans : target === 'result' ? resultPlans : target === 'body-pair' ? bodyPlans
       : target === 'side' || target === 'body-front' || target === 'body-back' ? viewOptions(target) : plans.filter(plan => plan.operation === target && sameLabReference(plan.input, localRefinement?.target)))
       .filter(plan => tasks[plan.id]?.asset);
@@ -911,7 +913,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
         setRecipeTarget(null);
         requestAnimationFrame(() => { const button = recipeTrigger.current?.isConnected ? recipeTrigger.current : document.querySelector<HTMLElement>('[data-character-prompt]'); button?.focus({ preventScroll: true }); });
       }} isAdmin={isAdmin} disabled={locked}
-      previewPayload={{ action: 'preview-prompt', workspaceId: workspace.id, workspaceRevision: workspace.revision, kind, operation, draft, description }}
+      previewPayload={{ action: 'preview-prompt', contextProtocol: 1, workspaceId: workspace.id, workspaceRevision: workspace.revision, kind, operation, draft, description }}
       previous={siblingIndex >= 0 ? siblings[siblingIndex + 1]?.id : undefined} next={siblingIndex > 0 ? siblings[siblingIndex - 1]?.id : undefined}
       onBrowse={id => {
         setCompositionSlot(null); setInspectionId(null);
@@ -920,8 +922,8 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
           const plan = plans.find(item => item.id === id); if (plan) restoreHistoryPersonal(plan);
           if (target === 'result') setResultPreviewId(id); else setBodyPreviewId(id);
         }
-        else if (target === 'refine-face' || target === 'refine-side') setRefinement(current => current ? { ...current, planId: id } : current);
-        else setViewPreviews(current => ({ ...current, [target]: id }));
+        else if (target === 'refine-face' || target === 'refine-side') { const plan = plans.find(item => item.id === id); setRefinement(current => current ? { ...current, planId: id, text: plan?.adjustment ?? current.text } : current); }
+        else { const plan = plans.find(item => item.id === id); if (plan) restoreHistoryPersonal(plan); setViewPreviews(current => ({ ...current, [target]: id })); }
       }}
       escapeEnabled={!preview && !promptOpen}
       onPreviewAsset={id => setPreview({ src: `/api/image-studio/template-assets/${encodeURIComponent(id)}`, alt: '本次参考原图' })}
@@ -936,7 +938,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
       <label className={styles.field}><span>{operation?.startsWith('refine-') ? '本次微调要求' : operation === 'side' ? '侧脸补充要求' : target === 'result' ? '本次调整要求' : '角色补充要求'}</span>
         <textarea rows={4} maxLength={3000} disabled={locked} value={description} onChange={event => {
           if (operation?.startsWith('refine-') && localRefinement) setRefinement({ ...localRefinement, text: event.target.value });
-          else updateDraft(operation === 'side' ? { sideDescription: event.target.value } : target === 'result' ? { adjustment: event.target.value } : { context: event.target.value });
+          else updateDraft(operation === 'side' ? { sideDescription: event.target.value } : target === 'result' ? { adjustment: event.target.value } : operation?.startsWith('body-') ? { bodyDescription: event.target.value } : { faceDescription: event.target.value });
         }} />
       </label>
       <button type="button" className={`${styles.primary} ${styles.generateAfterInput}`} disabled={locked || !draft.sourceAssetId || pendingBlocks(kind, operation) || operation === 'side' && !frontReady
@@ -1092,6 +1094,6 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
 
   function renderGenerationSettings() {
     if (!draft) return null;
-    return <details className={styles.generationSettings} open={advanced} onToggle={event => setAdvanced(event.currentTarget.open)}><summary>模型与项目<ChevronDown size={14} /></summary><label className={styles.field}><span>模型</span><select disabled={locked} value={draft.model} onChange={event => updateDraft({ model: event.target.value })}>{!modelChoices.includes(draft.model as typeof IMAGE_STUDIO_MODELS[number]) && <option value={draft.model}>{draft.model}</option>}{modelChoices.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || model}</option>)}</select></label><label className={styles.field}><span>供应商</span><ImageGenerationChannelSelect channels={channels} model={draft.model} value={draft.channelId} disabled={locked} onChange={channelId => updateDraft({ channelId })} /></label><div className={styles.parameterPair}><label className={styles.field}><span>画质</span><select value={draft.quality} disabled={locked} onChange={event => updateDraft({ quality: event.target.value })}>{!qualityChoices.includes(draft.quality as never) && <option value={draft.quality}>{imageStudioQualityLabel(draft.model, draft.quality)}</option>}{qualityChoices.map(quality => <option key={quality} value={quality}>{imageStudioQualityLabel(draft.model, quality)}</option>)}</select></label><label className={styles.field}><span>分辨率</span><select value={draft.resolution} disabled={locked} onChange={event => updateDraft({ resolution: event.target.value })}>{!resolutionChoices.includes(draft.resolution as never) && <option value={draft.resolution}>{draft.resolution}</option>}{resolutionChoices.map(resolution => <option key={resolution} value={resolution}>{resolution}</option>)}</select></label></div><ImageUsageProjectSelect ownerId={ownerId} value={draft.projectId} disabled={locked} onChange={projectId => updateDraft({ projectId })} /></details>;
+    return <details className={styles.generationSettings} open={advanced} onToggle={event => setAdvanced(event.currentTarget.open)}><summary>模型与项目<ChevronDown size={14} /></summary><label className={styles.field}><span>模型</span><select disabled={locked} value={draft.model} onChange={event => updateDraft({ model: event.target.value })}>{!modelChoices.includes(draft.model as typeof IMAGE_STUDIO_MODELS[number]) && <option value={draft.model}>{draft.model}</option>}{modelChoices.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || model}</option>)}</select></label><label className={styles.field}><span>供应商</span><ImageGenerationChannelSelect channels={channels} model={draft.model} value={draft.channelId} disabled={locked} onChange={channelId => updateDraft({ channelId })} /></label><div className={styles.parameterPair}><label className={styles.field}><span>画质</span><select value={draft.quality} disabled={locked} onChange={event => updateDraft({ quality: event.target.value })}>{!qualityChoices.includes(draft.quality as never) && <option value={draft.quality}>{imageStudioQualityLabel(draft.model, draft.quality)}</option>}{qualityChoices.map(quality => <option key={quality} value={quality}>{imageStudioQualityLabel(draft.model, quality)}</option>)}</select></label><label className={styles.field}><span>分辨率</span><select value={draft.resolution} disabled={locked} onChange={event => updateDraft({ resolution: event.target.value })}>{!resolutionChoices.includes(draft.resolution as never) && <option value={draft.resolution}>{draft.resolution}</option>}{resolutionChoices.map(resolution => <option key={resolution} value={resolution}>{resolution}</option>)}</select></label></div><ImageUsageProjectSelect ownerId={ownerId} value={draft.projectId} disabled={locked} onChange={projectId => updateDraft({ projectId })} />{draft.context && <label className={styles.field}><span>拆分前共用补充（只读）</span><textarea rows={3} readOnly value={draft.context} /><small>保留原文供复制，不用于正脸、侧脸或前后身的新生成。</small></label>}</details>;
   }
 }

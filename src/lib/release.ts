@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '修复默认共享模板状态读取', outline: [
-  '过度帧等默认模板不再误报内容编号无效',
-  '保留模板共享设置和原有查看权限',
+const notice = { title: '角色各部位补充独立保存', outline: [
+  '正脸、侧脸和前后身分别使用自己的补充与风格规则',
+  '切换历史只还原对应部位的补充，保留原生成记录',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

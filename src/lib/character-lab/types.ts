@@ -42,7 +42,9 @@ export type CharacterLabDraft = {
   count: 4 | 9;
   diversity: number;
   context: string;
+  faceDescription?: string;
   sideDescription?: string;
+  bodyDescription?: string;
   model: string;
   channelId: string;
   quality: string;
@@ -68,6 +70,9 @@ export type CharacterLabWorkspace = {
 };
 export type CharacterLabPromptFields = {
   basePrompt: string; characterContext: string; faceVariables: string; styleConstraints: string; resultPrompt: string;
+  sideStyleConstraints?: string;
+  bodyStyleConstraints?: string;
+  resultStyleConstraints?: string;
   refineFacePrompt?: string;
   sidePrompt?: string;
   refineSidePrompt?: string;
@@ -90,6 +95,7 @@ export type CharacterLabPlan = {
   slotScoped?: true;
   origin?: { planId: string; mode: 'current' | 'historical' };
   recipeProtocol?: 1;
+  contextProtocol?: 1;
   frozenReferenceContext?: string;
 };
 export type CharacterLabRecipe = {
