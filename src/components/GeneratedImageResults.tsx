@@ -299,7 +299,7 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
   const readBusy = busy || loading || readState.scope === scope && readState.busy;
   const readError = error || (readState.scope === scope ? readState.error : '');
   const pages = useResultPages({ items, storageKey: scope, visible, busy: readBusy, error: Boolean(readError), hasMore, total, loadMore: readMore,
-    currentId: activePreview || currentSelection || null, navigationIntent });
+    currentId: activePreview || currentSelection || null, navigationIntent, fullRows: compactInformation });
   const visibleItemsCallback = useRef(onVisibleItemsChange); visibleItemsCallback.current = onVisibleItemsChange;
   const visibleItemIds = pages.pageItems.map(item => item.id).join('\0');
   useEffect(() => { if (visible) visibleItemsCallback.current?.(pages.pageItems); }, [scope, visible, visibleItemIds]);
