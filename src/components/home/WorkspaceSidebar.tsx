@@ -82,8 +82,7 @@ export default function WorkspaceSidebar({ accountId, internal, images, worksEna
   };
 
   const links = [
-    { title: '作品广场', href: '/', icon: LayoutTemplate, visible: worksEnabled && Boolean(identity), current: activeView === 'works' },
-    { title: '创作概览', href: '/?view=overview', icon: Network, visible: worksEnabled && Boolean(identity), current: activeView === 'overview' },
+    { title: '创作首页', href: '/', icon: Network, visible: Boolean(identity), current: activeView === 'works' || activeView === 'overview' },
     { title: '新建项目', href: '/projects#create-project', icon: Plus, visible: internal },
     { title: '我的项目', href: '/projects', icon: Folder, visible: internal, current: current === 'projects' },
     { title: '资产管理', href: '/assets', icon: ImageIcon, visible: true, current: activeView === 'assets' },
