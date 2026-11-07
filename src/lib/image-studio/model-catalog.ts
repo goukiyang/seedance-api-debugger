@@ -113,6 +113,7 @@ export function imageStudioNewQualityOptions(model: string): ImageStudioQuality[
 }
 
 export function imageStudioQualityLabel(model: string, quality: string): string {
-  return model === 'gpt-image-2.5-sunburst' && quality === 'medium' ? '中等'
+  return model === 'gpt-image-2' && quality === 'high' ? '最高'
+    : model === 'gpt-image-2.5-sunburst' && quality === 'medium' ? '中等'
     : IMAGE_STUDIO_QUALITY_LABELS[quality as ImageStudioQuality] || quality;
 }

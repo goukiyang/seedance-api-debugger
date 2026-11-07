@@ -1984,6 +1984,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     setModuleModel(next);
     if (resetParameters && !replacesLegacyBanana) {
       setQuality(defaultImageStudioQuality(next)); setResolution(defaultImageResolution(next));
+    } else if (next === 'gpt-image-2' && (quality === 'max' || quality === 'xhigh')) {
+      setQuality('high');
     }
   }
   const qualityChoices = qualityRouted || isGptImageStudioModel(moduleModel) ? imageStudioNewQualityOptions(moduleModel) : selectedChannelModel?.qualities ?? (legacyImageRoute || qualitySupportUnconfirmed
