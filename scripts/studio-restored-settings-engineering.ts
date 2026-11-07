@@ -201,6 +201,16 @@ async function main() {
   assert.equal(parse(body).personalPrompt, '');
   const old = { ...body, restoredSettings: undefined, draft: undefined };
   assert.equal(Object.hasOwn(parse(old), 'restoredSettings'), false);
+  for (const sharedLive of [undefined, intent]) {
+    for (const selection of [{ styleGroupIds: [], styleGroupVersions: {} },
+      { styleGroupIds: [styleId], styleGroupVersions: { [styleId]: 2 } }]) {
+      const normal = parse({ ...old, sharedLive, draft: selection });
+      assert.deepEqual(plain(normal.draft.styleGroupVersions), selection.styleGroupVersions);
+      assert.equal(Object.hasOwn(normal, 'restoredSettings'), false);
+    }
+  }
+  assert.throws(() => parse({ ...old, draft: { styleGroupIds: [styleId], styleGroupVersions: { [styleId]: -1 } } }));
+  checks.push('ordinary_and_shared_generation_accept_valid_empty_or_selected_style_versions');
   assert.throws(() => parse({ ...body, draft: { ...body.draft, moduleContext: 'client-injection' } }));
   assert.throws(() => parse({ ...body, reproduceFromTaskId: marker.sourceTaskId }));
   assert.throws(() => parse({ ...body, draft: { styleGroupIds: [changedStyleId] } }));

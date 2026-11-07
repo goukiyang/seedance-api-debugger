@@ -1,7 +1,7 @@
 import './server-runtime.cjs';
 import assert from 'node:assert/strict';
-import { randomUUID, createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { randomUUID, randomBytes, createHash } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -195,6 +195,47 @@ async function main() {
     const historicalSource = await readStudioWorkspaceSource(prisma, other.id, directDefault.sourcePresetId!, 'preset');
     assert.equal(historicalSource?.taskSettings.sourceTaskId, 'historical-seed');
     checks.push('immediate_publication_preserves_saved_historical_mode_and_original_source');
+
+    // Exercise the full colleague open -> blank workspace -> DTO path under real encryption.
+    const policy = { schema: 'private-prompt-policy.v1', revision: 'colleague-open', state: 'encrypted-write', minimumReader: 1,
+      identities: [{ userId: author.id, tenant: 'fixture-tenant', subject: 'author-subject' }], origins: [],
+      authorKinds: [{ ownerId: author.id, kinds: ['image-module', 'image-preset'] }], destinations: [], consumers: ['fixture'],
+      keys: Object.fromEntries(['body', 'index', 'backup'].map(domain => {
+        const file = path.join(run, `${domain}.key`); writeFileSync(file, randomBytes(32), { mode: 0o600 });
+        return [domain, { active: domain, files: { [domain]: file } }];
+      })), activation: { inventoryId: 'inventory', restoreId: 'restore', writerFenceId: 'fence', attestationFile: path.join(run, 'consumers.json') } };
+    writeFileSync(path.join(run, 'policy.json'), JSON.stringify(policy), { mode: 0o600 });
+    writeFileSync(policy.activation.attestationFile, JSON.stringify({ schema: 'private-prompt-consumers.v1', policyRevision: policy.revision,
+      inventoryId: 'inventory', restoreId: 'restore', writerFenceId: 'fence', consumers: [{ id: 'fixture', reader: 1, permissionContract: 1, sourceRevision: 'c'.repeat(40) }] }), { mode: 0o600 });
+    Object.assign(process.env, { PRIVATE_PROMPTS_POLICY_FILE: path.join(run, 'policy.json'), PRIVATE_PROMPTS_MIN_STATE: 'encrypted-write',
+      PRIVATE_PROMPTS_CONSUMER_ID: 'fixture', PRIVATE_PROMPTS_RUNTIME_REVISION: 'c'.repeat(40), FEISHU_ALLOWED_TENANT_KEY: 'fixture-tenant' });
+    const storage = await import('../src/lib/image-studio/private-storage.server');
+    const sharing = await import('../src/lib/image-studio/shared-contract');
+    const colleague = { id: 'colleague', role: 'user', account_type: 'internal', feishu_tenant_key: 'fixture-tenant', feishu_open_id: 'colleague-subject' };
+    await prisma.user.create({ data: { ...colleague, name: 'colleague', username: 'colleague', password_hash: 'fixture-only' } });
+    const encryptedSource = await prisma.imageStudioPreset.create({ data: {
+      ...storage.writePrivateStudioDefinition('image-preset', { id: 'module-source:encrypted-source', owner_id: author.id,
+        prompt: 'synthetic protected prompt', context: 'synthetic protected context' }), name: 'encrypted shared template', scope: 'admin', is_shared: true,
+    } });
+    const openRequestId = randomUUID();
+    const opened = await sharing.openSharedStudioModule(colleague, encryptedSource.id, openRequestId, undefined, { explicitSelection: true });
+    assert.equal(opened.prompt, ''); assert.equal(opened.context, '');
+    const colleagueDTO = await studioModuleDTOForUser(colleague, opened.id);
+    assert.equal(colleagueDTO.context, ''); assert.equal(colleagueDTO.prompt, '');
+    assert.ok(colleagueDTO.sharedLive?.definitionToken);
+    assert.equal(JSON.stringify(colleagueDTO).includes('synthetic protected'), false);
+    checks.push('ordinary_colleague_opens_encrypted_dynamic_source_and_full_dto_hides_private_definition');
+    const repeatOpen = await sharing.openSharedStudioModule(colleague, encryptedSource.id, openRequestId);
+    assert.equal(repeatOpen.id, opened.id);
+    assert.equal(await prisma.imageStudioModule.count({ where: { owner_id: colleague.id, source_preset_id: encryptedSource.id } }), 1);
+    checks.push('committed_open_replay_reuses_the_original_blank_workspace');
+    const revokedBefore = await prisma.imageStudioPreset.findUniqueOrThrow({ where: { id: encryptedSource.id } });
+    await setStudioPresetSharing(author, encryptedSource.id, false, revokedBefore.updated_at.toISOString(), randomUUID());
+    await assert.rejects(sharing.resolveSharedStudioDefinition(colleague, encryptedSource.id), error => [403, 404].includes((error as { status: number }).status));
+    const revokedDTO = await studioModuleDTOForUser(colleague, opened.id);
+    assert.equal(revokedDTO.sharedLive?.available, false);
+    assert.equal(JSON.stringify(revokedDTO).includes('synthetic protected'), false);
+    checks.push('withdrawal_remains_enforced_after_empty_workspace_read');
     assert.equal(networkCalls, 0);
     assert.equal(await prisma.imageStudioTask.count(), 1);
     console.log(JSON.stringify({ passed: checks.length, checks, networkCalls, generatedTasks: 0, syntheticSourceTasks: 1 }));

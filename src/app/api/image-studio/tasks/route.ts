@@ -24,6 +24,9 @@ import { isPrivatePromptError } from '@/lib/security/private-prompts.server';
 import { rejectStudioSubmission, studioSubmitFailureDetail, StudioSubmitReceiptError, validStudioSubmitRequestId } from '@/lib/image-studio/submit-receipts.server';
 import { characterLabTaskBatchIds } from '@/lib/character-lab/task-source';
 import { studioMethodHistoryModuleId } from '@/lib/image-studio/shared-contract';
+import { StudioSharingError } from '@/lib/image-studio/shared-command-storage';
+import { RestoredStudioSettingsError } from '@/lib/image-studio/restored-settings';
+import { StudioTaskSettingsError } from '@/lib/image-studio/task-settings';
 
 export const dynamic = 'force-dynamic';
 export async function PATCH(request: NextRequest) {
@@ -140,7 +143,8 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const expected = error instanceof VideoFeishuError || error instanceof ImageGenerationChannelError
       || error instanceof QueueCapacityError || error instanceof QueueMaintenanceError || error instanceof StudioError
-      || error instanceof ContextVersionError || error instanceof StudioSubmitReceiptError || isPrivatePromptError(error);
+      || error instanceof ContextVersionError || error instanceof StudioSubmitReceiptError || isPrivatePromptError(error)
+      || error instanceof StudioSharingError || error instanceof RestoredStudioSettingsError || error instanceof StudioTaskSettingsError;
     const insufficientCredits = error instanceof Error && error.message.startsWith('点数不足');
     const detail = studioSubmitFailureDetail(error);
     const requestId = validStudioSubmitRequestId(body?.requestId) ? body.requestId : undefined;

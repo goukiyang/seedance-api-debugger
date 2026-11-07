@@ -18,8 +18,9 @@ export function readPrivateStudioDefinition<T extends Definition>(kind: Kind, ro
   if (privateStoredValue(row) !== row) return row;
   // Publication changes the source alias, not the encrypted field's authorship.
   // The codec verifies kind/id/field and authenticates the stored origins with AEAD.
+  // Live shared workspaces have empty placeholders; they carry no private definition.
   return readPrivateFields(row, kind, row.id, (['prompt', 'context'] as const).map(field => ({ field,
-    origins: isStoredPrivatePrompt(row[field]) ? [] : studioDefinitionOrigins(kind, row) })));
+    origins: isStoredPrivatePrompt(row[field]) || row[field] === '' ? [] : studioDefinitionOrigins(kind, row) })));
 }
 export function writePrivateStudioDefinition<T extends Definition>(kind: Kind, row: T, source?: Pick<Definition, 'prompt' | 'context'>): T {
   return writePrivateFields(row, kind, row.id, ['prompt', 'context'].map(field => ({ field,

@@ -55,6 +55,27 @@ function load(relative) {
     const identity = load('src/lib/security/private-prompt-identity.server.ts');
     assert.equal(identity.privatePromptCapabilities({ id: 'coworker', role: 'user', account_type: 'internal' }, [original]).canReadPrivatePrompt, false);
     checks.push('shared copy retains original authorship and gives no raw-text capability to another user');
+    // Live workspaces store only their source binding, not a private definition.
+    const live = { id: 'live-coworker', owner_id: 'coworker', source_preset_id: preset.id, prompt: '', context: '' };
+    const liveRead = storage.readPrivateStudioDefinition('image-module', live);
+    assert.equal(liveRead.prompt, ''); assert.equal(liveRead.context, '');
+    assert.deepEqual(fields.privateFieldOrigins(liveRead, 'context'), []);
+    assert.equal(fields.privateStoredValue(liveRead), live);
+    checks.push('blank colleague live workspace reads without inventing source authorship');
+    const mixed = { ...copy, prompt: '' };
+    const mixedRead = storage.readPrivateStudioDefinition('image-module', mixed);
+    assert.equal(mixedRead.prompt, ''); assert.equal(mixedRead.context, decoded.context);
+    assert.deepEqual(fields.privateFieldOrigins(mixedRead, 'context'), [original]);
+    assert.deepEqual(fields.privateFieldOrigins(mixedRead, 'prompt'), []);
+    const emptySealed = storage.writePrivateStudioDefinition('image-module', { id: 'module', owner_id: 'author', prompt: '', context: '' });
+    const emptyRead = storage.readPrivateStudioDefinition('image-module', { ...emptySealed, source_preset_id: preset.id });
+    assert.deepEqual(fields.privateFieldOrigins(emptyRead, 'context'), [original]);
+    assert.throws(() => storage.readPrivateStudioDefinition('image-module', { ...live, context: emptySealed.context }), crypto.PrivatePromptError);
+    checks.push('mixed blank and encrypted fields preserve provenance; encrypted empty fields still authenticate their row');
+    for (const field of ['prompt', 'context']) for (const value of ['plain', ' ']) {
+      assert.throws(() => storage.readPrivateStudioDefinition('image-module', { ...live, [field]: value }), crypto.PrivatePromptError);
+    }
+    checks.push('nonempty plaintext including whitespace still requires the original private source');
     for (const invalid of [{ ...linked, id: 'other-module' }, { ...linked, context: sealed.prompt }]) {
       assert.throws(() => storage.readPrivateStudioDefinition('image-module', invalid), crypto.PrivatePromptError);
     }

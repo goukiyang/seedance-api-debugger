@@ -113,6 +113,24 @@ async function main() {
     }
     check('encrypted_string_and_json_envelopes_have_matching_durable_rejection_without_body');
 
+    const invalidSettings = [
+      { restoredSettings: null }, { taskSettings: null }, { personalOverrides: null },
+      { restoredSettings: { protocol: 'task-settings-v1', sourceTaskId: 'synthetic-source' }, draft: { styleGroupIds: ['style-without-version'] } },
+    ];
+    for (const [index, invalid] of invalidSettings.entries()) {
+      const id = request(`invalid-settings-${index}`);
+      const response = await taskApi.POST(post('/api/image-studio/tasks', {
+        requestId: id, prompt: 'synthetic-personal', count: 1, revision: 0, referenceIds: [], ...invalid,
+      }));
+      const payload = await response.json();
+      assert.equal(response.status, index === 2 ? 400 : 409);
+      assert.equal(payload.receipt?.state, 'rejected'); assert.equal(payload.receipt?.stage, 'input');
+      assert.equal((await receipts.readStudioSubmitReceipt(owner, id)).state, 'rejected');
+      assert.notEqual(payload.error, '提交结果待确认，请查询这次提交，不要重复新建任务');
+      await assert.rejects(receipts.assertStudioRequestWritable(db, owner, id));
+    }
+    check('real_shared_restored_and_task_settings_validation_errors_return_durable_rejections');
+
     const genericId = request('http-only'), genericError = Object.assign(new Error('Synthetic status alone'), { status: 409 });
     const genericApi = apiSource<typeof taskApi>('src/app/api/image-studio/tasks/route.ts', { '@/lib/image-studio/tasks': { ...tasks, submitStudioBatch: async () => { throw genericError; } } });
     const genericResponse = await genericApi.POST(post('/api/image-studio/tasks', { requestId: genericId, prompt: 'safe' }));
