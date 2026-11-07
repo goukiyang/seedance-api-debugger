@@ -207,15 +207,15 @@ async function main() {
     writeFileSync(path.join(run, 'policy.json'), JSON.stringify(policy), { mode: 0o600 });
     writeFileSync(policy.activation.attestationFile, JSON.stringify({ schema: 'private-prompt-consumers.v1', policyRevision: policy.revision,
       inventoryId: 'inventory', restoreId: 'restore', writerFenceId: 'fence', consumers: [{ id: 'fixture', reader: 1, permissionContract: 1, sourceRevision: 'c'.repeat(40) }] }), { mode: 0o600 });
-    Object.assign(process.env, { PRIVATE_PROMPTS_POLICY_FILE: path.join(run, 'policy.json'), PRIVATE_PROMPTS_MIN_STATE: 'encrypted-write',
+    Object.assign(process.env, { PRIVATE_PROMPTS_FIXTURE_ROOT: run, PRIVATE_PROMPTS_POLICY_FILE: path.join(run, 'policy.json'), PRIVATE_PROMPTS_MIN_STATE: 'encrypted-write',
       PRIVATE_PROMPTS_CONSUMER_ID: 'fixture', PRIVATE_PROMPTS_RUNTIME_REVISION: 'c'.repeat(40), FEISHU_ALLOWED_TENANT_KEY: 'fixture-tenant' });
     const storage = await import('../src/lib/image-studio/private-storage.server');
     const sharing = await import('../src/lib/image-studio/shared-contract');
     const colleague = { id: 'colleague', role: 'user', account_type: 'internal', feishu_tenant_key: 'fixture-tenant', feishu_open_id: 'colleague-subject' };
-    await prisma.user.create({ data: { ...colleague, name: 'colleague', username: 'colleague', password_hash: 'fixture-only' } });
+    await prisma.user.create({ data: { ...colleague, name: 'colleague', username: 'colleague', email: 'colleague@fixture.invalid', password_hash: 'fixture-only' } });
     const encryptedSource = await prisma.imageStudioPreset.create({ data: {
       ...storage.writePrivateStudioDefinition('image-preset', { id: 'module-source:encrypted-source', owner_id: author.id,
-        prompt: 'synthetic protected prompt', context: 'synthetic protected context' }), name: 'encrypted shared template', scope: 'admin', is_shared: true,
+        prompt: 'synthetic protected prompt', context: 'synthetic protected context' }), name: 'encrypted shared template', scope: 'admin', is_shared: true, model: 'gpt-image-1',
     } });
     const openRequestId = randomUUID();
     const opened = await sharing.openSharedStudioModule(colleague, encryptedSource.id, openRequestId, undefined, { explicitSelection: true });

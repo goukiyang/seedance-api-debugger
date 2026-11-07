@@ -115,7 +115,7 @@ async function main() {
 
     const invalidSettings = [
       { restoredSettings: null }, { taskSettings: null }, { personalOverrides: null },
-      { restoredSettings: { protocol: 'task-settings-v1', sourceTaskId: 'synthetic-source' }, draft: { styleGroupIds: ['style-without-version'] } },
+      { restoredSettings: { protocol: 'task-settings-v1', sourceTaskId: 'synthetic-source' }, draft: { styleGroupIds: ['11111111-1111-4111-8111-111111111111'] } },
     ];
     for (const [index, invalid] of invalidSettings.entries()) {
       const id = request(`invalid-settings-${index}`);
