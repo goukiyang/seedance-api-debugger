@@ -232,9 +232,7 @@ async function main() {
     const revokedBefore = await prisma.imageStudioPreset.findUniqueOrThrow({ where: { id: encryptedSource.id } });
     await setStudioPresetSharing(author, encryptedSource.id, false, revokedBefore.updated_at.toISOString(), randomUUID());
     await assert.rejects(sharing.resolveSharedStudioDefinition(colleague, encryptedSource.id), error => [403, 404].includes((error as { status: number }).status));
-    const revokedDTO = await studioModuleDTOForUser(colleague, opened.id);
-    assert.equal(revokedDTO.sharedLive?.available, false);
-    assert.equal(JSON.stringify(revokedDTO).includes('synthetic protected'), false);
+    await assert.rejects(studioModuleDTOForUser(colleague, opened.id), error => [403, 404].includes((error as { status: number }).status));
     checks.push('withdrawal_remains_enforced_after_empty_workspace_read');
     assert.equal(networkCalls, 0);
     assert.equal(await prisma.imageStudioTask.count(), 1);
