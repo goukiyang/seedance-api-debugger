@@ -76,7 +76,10 @@ function imageConsumerAssertions(equal: (actual: unknown, expected: unknown) => 
   equal(imageStudioChannelIssue({ ...channel, enabled: false }, model, choices) !== null, true);
   equal(imageStudioChannelIssue({ ...channel, configured: false }, model, choices) !== null, true);
   equal(imageStudioChannelIssue(channel, model, { ...choices, resolution: '0.5K' }) !== null, true);
-  equal(imageStudioChannelIssue(channel, model, { ...choices, quality: 'low' }) !== null, true);
+  // Standard GPT selections do not depend on the provider metadata list;
+  // a concrete specification quote still authorizes the price separately.
+  equal(imageStudioChannelIssue(channel, model, { ...choices, quality: 'low' }), null);
+  equal(imageStudioChannelIssue(channel, model, { ...choices, quality: 'unlisted-quality' }) !== null, true);
   equal(imageStudioChannelIssue(channel, model, { ...choices, referenceCount: 10 }) !== null, true);
   equal(imageStudioChannelReadyForModel({ ...channel, models: { [model]: { ...capability, ready: false } } }, model), false);
   equal(imageStudioChannelUnitCredits({ ...capability, pricingBySpecification: false, fixedPoints: 0 }, false, channelId, 20), 0);

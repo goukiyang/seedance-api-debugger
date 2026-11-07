@@ -13,6 +13,7 @@ import {
   IMAGE_STUDIO_MODELS,
   IMAGE_STUDIO_MODEL_QUALITY_OPTIONS,
   IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS,
+  isStandardGptImageParameter,
   normalizeImageStudioQuality,
   type ImageStudioModel,
 } from '@/lib/image-studio/model-catalog';
@@ -1659,12 +1660,13 @@ export function validateImageGenerationChannel(
   if (capability.billingMode === 'fixed' && capability.fixedPoints === null) {
     return { ok: false, code: 'image_channel_fixed_price_missing', error: '固定点数未填写，明确免费时请填写 0' };
   }
-  const tests: Array<[string | undefined, string[] | null, string]> = [
-    [args.quality, capability.qualities, '图片质量'],
-    [args.resolution, capability.resolutions, '分辨率'],
+  const tests: Array<['quality' | 'resolution', string | undefined, string[] | null, string]> = [
+    ['quality', args.quality, capability.qualities, '图片质量'],
+    ['resolution', args.resolution, capability.resolutions, '分辨率'],
   ];
   const allowsUnconfirmed = allowsUnconfirmedGeminiProParameters(model, capability);
-  for (const [value, allowed, label] of tests) {
+  for (const [parameter, value, allowed, label] of tests) {
+    if (isStandardGptImageParameter(model, parameter, value)) continue;
     if (allowed === null && allowsUnconfirmed) continue;
     if (value !== undefined && (!allowed || !allowed.includes(value))) {
       return { ok: false, code: 'image_channel_capability_mismatch', error: label === '分辨率'

@@ -188,3 +188,265 @@ v1.0.0/R01；2026-10-31 America/Los_Angeles。用户要求查根因并重新规�
 - 保护切换完成11个writer自然退出、旧源进程归零且无强杀、一致SQLite备份、配置恢复点、六项实际启动检查和12个消费者源绑定。七服务、四timer、公网角色页面JS精确SHA、两匿名401及health ok=true均通过；原环境、持久链接、私有策略与费率全字段保持，无业务数据回退或收费生成，也没有执行浏览器功能验收。
 - 本次原证在服务器/data/video-api-debugger/release-staging/character-body-hd-20261105/attempt01，主要入口为public-deployed.json、main-build-success.json、source-pair-contract.json、startup-pair-checks.json、writers-stopped.json、database-protected.json及cutover.log。program-recovery.sh加release-input.json已绑定本次主/回退源，程序恢复不恢复业务数据。本轮未执行真实回退演练。
 - 用户手验范围为直达与阶段切换、两面生成/补充要求/选用/历史、高清显示及放大、九格各格位置、四格合成保存与复制。原第五组未知请求与10点预留未改，供应商历史响应缺口仍沿§7处理。本轮未新增范围外问题。
+
+## 9. 正背面同次生成纠正（2026-11-05）
+
+用户明确正背面必须一起生成，替代§8将两面拆成独立请求的实现解释。
+
+- 本次改为单一body-pair计划、单一报价及上游count=1，在同一张正方形图左正面、右背面，两个等宽全高区域，只有原角色设计参考。页面一个生成入口，选用时在一次工作区更新里同时绑定两个现有成品槽；旧单面任务/成品和未知请求保持，不自动重发。
+- 共享影响判断。新增可选bodyPairPrompt和body-pair操作属于角色JSON记录格式，不变DB schema或通用生图/计费合同；媒体、合成和HD客户端须识别左右裁区及槽绑定。成对槽与旧单面未知请求互斥，现有CAS/原回执保护沿用。已有代码仅refinement读取description，导致上轮UI全身补充未进prompt，本次一并修正所有全身用途的冻结描述，不改已受理prompt。
+- 相容回退须同步body-pair读者后才能开放新记录，回退关闭新建而保读取/选用/合成；不能直接使用原d2d8为新增数据回退。沿既有隔离工程补成对单图、裁区、源引用/描述、成品顺序、旧记录和未知槽保护的检查，保用户手验，无浏览器/收费生成验收。基线暂为4b679e4c0/v0.132.3，后续鲜核并承接同项目已授权修复；实际实施与发布另记。
+
+### 9.1 最终源码与工程准备（2026-11-05）
+
+- 最终主255eb58760561401089c2a2d63b8e6a0bf1077da/v0.133.0，相容guard82a42ef37136efcc5eb1214d3e20a706e85dded4/v0.133.0+body-pair-reader-guard.1。精确保留93 Works GET回执修复、b87插件侧栏及41资产侧栏。原attempt01只用于同源核心隔离检查，无完整构建或生产切换；最终attempt02两份源码已冻结，主完整构建已启动，guard先准备、完整构建等主成功后串行进行。
+- 主/guard核心11组隔离工程均已通过，实际执行cf4a6989f和32d80c304的日志在attempt01/{main,guard}-body-pair-reader-root.log。核一次实际quote/submit只建1图像任务、单图报价与幂等账本、原图/描述、左右裁区及错槽拒绝、旧单面读取、双向未知槽互斥和原合成像素顺序。最终两源码全部相关后端及测试脚本SHA与执行源相同，attempt02/{main,guard}-body-pair-reader.json明确记实际执行源和未变输入复用，不冒新源重跑。
+- Mac夹具在合成SQLite schema初始化120秒超时，未跑到业务断言。Linux首次以应用账号跑独立fixture因候选根.role-tests目录权限EACCES退出，未改权限；随后沿隔离root夹具检查通过，实际DB/文件均位于专用.role-tests，无production.env、网络调用、生产写或收费生成。上述未通过原件保留，不将其改记通过。
+- 按刚确认的生成图片信息位置规则，body生成/整组选用/放大在图上工具栏，历史在设置区原生选择，必要状态复用既有栏。相关四视图去图下状态和历史堆叠，旧整图目录归到设置区；最近预览与已选用分开，避免新返图被旧选择遮住，刷新恢复真实已选组合。此为最后UI范围，后续只处理工程失败与发布。
+- 为保留已打包成果，两最终完整归档由02720/95原Git归档加精确5文件Git归档差量组成；已核Git提交标记、完整2433文件集合与每一文件SHA，原包/原差量/原Git差异原件保留。不是替换生产文件。GitHub推送两次返回Internal Server Error与fatal error in commit_refs_rules；只读rulesets为空，尚不推断具体权限或全站故障，不换账号/远端/协议绕过。完整构建继续，推送状态另核。
+
+### 9.2 回退原请求判定与构建接续（2026-11-05）
+
+- 主255源码保持冻结，完整工程/Next/内置类型与lint于16:25:50 UTC通过，BUILD 2CoRsHQe1UqEpAyPeesP9。最终主与guard的41三业务文件、93两文件已保留。GitHub前两次普通推送返回内部错误；只读核rulesets为空、分支protected=false且现账号canPush=true，官方当次状态无报告事件，未据此编造全站故障或权限不足。沿同一账号/远端/协议的普通快进推送接续成功，两支最终源已推送，未强推或绕过分支规则。
+- 回退82在准备后、完整构建前，发现关闭新建分支先于receipt读取，可能将无task的旧submitting误标submitted=false。仅guard将该拒绝后移至耐久prepared判定之后，保已受理先回原batch、未知继续未知；增加实际原号断言。主版常量true时该分支不可达，主源码与通过构建不改，不重构建主。
+- 新相容guard为1d452f9186053d3012f420d330f4dce93a33d7f2，版本仍0.133.0+body-pair-reader-guard.1；82不得作为本批正式回退。82只准备过依赖，未跑native/Next或切换生产；原包、准备记录和停止原因留存。新guard两文件Git归档差量及完整集合/字节/提交标记已核，最终guard11组专项及未知分类新增断言已fresh通过，attempt02/guard-body-pair-reader-fresh.log为原件，guard-body-pair-reader.json明确记本次1d实际执行，随后串行完整工程/Next。
+- 主工作区CodeGraph已同步255，1917源码文件无缺失/内容差异/解析错误；开工真实结构查询与关键源码核对有效。收口的一次补充结构查询长时间未返回，已结束该补查，未冒新查询成功，也未重跑通过的测试。
+
+### 9.3 发布完成（2026-11-05）
+
+- 已部署，待用户手动验收。2026-11-05 16:51:51 UTC，正式源255eb58760561401089c2a2d63b8e6a0bf1077da，v0.133.0，BUILD 2CoRsHQe1UqEpAyPeesP9。入口 https://sd2.youdooart.com/tools/character-lab?view=body，刷新后使用“一起生成正背面”。现在同一个计划、同一份单图报价和count=1请求生成左正面/右背面的同图组合，整组选用同时写入两现有全身槽；原图参考、高清展示、单面历史和原请求保留，补充要求真正冻结入prompt。
+- 新相容回退为1d452f9186053d3012f420d330f4dce93a33d7f2 / v0.133.0+body-pair-reader-guard.1 / BUILD 4THsI43mwKhhvzVsWliHk。只关新成对生成并保新格式读取/选用/合成、原受理与未知查询，以及原cutout普通成员保护。已有body-pair数据后不可用旧d2d8或未完成构建的82作为回退；程序恢复入口program-recovery.sh加release-input.json绑定本次新源，恢复不回业务数据，未做真实回退演练。
+- 主与新guard均通过现有全量工程、高清链路、完整Next、内置类型和lint。主11组核心专项按未变输入SHA复用cf4实际执行；guard11组及未知分类断言在1d实际fresh执行。cutout旧32检查仅按11个后端reader及9个路由/auth/media依赖同字节复用；一次过宽比较发现旧guard与本版cutout页面认证接线不同，已分别核新页使用同一canUseCutout且member=false关闭入口，未冒所有页面字节相同、不为无关UI差异重跑未变后端检查。
+- 从实际41e59b68/v0.132.5保护切换，精确保留41资产侧栏、b87插件侧栏、93 Works只读回执修复。11 writer自然退出、旧源进程归零且无强杀，一致SQLite备份、配置恢复点、6项启动检查、12消费者源绑定完成。7服务、4timer、角色页JS精确SHA40d565ce93b5fd3095d67ed51174cedf0dc3a69ed4ccce4b91f04880f2610c9b、两匿名401与health=true均有实际证据，原价格全字段、私有策略和持久链接保持；无schema迁移、业务数据回退、收费生成或浏览器功能验收。
+- 完整原证在/data/video-api-debugger/release-staging/character-body-pair-20261105/attempt02，主要为public-deployed.json、main/guard-build-success.json、main/guard-body-pair-reader.json、guard-body-pair-reader-fresh.log、source-pair-contract.json、startup-pair-checks.json、writers-stopped.json、database-protected.json、cutover.log。原始包、差量及被替代候选/原失败记录保留；主/guard两分支已推送并核远端，源码与部署版本分开。
+- 实际成对构图与一致性、补充要求效果、整组选用、历史切换/刷新、图下无信息堆叠、高清放大及合成复制保存待用户手动验收。原第五组缺少供应商任务号的历史缺口未补造、未重发，10点预留仍沿§7核对。本轮未新增范围外业务问题，仅为既有本机工程准备慢线索补证。
+
+## 10. 图片绑定提示词的模板链路对照（2026-11-05，设计补充）
+
+用户要求生成内容绑定当次提示词、互相切换可查看对应内容，并要求参考生图模板逻辑检查遗漏。本节为源码对照和推荐设计，未实施业务改动、未发布、无收费生成或浏览器验收；不将推荐写成用户已批准的实施方案。上一轮“当前图片/下次生成”两区方案保留，补以下边界。
+
+### 已核实的可复用基础
+
+- 当前实际工作区为character-prompt-settings-20261104，HEAD d5043ea3（应用源255eb5876），源码干净。CodeGraph准备核1917文件无差异，真实context查询返回task-settings、报价及渠道快照入口；关键结论回到源码核对，不以索引证明线上现状。
+- character-lab/types.ts和service.ts已冻结plan.prompt、configRevision、参考ID、输入plan/cell、操作、模型/画质/分辨率；quoteLab和submitLab引用同一plan。工作台提示词弹窗仍由当前config/draft组装预览，没有按正在显示的历史plan绑定完整生成详情。
+- plan.prompt不是单独足够的“完整发送文本”。image-studio/tasks.ts还把参考角色/顺序等生成context，worker.ts将task.context与task.prompt合成provider输入。因此面板须从实际任务冻结输入读最终文本；准备但未提交的计划只称待生成预览，不能冒称已经发送。
+- 模板studio.tsx的restoreResultSettings/restoreTask分离current/historical，恢复保持当前主图且不自动生成；readTaskDetail按scope/view/输入修订丢弃过期响应。task-settings.ts、task-settings-storage.ts与tasks.ts贯穿设置来源、报价和快照。publicStudioSnapshot按管理员/本人等已有权限投影公共上下文、个人描述及参考，不能把完整内部文本统一公开。
+- 已读参照为[通用设置与历史复现原单](2026-10-26-template-global-settings.md)§3及§10；本节不把旧规划段落冒当前实现，不调用收费任务。无新增图片附件，沿本单已有原图/预览资料，不拿旧图作新方案验收。
+
+### 推荐补齐的设计
+
+1. **绑定完整生成配方。** 每次记录绑定实际冻结文本、可读的系统/阶段规则与本人补充、规则修订、模型/渠道/画质/分辨率、参考图角色与顺序、原图/父图和选中格。最终文本从任务冻结输入读取，不能用最新规则重算旧图；历史缺少分段来源时只展示已存内容，不猜补。
+2. **查看、选用、恢复与微调各有作用。** 浏览历史只切图片及只读详情，不能覆盖下一次草稿或偷偷设为成品；显式选用才换目标格；沿用设置只恢复本次合法输入、不自动生成/保存公共规则；微调保父图，开启新的生成记录。原图不因查看或恢复被输出图替换。
+3. **继续创作与原设置重做分开。** 沿用设置默认恢复个人描述和合法参数/参考，公共规则用最新已保存值；更多菜单可显式选择按原设置重新生成，使用历史冻结规则。后续编辑只影响新请求，不改历史或公共规则，不承诺生成像素完全相同；失效/无权参考不假装已完整恢复。
+4. **面板跟随实际显示对象。** 每区域一个提示词入口，默认当前图片只读区，可保持非模态面板打开连续切换；下次生成区独立保草稿。新任务无返图而显示旧图时，详情明确属于旧图，新任务状态另归原状态栏；快速切换的迟到读取不得回盖当前对象。刷新恢复账号/角色/阶段下的查看对象和下一次草稿，不恢复成自动提交。
+5. **角色来源可追溯。** 四/九格共一生成记录，各格标自身位置；正脸直接使用选中候选的原像素，详情回到该批和该格。侧脸/微调记录自己的输入和父子关系；正背同次生成共一记录和整组选用。合成图保存四槽引用/布局版本，详情按格查来源，不编造合成提示词；HD只是显示变体，不改变绑定的原件身份与生成参考。
+6. **预览、报价与提交一致。** 下次预览由服务端按有效已保存规则和当前个人输入解析，保现有plan冻结与报价/提交机制。未发送前改内容需重新准备/报价；已提交或未知仍只查原号，不自动创建新任务，失败也不能让旧图冒新结果。
+7. **规则管理、权限与当前草稿保持。** 当前图片详情只读；本人能修改个人本次输入，公共规则仅沿原管理员入口保存并作用于新任务。查看/复制/复用采用同一授权投影，不能因有图片权限就读出内部规则或他人描述。公共规则更新不盖正在编辑的个人草稿，保存公共版本不改历史。按角色模块实际权限核实，不直接复制模板的私有配方实现或新增权限。
+8. **简洁操作与切换对照。** 当前图片区保复制可见提示词、沿用设置；原设置重做放更多菜单，不堆常驻按钮。高级详情按需展开最终文本、规则和参考来源；差异对照可在详情比较本轮与父轮的已有字段，缺旧字段不伪造。关闭保草稿、不自动提交，复制反馈锚定按钮，不占图下高度。
+
+### 共享影响、残留和后续落点
+
+优先在角色模块复用既有计划/任务快照与planId+cell关联；前端查看对象、编辑草稿、已选用成品分别管理。新增只读详情如需任务context，服务端按现有身份裁剪后返回，不能直接给客户端整条私有task。当前底层报价/任务/收费能力已有，不为此新建通用配方平台或重构模板生成器。局部落点是character-lab的types/service/API与studio提示词面板，合成结果沿已有四槽引用追溯；只有新快照字段确实需要时才补版本兼容，不改老记录/已受理/未知请求。
+
+尚未实施：结果绑定详情、完整实际上下文投影、显式沿用/历史重做、跟随切换与草稿恢复。历史规则若缺少可恢复结构，需保留“可查看最终文本/不能完整结构恢复”的真实差别。真正效果仍需后续工程实现及用户手验；本轮仅文档差异核对和源码对照，不重跑已通过构建、不升级或重启应用。本轮未新增范围外问题。
+
+## 11. 七点配方绑定实施（2026-11-05）
+
+用户明确“就按这7点改，生成内容和提示词绑定，切换时同步显示对应提示词，做完直接上线”，授权本节实施与同项目现有正式环境部署；原§10“未实施”保留为设计阶段历史。实施基线鲜核796da6b036573b358aeca48df08d14190a768fc5 / v0.133.7 / EvNJSRnwlvEXpbydDTkEx，保护正式根及其它工作区脏改，在原character-prompt-settings-20261104工作树新建codex/character-prompt-binding-20261105。候选版本0.134.0，相容guard0.134.0+recipe-reader-guard.1；当前尚未构建或生产切换。
+
+1. 实际提示词：角色详情按原任务冻结context+prompt显示完整输入，准备但未受理只称预览；服务器预览读最新已存规则，不带入未保存管理员草稿。
+2. 浏览/选用/恢复/微调分开：历史及版本切换使用独立查看状态；沿用设置只读合法源并恢复本人下一次输入，保当前原图和已选槽；微调保父图另建任务。
+3. 两种复用：沿用设置采用当前公共规则；按原设置重新生成从原记录复制冻结prompt/context/参考与参数，主动报价确认后才提交，不修改旧记录或覆盖下一次草稿。旧单面记录只可查看/沿用，新正背仍共同生成。
+4. 来源：正脸回到候选批次/格，侧脸和微调保输入引用，正背同记录，新增合成记录保存四槽来源和布局；旧成品未记来源如实显示缺失，不回填。
+5. 报价/提交：同一不可变计划，原请求幂等和未知只查保持；guard先识别已受理和未知，再拒绝尚未发送的新配方，不误标未知为未提交。
+6. 权限：角色GET/准备返回按身份裁剪规则，普通成员读本人补充；通用任务详情按taskId也能读角色任务，已纳入同一边界。新角色任务分离个人文本，旧混合描述不当独立个人输入暴露，角色记录不冒普通模板可恢复配方；管理员完整详情仍从角色工作台读取。
+7. 恢复/切换：按账号/角色保存查看位置、面板页签和微调草稿，下一次输入沿原服务器保存；结果详情拒绝迟到响应，恢复设置检查查看对象及输入修订；刷新不重放生成。右侧非模态面板、上下组切换、来源入口和按需详情不占图下高度。
+
+共享判断：通用tasks仅在内部characterLab入口读取同owner同plan的冻结参考context，普通模板输入与价格/worker不改。新字段为可选JSON元数据，无schema迁移；新guard同源保读取与权限投影，关闭recipe新写/body-pair创建和cutout成员入口，旧1d不冒新配方相容回退。没有新增配方平台、批量迁历史或付费/浏览器验收。
+
+工程进展：10个改动源码/脚本语法检查0错误；首轮Mac类型仅报工程夹具role字符串不是SessionUser角色，已改为user。定向Next lint实际退出0，原有Hook提醒保留，本批新增依赖提醒已修；完整类型及最终lint仍以冻结Linux候选为准。npm version不将仅build metadata变更当新版本，guard标识随后按同一JSON两个version字段精确写入，不改依赖。首包5d/e1只用于冻结/打包准备，权限出口补查后将原包保留为被替代版本，未做完整构建或切换。
+
+私有证据入口：docs/materials/2026-11-05-character-prompt-binding/implementation/attempt01；服务器对应/data/video-api-debugger/release-staging/character-prompt-binding-20261105/attempt01。主/guard拟执行15组角色SQLite/费用/PNG工程、原生前置与双完整Next检查；真实构图、切换体验、手机和剪贴板由用户手验。最终源码、工程结果、推送与部署另续本节，不以本段冒已完成。
+
+### 11.1 冻结源与工程接续
+
+- 主源码8992f57e32c631a9515a2f6357ba4a46b153e078 / v0.134.0，guard2549b34ce0981c9b2fd80078b4bb779b9cc2fef4 / v0.134.0+recipe-reader-guard.1，两支已沿原remote正常推送。新guard必须连同完整参考context、成员提示词投影及v2报价合同读取，不能用旧1d替代。
+- 报价sourceVersion升级v2，原v1尚未提交的报价在发送前拒绝并重新准备；已受理优先返回原batch，未知仍只查原号。此次只是新计划合同，旧受理/账本/预留未重写。通用taskId读取中的角色旧混合prompt已按现有身份投影，普通模板链路不因本批改变。
+- attempt01主2d4c3d99完整15组隔离夹具在旧marker严格断言处退出，因为新增personalPromptSeparated:1未列入期望。仅修正该断言，不改应用行为；旧失败日志保留。Linux该应用源完整tsc退出0，随后新attempt02主8992和guard2549分别fresh通过15组SQLite/实际单图quote+submit/幂等费用/PNG/权限/完整上下文/设置恢复/原设置重做/旧报价拒绝/未知回执工程，零生产写、零网络和收费请求。最终类型及lint以两份完整Next回执为准。
+- Git切分支尚未结束时误提前发起一次cherry-pick，原分支为空操作，确认切分支结果后在正确guard完成合入；核两分支源与干净状态，无代码丢失或生产影响。最终归档保留原包/精确Git差量、真实提交标记、2440文件完整集合及全部SHA，不在候选目录手改应用文件。
+- 当前主原生工程/高清链路及fresh定价门已过，完整Next中；guard随主完成后串行原生/定价/Works reader及完整Next。尚未切换生产，不将候选工程通过冒功能验收。私有证据正式入口改为docs/materials/2026-11-05-character-prompt-binding/implementation/attempt02，attempt01原失败保留。
+- CodeGraph已同步实际工作树8992源，1923源码文件、零missing/extra/hashMismatch/parseError；补充结构查询独立记录，不把索引当构建或线上证明。
+
+### 11.2 接续发布期间的线上增量
+
+发布前收到同项目接续线索后，实时核七服务均已由796更新到2dc29ec3c40fd7b940e7c8d26f033ebe09075338 / v0.133.8 / BUILD GpD4_VSWXng9OZ827K2k-，本轮仍未停服。核796..2dc四提交，涉及模板共享已保存定义、v2设置模式与原件恢复、封面直接进入工作台；无schema/迁移变化。主899和guard2549的完整native/定价/Next/types/lint均成功，原证保留attempt02，但未当作最终相容线上增量的产物发布。
+
+- 主765b3b1c24100c4ddc9e180d37613d53f50fe521和guard d2eea332d39e974a23318c99fd36f99406cb1211已正常推送；两者都完整继承2dc，版本仍0.134.0及0.134.0+recipe-reader-guard.1。仅4个预期文件不同：package两文件、角色新写常量和cutout成员常量。发布提示更新为本次角色图片/提示词同步的3条简短说明。
+- 主merge仅package两个version字段冲突，保本批版本、依赖语义不变；其它已发布增量直接继承，未重写原共享合同。与正在做侧栏的同项目任务明确本轮候选已冻结，该新UI不并入；对方接本轮实际发布回执再单独整合，避免继续扩大本批。
+- attempt03按原Git包加精确17文件差量，包含一个新增脚本；2441文件完整集合/各文件SHA/原Git提交标记均核实。归档脚本仅允许M/A并核全集合，未改部署engine或削减门。主765与新guard各15组隔离工程已fresh通过；因新增共享执行与设置合同，最终native及完整Next按这两份整合源码重新执行，原attempt02工程不冒本次新源fresh。
+- 自有attempt02 SSH连接在服务器双candidate-ready/双完整构建成功且无原执行进程之后仍未自行结束，仅关闭该残留连接；exit255是客户端关闭结果，不改已成功构建回执，也未影响生产。
+- 最终私有证据入口为docs/materials/2026-11-05-character-prompt-binding/implementation/attempt03及服务器对应目录。主准备阶段main-preparation-input.json明确仅main源准备，最终release-input.json绑定765/d2ee/2dc后才开始native；阶段输入原件保留。
+- 899收口补充CodeGraph context读取超过90秒无返回，已结束该补查，未冒查询成功。开工结构查询及源码核对有效，最终整合源索引另核。用户功能手验边界、第五组原未知请求和10点预留保持。
+
+### 11.3 发布完成（2026-11-05）
+
+- **已部署，待用户手动验收。** 2026-11-06 05:55:08 UTC（洛杉矶11月5日晚），主源765b3b1c24100c4ddc9e180d37613d53f50fe521，v0.134.0，BUILD BYbuEzysCmXTtkfqMUyNv。入口 https://sd2.youdooart.com/tools/character-lab 。本节七点代码均已交付：生成图片绑定当次冻结配方、切图同步详情、浏览/选用/恢复/微调分开、当前规则沿用与原设置重做分开、四槽和父图来源、预览/报价/提交同源、权限与个人草稿恢复。原§10/11初始“未实施/未构建”保留为过程历史，不当当前状态。
+- 新相容回退为d2eea332d39e974a23318c99fd36f99406cb1211 / v0.134.0+recipe-reader-guard.1 / BUILD sFx7NvYa1dkHeWkz9fOx3。保留新JSON配方/完整参考context、成员投影、v2报价与原受理/未知读者，关闭新配方写入、body-pair新建和cutout普通成员入口。本批程序恢复只用attempt03/program-recovery.sh加同目录release-input.json，保业务DB、媒体、账本、回执及私有绑定，不用旧1d代替；未做真实线上回退演练。
+- 最终主/guard分别fresh通过15组角色隔离工程、现有全量原生工程/高清链路、fresh定价、完整Next及内置类型/lint；guard额外fresh Works method reader通过。原规则/代码、实质类型和source-v2报价已冻结到相同真实计划，历史/旧受理/未知不重写或重发。没有Prisma schema或migration变化，无真实收费生成、浏览器功能验收或独立审核。应用两源已推送并核原remote，后续纯文档提交不作为运行源。
+- 发布前第一次相容辅助比较未通过：我将旧cutout证明的20文件宽列表误作为原32检查的完整导入范围，遇到image-result-bridge.ts与image-result-next/.../cutout/route.ts的已发布费用确认参数移除。保留失败JSON、原脚本和原差异后，读取原检查脚本，核其实际proxy/access/external-role/user-profiles四文件与原d2执行源全部同SHA；其余18个宽列表文件相同，两处差异与当前2dc基线同SHA且不在原fixture导入闭包。最终只按真实四文件范围复用原32检查/25绑定证据，明确20列表不是全同，并保两处审查记录；没有重造fresh检查或修改受限部署engine。主/guard构建源码保持不变。
+- 从鲜核2dc/v0.133.8保护切换。11 writer自然退出、旧源进程归零、无强杀；一致SQLite备份、配置恢复点、6项实际启动检查、12个消费者源绑定完成。7服务与4timer、公网角色页面chunk同SHA、3个匿名401、05:56:19 UTC health200/ok=true均有实际证据；原环境/持久链接、私有策略和两费率键全字段保持，没有业务数据恢复。最后核本轮cutover/public-proof/recovery控制器为0，窗口已释放，后继任务接本批新源与guard。
+- 完整私有原证在/data/video-api-debugger/release-staging/character-prompt-binding-20261105/attempt03，本地入口docs/materials/2026-11-05-character-prompt-binding/implementation/attempt03。主要为public-deployed.json、service-health.json、main/guard-build-success.json、main/guard-recipe-reader.json、source-pair-contract.json、guard-cutout-owner-reader.json、startup-pair-checks.json、writers-stopped.json、database-protected.json及cutover.log。attempt01断言失败、attempt02被替代构建和attempt03相容范围纠正均保留；未把它们改写成原先通过。
+- 最终实际工作树CodeGraph同步到765应用源，1924文件，零missing/extra/hashMismatch/parseError；开工真实结构查询有效，先前补充context超时如§11.2记录，不冒补查成功。本轮未新增范围外业务问题，既有本机I/O线索不扩大为本批修复。
+
+手动验收仍待用户执行：各区域打开“提示词”，保持当前图片区切换四/九格、历史和选中格；分别核本人补充/管理员完整文本、原图/父图/正背/合成分格来源；沿用设置和原设置重做的不同作用、公共规则更新与报价、快速切换/刷新/切号草稿隔离、手机/键盘及PNG复制保存。真实出图一致性和面部变化效果不以工程或上线冒通过。原test第五组缺供应商任务号及10点预留仍沿§7核对，本轮未重发或另行扣费。
+
+## 12. 历史补充单独恢复、图框对齐与正脸版本（2026-11-06）
+
+用户本轮原话：“历史记录里面要能够找回单独补充的上下文恢复到补充输入窗口，图1没有对齐，且正面头部缺少版本选择”。沿常规修复授权实施、聚焦提交推送并必要上线，功能仍用户手动验收。
+
+原附件：[codex-clipboard-509abce5-4818-4296-b0db-df23294c8e20.png](../../docs/materials/2026-11-06-character-history-context/user-reference/codex-clipboard-509abce5-4818-4296-b0db-df23294c8e20.png)，用户临时附件原件归档到正式根资料目录，内容校验与尺寸见同目录attachment.json；本地私有不随源码外发。截图显示正脸图框起点高于侧脸，正脸只有提示词/微调，没有版本选择。
+
+已实核线上七服务d5d77d6e8d19e96fb0b96211ade96b82861d072f / v0.134.8 / BUILD 3UohRWHsr0d-Om8LwPXc0；当前相容guard be92a5e9ff6d83ea8cd9587411df887c450f5ba4 / 0.134.8+pricing-editor-guard.1 / muaBZZWQ0CSgrh81FCHIH，沿pricing-editor-focus-20261106/attempt01记录。复用原角色工作树，新分支codex/character-history-context-20261106由d5建立；该版本角色UI/API/库与本单765应用源字节相同，沿用已有局部调用证据，不以旧线上版本替代当前基线。
+
+1. **仅恢复补充。** 现有“沿用设置”恢复整套patch，缺单独文本入口。原recipe已返回冻结plan.context/adjustment及本人个人文本，新增“仅恢复补充”只写对应个人输入，打开“下次生成”补充框；模型/画质/原图/已选用图片和公共规则保持。微调进入相应用途的文本框，旧整图的角色补充与调整要求仍按原字段分开，不把完整系统提示词解析回个人输入。复用已授权的本人recipe读取，不新增收费或生成请求。
+2. **图框对齐。** 正脸缺少其它槽位已有的操作排，导致同排等比例图框起点不同。保留原contain/高清图片，用同排flex布局和统一操作位置对齐图框；空图生成状态归到已有标题详情入口，避免图下文流额外撑高。
+3. **正脸版本。** 从同一原图已完成的候选与正脸微调记录逐格提供版本选择，独立浏览状态与显式选用分开。查看图片、提示词和微调目标同步到所看版本；实际侧脸/合成仍用真正选用的主面部。沿原selectFace选用及账号/工作区v2现场白名单保存，不自动生成。
+
+共享判断：仅3个角色UI文件、版本及发布说明；无API、DB/schema、生成计划、费用、pricingEnabled或权限协议变化。原九个配方后端输入不变，可复用当前be92完整guard及其已证读者；上线前核实际源码/构建和继承的新费率读者，不能回本单旧1d/d2ee。未改原受理/未知请求或自动重发。新增边界只补本轮前端类型/构建和必要发布检查，无浏览器、收费生成或自动功能回归，实际图框、小屏/键盘、版本及补充恢复由用户手验。
+
+当前为源码阶段，最终改动、工程结果、提交和发布另续本节。本轮未新增范围外业务问题。
+
+### 12.1 实现与发布顺序
+
+- 三项改动已在独立应用提交e48fe66c9完成，6文件：角色studio/prompt-panel/CSS、package两文件与简短发布说明，版本0.134.10。单独恢复按当前区域写context、sideDescription或微调文本，旧整图的角色补充/调整字段分别恢复；不套用模型等整套参数。恢复后切“下次生成”并聚焦输入，未额外创建API或生成调用。正脸候选与微调组按原组号和格号选择，浏览/选用、实际提示词及微调目标分开同步；正侧/正背图框使用同排flex余量对齐，空图状态转到现有标题详情入口。
+- 本地完整tsc --noEmit退出0、定向Next lint退出0，既有4条Hook提醒保留；后续只补整合后候选的必要构建，功能仍手验。CodeGraph已准备实际d5工作树1938文件无差异，真实context查询定位CharacterLabStudio与AppSession，关键结论已回源码核对。最终整合源码索引另同步。
+- 原拟1349前，15/3告知真实已有同号冻结候选4cff6ff743491c4028f4dce633b941b67c26142a与guard3499f6607957e507ebeab037fe8abd1e9a7357ef，stage image-model-connectivity-20261106/attempt02，主完整构建_CjshCodUrX1AjCKYjhhP已过，guard仍在后续阶段，未当作线上事实。保留其窗口，本轮改排13410，先做不冲突的源码合入/归档；待其实际pub主/guard/BUILD后鲜核，再启动单main候选与切站。当前实核运行仍为§12的d5/v1348。
+- 仅继承该冻结上游；对方另提后台API诊断3文件已明确排13411，不夹入本轮UI或当前1349，也不重复其已过8项/23+22检查。本轮尚未执行服务器重型构建或生产切换，原be92不再作为下一窗口回退假设。
+
+### 12.2 整合源码与单主版构建
+
+- 最终应用源0b17ac9a18e5cc27bf34b4c122db8977f88597c8 / v0.134.10，已推原remote分支codex/character-history-context-20261106。完整继承已发布4cff6ff743491c4028f4dce633b941b67c26142a；对照该基线仅本轮6个UI/版本文件不同，package/lock除version外语义不变。新上游诊断11fac1c6d仍排下一批，不夹入本轮。
+- 2026-11-06T17:49:17Z前序主4cff/v0.134.9/BUILD _CjshCodUrX1AjCKYjhhP已实际恢复并发布，七服务新源活动；原发布policy断言误判和自动guard恢复由前序工单保留，不重放其切换。本轮保当前私有policy及其已授权2.6型号purpose，单纯UI发布不再调用purpose增量脚本。相容guard更新为3499f6607957e507ebeab037fe8abd1e9a7357ef / v0.134.9+image-model-guard.1 / SrcNDCaW3KCU5psE62z9t，原完整构建完成17:28:37Z；按原证复用，不重造本轮fresh guard执行时间。
+- 源码归档2463文件、25395619字节，tar SHA256 9a37fd63bac2efbf3e401289505ab42137b5b2102b84090b7b22268bb20dda3a，完整Git集合/文件SHA及tar提交标记已核。私有资料docs/materials/2026-11-06-character-history-context/implementation/attempt01，服务器对应release-staging/character-history-context-20261106/attempt01。仅主版完整原生/价格及Next/types/lint已启动，当前未切换本轮生产。
+- 最终CodeGraph同步实际0b应用源，1941文件，零missing/extra/hashMismatch/parseError；开工结构查询仍按原实际d5源码记录，不把同步冒新增查询或部署证明。发布前重新取得实际费率/作者配置/能力修订，不把前序固定值当鲜核，保独立任务的正常CAS和在途原号，不覆盖价格/账本/回执。
+
+### 12.3 发布完成（2026-11-06）
+
+- **已部署，待用户手动验收。** 18:08:43 UTC主源0b17ac9a18e5cc27bf34b4c122db8977f88597c8 / v0.134.10 / BUILD ncFC4el-COldx9qIzw6At上线，入口 https://sd2.youdooart.com/tools/character-lab 。三项代码均已交付：历史“提示词→仅恢复补充”回填下一次对应补充输入；正侧/同排图框使用统一布局；正脸候选/微调版本可独立浏览、明确选用，提示词和微调目标跟随当前浏览版本。真实图框、小屏、焦点、切图/刷新及生成效果仍用户手验，不把发布检查冒功能验收。
+- 主版fresh原生/定价、完整Next及内置类型/lint均通过，18:05:36 UTC构建成功。相容guard仍为3499f6607957e507ebeab037fe8abd1e9a7357ef / SrcNDCaW3KCU5psE62z9t，原17:28:37 UTC完整构建与native/Works reader证据按真实输入复用；原关闭新配方/body-pair/cutout/定价编辑/反馈上传门及新价格/作品读者保持。没有Prisma或迁移、生成/报价/API变化，无浏览器、真实收费生成或自动功能回归。
+- 首次source-pair辅助比较将整个发布归档差量误当6个应用文件而退出，生产未停。核Git 4cff..0b仅6文件，而实发4cff归档另有8份继承Markdown与Git内容不同；逐一列明仅docs/tasks下.md后，验证应用与版本仍是精确6文件、原主/guard仍精确6处关闭差异，schema/deps不变。source-pair-first-failure.json和record-source-pair.first.py保留，最终source-pair-contract.json公开区分应用与继承文档差异；没有重编、删门或将文档差异冒成应用相同。
+- 从七服务实发4cff/v1349保护切换，11 writer自然退出且旧源进程归零，无强杀；已留一致SQLite备份、配置恢复点，6项实际启动检查、12消费者源绑定、七服务/四timer和公网角色JS一致均过。另核11份关联CSS公网200且与候选同SHA，3个匿名入口401；18:09:18 UTC health200/ok=true、发布/恢复控制器0。两费率键全字段SHA e52bb566d0137362f0f24c6d379e73f8075e7143532efb5144afd26660f572f3保持，私有policy/model26目的地及环境/持久链接均保持；未执行配置CAS、未知重发或业务数据恢复。前序已释放短配置静默，后继版本须继承此实际主源。
+- 本批程序恢复固定使用/data/video-api-debugger/release-staging/character-history-context-20261106/attempt01/program-recovery.sh与同目录release-input.json，仅回程序/消费者配置到3499，不回DB、图片、账本、回执或私有policy；未做真实线上回退演练，不用旧be92/d2ee/1d替代。当前恢复入口和原产物仍保留。
+- 完整私有原证位于服务器上述attempt01及本地docs/materials/2026-11-06-character-history-context/implementation/attempt01；主要为public-deployed.json、public-character-css.json、service-health.json、main/guard-build-success.json、source-pair-contract.json、startup-pair-checks.json、writers-stopped.json、database-protected.json、cutover.log与原失败记录。源码分支已推并核远端，后续纯文档提交不当运行源，不为文档重启或重建。
+
+用户手验入口：在历史记录选图后打开所在区域“提示词”，点击“仅恢复补充”，核对应输入文字及其它参数保留；成品预览核正脸/侧脸图框对齐；正脸版本选择分别切候选与微调格，核图片/提示词/微调对象同步，浏览不替换成品、点“选用这张”才改变采用版本。旧整图补充/调整分开恢复，账号/角色及刷新现场仍按原范围隔离。本轮未新增任务外业务问题；前序模型未知原号/预留和原第五组问题仍归原工单，不重发或冒已解决。
+
+## 13. C头像框分批选择与历史候选补充回填（2026-11-06）
+
+用户纠正版本入口必须带头像图片，四方案预览后明确“c是ok的，但要区分候选批次”；同时反馈点击历史候选没有还原补充，询问文字是否丢失。沿既有常规修复授权实施、推送与必要上线，不自动功能验收。
+
+1. **历史数据与根因。** 只读实际SQLite，test共18条plan、人脸候选7批；6批context非空（73、67、87、87、87、85字符），最早一批context本来为空，非空六批原文均包含在当时冻结prompt。没有写生产数据，也不从系统文本猜补个人输入。实发v13412的左侧历史入口只有setFacePreviewId，完整历史也只改selection/view；selection又隐藏context输入框。上轮仅增加二级“仅恢复补充”，没有覆盖用户正在用的直接历史入口，属于本轮遗漏修复，不冒数据丢失。
+2. **回填范围。** 同一账号/工作区/原图内，点击左侧历史候选或完整历史人脸批次，切图并恢复plan.context到下一次补充框；输入框在faces/selection两阶段均可见。提示词面板上下批次沿同一入口，模型/画质/数量/差异/原图/已选用图片保持，历史计划不重写、不生成。不同原图仍先历史查看，不偷偷更换原图或套整套设置；最早空补充如实恢复为空，避免借用上一批残留。
+3. **C方案。** 正脸标题旁52px真实头像框替代文字原生select，点击打开锚定非模态图片弹层。候选/正脸微调按原批次编号和时间分别成组，四张2×2、九张3×3；只列同原图可读成品，保原格号。浏览与采用仍分开，图片/提示词/微调目标跟随浏览，显式“选用这张”才改成品。沿用CharacterLabImage高清/crop、Radix Popper和共享useDialogDismiss，不新增依赖、原图预读或弹层系统；Esc/点外/关闭与焦点沿原组件，弹层在可用视口内滚动。
+
+实际开工七服务f02e0a1503df27fd8e69f239e92486174092df74 / v0.134.12 / BUILD fIktSNzFk6k4JH1jRKGbc；本轮复用原角色工作树，干净切新分支codex/character-avatar-batches-20261106，候选v0.134.13。f02与0b角色UI/库字节相同，但保留全部线上新模型/图片结果增量。无API、plan/schema/迁移、报价、权限、pricingEnabled或私有policy修改；相容guard待鲜核实发对，只构建新main，复用匹配guard原产物/原时，不回旧3499。
+
+CodeGraph当前595源索引准备成功、1941文件无差异，context补查长时间无输出后终止，未冒查询成功；按局部定向源码/实发handler/只读数据完成调用核对，整合索引后续同步。私有原证入口docs/materials/2026-11-06-character-avatar-batches/implementation/attempt01。当前尚未构建或部署，本轮未新增任务外业务问题。
+
+### 13.1 用户追加范围与侧脸设计
+
+用户进一步要求“历史候选不管是头像和全身的补充提示词都要能够还原。另外导入的原图下方不要显示文件名”；已将同原图头像、正背组合、旧全身单面/整图的历史入口与版本切换接入本人补充字段恢复，继续只动文字，不套模型等参数。原图文件名行从界面移除，小屏原图/更换按钮去掉空行，文件与后台名称保持。e2e6c0185已推送是第一轮UI冻结，打包中尚未服务器构建/切版；该新增两项需要新应用提交，e2旧候选不部署，不把它冒包含新增范围。
+
+用户希望侧脸也生成四/九格后筛选，随后明确问“侧脸这部分怎么设计”。已给设计：选定正脸锁定身份、同朝向侧脸4/9格、按批次筛选/放大/显式选用单格进入成品；只在鼻梁/下颌/发型遮挡细节小幅变动，微调另留批次。侧脸C头像框也按批次管理，提示词跟随当前批次。当前仅完成方案说明，尚未将侧脸改为网格；需保持旧单张历史的身份与读取，不能因为旧plan.count带4/9就把旧单张解释为网格。若实施该部分，需新增明确的网格布局标记并贯通生成提示词、裁切、选用/来源、快照与相容guard，不能只改页面九格或复用旧count冒完成。
+
+### 13.2 最终候选与构建
+
+- 应用源9e2fa52beb3d74f1320b50ddebc7652213460e02 / v0.134.13已聚焦提交并推原分支codex/character-avatar-batches-20261106，继承当前实发f02全部增量。相对基线仍6文件（studio、CSS、新front-version-picker、package两文件、release），头像/全身历史个人补充回填、原图文件名移除与C分批头像框同包；侧脸网格仍只设计，未改生成链路。无后台、schema或费用写入。
+- e2本地定向Next lint最终退出0，4条既有Hook提醒；用户追加两处修改以最终Linux全量类型/lint为准，不为旧本地无输出反复重跑。初次本机Git全量archive长时间0字节，保attempt01与原执行；最终采用项目既有assemble-sources模式，从实发f02原archive加6文件Git精确delta组装，逐文件Git blob/SHA、完整继承集合和version校验。e2原全量Git归档随后完成且原证保留；最终组装与e2全量Git集合加最终delta再次对照，集合/所有文件SHA相同，无文档漂移。最终2464文件、58091520字节tar，SHA f37aa480d055e6fb445e9d3f7945c753861b7a237b2eeb528b5b7ac38f22f058，原执行模式保留，不在运行目录修改应用文件。
+- 最终私有原证转attempt02：docs/materials/2026-11-06-character-avatar-batches/implementation/attempt02，服务器/data/video-api-debugger/release-staging/character-avatar-batches-20261106/attempt02。单main原生/fresh价格/完整Next已启动，guard0985d9008639bac17cb9b20332ddc798f5150f45 / v0.134.12+result-card-menu-guard.1 / BUILD X-sp1uRUSy30X8aTZv-Pm沿result-card-menu-20261106/attempt01原完整构建/读者证据复用，原04:11:26Z时间不重写。尚未切换本轮生产。
+- 用户原下拉截图和四方案预览完整归档到同主题user-reference，attachments.json记录两份字节/SHA，未改图片内容、未随源码公开。侧脸设计需继续保旧单张历史合同；本轮未新增任务外业务问题。
+
+### 13.3 发布完成（2026-11-06 洛杉矶时间）
+
+- **已部署，待用户手动验收。** UTC 2026-11-07 05:51:49（洛杉矶11月6日21:51）主9e2fa52beb3d74f1320b50ddebc7652213460e02 / v0.134.13 / BUILD 3rYRnUoKkHJlBXbffJNvG上线，入口 https://sd2.youdooart.com/tools/character-lab 。已交付C头像框图片弹层、候选/正脸微调按原批次分组与格号/时间、4/9原排布、浏览/选用分开；头像和全身历史/组合版本/旧整图的个人补充恢复，选脸输入持续可见；原图下方文件名行移除。历史快照和实际生成提示词未改，补充仍取对应冻结字段，不从系统提示词猜文本。
+- 用户侧脸四/九格筛选目前为设计交付，未更改生成链路：正脸锁身份、同朝向侧脸4/9候选、分批比较/放大、显式选用单格、微调新增批次并保来源与本人补充。成品区只呈现选定的一张侧脸，版本用C头像框按批次切换；实施必须区分旧单张与新网格记录，不将旧count误判为网格。本轮不冒称已实现侧脸网格。
+- 最终主源码fresh原生/定价、完整Next与内置类型/lint均通过，05:50:19Z完整构建成功。e2旧候选本地lint过但未服务器构建/部署；追加范围以9e2完整候选为准。CodeGraph最终同步9e2、1942文件、零missing/extra/hashMismatch/parseError；首次context补查超时仍如实保留，不当结构查询成功。无浏览器、收费生成、自动功能回归或独立审核。
+- 由鲜核实发f02/v13412保护切换，11 writer自然退出、旧源进程归零，无强杀；一致SQLite备份、配置恢复点、6实际启动检查、12消费者绑定、七服务/四timer均有证。公网角色JS和11份关联CSS200且与候选同SHA，3匿名入口401；05:52:38Z health200/ok=true、发布/恢复控制器0。价格policy6c9e49fd-dddd-4e30-97a4-73405d0e6da0、authoring b869ebdb-fe48-420a-8939-78280f2a43fe、cap f4，全部两键字段SHA 8f4ab818b0baae2bcfffa8d86456e6c190c7865fad7f195b12735648cef36c17保持，私有policy/环境/持久链接保持，未CAS改价、重发原号或回灌业务数据。
+- 相容guard0985d9008639bac17cb9b20332ddc798f5150f45 / 0.134.12+result-card-menu-guard.1 / X-sp1uRUSy30X8aTZv-Pm按原04:11:26Z完整构建/native/Works与配方读者证据复用，原时间不重写。程序恢复固定用本批attempt02/program-recovery.sh与同目录release-input.json，只回程序/消费者配置，不回DB、素材、账本、回执或私有policy；未做真实线上回退演练，不使用旧3499/d7替代。
+- 私有证据为本主题implementation/attempt02和服务器同名stage：public-deployed、public-character-css、service-health、main/guard-build-success、source-pair-contract、archive-inheritance-comparison、history-context-audit、writers-stopped、startup-pair-checks、database-protected及cutover.log。attempt01旧包和迟到完成的Git归档原件保留，不冒新范围产物。应用分支已推并核远端9e2；后续仅原单/todo/资料索引文档收口，不为文档重建或重启。
+
+手验重点：C头像框关闭态显示当前图，打开可按原候选批次/正脸微调批次选格，当前浏览与已选用分开，提示词/微调目标同步，Esc/点外/关闭焦点与小屏滚动；分别点头像和全身历史批次/组合版本，核个人补充回填和其他参数保持，最早空补充如实为空；原图文件名不再显示、图片/更换原图可用。侧脸4/9仍为方案；原第五组/供应商未知及6.9点预留等沿原工单，不由本次UI发布处理。本轮未新增任务外业务问题。
+
+## 14. 所有生成按钮紧跟补充输入（2026-11-06）
+
+用户明确：“不论是头部还是身体，重新生成的按键一定要放在补充的输入框下方”。本轮只修改角色工作台的操作位置，沿既有授权完成聚焦推送和保护发布；侧脸4/9候选仍为原设计事项，不夹入生成链路修改。
+
+实际基线七服务9e2fa52beb3d74f1320b50ddebc7652213460e02 / v0.134.13 / BUILD 3rYRnUoKkHJlBXbffJNvG，当前相容guard0985d9008639bac17cb9b20332ddc798f5150f45 / X-sp1uRUSy30X8aTZv-Pm保持。本轮复用原角色工作树，干净从实际9e2建codex/character-generate-placement-20261106，候选0.134.14。正式根其他脏记录保持，仅原单和自有索引标记同步。
+
+1. 人脸生成/重新生成/生成另一组从底部公共操作区移至角色补充textarea直接下方，两阶段沿同一位置，参数在补充输入之前；底部保阶段导航。
+2. 正背面同次生成从图上工具栏移到全身补充输入下方；图上保组合选用和放大。旧版整图的调整位置/模型在前，调整文字与原生成按钮紧邻。
+3. 下一次生成提示词面板中，数量/强度/模型放在补充输入前，原提交按钮紧跟输入，重置/管理员规则仍是次要工具；侧脸图旁入口只打开“下次生成”补充表单，实际生成在补充框下方，保正脸已就绪限制。
+4. 正脸/侧脸微调把原底部生成按钮移到修改输入下方，相关错误/状态跟随该按钮，底部保提示词/关闭。未更换实际generate/报价/提交函数、在途/权限/原图或选用链。
+
+共享影响为局部studio/CSS、版本与简短发布说明5文件，无API、schema、数据格式、费用/policy或共享弹层变化。既有局部源码/调用关系判断复用，当前是同文件可明确定位的元素移动，不因流程重复拉长CodeGraph查询；改后核实际源码索引。只做候选原生/完整Next/types/lint及必要发布检查，实际位置、小屏/键盘仍用户手验，无收费生成或自动功能验收。当前已改码、尚未发布；原单后续追加实际源码/构建/部署证据。本轮未新增任务外问题。
+
+### 14.1 冻结源与单主版构建
+
+最终主源码3f2180bb69482c90ac1793d6a8e5ca50c2912b70 / v0.134.14，5文件UI/版本改动，无新依赖、后台或schema变化。首次diff-check发现移除原按钮留下两空白行，已清除，最终源码差异检查通过；未为布局移动新增测试或自动功能验收。实际各生成回调仍只在各对应补充textarea后的按钮调用，正脸/侧脸微调原输入目标、body-pair整组和旧整图合同保持。仅把侧脸图片区域的直接生成入口改为进入对应“下次生成”输入表单，并在实际按钮保留正脸ready及原在途条件。
+
+当前实发9e2原完整归档加5文件Git delta组装候选，所有delta以Git blob/SHA校验、完整2464文件集合/每文件SHA/版本/原可执行mode校验；58091520字节tar，SHA e2b195ab7ea86cdd9a3be825d777521a4642eb3ca4ae71ab1699c2e70e54f658。私有原证docs/materials/2026-11-06-character-generate-placement/implementation/attempt01及服务器同名release-staging；主版隔离native/fresh价格与完整Next已启动，当前尚未生产切换。guard0985完整构建/native/读者沿原04:11:26Z实际证据复用，不重造本轮fresh执行；当前baseline9e2与guard已有10文件差异（含前一轮C/历史UI），按原已发布source-pair和相同后端字节继承，不误套旧6文件关闭差异断言。
+
+### 14.2 发布完成（2026-11-06 洛杉矶时间）
+
+- **已部署，待用户手动验收。** UTC 2026-11-07 06:39:05（洛杉矶11月6日22:39）主3f2180bb69482c90ac1793d6a8e5ca50c2912b70 / v0.134.14 / BUILD mqYZ21ZNljXtz7xuaVSuf上线，入口 https://sd2.youdooart.com/tools/character-lab 。本轮调整的人脸候选/重新生成、侧脸下次生成、正背面、旧整图、正脸/侧脸微调及下次提示词面板，实际提交按钮均紧接对应补充输入；模型/数量等参数在补充前，图上保选用/放大或进入补充设置，不再直接提交新生成。沿既有generate/报价确认/在途和来源限制执行；历史按原设置重做仍沿原冻结详情操作，不套用新补充。
+- 最终主fresh原生/定价、完整Next及内置类型/lint通过，06:37:23Z构建完成；没有另跑本地重复检查、浏览器、收费生成或自动功能回归。CodeGraph最终实际3f源1942文件，零missing/extra/hashMismatch/parseError；本批为同文件元素位置移动，复用既有局部关系和直接源码核对，未冒新增结构查询。Git分支codex/character-generate-placement-20261106已推并核远端3f；后续纯文档HEAD不作为运行源，不为文档重建/重启。
+- 从鲜核9e2/v13413保护切换，11 writer自然退出、旧源进程归零、无强杀；一致SQLite备份及配置恢复点、6项实际启动检查、12消费者绑定、七服务/四timer完成。公网角色JS及11份关联CSS200且与候选同SHA，3匿名入口401；06:40:19Z health200/ok=true，发布/恢复控制器0，窗口已交还后继独立key parser修复，未夹该无关差量。
+- 两价格键所有字段SHA 8f4ab818b0baae2bcfffa8d86456e6c190c7865fad7f195b12735648cef36c17保持（policy6c9e49fd-dddd-4e30-97a4-73405d0e6da0 / authoring b869ebdb-fe48-420a-8939-78280f2a43fe / capf4），私有policy、环境/持久链接、历史原请求和数据保持，无价格CAS或业务数据回灌。相容guard仍0985d9008639bac17cb9b20332ddc798f5150f45 / v0.134.12+result-card-menu-guard.1 / X-sp1uRUSy30X8aTZv-Pm，原04:11:26Z完整构建/native/readers原时复用，已有10文件UI/关闭门差量按已发布源对继承，新主仅5UI/版本文件改变。
+- 程序恢复使用本批/data/video-api-debugger/release-staging/character-generate-placement-20261106/attempt01/program-recovery.sh和同目录release-input.json，固定0985原产物，只回程序/消费者配置，不回DB、素材、账本、回执或私有policy；未做真实线上回退演练。本主题implementation/attempt01及服务器同名stage保main/guard-build-success、source-pair-contract、public-deployed、public-character-css、service-health、startup-pair-checks、writers-stopped、database-protected、cutover.log及精确Git delta原件。
+
+手验：分别在人脸生成/方案选择、正背面制作、侧脸补充、正侧微调和下次提示词面板输入补充，核生成按钮紧贴对应框下方且原报价/在途限制可用；图上进入设置不自动提交，原选用/放大/返回仍可用，小屏键盘和滚动可到按钮。侧脸4/9候选仍为§13方案，原test第五组未知仍沿§7；本轮不冒已实现该侧脸链路或已核供应商历史结果。本轮未新增任务外问题。
+
+## 15. 正脸、侧脸与前后身上下文独立（2026-11-07）
+
+用户明确“正脸，侧脸，还有那个前后身。要用的上下文全部都是独立的，不要把它们混在一起”，授权按既有常规修复完成实现、推送与必要上线。实际基线七服务eb026ad330e6996056449094d26f8250ccb4bc57 / v0.134.15 / BUILD nv4l5DbafyAjE-a_gwgjY，包含上一轮按钮位置和后继默认模板key修复。本轮从实际eb026建立codex/character-independent-context-20261107，候选0.134.16；相容guard需同源新读者，不能沿用丢新字段的0985。
+
+根因：face与body输入共用draft.context，body历史恢复还以adjustment||context回落到可能属于脸的旧文字；各phase的labViewPrompt和管理员弹窗共用可编辑styleConstraints。虽sideDescription已有独立字段，plan仍把整份draft.context复制进每项快照，导致历史/准备字段混淆。
+
+方案：增加可选faceDescription/bodyDescription，保sideDescription；context仅留旧版整图/拆分前原文。新工作区三项空值独立，旧工作区只从同账号/角色/原图的对应阶段计划填缺省，不把无法归位的共用字段复制到各区；原共用文字只读可复制保留。保存CAS保留旧客户端未携带的新字段，不批量迁历史或写生产回填。阶段风格字段分正脸/侧脸/前后身/旧整图，侧脸/身体不再读取正脸可编辑规则；管理员保存各自字段、保CAS与历史版本。
+
+准备/预览使用contextProtocol=1和当前阶段的明确字段，新plan不再带其他阶段个人上下文；原plan.prompt/context/quote/费用/已受理/未知原号冻结不改。旧prepare同号同输入优先返回原计划，旧页面的新提交/旧共享规则保存须刷新，防旧UI继续混用；原设置重做仍冻结历史原文，不套当前其他阶段。恢复补充只写对应字段，body实际补充为空时不借用face context。原图/正脸身份等引用关系保持，此次独立的是文字上下文，不取消必要角色参考。
+
+共享影响：角色UI/types/store/prepare/preview/restore/API边界和阶段prompt，属于JSON读写相容变化，无Prisma schema/迁移、价格、policy或通用生图合同变化。新guard继承所有新读者/字段保存，仍只关闭原5项新写入口；先备好新guard完整产物再开放新主版，程序恢复不回DB/素材/账本/回执。必要工程用隔离SQLite和明确sentinel核三套不串、保存/旧客户端保留、历史归位/空值、预览/准备/原号与规则隔离；无浏览器、收费生成或自动功能回归验收。侧脸4/9候选仍原方案，不夹入本轮。
+
+CodeGraph已准备实际eb026工作树1943文件无差异，真实context查询返回faceLabPrompt、CharacterLabStudio、prepareLab及previewLabPrompt，关键结论回到实际源码核对。本轮未新增范围外问题；目前尚未改写生产或部署。
+
+### 15.1 实现与隔离工程检查
+
+主源码fefc801ac30f0faf66f6cdaa7b614ae0a9b17d47 / 0.134.16，新相容guard a181efd81e8ee999a058134332d0137ed63c7c6b / 0.134.16+character-context-guard.1，两分支已推并核远端。主改12文件含单个contexts纯函数模块和既有工程fixture，guard相对主仅6文件版本/原5写门差异；均继承eb026实际基线的默认模板key修复、C候选批次及按钮位置。无schema/migration/依赖变化。
+
+正脸faceDescription、侧脸sideDescription、前后身bodyDescription分别保存/恢复/预览/准备；新operation计划context为空，仅adjustment存本次局部输入，正脸计划context仅存正脸补充。body旧adjustment为空时原样恢复空值，移除借face context的回退。旧context仅旧整图及拆分前只读原文，放现有模型/项目按需区域供复制，不能混入新阶段生成。各阶段独立风格字段/默认值；保存和历史规则载入仍只更改当前相关字段，并保原CAS。旧页面新prepare/preview/config编辑需刷新，旧prepare同号同输入优先查回原计划，旧workspace写入未携带新字段时保留已保存值；旧任务/原设置重做仍按原冻结提示词和引用，不改已受理或未知原号。
+
+服务器实际主/guard隔离SQLite核心fixture各18组通过，含原15组费用/引用/构图/配方/未知保护及新增3组上下文隔离、历史/空值/旧客户端保留、风格和预览隔离。网络出口被fixture拦截，productionWrites/paidRequests/browserRuns/forbiddenCalls均0；未加载生产环境，原证main-recipe-reader.json/guard-recipe-reader.json。此为必要工程检查，不冒用户功能验收。候选fresh native与完整Next/types/lint继续执行，尚未切生产。单独本地tsc全仓慢读已停止，类型检查由候选完整构建统一完成，不将停止结果记为通过。
+
+CodeGraph最终实际fefc源1944文件、32666节点/110879边，零missing/extra/hashMismatch/parseError；实际初始context查询已有真实返回，关键结论均核源码。本轮未新增范围外问题。
+
+#### 15.1.1 首轮构建类型修正
+
+attempt01主原生/价格门通过，但完整Next在新增fixture第315行发现draft.count被推断为number而非4|9，未生产切换；guard原生/完整构建尚未执行。已仅给fixture初始count添加9 as const，业务源码无新增变化；在服务器独立type-fix-check目录（原源码集合＋该单行修正、仅只读链接候选node_modules、无生产.env/storage）完成全仓tsc --noEmit --incremental false，退出0、日志空。失败原日志和18组实际检查原证保留，后续attempt02使用新提交重新构建，不将attempt01失败记录冒成功。
+
+#### 15.1.2 修正后冻结源
+
+最终主候选16c57e550068fca839b351997c213466c25e288b / 0.134.16，guard2d3ab523a1d47c1e786f8cf07cc3fcdbb8a46d5f / 0.134.16+character-context-guard.1，较attempt01仅fixture一行类型断言，业务实现相同。私有implementation/attempt02与服务器同名stage重新准备全套源码/隔离fixture/原生/完整Next；恢复入口固定本次attempt02和新guard，首轮失败原件保留。无生产切换或数据改动。
+
+最终16c57源码CodeGraph于08:51:40Z同步1944文件、32666节点/110879边，零missing/extra/hashMismatch/parseError。后续新helper context补查25秒超时，未冒查询成功；初始eb026真实context查询有返回，最终helper的UI/restore/workspace调用方仍以源码直接核对，具体private codegraph-ready.json保留。修正后主完整Next/types/lint已通过，guard原生/完整构建继续；旧工作区均经workbench=2状态接口的labIndependentDraft后进入acceptWorkspace，三份可缺省旧字段不直接从bootstrap raw draft填到表单。
+
+### 15.2 已部署（2026-11-07 洛杉矶时间）
+
+- **已部署，待用户手动验收。** UTC 09:12:09（洛杉矶01:12）主16c57e550068fca839b351997c213466c25e288b / v0.134.16 / BUILD RfviUaNpEBzDe5Tdvrg-L上线，入口 https://sd2.youdooart.com/tools/character-lab 。正脸、侧脸、前后身的个人补充、历史回填、规则预览和新生成各用自己的字段，管理员风格规则也按部位独立。切换一个部位不覆盖其他两份补充；body实际补充为空就恢复空，不借正脸文字。所有实际生成按钮仍紧跟对应输入框。
+- 旧工作区仅读同账号/角色/原图对应阶段的冻结计划来初始化缺少的独立字段，不批量迁历史或回填生产数据；无法归位的原共用文字保留在“模型与项目”的按需展开区域，只读可复制。旧整图仍用自己的context/adjustment。旧页面的新生成和规则编辑须刷新，已保存的新字段不会被未携带它们的旧页面保存抹掉。旧原图、计划/任务提示词、已受理和未知原号保持原合同；按原设置重做仍冻结原记录，不套其他阶段新文字。
+- 最终主/guard各18组隔离SQLite通过，productionWrites/paidRequests/browserRuns/forbiddenCalls均0；两版fresh原生/定价门与完整Next/types/lint通过，主08:59:18Z、guard09:10:10Z完成。attempt01检查脚本count类型错误未部署，单行9 as const修正后的全仓独立tsc退出0，attempt02按最终源重新完整执行，不隐去旧失败。CodeGraph最终16c57源1944文件无差异；新helper的补查超时按§15.1记录，初始真实context有返回且最终调用关系核源码。无浏览器、收费生成、自动功能验收或独立审核。
+- 从鲜核eb026/v13415保护切换，11 writer自然退出、旧源进程归零、无强杀；一致SQLite备份/配置恢复点、6实际启动检查、12消费者配置、七服务/四timer完成。公网角色JS及11份CSS200且与候选同SHA，3匿名入口401；09:13:00Z内外health200/ok=true、发布/恢复控制器0。两价格键全字段SHA 8f4ab818b0baae2bcfffa8d86456e6c190c7865fad7f195b12735648cef36c17保持（policy6c9e49fd-dddd-4e30-97a4-73405d0e6da0 / authoring b869ebdb-fe48-420a-8939-78280f2a43fe / capf4a48550-4e17-409c-8b3e-a0e42ea05489），私有policy/环境和持久链接保持，没有价格CAS或DB/素材/账本/回执回灌。
+- 新相容guard2d3ab523a1d47c1e786f8cf07cc3fcdbb8a46d5f / 0.134.16+character-context-guard.1 / yB9pJkJEDy0F4ZeLa1cvZ具备相同的新字段读写/历史/规则/UI，只关闭原五项新写门，主/guard恰6文件差异。程序恢复固定/data/video-api-debugger/release-staging/character-independent-context-20261107/attempt02/program-recovery.sh与同目录release-input.json；只回程序/消费者配置，不回业务数据，不用旧0985丢新字段。未做真实线上回退演练。
+- 私有原证本主题implementation/attempt02及服务器同名stage保main/guard-source、精确Git delta、两版18组读者/原生摘要/完整构建、source-pair-contract、public-deployed/public-character-css/service-health、startup-pair-checks/writers-stopped/database-protected、cutover.log。首轮失败与类型修正原证沿attempt01保留，原始native/Next日志及回退/备份留服务器。源码两分支已推并核16c57/2d3，窗口已交还；后续仅3文档Git收口，不为文档重建或重启。
+
+手验：刷新到v0.134.16，在正脸、侧脸和前后身分别输入不同要求并来回切换，核三个输入和“下次生成”规则预览分别保留；切换各自历史批次/成品来源，核只回填本部位，历史空值如实为空；分别改管理员风格，核另两阶段不受影响。旧共用文字在“模型与项目”可复制，原记录按原设置重做仍显示原冻结提示词。实际出图/键盘/小屏由用户手验。侧脸4/9仍为§13设计方案，未夹入本次上下文修复；原test第五组未知沿§7不自动重发。本轮未新增任务外问题。

@@ -51,6 +51,7 @@ const dimensionMismatchChecks = [
   'settled_backfill_idempotent_hidden_by_default_exact_visibility_cas',
   'normal_actions_follow_owner_source_permissions_not_size_status',
   'plain_failure_corrupt_or_unproven_output_stays_unavailable',
+  'valid_size_difference_completes_original_and_settles_once_without_provider',
 ];
 const fixtures = [
   { file: 'scripts/works-engineering.ts', schema: 'works-engineering.v1', marker: 'Works engineering receipt: ', checks: WORKS_CHECKS, sources: WORKS_SOURCES },
