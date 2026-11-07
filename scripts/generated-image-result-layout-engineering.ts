@@ -190,7 +190,7 @@ function card(item: Props, options: Props = {}) {
   return render(child.type, child.props);
 }
 
-const ready = card({ id: 'ready', completionTaskId: 'task-ready', label: '结果', status: '已完成', media: { src: '/fixture.png' }, download: () => undefined , { fullRows: true });
+const ready = card({ id: 'ready', completionTaskId: 'task-ready', label: '结果', status: '已完成', media: { src: '/fixture.png' }, download: () => undefined }, { fullRows: true });
 assert.equal(pageOptions?.fullRows, true, 'template results opt into complete rows');
 const readyArticle = nodes(ready).find(node => node.type === 'article')!;
 assert.equal(readyArticle.props['data-result-ready'], '');
