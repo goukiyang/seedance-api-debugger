@@ -10,17 +10,18 @@ const MIN_PAGE_ITEMS = 12;
 const MAX_PAGE_ITEMS = 24;
 const TARGET_PAGE_ROWS = 3;
 
-export function gridPageCapacity(grid: HTMLElement) {
+export function gridPageCapacity(grid: HTMLElement, fullRows = false) {
   const columns = getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length;
   const rowSize = Math.max(1, columns);
   const target = Math.max(MIN_PAGE_ITEMS, rowSize * TARGET_PAGE_ROWS);
+  if (fullRows) return Math.ceil(target / rowSize) * rowSize;
   // Prefer complete rows, while keeping even very narrow grids useful and every page bounded.
   if (rowSize > MAX_PAGE_ITEMS) return MAX_PAGE_ITEMS;
   const rows = Math.min(Math.ceil(target / rowSize), Math.floor(MAX_PAGE_ITEMS / rowSize));
   return rows * rowSize;
 }
 
-export function useResultPages<T extends { id: string }>({ items: inputItems, storageKey, visible, busy, error, hasMore, loadMore, currentId, total, navigationIntent, tabScoped = false, positionKey, serverPage = false }: {
+export function useResultPages<T extends { id: string }>({ items: inputItems, storageKey, visible, busy, error, hasMore, loadMore, currentId, total, navigationIntent, tabScoped = false, positionKey, serverPage = false, fullRows = false }: {
   items: T[]; storageKey: string; visible: boolean; busy: boolean; error: boolean;
   hasMore: boolean; loadMore: () => Promise<unknown>; currentId: string | null;
   total?: number | null;
@@ -28,6 +29,7 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
   tabScoped?: boolean;
   positionKey?: (item: T) => string;
   serverPage?: boolean;
+  fullRows?: boolean;
 }) {
   const itemId = useCallback((item: T) => positionKey?.(item) || item.id, [positionKey]);
   const items = useMemo(() => Array.from(new Map(inputItems.map(item => [itemId(item), item])).values()), [inputItems, itemId]);
@@ -90,7 +92,7 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
     if (!visible || !grid) return;
     const measure = () => {
       if (grid.getBoundingClientRect().width <= 0) return;
-      const next = gridPageCapacity(grid);
+      const next = gridPageCapacity(grid, fullRows);
       const previous = latest.current;
       if (next === previous.capacity) return;
       const selectedIndex = previous.items.findIndex(item => item.id === previous.currentId);
@@ -104,7 +106,7 @@ export function useResultPages<T extends { id: string }>({ items: inputItems, st
     const observer = new ResizeObserver(measure);
     observer.observe(grid);
     return () => observer.disconnect();
-  }, [visible, items.length, itemId, serverPage]);
+  }, [visible, items.length, itemId, serverPage, fullRows]);
 
   useEffect(() => {
     if (serverPage || restoredKey !== storageKey || busy || (error && !retryRequested.current) || navigationIssue || reading.current || !visible) return;

@@ -32,6 +32,8 @@
 .coverReactions [role="status"] { max-width: min(320px, 100%); padding: 4px 6px; border-radius: 4px; background: #111614ed; white-space: normal; overflow-wrap: anywhere; }
 .coverReactions [data-studio-pin-readonly] { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; }
 @media (hover: hover) and (pointer: fine) {
+  .moreTrigger { opacity: 0; pointer-events: none; }
+  .media:hover .moreTrigger, .media:focus-within .moreTrigger, .moreTrigger[aria-expanded="true"] { opacity: 1; pointer-events: auto; }
   .coverReactions button[data-reaction-action="like"]:not([aria-pressed="true"]):not([data-bloom]),
   .coverReactions [data-studio-pin-control]:where(:not([data-active]):not([data-feedback]):not([aria-busy="true"])) { opacity: 0; pointer-events: none; }
   .media:hover .coverReactions button[data-reaction-action="like"], .media:focus-within .coverReactions button[data-reaction-action="like"],

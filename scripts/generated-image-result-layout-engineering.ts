@@ -191,6 +191,7 @@ function card(item: Props, options: Props = {}) {
 }
 
 const ready = card({ id: 'ready', completionTaskId: 'task-ready', label: '结果', status: '已完成', media: { src: '/fixture.png' }, download: () => undefined });
+assert.equal(pageOptions?.fullRows, true, 'template results opt into complete rows');
 const readyArticle = nodes(ready).find(node => node.type === 'article')!;
 assert.equal(readyArticle.props['data-result-ready'], '');
 assert.equal(readyArticle.props['data-result-task-id'], 'task-ready');
@@ -202,6 +203,7 @@ assert.ok(byClass(ready, 'moreSlot'));
 assert.equal(nodes(actions).some(node => node.type === StatusDetails), false, 'details leave the lower toolbar');
 assert.equal(actions.props['data-compact-actions'], true);
 const legacy = card({ id: 'legacy', label: '结果', media: { src: '/fixture.png' } }, { compactInformation: false });
+assert.equal(pageOptions?.fullRows, false, 'other consumers retain bounded paging');
 assert.ok(byClass(legacy, 'mediaDetailAction'), 'non-compact consumers retain their existing details entry');
 
 const pending = card({ id: 'pending', label: '处理中', status: '生成中', pending: true,
@@ -236,6 +238,18 @@ const mediaLayout = declarations('.mediaActions')[0];
 assert.equal(mediaLayout['flex-wrap'], 'wrap'); assert.equal(mediaLayout['overflow-x'], 'hidden');
 const compactLayout = declarations('.mediaActions[data-compact-actions]')[0];
 assert.equal(compactLayout['max-block-size'], 'none'); assert.equal(compactLayout.overflow, 'visible');
+const hiddenMore = declarations('.moreTrigger').find(rule => rule.opacity === '0');
+assert.equal(hiddenMore?.['pointer-events'], 'none');
+for (const selector of ['.media:hover .moreTrigger', '.media:focus-within .moreTrigger', '.moreTrigger[aria-expanded="true"]']) {
+  const revealed = declarations(selector).find(rule => rule.opacity === '1');
+  assert.equal(revealed?.['pointer-events'], 'auto');
+}
+css.walkRules(rule => {
+  if (rule.selectors.includes('.moreTrigger') && rule.nodes.some(node => node.type === 'decl' && node.prop === 'opacity' && node.value === '0')) {
+    assert.equal(rule.parent?.type, 'atrule');
+    assert.equal((rule.parent as import('postcss').AtRule).params, '(hover: hover) and (pointer: fine)', 'touch retains a visible more button');
+  }
+});
 const visibleDeliveryFailure = declarations('.card .mediaActions:has(button[data-state="failed"], button[data-state="unknown"], button[data-state="sent_navigation_unknown"], button[data-state="sent_navigation_failed"])')[0];
 assert.equal(visibleDeliveryFailure.opacity, '1'); assert.equal(visibleDeliveryFailure['pointer-events'], 'auto');
 const square = declarations('.mediaActions[data-cover-context-delete] button')[0];
