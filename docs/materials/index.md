@@ -504,3 +504,7 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 <!-- CHARACTER-CELL-COPY-20261107 -->
 [角色单格复制/左下候选原单§16.5](../../tasks/todo/2026-10-31-character-reference-replan.md#165-已部署2026-11-07)：v0.134.18主aa9/tEZ已保护部署，待手验；[简要发布证据](2026-11-07-character-cell-copy/README.md)。私有implementation/attempt01保匹配定向原证、最终15文件scope检查、继承IMAGE-UX04原证、主完整构建/guard继承source-pair、3JS+14CSS/4匿名401/health、最新rev14配置与价格hash、启动/切换/备份元证；服务器同名stage保完整原日志/DB备份/程序恢复。中间包provisional-3868保留，无新用户附件、浏览器或收费生成。
 <!-- /CHARACTER-CELL-COPY-20261107 -->
+
+<!-- CHARACTER-WORKBENCH-MOCKS-20261107 -->
+[角色工作台两稿§17.7](../../tasks/todo/2026-10-31-character-reference-replan.md#177-两个完整页面方向预览2026-11-07均未选定)：[A成品常驻](2026-11-07-character-workbench-design/direction-a-composition.png)、[B对比优先](2026-11-07-character-workbench-design/direction-b-comparison.png)，同一侧脸微调场景的完整页面静态概念图，用户尚未选定；[精确提示词与工具/文件SHA](2026-11-07-character-workbench-design/briefs.json)。非实际应用截图或功能验收，无代码/生产改动。
+<!-- /CHARACTER-WORKBENCH-MOCKS-20261107 -->
