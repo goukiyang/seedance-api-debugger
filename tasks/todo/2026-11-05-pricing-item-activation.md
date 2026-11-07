@@ -65,3 +65,12 @@ CodeGraph 查询接口当前不可用，以对应工作区的定向源码核对�
 - 6实际启动门、7服务4timer、4页面公网JS同SHA、3匿名401和health200/ok=true通过。两费率键全字段仍e52bb566d0137362f0f24c6d379e73f8075e7143532efb5144afd26660f572f3，赠分关闭/default0；无生产费率、余额或账本测试写入，无DDL/真实生成。
 - 一致数据库备份、原环境/持久目录及私有policy保留；服务器pricing-editor-focus-20261106/attempt01/program-recovery.sh只切新相容程序，不回数据库/媒体/费率/账本/回执。未演练生产回退。复制准备缺本机baseline manifest已改取服务器原件；切换前审查校正恢复脚本旧baseline断言，未试停服务或修改release-engine。
 - 正式私有原证：docs/materials/2026-11-05-ledger-rate-accounting/release/pricing-editor-focus-20261106/attempt01/；同名服务器stage保完整日志/源码归档。构建/发布窗口已释放，只剩记录/Git收口。CREDIT-EMAIL01真实申请与手机审批仍用户手验；顶部小数截断另记D-20261106-TOPBAR-CREDIT-FRACTION，未扩修。
+
+## RATE-EDIT03 旧草稿不应锁死编辑（2026-11-07）
+
+- 用户再次反馈金额/启停不可编辑，并询问2.6 Sunburst每张0.5元是否API定价。鲜核主程序9ae7ab0/v0.134.20/BUILD NWJKE_YesaMnvCSTysJFY，pricing写true，v8身份门修复保留，非guard。自有Ego13管理员现场真实复现：旧2f52/76e5草稿对当前6c9e/b869和新目录冲突，7行输入/开关全部disabled，开关title明确版本变化。不是权限丢失；初次GET503后重读200另留原事实，未证明其网络/后端细因。
+- 仅改客户端冲突体验：保留并展示手填草稿，允许修改金额及启停草稿；预览/保存仍在冲突时禁止，需显式“核对最新费率并重新预览”后走原服务端预览、CAS和原操作回执。保存中/未知保存/真实不可用/失权/复杂旧草稿等保护不变，不自动更新revision、不丢草稿、不保存价格。
+- 扩展既有实际源码fixture至11组，冲突输入/开关可编辑、草稿显示和原save/CAS门保持；旧v20同检查按预期red。原启停合并/撤销/回执/恢复工程通过。CodeGraph实际worktree索引1946文件与当前合并源一致；context未返回，已结束该等待，关键结论回实际源码，不冒结构查询成功。
+- 收尾误判纠正：上轮声称测试0.051已撤回，但本轮本人profile仍有唯一同ID/来源/值的未保存测试行；无pending。已向用户说明是上轮排查残留，核严格单行后用页面“撤销修改”撤回，不清其它草稿、不写线上价；后续再核持久化而非仅改localStorage，避免React回写。用户其它浏览器状态不冒已修。
+- 0.5元来源鲜核为正式policy rate-0715e3c0d2f95f0ee215439683298f89、site_base_cny/admin_defined、MODEL-ALL01 image onboarding 2026-11-06，note明确参照已有1K Flare站内价、供应商USD另记且非账单；因此不是API实扣。1元10点对应5点/张，金额和原来源保持，不以公开分组价或汇率推算替代当前账户账单。现费率两键全字段8f4ab818、policy6c9e49fd/authoringb869ebdb未写。
+- 当前代码修复完成待同站串行发布；15号占v21构建窗口，给其聚焦client/两fixture差量，不改费用、DB或生成，不覆盖其共享模板/其它工作。最终上线及指定浏览器未保存交互结果另附。

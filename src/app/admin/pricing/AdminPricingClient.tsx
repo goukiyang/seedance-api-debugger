@@ -390,8 +390,8 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
       ? row.unavailableReason || '当前通道不可用'
       : row.availability === 'needs_review' ? `来源待确认${row.unavailableReason ? `：${row.unavailableReason}` : ''}，请先补充本次有效基价`
         : '请先填写有效单价，再开启；单价与开关将一同保存' : '';
-    const disabled = Boolean(pending || saving || conflict || reading || readError || !recoveringDraft && complexDraft || cannotEnable);
-    const title = enableReason || (pending ? '保存结果待确认，请先查询原回执' : saving ? '正在保存费率' : conflict ? '费率版本已变化，请先核对原草稿'
+    const disabled = Boolean(pending || saving || reading || readError || !recoveringDraft && complexDraft || cannotEnable);
+    const title = enableReason || (pending ? '保存结果待确认，请先查询原回执' : saving ? '正在保存费率' : conflict ? '可编辑草稿，保存前请核对最新费率'
       : reading || readError ? '请先读取当前费率' : !recoveringDraft && complexDraft ? '请先查看原草稿'
         : `${enabled ? '关闭' : '开启'}此费率，仅影响新任务`);
     return <button type="button" role="switch" aria-checked={enabled} className={styles.pricingSwitch}
@@ -420,7 +420,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
             {message && <p>{message}</p>}
             {storageFailed && <p>浏览器无法保存草稿，离开可能丢失输入。</p>}
             {operationStorageFailed && <p>原保存记录不可核实，已暂停新保存。</p>}
-            {conflict && <p>表中显示当前生效价，原草稿仍保留。 <button type="button" disabled={Boolean(pending)} onClick={() => setDraft(current => ({ ...current, revision: snapshot.revision, authoringRevision: snapshot.authoring?.revision, catalogFingerprint: snapshot.catalogFingerprint }))}>核对原草稿</button></p>}
+            {conflict && <p>费率已更新，原草稿已保留。保存前请核对最新费率。 <button type="button" disabled={Boolean(pending)} onClick={() => setDraft(current => ({ ...current, revision: snapshot.revision, authoringRevision: snapshot.authoring?.revision, catalogFingerprint: snapshot.catalogFingerprint }))}>核对最新费率并重新预览</button></p>}
             {pending && <p>保存结果待确认。 <button type="button" disabled={saving} onClick={() => void queryReceipt(pending)}>查询原回执</button></p>}
             {(complexDraft || pendingRows.length > 0) && <p>有未处理的旧草稿，未自动提交。 <button type="button" onClick={() => setRecoveringDraft(true)}>查看原草稿</button></p>}
           </div>}
@@ -431,7 +431,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
         <table className={styles.moneyTable}>
           <thead><tr><th scope="col">型号与规格</th><th scope="col">人民币单价</th><th scope="col">扣点</th></tr></thead>
           <tbody>{rows.map(row => {
-            const change = !complexDraft && !conflict ? moneyRows.get(row.id) : undefined;
+            const change = !complexDraft ? moneyRows.get(row.id) : undefined;
             const pricingEnabled = change?.pricingEnabled ?? pricingAdminEnabled(row);
             const { change: projected, scenario } = pricingAdminPreviewForSource(preview, row.id);
             const actual = row.identity.billingMode === 'actual', free = row.mode === 'free';
@@ -454,7 +454,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
             return <tr key={row.id} data-pricing-row={row.id}>
               <th scope="row"><div className={styles.pricingName}>{renderPricingSwitch(row, change)}<strong>{label}</strong></div><small>{row.providerLabel} · {scope}</small>{change?.pricingEnabled !== undefined && <small>待保存：{pricingEnabled ? '开启' : '关闭'}</small>}{row.availability !== 'ready' && <small>{row.unavailableReason || '不可用'}</small>}</th>
               <td>{actual ? '按供应商账单' : free ? '免费' : editable ? <label className={styles.moneyInput}>
-                <input type="text" inputMode="decimal" maxLength={snapshot.limits.maxNumberLength} aria-label={`${label} ${row.providerLabel} ${scope} 人民币单价（元/${unit}）`} placeholder="填写单价" value={amount ?? ''} disabled={saving || complexDraft || conflict} onChange={event => {
+                <input type="text" inputMode="decimal" maxLength={snapshot.limits.maxNumberLength} aria-label={`${label} ${row.providerLabel} ${scope} 人民币单价（元/${unit}）`} placeholder="填写单价" value={amount ?? ''} disabled={saving || complexDraft} onChange={event => {
                   const value = event.target.value;
                   if (value === (row.baseCny ?? '')) updateChanges(changes => restorePricingAdminMoneyRow(changes, row.id));
                   else editRow(row.id, { base: { amount: value, currency: 'CNY', unit: row.identity.unit, source: { type: 'admin_defined', reference: moneySource, note: '' } },
