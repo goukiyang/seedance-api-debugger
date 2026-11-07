@@ -12,7 +12,7 @@
 import type { CreateVideoInput, GenerationMode, LocalStatus, ProviderCreateResponse, ProviderStatusResponse } from '@/types';
 import { retryFailure } from '@/lib/generation-retry/contracts';
 import { assertPrivateSend, privatePromptFetch } from '@/lib/security/private-prompt-send.server';
-import { PrivatePromptError, type PrivateOrigin } from '@/lib/security/private-prompts.server';
+import { isPrivatePromptError, type PrivateOrigin } from '@/lib/security/private-prompts.server';
 import { privateMultiviewOrigins } from '@/lib/video/private-storage.server';
 import { normalizeProviderErrorMessage, providerFailureUserMessage } from './error-message';
 import {
@@ -559,7 +559,7 @@ export async function createVideoTask(
         : data,
     };
   } catch (error) {
-    if (error instanceof PrivatePromptError) throw error;
+    if (isPrivatePromptError(error)) throw error;
     const diagnostic = capture(error);
     const safeError = sensitiveRecipe ? (() => {
       const failure = privateMultiviewFailure(
