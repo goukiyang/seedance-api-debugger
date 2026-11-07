@@ -54,18 +54,19 @@ function useCharacterLabImage(source: string) {
     return acquireImageRead(account, readSource, version, 0, result => setRead({ key, result }));
   }, [account, readSource, version, key]);
   const result = read?.key === key ? read.result : null;
-  const imageSrc = result?.imageSrc || '', crop = resolved.crop;
-  const cropKey = JSON.stringify([imageSrc, crop]);
+  const imageSrc = result?.imageSrc || '', isCropped = Boolean(resolved.crop);
+  const { x, y, width: cropWidth, height: cropHeight } = resolved.crop || { x: 0, y: 0, width: 1, height: 1 };
+  const cropKey = JSON.stringify([imageSrc, isCropped, x, y, cropWidth, cropHeight]);
   const [cropped, setCropped] = useState<{ key: string; src: string } | null>(null);
   const [failed, setFailed] = useState('');
   useEffect(() => {
-    if (!imageSrc || !crop) return;
+    if (!imageSrc || !isCropped) return;
     let active = true, objectUrl = '';
     const original = new Image();
     original.onload = () => {
-      const left = Math.floor(original.naturalWidth * crop.x), top = Math.floor(original.naturalHeight * crop.y);
-      const width = Math.floor(original.naturalWidth * (crop.x + crop.width)) - left;
-      const height = Math.floor(original.naturalHeight * (crop.y + crop.height)) - top;
+      const left = Math.floor(original.naturalWidth * x), top = Math.floor(original.naturalHeight * y);
+      const width = Math.floor(original.naturalWidth * (x + cropWidth)) - left;
+      const height = Math.floor(original.naturalHeight * (y + cropHeight)) - top;
       const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
       const context = canvas.getContext('2d');
       if (!context) { if (active) setFailed(cropKey); return; }
@@ -79,14 +80,16 @@ function useCharacterLabImage(source: string) {
     original.onerror = () => { if (active) setFailed(cropKey); };
     original.src = imageSrc;
     return () => { active = false; original.onload = null; original.onerror = null; original.removeAttribute('src'); if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [imageSrc, crop?.x, crop?.y, crop?.width, crop?.height, cropKey]);
-  return { ...resolved, imageSrc: crop ? cropped?.key === cropKey ? cropped.src : '' : imageSrc,
+  }, [imageSrc, isCropped, x, y, cropWidth, cropHeight, cropKey]);
+  return { ...resolved, imageSrc: isCropped ? cropped?.key === cropKey ? cropped.src : '' : imageSrc,
     failed: hd.denied || result?.progress.phase === 'unavailable' || !resolved.src || failed === cropKey };
 }
 
 export function CharacterLabImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
   const image = useCharacterLabImage(src);
   if (!image.imageSrc) return <span className={styles.imageUnavailable}>{image.failed ? '图片暂不可读取' : '正在读取高清图'}</span>;
+  // Native image commands must target the cell PNG rather than a visual clip of the sheet.
+  // eslint-disable-next-line @next/next/no-img-element
   return <img src={image.imageSrc} alt={alt} className={image.crop ? `${styles.imageCrop} ${className || ''}` : className}
     style={image.crop ? { aspectRatio: image.aspectRatio, objectFit: 'contain' } : undefined} />;
 }
