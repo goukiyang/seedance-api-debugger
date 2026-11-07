@@ -73,6 +73,7 @@ async function main() {
     assert.equal(row.owner_id, member.id); assert.equal(row.is_shared, false); assert.equal(row.context, ''); assert.equal(row.prompt, '');
     const resolved = await resolveSharedStudioDefinition(member, copy.id);
     assert.equal(resolved.definition.context, 'root-private-context'); assert.equal(resolved.definition.sourceOwnerId, author.id);
+    assert.equal(resolved.publicDTO.ownedByViewer, true); assert.equal(resolved.publicDTO.capabilities?.saveDefinition.allowed, false);
     assert.equal(resolved.publicDTO.context, ''); assert.equal(resolved.publicDTO.templatePrompt, ''); assert.equal(resolved.publicDTO.canManageSharing, false);
     assert.equal(resolved.definition.generationDefaults.count, 2);
     assert.deepEqual(await prisma.imageStudioPreset.findUniqueOrThrow({ where: { id: rootId } }), rootBefore);

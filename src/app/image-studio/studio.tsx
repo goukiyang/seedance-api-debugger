@@ -157,7 +157,7 @@ function studioTaskPhase(task: StudioTask) {
 }
 type StudioModule = { personalPromptState?: string; personalPromptReason?: string; privateDefinition?: boolean; canReadPrivatePrompt?: boolean; requiresIdentityVerification?: boolean;
   taskSettings?: StudioTaskSettings; settingsSourceTaskId?: string | null; templateRead?: StudioTemplateRead; sharingPreference?: { enabled: boolean; revision: number; requestId?: string } | null; canChooseSharing?: boolean; fixedCover?: ModuleCoverDTO | null; coverEditable?: boolean; sharedLive?: SharedStudioView | null; templateImages?: UploadedAssetPayload[]; templateReferenceIds?: string[]; templatePrompt?: string; personalPrompt?: string; fixedReferences?: FixedStudioReference[]; contextEditable?: boolean; referencePolicy?: StudioReferencePolicy; id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; referenceLimit: number; aspectRatio: string; resolution: ImageResolution; model: string; quality: string; groupName: string; banner: UploadedAssetPayload | null; cover?: { resultUrl: string; thumbnailUrl?: string | null; referenceUrl?: string | null } | null; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; sourcePresetId?: string | null; sourcePresetShared?: boolean | null; sourcePresetOwnedByViewer?: boolean; sourcePresetCanManageSharing?: boolean; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string; fixedReferenceCount?: number; fixedReferencesEditable?: boolean; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; skills?: SkillSummary[]; skillIds?: string[]; reproductionState?: { fixedReferenceCount: number; styleGroups: StudioStyleSummary[] } | null };
-type StudioPreset = { templateRead?: StudioTemplateRead; id: string; name: string; revision: string; deletion?: StudioDeletionTarget; moduleContextVersion?: string | null; scope: 'admin' | 'creator'; isShared: boolean; canManageSharing?: boolean; ownedByViewer?: boolean; groupName: string; model: string; quality: string; resolution: ImageResolution; count: number; referenceLimit: number; aspectRatio: string; images: UploadedAssetPayload[]; banner: UploadedAssetPayload | null; contextConfigured: boolean; createdAt: string };
+type StudioPreset = { intent?: SharedStudioIntent; templateRead?: StudioTemplateRead; id: string; name: string; revision: string; deletion?: StudioDeletionTarget; moduleContextVersion?: string | null; scope: 'admin' | 'creator'; isShared: boolean; canManageSharing?: boolean; ownedByViewer?: boolean; groupName: string; model: string; quality: string; resolution: ImageResolution; count: number; referenceLimit: number; aspectRatio: string; images: UploadedAssetPayload[]; banner: UploadedAssetPayload | null; contextConfigured: boolean; createdAt: string };
 type QuickStudioPreset = StudioPreset & { personalPrompt?: string; personalPromptState?: string; personalPromptReason?: string; sourceTaskId?: string; taskSettings?: StudioTaskSettings; prompt: string; context: string; personalOverrides?: PersonalStudioOverrides; personalImages?: UploadedAssetPayload[]; referencesAvailable: boolean; referencePolicy?: StudioReferencePolicy; fixedReferences?: FixedStudioReference[]; styleGroupIds: string[]; skillIds?: string[] };
 type PresetSource = { draft: Record<string, unknown>; blocked: string | null; groupDeleteBlocked?: boolean; moduleDeletionBlocked?: string | null };
 type PresetSourceReader = () => PresetSource;
@@ -849,7 +849,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       if (moduleReadScope.current !== scope) return false;
       const preset: StudioPreset | undefined = data.presets.find((item: StudioPreset) => item.id === presetId);
       if (!preset) throw new Error('指定模板已不可用或不再共享');
-      if (preset.isShared) return openSharedPreset(presetId, options);
+      if (preset.isShared || preset.intent?.protocol === 'shared-live-v1') return openSharedPreset(presetId, options);
       const installed = modules.find(item => !item.sharedLive && item.sourcePresetId === presetId && item.sourcePresetShared === false);
       if (installed) { navigateToModule(installed.groupName || '未分组', installed.id, options); return true; }
       setPresetSourceId(active || ''); setPresets([preset, ...data.presets.filter((item: StudioPreset) => item.id !== presetId)]);
@@ -967,7 +967,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     finally { presetManagementLock.current = false; setPresetManaging(false); }
   }
   async function applyPreset(preset: StudioPreset) {
-    if (preset.isShared) {
+    if (preset.isShared || preset.intent?.protocol === 'shared-live-v1') {
       if (await openSharedPreset(preset.id, { markViewed: false, explicitSelection: true })) setPresetDialogOpen(false);
       return;
     }

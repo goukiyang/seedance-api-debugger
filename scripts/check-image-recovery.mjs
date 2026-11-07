@@ -192,6 +192,7 @@ const publicUsageFixtures = [
       'src/lib/image-studio/shared-contract.ts', 'src/lib/image-studio/shared-command-storage.ts',
       'src/lib/image-studio/workspace-deletion.ts', 'src/lib/image-studio/preset-lifecycle.ts',
       'src/lib/image-studio/context-version.ts', 'src/lib/image-studio/access.ts', 'src/lib/image-studio/dimension-mismatch.ts',
+      'src/lib/image-studio/parameter-copy.ts', 'src/lib/image-studio/model-catalog.ts', 'src/lib/image-studio/ratios.ts', 'src/lib/image-studio/preset-id.ts',
       'src/lib/image-studio/pricing-state.ts', 'src/lib/assets/site-url.ts', 'src/lib/access/external-role.ts',
       'src/lib/users/profiles.ts', 'src/lib/users/display.ts',
     ] },

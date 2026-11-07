@@ -236,7 +236,7 @@ async function resolveSharedStudioDefinitionInternal(user: ImageStudioIdentity, 
       sourceRevision: definition.sourceRevision, moduleRevision: null, definitionToken: intent.definitionToken,
       actorAllowed: true, ownsWorkspace: false, canViewSource: true, canManageSource: false, canViewDefinition: false });
     return { definition, publicDTO: { ...root.publicDTO, ...state, intent, presetId, revision: definition.sourceRevision,
-      name: definition.name, groupName: definition.groupName, defaults, isShared: false, ownedByViewer: false,
+      name: definition.name, groupName: definition.groupName, defaults, isShared: false, ownedByViewer: storedSource.owner_id === actor.id,
       canManageSharing: false, contextEditable: false, templatePrompt: '', context: '', deletion: studioSourceDeletionCapability(actor, storedSource),
       fixedReferences: [], styleGroupIds: copy.styleGroupIds, styleGroups: styles.groups.map(group => ({ id: group.id, name: group.name,
         revision: group.revision, referenceCount: group.references.length, coverUrl: `/api/image-studio/style-groups/${group.id}/cover?revision=${group.revision}`,
