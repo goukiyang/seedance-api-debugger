@@ -3,6 +3,7 @@ import packageInfo from '../../package.json';
 const notice = { title: '生图参数选择修复', outline: [
   '切换生图模型时保留已选质量和分辨率',
   '修复生图选项误拦截，保留原任务与费用保护',
+  '完整原图按实际尺寸交付，尺寸差异不再记为失败',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

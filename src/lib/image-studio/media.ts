@@ -263,7 +263,7 @@ export class StudioImageDeliveryError extends Error {
 
 // Generated 4K images must not inherit the reference-upload 20MB ceiling.
 // Keep full resolution and lossless PNG; never silently downscale paid output.
-export type StudioOutputRequirements = { format?: string; size?: string; transparent?: boolean };
+export type StudioOutputRequirements = { format?: string; size?: string; transparent?: boolean; requireExactDimensions?: boolean };
 export async function validateGeneratedStudioImage(bytes: Buffer, requirements: StudioOutputRequirements = {},
   recordValidation?: (validation: { originalFormat: string; storedFormat: string; width: number; height: number; requestedSize?: string; transparentPixels?: number }) => Promise<void>) {
   if (!bytes.length || bytes.length > MAX_STUDIO_GENERATED_BYTES) {
@@ -286,7 +286,7 @@ export async function validateGeneratedStudioImage(bytes: Buffer, requirements: 
   const validation = { originalFormat: metadata.format!, storedFormat: 'png', width: metadata.width!, height: metadata.height!, requestedSize: requirements.size, transparentPixels: undefined as number | undefined };
   await recordValidation?.(validation);
   if (requirements.format && metadata.format !== requirements.format) throw new StudioImageDeliveryError('generated_format_mismatch', bytes.length);
-  if (requirements.size && /^\d+x\d+$/.test(requirements.size)) {
+  if (requirements.requireExactDimensions !== false && requirements.size && /^\d+x\d+$/.test(requirements.size)) {
     const [width, height] = requirements.size.split('x').map(Number);
     if (metadata.width !== width || metadata.height !== height) throw new StudioImageDeliveryError('generated_dimensions_mismatch', bytes.length);
   }
