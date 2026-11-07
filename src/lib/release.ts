@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '角色各部位补充独立保存', outline: [
-  '正脸、侧脸和前后身分别使用自己的补充与风格规则',
-  '切换历史只还原对应部位的补充，保留原生成记录',
+const notice = { title: '生图参数选择修复', outline: [
+  '切换生图模型时保留已选质量和分辨率',
+  '修复生图选项误拦截，保留原任务与费用保护',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

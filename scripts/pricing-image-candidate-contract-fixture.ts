@@ -261,7 +261,11 @@ export async function runPricingImageCandidateContractFixture(db: PrismaClient, 
     equal(priced.unitCredits, 5); equal(priced.estimatedCredits, 15);
     equal((await getImageGenerationChannels(db, true)).managed.find(item => item.channelId === newChannel)!
       .modelCapabilities[model]!.billingMode, null);
-    await reject(() => quote({ model, channelId: newChannel, quality: 'high' }), error => error instanceof PricingItemUnavailableError);
+    const retained = await quote({ model, channelId: newChannel, quality: 'max', resolution: '4K' });
+    equal(retained.unitCredits, 5); equal(retained.estimatedCredits, 15);
+    equal(retained.imageChannel?.channelId, newChannel);
+    equal(retained.imageChannel?.configRevision, configRevision);
+    await reject(() => quote({ model, channelId: newChannel, quality: 'unlisted-quality' }), error => error instanceof Error);
     equal(await db.imageStudioTask.count(), taskCount); equal(await db.creditAccount.findMany({ orderBy: { id: 'asc' } }), accounts);
   } finally {
     await db.$transaction(async tx => {
