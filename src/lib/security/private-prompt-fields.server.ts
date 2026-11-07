@@ -3,8 +3,12 @@ import { canonicalPrivateBinding, inspectPrivatePrompt, isStoredPrivatePrompt, P
   readPrivatePrompt, writePrivatePrompt, privatePromptPolicy, type PrivateBinding, type PrivateOrigin } from './private-prompts.server';
 
 export type PrivateField = { field: string; origins: PrivateOrigin[] };
-const provenance = new WeakMap<object, Map<string, PrivateOrigin[]>>();
-const stored = new WeakMap<object, object>();
+const stateKey = Symbol.for('sd2.private-prompt-fields.v1');
+const processState = globalThis as typeof globalThis & { [stateKey]?: {
+  provenance: WeakMap<object, Map<string, PrivateOrigin[]>>; stored: WeakMap<object, object>;
+} };
+// Node loaders and separately bundled server routes must retain the same authenticated metadata.
+const { provenance, stored } = processState[stateKey] ??= { provenance: new WeakMap(), stored: new WeakMap() };
 const definitionKinds = new Set(['image-module', 'image-preset', 'skill', 'video-template', 'video-template-version', 'video-module-context', 'multiview-action-format', 'multiview-action-sync']);
 
 export function privateFieldBinding(raw: unknown, kind: string, id: string, field: string, origins: PrivateOrigin[]): PrivateBinding | null {

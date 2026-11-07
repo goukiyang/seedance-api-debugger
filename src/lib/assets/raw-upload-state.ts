@@ -5,20 +5,22 @@ import { validateSiteUploadMetadata, sameOriginPublicUrlForLocalUpload, isLocalP
 import { isPubliclyReachableUrl } from './public-storage';
 import { uploadSimilarityStatus } from './upload-similarity';
 import { readRawUploadRecoveryProof } from './raw-upload-recovery-proof';
+import { FEEDBACK_UPLOADS_ENABLED } from './upload-purpose';
 
-export type RawUploadIdentity = { ownerId: string; requestId: string; hash: string; fileSize: number; mimeType: string };
+export type RawUploadIdentity = { ownerId: string; requestId: string; hash: string; fileSize: number; mimeType: string; purpose?: 'feedback' };
 export type RawUploadPhase = 'prepared' | 'receiving' | 'writing' | 'notAccepted' | 'completed';
 export type RawUploadState = RawUploadIdentity & { version: 2; fingerprint: string; nonce: string; phase: RawUploadPhase };
-export function rawUploadIdentity(ownerId: string, input: { requestId?: unknown; hash?: unknown; fileSize?: unknown; mimeType?: unknown }): RawUploadIdentity {
+export function rawUploadIdentity(ownerId: string, input: { requestId?: unknown; hash?: unknown; fileSize?: unknown; mimeType?: unknown; purpose?: unknown }): RawUploadIdentity {
   const requestId = uploadRequestId(input.requestId);
   const hash = typeof input.hash === 'string' ? input.hash : '';
   const fileSize = Number(input.fileSize);
   const mimeType = typeof input.mimeType === 'string' ? input.mimeType.split(';')[0].trim().toLowerCase() : '';
   if (!requestId || !/^[a-f0-9]{64}$/.test(hash) || !Number.isSafeInteger(fileSize) || fileSize <= 0
     || validateSiteUploadMetadata({ mimeType, fileSize })) throw new VerifiedUploadError('UPLOAD_IDENTITY_INVALID', '原上传文件身份无法确认', 400);
-  return { ownerId, requestId, hash, fileSize, mimeType };
+  if (input.purpose != null && input.purpose !== '' && input.purpose !== 'feedback') throw new VerifiedUploadError('UPLOAD_PURPOSE_INVALID', '上传用途无效', 400);
+  return { ownerId, requestId, hash, fileSize, mimeType, ...(input.purpose === 'feedback' ? { purpose: 'feedback' as const } : {}) };
 }
-const fingerprint = (identity: RawUploadIdentity) => uploadDigest(JSON.stringify([identity.hash, identity.fileSize, identity.mimeType]));
+const fingerprint = (identity: RawUploadIdentity) => uploadDigest(JSON.stringify([identity.hash, identity.fileSize, identity.mimeType, ...(identity.purpose ? [identity.purpose] : [])]));
 const stateKey = (identity: RawUploadIdentity) => `raw_upload_attempt_v2:${uploadDigest(identity.ownerId)}:${uploadDigest(identity.requestId)}`;
 const newNonce = () => randomBytes(24).toString('hex');
 const unknown = () => new VerifiedUploadError('UPLOAD_RESULT_UNKNOWN', '原上传结果尚未确认，未重新发送文件');
@@ -27,7 +29,7 @@ function parseState(value: string, identity: RawUploadIdentity): RawUploadState 
   try { state = JSON.parse(value) as RawUploadState; } catch { throw unknown(); }
   if (!state || state.version !== 2 || state.ownerId !== identity.ownerId || state.requestId !== identity.requestId
     || state.hash !== identity.hash || state.fileSize !== identity.fileSize || state.mimeType !== identity.mimeType
-    || state.fingerprint !== fingerprint(identity)) throw new VerifiedUploadError('UPLOAD_REQUEST_CONFLICT', '上传编号已用于其它文件');
+    || state.purpose !== identity.purpose || state.fingerprint !== fingerprint(identity)) throw new VerifiedUploadError('UPLOAD_REQUEST_CONFLICT', '上传编号已用于其它文件');
   if (!/^[a-f0-9]{48}$/.test(state.nonce) || !['prepared', 'receiving', 'writing', 'notAccepted', 'completed'].includes(state.phase)) throw unknown();
   return state;
 }
@@ -55,7 +57,7 @@ export async function recoverRetiredRawUpload(identity: RawUploadIdentity, token
     try {
       await registerVerifiedUpload({ ownerId: identity.ownerId, proof: existing.proof, fileName: existing.asset.file_name,
         originalUrl: existing.asset.original_url, thumbnailUrl: existing.asset.thumbnail_url, requestId: identity.requestId,
-        fingerprint: fingerprint(identity) });
+        fingerprint: fingerprint(identity), purpose: identity.purpose });
       const recovered = await readRawUploadResult(identity);
       if (!recovered) throw unknown();
       return { asset: recovered };
@@ -86,13 +88,13 @@ export async function readRawUploadResult(identity: RawUploadIdentity) {
       fileSize: asset.file_size, mimeType: asset.mime_type, hash: asset.hash, reused: found.reused, similarity,
       isPubliclyReachable: isPubliclyReachableUrl(originalUrl), storageProvider: isLocalPublicUploadUrl(asset.original_url) ? 'local-public' : undefined,
       ...(!isPubliclyReachableUrl(originalUrl) ? { warning: '文件已保存；当前站点未配置可供外部服务访问的原文件地址。' } : {}),
-      upload: { requestId: identity.requestId, verified: true as const, assetDisposition: found.reused ? 'reused' as const : 'new' as const,
+      upload: { ...(identity.purpose ? { purpose: identity.purpose } : {}), requestId: identity.requestId, verified: true as const, assetDisposition: found.reused ? 'reused' as const : 'new' as const,
         sourceVersion: found.proof.sourceVersion || found.proof.version } };
   } finally { await releaseVerifiedUpload(found.proof); }
 }
 export function rawUploadProof(state: RawUploadState) {
   return { ownerId: state.ownerId, requestId: state.requestId, hash: state.hash, fileSize: state.fileSize,
-    mimeType: state.mimeType, phase: state.phase, nonce: state.nonce };
+    mimeType: state.mimeType, ...(state.purpose ? { purpose: state.purpose } : {}), phase: state.phase, nonce: state.nonce };
 }
 async function replaceState(identity: RawUploadIdentity, current: NonNullable<Awaited<ReturnType<typeof stateRow>>>, next: RawUploadState) {
   const changed = await prisma.platformSetting.updateMany({ where: { key: stateKey(identity), value_json: current.row.value_json },
@@ -104,6 +106,7 @@ export async function prepareRawUpload(identity: RawUploadIdentity, previousNonc
   const asset = await readRawUploadResult(identity);
   if (asset) return { asset };
   const current = await stateRow(identity);
+  if (identity.purpose && !FEEDBACK_UPLOADS_ENABLED && !current) throw new VerifiedUploadError('FEEDBACK_UPLOAD_UNAVAILABLE', '反馈图片上传暂不可用，原稿已保留', 503);
   if (previousNonce !== undefined) {
     if (typeof previousNonce !== 'string' || !current || current.state.nonce !== previousNonce
       || !['prepared', 'notAccepted'].includes(current.state.phase)) throw unknown();
@@ -133,6 +136,7 @@ export async function transitionRawUpload(identity: RawUploadIdentity, nonce: st
 // Legacy clients may acquire a brand-new identity only after their complete
 // bytes have been hashed in memory. Existing attempts are never reclaimed.
 export async function claimLegacyRawUpload(identity: RawUploadIdentity) {
+  if (identity.purpose && !FEEDBACK_UPLOADS_ENABLED) throw new VerifiedUploadError('FEEDBACK_UPLOAD_UNAVAILABLE', '反馈图片上传暂不可用，原稿已保留', 503);
   if (await stateRow(identity)) throw unknown();
   const state: RawUploadState = { ...identity, version: 2, fingerprint: fingerprint(identity), nonce: newNonce(), phase: 'receiving' };
   try { await prisma.platformSetting.create({ data: { key: stateKey(identity), value_json: JSON.stringify(state), updated_by: identity.ownerId } }); }

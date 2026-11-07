@@ -15,6 +15,7 @@ import { VOLCENGINE_IP_API_SETTING_KEY } from '@/lib/integrations/volcengine-ip'
 import { AIMEDIAKIT_API_SETTING_KEY } from '@/lib/integrations/aimediakit';
 import { BANANA_IMAGE_API_SETTING_KEY, IMAGE_GENERATION_CHANNEL_REGISTRY_SETTING_KEY } from '@/lib/integrations/image-generation';
 import { IMAGE_STUDIO_SETTING_KEY } from '@/lib/image-studio/settings';
+import { assertNewPricingCharge, frozenPricingCredits, quotePricingCharge } from '@/lib/pricing/charge';
 
 // The build controller supplies an already-schema-initialized, empty SQLite fixture DB.
 // No schema command, production client, provider request, or committed fixture row is used here.
@@ -69,7 +70,7 @@ async function run() {
         role: 'user', account_type: 'internal', user_profile: 'other', feature_profile_id: 'internal_email_authorized', status: 'active', expires_at: null };
       const settingsBeforeGuide = await tx.platformSetting.findMany({ orderBy: { key: 'asc' } });
       const guide = await getPricingGuideSnapshot(ordinary, tx);
-      assert.ok(guide.items.some(item => item.specification.includes('IP生成')));
+      assert.equal(guide.items.some(item => item.specification.includes('IP生成')), false, 'Missing RMB video rates must not publish old fixed points');
       assert.equal(guide.pointsPerCny, null, 'An unconfigured conversion must not invent 100');
       assert.ok(guide.items.every(item => item.credits === null || item.free));
       const forbiddenGuideFields = ['billingPrincipalId', 'credentialVersion', 'configFingerprint', 'binding', 'confirmedBy', 'sourceKind', 'fixture-key-not-valid', 'fixture.invalid/api'];
@@ -85,7 +86,7 @@ async function run() {
       const rowA = snapshot.rows.find(row => row.identity.channelId === 'volcengine_ark' && row.isDefault)!;
       const rowB = snapshot.rows.find(row => row.identity.channelId === 'volcengine_ark' && row.id !== rowA.id)!;
       assert.ok(rowA && rowB); assert.equal(rowA.baseCny, null); assert.equal(rowA.confirmation, 'unconfirmed');
-      assert.equal(await resolvePricingCharge(rowA.identity, tx), null);
+      await assert.rejects(() => resolvePricingCharge(rowA.identity, tx), { code: 'pricing_charge_disabled' });
       await assert.rejects(() => resolvePricingCharge({ ...rowA.identity, modelId: 'unregistered-model' }, tx));
       evidence.push('G05/G12: real catalog, 30 enhancement scopes, no first-open write, no missing-scope fallback');
 
@@ -93,8 +94,8 @@ async function run() {
       snapshot = baseline.snapshot;
       const baselineRevision = snapshot.revision;
       const adopted = await persist(tx, snapshot, { kind: 'save', changes: { rows: [
-        { id: rowA.id, mode: 'follow', base: { amount: '0.15', currency: 'CNY', unit: 'second', source: defined } },
-        { id: rowB.id, mode: 'custom', customPointsPerCny: '2.0', base: { amount: '0.5', currency: 'CNY', unit: 'second', source: defined } },
+        { id: rowA.id, mode: 'follow', pricingEnabled: true, base: { amount: '0.15', currency: 'CNY', unit: 'second', source: defined } },
+        { id: rowB.id, mode: 'custom', pricingEnabled: true, customPointsPerCny: '2.0', base: { amount: '0.5', currency: 'CNY', unit: 'second', source: defined } },
       ] } });
       snapshot = adopted.snapshot;
       const adoptedRevision = snapshot.revision;
@@ -106,6 +107,8 @@ async function run() {
       assert.equal(projectPricingGuide([guideRow], '100', snapshot.updatedAt, true).items[0].credits, '13');
       assert.equal(projectPricingGuide([{ ...guideRow, mode: 'free' }], '100', snapshot.updatedAt, true).items[0].credits, '0');
       assert.equal(projectPricingGuide([{ ...guideRow, availability: 'needs_review' }], '100', snapshot.updatedAt, true).items.length, 0);
+      assert.equal(projectPricingGuide([{ ...guideRow, pricingEnabled: false }], '100', snapshot.updatedAt, true).items.length, 0);
+      assert.equal(projectPricingGuide([{ ...guideRow, mode: 'unset' }], '100', snapshot.updatedAt, true).items.length, 0);
       const imageGuideRow = { ...guideRow, identity: { ...guideRow.identity, kind: 'image' as const, unit: 'image' as const }, isDefault: true, baseCny: '0.05' };
       assert.equal(projectPricingGuide([imageGuideRow], '100', snapshot.updatedAt, true).items[0].credits, '5');
       assert.equal(projectPricingGuide([imageGuideRow], '100', snapshot.updatedAt, false).items.length, 0);
@@ -118,6 +121,10 @@ async function run() {
           specifications: { resolution, referenceVideo: 'none', pricingPurpose: 'standard' } } }));
       const resolutionGuide = projectPricingGuide(resolutionRows, '100', snapshot.updatedAt, true);
       assert.deepEqual(resolutionGuide.items.map(item => item.specification), ['480P', '720P', '1080P']);
+      assert.equal(projectPricingGuide([
+        { ...guideRow, identity: { ...guideRow.identity, channelId: 'seedance', specifications: {} } },
+        ...resolutionRows.map(row => ({ ...row, pricingEnabled: false })),
+      ], '100', snapshot.updatedAt, true).items.length, 0, 'Disabled scoped prices must not promote the generic fallback in the public guide');
       assert.ok(resolutionGuide.items.every(item => item.name === 'Seedance 2.0'), 'Resolution is displayed once, below the model name');
       evidence.push('Read-only guide: ordinary internal access, no configuration writes or private metadata, real adoption readback, full-task rounding and explicit free/unknown separation');
       const simulation = await previewAdminPricing(actorA, { ...input(snapshot, { kind: 'save', changes: { rows: [] } }),
@@ -203,14 +210,18 @@ async function run() {
       assert.ok(laterRows.length > 0);
       assert.ok(laterRows.every(row => row.currentUnitCredits === null && row.mode === 'unset'));
       const beforeRowB = snapshot.rows.find(row => row.id === rowB.id)!;
-      const restored = await persist(tx, snapshot, { kind: 'restore', revisionId: baselineRevision, ruleIds: [rowA.id] });
+      const missingPriceRestore = await previewAdminPricing(actorA, input(snapshot, { kind: 'restore', revisionId: baselineRevision, ruleIds: [rowA.id] }), tx);
+      assert.equal(missingPriceRestore.changes.find(change => change.id === rowA.id)!.after.mode, 'unset',
+        'Unconfigured historical video scopes never restore invented fixed-point defaults');
+      assert.equal(missingPriceRestore.changes.find(change => change.id === rowA.id)!.after.pricingEnabled, false);
+      const restored = await persist(tx, snapshot, { kind: 'restore', revisionId: adoptedRevision, ruleIds: [rowA.id] });
       snapshot = restored.snapshot;
-      assert.equal(snapshot.rows.find(row => row.id === rowA.id)!.mode, 'legacy_fixed');
+      assert.equal(snapshot.rows.find(row => row.id === rowA.id)!.mode, 'custom');
       assert.deepEqual(snapshot.rows.find(row => row.id === rowB.id), beforeRowB);
       assert.notEqual(snapshot.revision, baselineRevision);
       assert.equal(snapshot.standards.site_base_cny, '1.2', 'unselected standard stays current');
       assert.deepEqual(snapshot.rows.filter(row => row.identity.channelId === laterChannel), laterRows);
-      evidence.push('G08/G12/G20: injection-safe effective CSV, cursor history, selected legacy restore creates a new revision and retains unrelated rows plus a later supplier with no invented default price');
+      evidence.push('G08/G12/G20: injection-safe CSV and cursor history; valid monetary restore preserves unrelated rows, while unconfigured history remains disabled with no invented video price');
 
       const rowsBefore = await tx.platformSetting.findMany({ where: { key: { startsWith: PRICING_REVISION_PREFIX } }, orderBy: { key: 'asc' } });
       const draft = input(snapshot, { kind: 'save', changes: { rows: [{ id: rowA.id, mode: 'custom', customPointsPerCny: '2.1',
@@ -257,6 +268,115 @@ async function run() {
       await tx.platformSetting.update({ where: { id: policy.id }, data: { value_json: policy.value_json } });
       assert.ok(await tx.platformSetting.count({ where: { key: { startsWith: PRICING_OPERATION_PREFIX } } }));
       evidence.push('G12/G21: malformed source/policy rejects instead of defaulting or overwriting');
+
+      await setting(tx, VOLCENGINE_IP_API_SETTING_KEY, { enabled: true, api_key: 'fixture-key-not-valid',
+        base_url: 'https://fixture.invalid/api/v3', default_model: rowA.identity.modelId });
+      snapshot = await getAdminPricingSnapshot(actorA, tx);
+      const activeRow = (id: string) => snapshot.rows.find(row => row.id === id)!;
+      const activationInput = (action: PricingAdminAction): PricingAdminPreviewInput => ({ ...input(snapshot, action), expectedAuthoringRevision: snapshot.authoring!.revision });
+      const activationSave = async (action: PricingAdminAction) => {
+        const requestInput = activationInput(action), preview = await previewAdminPricing(actorA, requestInput, tx);
+        const request = { ...requestInput, operationId: randomUUID(), previewToken: preview.previewToken };
+        const result = await saveAdminPricing(actorA, request, tx);
+        assert.equal(result.state, 'succeeded', result.error?.message); assert.ok(result.snapshot);
+        snapshot = result.snapshot!;
+        return { preview, request, result };
+      };
+      assert.equal(activeRow(rowA.id).pricingEnabled, true, 'Old legacy fee contracts remain enabled');
+      assert.equal(activeRow(rowB.id).pricingEnabled, true, 'Old configured fee contracts remain enabled');
+      assert.ok(laterRows.every(row => activeRow(row.id).pricingEnabled === false), 'Unset rows default off');
+      const accepted = await quotePricingCharge(rowA.identity, '5', tx);
+      assert.ok(accepted);
+      const frozenCredits = frozenPricingCredits(accepted.charge);
+      const beforeOff = activeRow(rowA.id);
+      const off = await activationSave({ kind: 'save', changes: { rows: [{ id: rowA.id, pricingEnabled: false }] } });
+      const offRevision = snapshot.revision;
+      const disabled = activeRow(rowA.id);
+      assert.equal(disabled.pricingEnabled, false);
+      assert.equal(disabled.enabled, beforeOff.enabled);
+      for (const key of ['availability', 'canAdopt', 'mode', 'baseCny', 'source', 'currentPointsPerCny'] as const) assert.deepEqual(disabled[key], beforeOff[key], key);
+      assert.equal(off.preview.changes.find(change => change.id === rowA.id)!.before.pricingEnabled, true);
+      assert.equal(off.preview.changes.find(change => change.id === rowA.id)!.after.pricingEnabled, false);
+      const activationCsv = await exportAdminPricingCsv(actorA, { channelId: 'volcengine_ark' }, tx);
+      assert.ok(activationCsv.split('\r\n')[0].endsWith(',"pricingEnabled"'), 'Activation is appended without shifting existing CSV columns');
+      assert.ok(activationCsv.split('\r\n').some(line => line.includes(`"${rowA.id}"`) && line.endsWith(',"false"')));
+      assert.deepEqual(await getAdminPricingOperation(actorA, off.request.operationId, tx), off.result);
+      assert.deepEqual(await saveAdminPricing(actorA, off.request, tx), off.result, 'Same operation replays instead of enabling or creating a second save');
+      await assert.rejects(() => resolvePricingCharge(rowA.identity, tx), { code: 'pricing_charge_disabled' });
+      await assert.rejects(() => quotePricingCharge(rowA.identity, '5', tx));
+      await assert.rejects(() => assertNewPricingCharge(accepted.charge, accepted.charge.revision, tx));
+      assert.deepEqual(frozenPricingCredits(accepted.charge), frozenCredits, 'Accepted/frozen settlement does not re-read activation');
+      const activationHistory = await getAdminPricingHistory(actorA, { limit: 1 }, tx);
+      assert.equal(activationHistory.entries[0].changes.find(change => change.id === rowA.id)!.after.pricingEnabled, false);
+      const noOp = await activationSave({ kind: 'save', changes: { rows: [{ id: rowA.id, pricingEnabled: false }] } });
+      assert.equal(noOp.preview.affectedRuleIds.length, 0);
+      assert.equal(snapshot.revision, offRevision);
+      await activationSave({ kind: 'save', changes: { rows: [{ id: rowA.id, pricingEnabled: true }] } });
+      await activationSave({ kind: 'restore', revisionId: offRevision, ruleIds: [rowA.id] });
+      assert.equal(activeRow(rowA.id).pricingEnabled, false, 'Historical restore carries off state');
+      await activationSave({ kind: 'restore', revisionId: adoptedRevision, ruleIds: [rowA.id] });
+      assert.equal(activeRow(rowA.id).pricingEnabled, true, 'Restoring old configured history defaults on');
+
+      await activationSave({ kind: 'save', changes: { authoring: { globalPointsPerCny: '2' }, rows: [{ id: rowB.id, authoringRateMode: 'follow_global' }] } });
+      const memberPrice = activeRow(rowB.id).baseCny;
+      const memberOff = await activationSave({ kind: 'save', changes: { rows: [{ id: rowB.id, pricingEnabled: false }] } });
+      assert.ok(snapshot.authoring!.members.includes(rowB.id));
+      assert.equal(memberOff.preview.authoringChanged, false, 'Activation keeps the same authoring relationship');
+      const originalPolicy = JSON.parse((await tx.platformSetting.findUniqueOrThrow({ where: { key: PRICING_POLICY_KEY } })).value_json);
+      const originalBinding = originalPolicy.rules.find((rule: { id: string }) => rule.id === rowA.id).binding;
+      await setting(tx, VOLCENGINE_IP_API_SETTING_KEY, { enabled: false, api_key: 'fixture-rotated-key',
+        base_url: 'https://fixture.invalid/api/v3', default_model: rowA.identity.modelId });
+      snapshot = await getAdminPricingSnapshot(actorA, tx);
+      await activationSave({ kind: 'save', changes: { rows: [{ id: rowA.id, pricingEnabled: false }] } });
+      const unavailablePolicy = JSON.parse((await tx.platformSetting.findUniqueOrThrow({ where: { key: PRICING_POLICY_KEY } })).value_json);
+      assert.deepEqual(unavailablePolicy.rules.find((rule: { id: string }) => rule.id === rowA.id).binding, originalBinding, 'Off must not rebind an unavailable source');
+      await activationSave({ kind: 'save', changes: { authoring: { globalPointsPerCny: '3' }, rows: [] } });
+      assert.ok(snapshot.authoring!.members.includes(rowB.id));
+      assert.equal(activeRow(rowB.id).pricingEnabled, false);
+      assert.equal(activeRow(rowB.id).currentPointsPerCny, null, 'Unavailable source remains unavailable, not magically adopted');
+      assert.equal(activeRow(rowB.id).baseCny, memberPrice);
+      const closedPolicy = JSON.parse((await tx.platformSetting.findUniqueOrThrow({ where: { key: PRICING_POLICY_KEY } })).value_json);
+      assert.equal(closedPolicy.rules.find((rule: { id: string }) => rule.id === rowB.id).customPointsPerCny, '3', 'Closed members keep following the global setting without readiness blocking');
+      await assert.rejects(() => previewAdminPricing(actorA, activationInput({ kind: 'save', changes: { rows: [{ id: rowA.id, pricingEnabled: true }] } }), tx));
+      await assert.rejects(() => previewAdminPricing(actorA, activationInput({ kind: 'save', changes: { rows: [{ id: rowB.id, pricingEnabled: true }] } }), tx));
+      await setting(tx, VOLCENGINE_IP_API_SETTING_KEY, { enabled: true, api_key: 'fixture-key-not-valid',
+        base_url: 'https://fixture.invalid/api/v3', default_model: rowA.identity.modelId });
+      snapshot = await getAdminPricingSnapshot(actorA, tx);
+      await activationSave({ kind: 'save', changes: { rows: [{ id: rowB.id, pricingEnabled: true }] } });
+      const scopedIdentity = { ...rowB.identity, specifications: { resolution: rowB.identity.specifications.resolution, referenceVideo: 'none', pricingPurpose: 'standard' } };
+      const scopedOff = await activationSave({ kind: 'save', changes: { rows: [{ id: rowB.id, specifications: scopedIdentity.specifications, pricingEnabled: false }] } });
+      const scopedId = scopedOff.preview.changes.find(change => change.sourceRowId === rowB.id && change.after.pricingEnabled === false)!.id;
+      assert.equal(activeRow(rowB.id).pricingEnabled, true);
+      assert.equal(activeRow(scopedId).pricingEnabled, false);
+      await assert.rejects(() => resolvePricingCharge(scopedIdentity, tx), { code: 'pricing_charge_disabled' });
+      assert.ok(await resolvePricingCharge({ ...scopedIdentity, specifications: { ...scopedIdentity.specifications, referenceVideo: 'present' } }, tx), 'Other modes in the same resolution still use their enabled general contract');
+      await assert.rejects(() => resolvePricingCharge({ ...scopedIdentity, specifications: { ...scopedIdentity.specifications, resolution: '1080p' } }, tx),
+        { code: 'pricing_scope_unmatched' }, 'No unrelated resolution borrows a fixed-point fallback');
+      const scopedOffRevision = snapshot.revision;
+      await activationSave({ kind: 'save', changes: { rows: [{ id: scopedId, pricingEnabled: true }] } });
+      await activationSave({ kind: 'restore', revisionId: scopedOffRevision, ruleIds: [scopedId] });
+      assert.equal(activeRow(scopedId).pricingEnabled, false);
+      const tombstone = laterRows[0];
+      await activationSave({ kind: 'save', changes: { rows: [{ id: tombstone.id, pricingEnabled: false }] } });
+      const tombstonePolicy = await tx.platformSetting.findUniqueOrThrow({ where: { key: PRICING_POLICY_KEY } });
+      const tombstoneRule = JSON.parse(tombstonePolicy.value_json).rules.find((rule: { id: string }) => rule.id === tombstone.id);
+      assert.equal(tombstoneRule.mode, 'unset'); assert.equal(tombstoneRule.pricingEnabled, false);
+      await assert.rejects(() => previewAdminPricing(actorA, activationInput({ kind: 'save', changes: { rows: [
+        { id: tombstone.id, authoringRateMode: 'follow_global' },
+      ] } }), tx));
+      assert.equal((await getAdminPricingSnapshot(actorA, tx)).revision, snapshot.revision, 'Rejected member preview leaves the current policy readable and unchanged');
+      await assert.rejects(() => resolvePricingCharge(tombstone.identity, tx), (error: unknown) => !!error && typeof error === 'object' && 'reason' in error && error.reason === 'disabled');
+      await assert.rejects(() => previewAdminPricing(actorA, activationInput({ kind: 'save', changes: { rows: [{ id: tombstone.id, pricingEnabled: true }] } }), tx));
+      await assert.rejects(() => previewAdminPricing(actorA, activationInput({ kind: 'save', changes: { rows: [{ id: rowA.id, pricingEnabled: 'false' as unknown as boolean }] } }), tx));
+      const invalidTombstone = JSON.parse(tombstonePolicy.value_json);
+      delete invalidTombstone.rules.find((rule: { id: string }) => rule.id === tombstone.id).pricingEnabled;
+      await setting(tx, PRICING_POLICY_KEY, invalidTombstone);
+      await assert.rejects(() => getAdminPricingSnapshot(actorA, tx), { code: 'pricing_policy_invalid' });
+      await tx.platformSetting.update({ where: { key: PRICING_POLICY_KEY }, data: { value_json: tombstonePolicy.value_json } });
+      const staleActivation = await saveAdminPricing(actorA, { ...off.request, operationId: randomUUID() }, tx);
+      assert.equal(staleActivation.state, 'rejected'); assert.equal(staleActivation.error!.code, 'pricing_conflict');
+      assert.deepEqual(await getAdminPricingOperation(actorA, staleActivation.operationId, tx), staleActivation);
+      evidence.push('G07/G15/G18/G20/G22: activation separates supplier availability, blocks exact/legacy fallback, preserves frozen settlement and unavailable authoring membership/bindings, restores flags, rejects unset enable/corrupt flags/stale requests, and persists false tombstones in the same rollback-only Prisma gate');
       completed = true;
       throw rollback;
     }, { timeout: 120000, maxWait: 10000 });

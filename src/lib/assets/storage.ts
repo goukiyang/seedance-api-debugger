@@ -184,6 +184,7 @@ export async function uploadAsset(
   mediaMetadata: UploadAssetMetadata | null = null,
   requestId?: string,
   receiptFingerprint?: string,
+  purpose?: 'feedback',
 ): Promise<UploadResult> {
   await uploadIdentity(ownerId);
   await privateUploadDirectory();
@@ -201,7 +202,7 @@ export async function uploadAsset(
       thumbnailUrl = proof.type === 'image' ? await prepareVerifiedUploadThumbnail(proof)
         : proof.type === 'video' ? await generateVideoThumbnailFromFile(original, proof.hash) : null;
     }
-    const registered = await registerVerifiedUpload({ ownerId, proof, fileName, originalUrl, thumbnailUrl, requestId, fingerprint: receiptFingerprint,
+    const registered = await registerVerifiedUpload({ ownerId, proof, fileName, originalUrl, thumbnailUrl, requestId, fingerprint: receiptFingerprint, purpose,
       width: normalizeStoredDimension(mediaMetadata?.width), height: normalizeStoredDimension(mediaMetadata?.height) });
     const asset = registered.asset;
     // Queue/index failure never turns an already committed upload into a failure.
@@ -214,7 +215,7 @@ export async function uploadAsset(
     return { assetId: asset.id, originalUrl: asset.original_url, thumbnailUrl: asset.thumbnail_url, hash: proof.hash,
       fileName: asset.file_name, fileSize: asset.file_size, mimeType: asset.mime_type,
       reused: registered.reused, width: asset.width ?? undefined, height: asset.height ?? undefined,
-      upload: { requestId: requestId || proof.hash, verified: true, assetDisposition: registered.reused ? 'reused' : 'new', sourceVersion }, similarity };
+      upload: { ...(purpose ? { purpose } : {}), requestId: requestId || proof.hash, verified: true, assetDisposition: registered.reused ? 'reused' : 'new', sourceVersion }, similarity };
   } finally { await releaseVerifiedUpload(reusedProof); await releaseVerifiedUpload(proof); }
 }
 

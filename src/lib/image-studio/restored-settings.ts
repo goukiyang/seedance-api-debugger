@@ -25,10 +25,8 @@ export function assertRestoredStudioDraft(input: {
   draft?: { moduleContext?: unknown; globalContext?: unknown; fixedReferences?: unknown;
     styleGroupIds?: string[]; styleGroupVersions?: Record<string, number>; skillIds?: string[]; skillVersions?: Record<string, string> };
 }) {
-  if (!input.restoredSettings) {
-    if (input.draft?.styleGroupVersions !== undefined) throw new RestoredStudioSettingsError('风格版本只能用于明确恢复的本次设置');
-    return;
-  }
+  // Current and shared selections also carry versions; their consumers check fresh access/revisions.
+  if (!input.restoredSettings) return;
   const draft = input.draft;
   if (input.reproduceFromTaskId !== undefined || draft?.moduleContext !== undefined
     || draft?.globalContext !== undefined || draft?.fixedReferences !== undefined) {

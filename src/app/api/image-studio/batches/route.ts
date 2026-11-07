@@ -12,6 +12,9 @@ import { videoFeishuErrorText } from '@/lib/video/feishu-errors';
 import { ContextVersionError } from '@/lib/image-studio/context-version';
 import { isPrivatePromptError } from '@/lib/security/private-prompts.server';
 import { rejectStudioSubmission, studioSubmitFailureDetail, StudioSubmitReceiptError, validStudioSubmitRequestId } from '@/lib/image-studio/submit-receipts.server';
+import { StudioSharingError } from '@/lib/image-studio/shared-command-storage';
+import { RestoredStudioSettingsError } from '@/lib/image-studio/restored-settings';
+import { StudioTaskSettingsError } from '@/lib/image-studio/task-settings';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
@@ -65,7 +68,8 @@ async function handle(request: NextRequest, write = false) {
   } catch (error) {
     const expected = error instanceof VideoFeishuError || error instanceof ImageGenerationChannelError
       || error instanceof QueueCapacityError || error instanceof QueueMaintenanceError || error instanceof StudioError
-      || error instanceof ContextVersionError || error instanceof StudioSubmitReceiptError || isPrivatePromptError(error);
+      || error instanceof ContextVersionError || error instanceof StudioSubmitReceiptError || isPrivatePromptError(error)
+      || error instanceof StudioSharingError || error instanceof RestoredStudioSettingsError || error instanceof StudioTaskSettingsError;
     const detail = studioSubmitFailureDetail(error, 'batch-api');
     const requestId = validStudioSubmitRequestId(submittedBody?.requestId) ? submittedBody.requestId : undefined;
     if (creating) logImagePricingFailure('acceptance', error, startedAt, requestId, detail.stage);

@@ -27,13 +27,16 @@ export type StoredPrivatePrompt = {
   format: typeof PRIVATE_PROMPT_FORMAT; keyId: string; nonce: string; tag: string; ciphertext: string;
   binding: PrivateBinding;
 };
+const privateErrorBrand = Symbol.for('sd2.private-prompt-error.v1');
 export class PrivatePromptError extends Error {
+  readonly [privateErrorBrand] = true;
   deliveryAttempted = false;
   readonly status = 503;
   readonly code = 'PRIVATE_PROMPT_UNAVAILABLE';
   constructor() { super('私密设置暂不可用，原输入和请求编号已保留；请稍后重试或联系维护人员'); }
 }
-export const isPrivatePromptError = (error: unknown): error is PrivatePromptError => error instanceof PrivatePromptError;
+export const isPrivatePromptError = (error: unknown): error is PrivatePromptError => error instanceof PrivatePromptError
+  || typeof error === 'object' && error !== null && (error as { [privateErrorBrand]?: unknown })[privateErrorBrand] === true;
 const fail = (): never => { throw new PrivatePromptError(); };
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 const identifier = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_.:/-]{1,240}$/.test(value);

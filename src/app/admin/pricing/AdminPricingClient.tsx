@@ -14,6 +14,7 @@ import { allPricingFilters, canEditPricingBase, pricingActiveFilters, pricingDis
 import { isSeedanceVideoDuration } from '@/lib/provider/seedance-models';
 import type { PricingEnhanceGroup } from '@/lib/pricing/pricing-authoring-contract';
 import { multiplyDecimal, roundDecimal } from '@/lib/pricing/math';
+import { canEnablePricingAdminRow, isSimplePricingAdminMoneyDraft, pricingAdminEnabled, restorePricingAdminMoneyRow, stagePricingAdminEnabled } from '@/lib/pricing/admin-client-state';
 import PricingSourceEditor from './PricingSourceEditor';
 import PricingHistory from './PricingHistory';
 import PricingReferenceSettings, { broadcastReferencePricingUpdated } from './PricingReferenceSettings';
@@ -54,6 +55,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
   const scrollAnchor = useRef<{ anchorId: string; anchorOffset: number } | null>(null), readSequence = useRef(0);
   draftRef.current = draft; viewRef.current = view; pendingRef.current = pending;
   const unauthorized = useCallback(() => {
+    setIdentityVerified(false);
     setDenied(true); setSnapshot(null); setHistoryOpen(false); setPreviewResult(null); setSelected([]);
     setDraft({ revision: '', changes: { rows: [] } }); setPending(null); setHydrated(false);
   }, []);
@@ -143,7 +145,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
   useEffect(() => {
     if (!hydrated || denied) return;
     const visibility = () => {
-      setIdentityVerified(false);
+      // A background refresh is not an account change; writes still require a fresh read and preview.
       setHistoryOpen(false);
       window.dispatchEvent(new CustomEvent('sd2-time-bubble', { detail: 'pricing-session-check' }));
       if (!document.hidden) void load();
@@ -178,10 +180,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
   const dirty = hasChanges(draft.changes), conflict = Boolean(snapshot && dirty && (draft.revision !== snapshot.revision
     || draft.authoringRevision !== snapshot.authoring?.revision || draft.catalogFingerprint !== snapshot.catalogFingerprint));
   const moneyRows = new Map(draft.changes.rows.map(row => [row.id, row]));
-  const complexDraft = Boolean(Object.keys(draft.changes.standards || {}).length || Object.keys(draft.changes.authoring || {}).length
-    || draft.changes.rows.some(row => !row.base || row.base.source.type !== 'admin_defined' || row.base.source.reference !== moneySource
-      || row.baseRelation != null || Object.keys(row).some(key => !['id', 'base', 'baseRelation', 'authoringRateMode', 'rounding'].includes(key))
-      || row.authoringRateMode !== undefined && row.authoringRateMode !== 'follow_global'));
+  const complexDraft = !isSimplePricingAdminMoneyDraft(draft.changes, moneySource);
   const action: PricingAdminAction = restore || { kind: 'save', changes: draft.changes };
   const scenarioRows = snapshot?.rows || [];
   const quantity = recoveringDraft ? view.quantity : '5';
@@ -374,11 +373,30 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
     || draft.changes.authoring?.globalPointsPerCny !== undefined && !validPricingAdminRate(draft.changes.authoring.globalPointsPerCny)
     || draft.changes.rows.some(row => row.customPointsPerCny !== undefined && !validPricingAdminRate(row.customPointsPerCny)));
   const invalidEnhance = action.kind === 'save' && draft.changes.authoring?.enhanceGroup !== undefined && !validPricingEnhanceGroup(draft.changes.authoring.enhanceGroup);
+  const invalidEnabled = action.kind === 'save' && draft.changes.rows.some(change => {
+    const row = snapshot.rows.find(item => item.id === change.id);
+    return change.pricingEnabled === true && (!row || !canEnablePricingAdminRow(row, change));
+  });
   const canSave = Boolean(preview && actionable && (preview.changes.length || preview.authoringChanged || action.kind === 'save' && Object.keys(draft.changes.standards || {}).length || action.kind === 'restore' && action.standards?.length))
-    && !pending && !saving && !previewBusy && !conflict && !readError && !reading && !invalidRate && !invalidEnhance && !operationStorageFailed && !scenarioOverflow;
+    && !pending && !saving && !previewBusy && !conflict && !readError && !reading && !invalidRate && !invalidEnhance && !invalidEnabled && !operationStorageFailed && !scenarioOverflow;
   const resetDraft = () => {
     setRestore(null);
     setDraft({ revision: snapshot.revision, authoringRevision: snapshot.authoring?.revision, catalogFingerprint: snapshot.catalogFingerprint, changes: { rows: [] } });
+  };
+  const renderPricingSwitch = (row: PricingAdminRow, change?: PricingAdminRowChange) => {
+    const enabled = change?.pricingEnabled ?? pricingAdminEnabled(row);
+    const cannotEnable = !enabled && !canEnablePricingAdminRow(row, change);
+    const enableReason = cannotEnable ? !row.enabled || row.availability === 'disabled' || row.availability === 'unconfigured'
+      ? row.unavailableReason || '当前通道不可用'
+      : row.availability === 'needs_review' ? `来源待确认${row.unavailableReason ? `：${row.unavailableReason}` : ''}，请先补充本次有效基价`
+        : '请先填写有效单价，再开启；单价与开关将一同保存' : '';
+    const disabled = Boolean(pending || saving || conflict || reading || readError || !recoveringDraft && complexDraft || cannotEnable);
+    const title = enableReason || (pending ? '保存结果待确认，请先查询原回执' : saving ? '正在保存费率' : conflict ? '费率版本已变化，请先核对原草稿'
+      : reading || readError ? '请先读取当前费率' : !recoveringDraft && complexDraft ? '请先查看原草稿'
+        : `${enabled ? '关闭' : '开启'}此费率，仅影响新任务`);
+    return <button type="button" role="switch" aria-checked={enabled} className={styles.pricingSwitch}
+      aria-label={`${pricingDisplayName(row)} ${row.providerLabel} ${pricingDisplayScope(row)} 费率启停`}
+      title={title} disabled={disabled} onClick={() => updateChanges(changes => stagePricingAdminEnabled(changes, row, !enabled))} />;
   };
   if (!recoveringDraft) {
     const kind = view.filter.kind || 'image';
@@ -414,6 +432,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
           <thead><tr><th scope="col">型号与规格</th><th scope="col">人民币单价</th><th scope="col">扣点</th></tr></thead>
           <tbody>{rows.map(row => {
             const change = !complexDraft && !conflict ? moneyRows.get(row.id) : undefined;
+            const pricingEnabled = change?.pricingEnabled ?? pricingAdminEnabled(row);
             const { change: projected, scenario } = pricingAdminPreviewForSource(preview, row.id);
             const actual = row.identity.billingMode === 'actual', free = row.mode === 'free';
             const unit = row.identity.unit === 'image' ? '张' : '秒';
@@ -433,26 +452,26 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
             const scope = pricingDisplayScope(row);
             const rowFields = Object.entries(fields).filter(([key]) => key.includes(row.id));
             return <tr key={row.id} data-pricing-row={row.id}>
-              <th scope="row"><strong>{label}</strong><small>{row.providerLabel} · {scope}</small>{row.availability !== 'ready' && <small>{row.unavailableReason || '不可用'}</small>}</th>
+              <th scope="row"><div className={styles.pricingName}>{renderPricingSwitch(row, change)}<strong>{label}</strong></div><small>{row.providerLabel} · {scope}</small>{change?.pricingEnabled !== undefined && <small>待保存：{pricingEnabled ? '开启' : '关闭'}</small>}{row.availability !== 'ready' && <small>{row.unavailableReason || '不可用'}</small>}</th>
               <td>{actual ? '按供应商账单' : free ? '免费' : editable ? <label className={styles.moneyInput}>
                 <input type="text" inputMode="decimal" maxLength={snapshot.limits.maxNumberLength} aria-label={`${label} ${row.providerLabel} ${scope} 人民币单价（元/${unit}）`} placeholder="填写单价" value={amount ?? ''} disabled={saving || complexDraft || conflict} onChange={event => {
                   const value = event.target.value;
-                  if (value === (row.baseCny ?? '')) updateChanges(changes => ({ ...changes, rows: changes.rows.filter(item => item.id !== row.id) }));
+                  if (value === (row.baseCny ?? '')) updateChanges(changes => restorePricingAdminMoneyRow(changes, row.id));
                   else editRow(row.id, { base: { amount: value, currency: 'CNY', unit: row.identity.unit, source: { type: 'admin_defined', reference: moneySource, note: '' } },
                     ...(adoptsGlobal ? { authoringRateMode: 'follow_global' as const, ...(globalRate === '100' ? { rounding: RMB_INTEGER_ROUNDING } : {}) } : {}) });
                 }} /><small>元/{unit}</small>
               </label> : knownBase ? <>{amount} 元/{unit}{derived && <small>随关联单价更新</small>}</> : <>{'待确认'}{row.availability === 'ready' && !complexDraft && !hasRate && !adoptsGlobal && <small>尚未配置换算</small>}</>}
               {derived && editable && <small>{change ? '保存后单独定价' : '随关联价更新，手改后单独定价'}</small>}
               {rowFields.map(([key, value]) => <small key={key}>{value}</small>)}</td>
-              <td className={styles.moneyPoints}>{actual ? '按实结算' : free ? '0 点' : row.availability !== 'ready' ? '待确认' : points != null ? <><strong>{points} 点</strong><small>{unit === '张' ? '每张' : `${quantity} 秒`}{pendingPrice ? serverPoints == null ? ' · 待核对' : ' · 待保存' : ''}</small>{points === '0' && <small>按规则取整为 0</small>}</> : !knownBase && editable ? '待填单价' : change ? '单价无效或超出上限' : '待确认'}</td>
+              <td className={styles.moneyPoints}>{!pricingEnabled ? <><strong>已关闭</strong>{pendingPrice && <small>待保存</small>}</> : actual ? '按实结算' : free ? '0 点' : row.availability !== 'ready' ? '待确认' : points != null ? <><strong>{points} 点</strong><small>{unit === '张' ? '每张' : `${quantity} 秒`}{pendingPrice ? serverPoints == null ? ' · 待核对' : ' · 待保存' : ''}</small>{points === '0' && <small>按规则取整为 0</small>}</> : !knownBase && editable ? '待填单价' : change ? '单价无效或超出上限' : '待确认'}</td>
             </tr>;
           })}</tbody>
         </table>
         {!rows.length && <p className={styles.empty}>{kind === 'image' ? '这个范围没有可编辑的图片费率。' : '暂无可显示的型号。'}</p>}
-        {affected.length > 0 && <details className={styles.moneyAffected} open><summary>同时变更 {affected.length} 项价格</summary><ul>{affected.map(item => {
+        {affected.length > 0 && <details className={styles.moneyAffected} open><summary>同时变更 {affected.length} 项费率</summary><ul>{affected.map(item => {
           const row = snapshot.rows.find(row => row.id === item.sourceRowId);
           const scenario = pricingAdminPreviewForSource(preview, item.sourceRowId, item.id).scenario;
-          return <li key={item.id}>{row ? `${pricingDisplayName(row)} · ${row.providerLabel} · ${pricingDisplayScope(row)}` : item.label}：{item.after.baseCny ?? '待确认'} 元/{row?.identity.unit === 'image' ? '张' : '秒'}{scenario?.adjustedCredits != null && `，${scenario.adjustedCredits} 点 / ${scenario.quantity}${scenario.unit === 'image' ? ' 张' : ' 秒'}`}</li>;
+          return <li key={item.id}>{row ? `${pricingDisplayName(row)} · ${row.providerLabel} · ${pricingDisplayScope(row)}` : item.label}：{!pricingAdminEnabled(item.after) ? '已关闭 · 待保存' : <>{item.after.baseCny ?? '待确认'} 元/{row?.identity.unit === 'image' ? '张' : '秒'}{scenario?.adjustedCredits != null && `，${scenario.adjustedCredits} 点 / ${scenario.quantity}${scenario.unit === 'image' ? ' 张' : ' 秒'}`}</>}</li>;
         })}</ul></details>}
         <footer className={styles.savebar}>
           <div role="status">{previewMessage ? <><span>{previewMessage}</span><button type="button" onClick={() => setPreviewNonce(value => value + 1)}>重新核对</button></>
@@ -530,6 +549,7 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
       <div className={styles.tableHeader} aria-hidden="true"><span /><span>型号 / 画质 / 适用范围</span><span>当前价格</span><span>点/元设置</span><span>跟随方式</span><span /></div>
       <div className={view.filter.kind === 'video' ? styles.videoRows : undefined}>{visible.map(row => {
         const change = draft.changes.rows.find(item => item.id === row.id);
+        const pricingEnabled = change?.pricingEnabled ?? pricingAdminEnabled(row);
         const mapped = pricingAdminPreviewForSource(preview, row.id), after = mapped.change?.after, scenario = mapped.scenario;
         const basisKind = change?.basisKind || row.basisKind;
         const follows = change?.authoringRateMode === 'follow_global' || !change?.authoringRateMode && row.authoringRateMode === 'follow_global';
@@ -539,13 +559,13 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
         const newScope = change?.specifications && Object.entries(change.specifications).some(([key, value]) => row.identity.specifications[key] !== value);
         const invalidRowDuration = row.identity.kind === 'video' && !isSeedanceVideoDuration(Number(view.quantity), row.identity.modelId);
         const unavailableMember = row.authoringRateMode === 'follow_global' && (!row.enabled || row.availability !== 'ready' || !row.canAdopt);
-        const pendingMemberExit = change?.authoringRateMode === 'custom' && Object.keys(change).length === 2;
+        const pendingMemberExit = change?.authoringRateMode === 'custom' && Object.keys(change).filter(key => key !== 'pricingEnabled').length === 2;
         const currentCredits = !newScope && scenario?.currentCredits !== null && scenario?.currentCredits !== undefined ? scenario.currentCredits : null;
         return <div key={row.id} className={`${styles.rowBlock} ${selected.includes(row.id) ? styles.selected : ''}`} data-pricing-row={row.id}>
           <div className={styles.row}>
             <input type="checkbox" aria-label={`选择 ${row.label} ${row.providerLabel}`} checked={selected.includes(row.id)} onChange={event => { setRestore(null); setAllMatched(false); setSelected(current => event.target.checked ? [...current, row.id] : current.filter(id => id !== row.id)); }} />
-            <div className={styles.model}><strong>{pricingDisplayName(row)}</strong><small>{row.providerLabel}{row.isDefault ? ' · 默认' : ''}{!row.enabled ? ' · 已停用' : ''}</small><span className={styles.scope}>{pricingDisplayScope(row)}</span>{row.availability !== 'ready' && <small>{row.unavailableReason || (row.enabled ? '当前不可调用' : '已停用，不可调用')}</small>}</div>
-            <div className={styles.credits} data-label="当前价格">{row.identity.billingMode === 'actual' ? <><strong>按账单结算</strong><small>{scenario?.authorizedMaximumCredits ? `最多预留 ${scenario.authorizedMaximumCredits} 点${changed ? '（草稿预览）' : ''}` : '预留上限待实际请求报价'}</small></> : <><strong>{currentCredits !== null ? `${currentCredits} 点` : row.currentUnitCredits !== null ? `${row.currentUnitCredits} 点` : '当前价格待核实'}</strong><small>{currentCredits !== null ? row.identity.unit === 'image' ? '每张' : `${view.quantity} 秒` : row.identity.unit === 'image' ? '每张' : '每秒单价，整任务另行取整'}</small>{invalidRowDuration && <small>此时长不可试算</small>}{changed && <small>待保存：{scenario?.adjustedCredits !== null && scenario?.adjustedCredits !== undefined ? `${scenario.adjustedCredits} 点 / ${row.identity.unit === 'image' ? '张' : `${view.quantity} 秒`}` : '等待预览'}{pricingAdminScenarioDifference(scenario || { deltaCredits: null, differencePercent: null }) ? ` · ${pricingAdminScenarioDifference(scenario!)}` : ''}</small>}{newScope && <small>待保存范围：{pricingDisplayScope(row, change!.specifications)}</small>}{scenario?.roundedToZero && <small>预览取整为 0 点，不是明确免费</small>}{scenario?.reason && <small>{scenario.reason}</small>}</>}<small>{pricingDisplayRounding(row)}</small>{row.baseCny !== null && <small>基价 ¥{row.baseCny}/{row.identity.unit === 'image' ? '张' : '秒'}{row.currentPointsPerCny !== null ? ` × ${row.currentPointsPerCny} 点/元` : ''}</small>}</div>
+            <div className={styles.model}><div className={styles.pricingName}>{renderPricingSwitch(row, change)}<strong>{pricingDisplayName(row)}</strong></div><small>{row.providerLabel}{row.isDefault ? ' · 默认' : ''}{!row.enabled ? ' · 已停用' : ''}</small><span className={styles.scope}>{pricingDisplayScope(row)}</span>{change?.pricingEnabled !== undefined && <small>待保存：{pricingEnabled ? '开启' : '关闭'}</small>}{row.availability !== 'ready' && <small>{row.unavailableReason || (row.enabled ? '当前不可调用' : '已停用，不可调用')}</small>}</div>
+            <div className={styles.credits} data-label="当前价格">{!pricingEnabled ? <><strong>已关闭</strong>{changed && <small>待保存</small>}</> : row.identity.billingMode === 'actual' ? <><strong>按账单结算</strong><small>{scenario?.authorizedMaximumCredits ? `最多预留 ${scenario.authorizedMaximumCredits} 点${changed ? '（草稿预览）' : ''}` : '预留上限待实际请求报价'}</small></> : <><strong>{currentCredits !== null ? `${currentCredits} 点` : row.currentUnitCredits !== null ? `${row.currentUnitCredits} 点` : '当前价格待核实'}</strong><small>{currentCredits !== null ? row.identity.unit === 'image' ? '每张' : `${view.quantity} 秒` : row.identity.unit === 'image' ? '每张' : '每秒单价，整任务另行取整'}</small>{invalidRowDuration && <small>此时长不可试算</small>}{changed && <small>待保存：{scenario?.adjustedCredits !== null && scenario?.adjustedCredits !== undefined ? `${scenario.adjustedCredits} 点 / ${row.identity.unit === 'image' ? '张' : `${view.quantity} 秒`}` : '等待预览'}{pricingAdminScenarioDifference(scenario || { deltaCredits: null, differencePercent: null }) ? ` · ${pricingAdminScenarioDifference(scenario!)}` : ''}</small>}{newScope && <small>待保存范围：{pricingDisplayScope(row, change!.specifications)}</small>}{scenario?.roundedToZero && <small>预览取整为 0 点，不是明确免费</small>}{scenario?.reason && <small>{scenario.reason}</small>}</>}<small>{pricingDisplayRounding(row)}</small>{row.baseCny !== null && <small>基价 ¥{row.baseCny}/{row.identity.unit === 'image' ? '张' : '秒'}{row.currentPointsPerCny !== null ? ` × ${row.currentPointsPerCny} 点/元` : ''}</small>}</div>
             <div className={styles.rate} data-label="当前点/元"><input type="number" min={snapshot.limits.rateMin} max={snapshot.limits.rateMax} step="0.1" maxLength={32} aria-label={`${row.label} ${row.providerLabel} 当前点每元`} value={rate} placeholder={row.mode === 'free' ? '免费' : '未设置'} onChange={event => editRow(row.id, { mode: 'custom', customPointsPerCny: event.target.value })} />
               {changed && <small>生效 {row.currentPointsPerCny ?? '待核'}，{action.kind === 'save' ? '待保存' : '目标见预览'}</small>}</div>
             <div className={styles.mode} data-label="点元跟随"><span>{follows ? '跟随统一' : rateModeLabel({ ...row, mode, authoringRateMode: change?.authoringRateMode || row.authoringRateMode })}</span>
@@ -586,9 +606,10 @@ export default function AdminPricingClient({ actorId }: { actorId: string }) {
         const scenario = pricingAdminPreviewForSource(preview, change.sourceRowId, change.id).scenario;
         return <div key={change.id}><span>{change.label}<small>{snapshot.rows.find(row => row.id === change.sourceRowId)?.providerLabel}</small><small>{specsLabel(change.specifications) || '通用规格'}</small>
         {rateModeLabel(change.before) !== rateModeLabel(change.after) && <small>{rateModeLabel(change.before)} → {rateModeLabel(change.after)}</small>}
+        {pricingAdminEnabled(change.before) !== pricingAdminEnabled(change.after) && <small>费率：{pricingAdminEnabled(change.before) ? '开启' : '关闭'} → {pricingAdminEnabled(change.after) ? '开启' : '关闭'} · 待保存</small>}
         {change.before.baseCny !== change.after.baseCny && <small>基价 ¥{change.before.baseCny ?? '待核'} → ¥{change.after.baseCny ?? '待核'}</small>}
         {JSON.stringify(change.before.authoringEntry) !== JSON.stringify(change.after.authoringEntry) && <small>基价关系或来源依据已调整{action.kind === 'restore' && !change.after.authoringEntry?.baseRelation ? '，恢复历史价并单独设置' : ''}</small>}
-      </span><span>{scenario && !scenario.isExample && scenario.currentCredits !== null && scenario.adjustedCredits !== null ? <>{scenario.currentCredits} → <strong>{scenario.adjustedCredits} 点</strong><small>{scenario.unit === 'second' ? `${scenario.quantity} 秒` : `${scenario.quantity} 张`}{pricingAdminScenarioDifference(scenario) ? ` · ${pricingAdminScenarioDifference(scenario)}` : ''}</small></> : change.after.currentUnitCredits !== null ? <>{change.before.currentUnitCredits ?? '待核'} → <strong>{change.after.currentUnitCredits} 点</strong><small>每计价单位 · 完整场景待报价</small></> : <>{change.before.currentPointsPerCny ?? '待核'} → <strong>{change.after.currentPointsPerCny ?? '待核'}</strong><small>点/元{scenario?.isExample ? ' · 实扣取决于账单' : ' · 此场景待报价'}</small></>}</span></div>;
+      </span><span>{!pricingAdminEnabled(change.after) ? <><strong>已关闭</strong><small>待保存，保留原价</small></> : scenario && !scenario.isExample && scenario.currentCredits !== null && scenario.adjustedCredits !== null ? <>{scenario.currentCredits} → <strong>{scenario.adjustedCredits} 点</strong><small>{scenario.unit === 'second' ? `${scenario.quantity} 秒` : `${scenario.quantity} 张`}{pricingAdminScenarioDifference(scenario) ? ` · ${pricingAdminScenarioDifference(scenario)}` : ''}</small></> : change.after.currentUnitCredits !== null ? <>{change.before.currentUnitCredits ?? '待核'} → <strong>{change.after.currentUnitCredits} 点</strong><small>每计价单位 · 完整场景待报价</small></> : <>{change.before.currentPointsPerCny ?? '待核'} → <strong>{change.after.currentPointsPerCny ?? '待核'}</strong><small>点/元{scenario?.isExample ? ' · 实扣取决于账单' : ' · 此场景待报价'}</small></>}</span></div>;
       })}</div>
       {displayChanges.length > previewLimit && <button type="button" className={styles.link} onClick={() => setPreviewLimit(value => value + 24)}>加载更多变化（已显示 {previewLimit}/{displayChanges.length}）</button>}
       {skipped.length > 0 && <details><summary>有 {skipped.length} 项未参与，保留原价</summary><ul>{skipped.map(item => <li key={item.id}>{snapshot.rows.find(row => row.id === item.id)?.label || '该收费项'}：{item.reason}</li>)}</ul></details>}

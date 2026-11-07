@@ -44,6 +44,9 @@ export async function pricingAdminRoute(request: NextRequest, mutate: boolean,
       ...(error.fields ? { fields: error.fields } : {}), ...(error.currentRevision ? { currentRevision: error.currentRevision } : {}) }, { status: error.status, headers: pricingAdminHeaders });
     if (error instanceof AuthError) return NextResponse.json({ error: error.message, code: 'pricing_unauthorized' }, { status: error.status, headers: pricingAdminHeaders });
     if (error instanceof PricingNumberError || error instanceof PricingRuleConflict) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status, headers: pricingAdminHeaders });
+    const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
+      && (/^P\d{4}$/.test(error.code) || error.code === 'PRIVATE_PROMPT_UNAVAILABLE') ? error.code : 'UNEXPECTED';
+    console.warn('[PricingAdmin]', JSON.stringify({ operation: mutate ? 'mutate' : 'read', code }));
     return NextResponse.json({ error: '费率结果暂时无法确认，请保留修改；保存请求请查询原操作编号', code: 'pricing_unavailable' }, { status: 503, headers: pricingAdminHeaders });
   }
 }

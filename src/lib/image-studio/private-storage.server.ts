@@ -1,5 +1,5 @@
 import 'server-only';
-import { privateOrigin, privatePromptPolicy, PrivatePromptError, type PrivateOrigin } from '@/lib/security/private-prompts.server';
+import { isStoredPrivatePrompt, privateOrigin, privatePromptPolicy, PrivatePromptError, type PrivateOrigin } from '@/lib/security/private-prompts.server';
 import { privateFieldOrigins, privateStoredValue, readPrivateFields, writePrivateFields, transferPrivateFieldOrigin } from '@/lib/security/private-prompt-fields.server';
 import { requirePrivatePromptRequest } from '@/lib/security/private-prompt-request.server';
 
@@ -16,8 +16,11 @@ export function studioDefinitionOrigins(kind: Kind, row: Pick<Definition, 'id' |
 }
 export function readPrivateStudioDefinition<T extends Definition>(kind: Kind, row: T): T {
   if (privateStoredValue(row) !== row) return row;
-  const origins = studioDefinitionOrigins(kind, row);
-  return readPrivateFields(row, kind, row.id, ['prompt', 'context'].map(field => ({ field, origins })));
+  // Publication changes the source alias, not the encrypted field's authorship.
+  // The codec verifies kind/id/field and authenticates the stored origins with AEAD.
+  // Live shared workspaces have empty placeholders; they carry no private definition.
+  return readPrivateFields(row, kind, row.id, (['prompt', 'context'] as const).map(field => ({ field,
+    origins: isStoredPrivatePrompt(row[field]) || row[field] === '' ? [] : studioDefinitionOrigins(kind, row) })));
 }
 export function writePrivateStudioDefinition<T extends Definition>(kind: Kind, row: T, source?: Pick<Definition, 'prompt' | 'context'>): T {
   return writePrivateFields(row, kind, row.id, ['prompt', 'context'].map(field => ({ field,
@@ -44,7 +47,19 @@ export async function protectStudioDefinitionPatch<T extends Partial<Pick<Defini
 }
 
 type TaskCopy = { id: string; owner_id: string; module_id?: string | null; source_preset_id?: string | null; prompt: string; context: string; snapshot_json: string | null };
-const taskSnapshots = new WeakMap<object, Record<string, unknown>>();
+const snapshotsKey = Symbol.for('sd2.private-image-task-snapshots.v1');
+const processState = globalThis as typeof globalThis & { [snapshotsKey]?: WeakMap<object, Record<string, unknown>> };
+const taskSnapshots = processState[snapshotsKey] ??= new WeakMap<object, Record<string, unknown>>();
+function taskDefinitionOrigin(task: TaskCopy, snapshot: Record<string, unknown> | null) {
+  const sourceId = task.source_preset_id || (typeof snapshot?.sourcePresetId === 'string' ? snapshot.sourcePresetId : null);
+  const moduleId = task.module_id || (typeof snapshot?.moduleId === 'string' ? snapshot.moduleId : null);
+  const restored = snapshot?.restoredSource as { sharedSourceOwnerId?: unknown } | undefined;
+  const sourceOwner = typeof snapshot?.sharedSourceOwnerId === 'string' ? snapshot.sharedSourceOwnerId
+    : typeof restored?.sharedSourceOwnerId === 'string' ? restored.sharedSourceOwnerId : undefined;
+  // A shared task's author is frozen by the server, never inferred from its consumer.
+  return sourceId ? privateOrigin('image-preset', sourceId, sourceOwner)
+    : moduleId ? privateOrigin('image-module', moduleId, task.owner_id) : null;
+}
 export function readPrivateImageTaskSnapshot(task: TaskCopy) {
   const decoded = transformPrivateImageTask(task, false);
   return taskSnapshots.get(decoded) || {};
@@ -59,19 +74,16 @@ export function privateImageTaskOrigins(task: TaskCopy) {
   }) : [];
   if (origins.length || promptOrigins.length) return [...origins, ...promptOrigins, ...skills];
   const global = privateOrigin('image-global', 'gpt_image_studio_v1');
-  const source = task.source_preset_id ? privateOrigin('image-preset', task.source_preset_id)
-    : task.module_id ? privateOrigin('image-module', task.module_id) : null;
+  const source = taskDefinitionOrigin(task, snapshot);
   return [...(global ? [global] : []), ...(source ? [source] : []), ...skills];
 }
-export function transformPrivateImageTask<T extends TaskCopy>(task: T, write: boolean): T {
+export function transformPrivateImageTask<T extends TaskCopy>(task: T, write: boolean, definitionOrigins?: PrivateOrigin[]): T {
   if (!write && privateStoredValue(task) !== task) return task;
   const snapshot = task.snapshot_json ? JSON.parse(task.snapshot_json) as Record<string, unknown> : null;
   const global = privateOrigin('image-global', 'gpt_image_studio_v1');
-  const sourceId = task.source_preset_id || (typeof snapshot?.sourcePresetId === 'string' ? snapshot.sourcePresetId : null);
-  const moduleId = task.module_id || (typeof snapshot?.moduleId === 'string' ? snapshot.moduleId : null);
-  const source = sourceId ? privateOrigin('image-preset', sourceId) : moduleId ? privateOrigin('image-module', moduleId) : null;
+  const source = definitionOrigins?.length ? null : taskDefinitionOrigin(task, snapshot);
   const globalOrigins = global ? [global] : [];
-  const moduleOrigins = source ? [source] : [];
+  const moduleOrigins = definitionOrigins?.length ? definitionOrigins : source ? [source] : [];
   const skillOrigins = Array.isArray(snapshot?.skills) ? snapshot.skills.flatMap(skill => {
     const origin = skill && typeof skill.id === 'string' ? privateOrigin('skill', skill.id) : null;
     return origin ? [origin] : [];

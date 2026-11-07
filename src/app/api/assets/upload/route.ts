@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
     assertUploadOwner(request.headers.get('x-upload-owner-id'), user.id);
     await uploadIdentity(user.id);
     const query = request.nextUrl.searchParams;
-    const identity = rawUploadIdentity(user.id, { requestId: query.get('requestId'), hash: query.get('hash'), fileSize: query.get('fileSize'), mimeType: query.get('mimeType') });
+    const identity = rawUploadIdentity(user.id, { requestId: query.get('requestId'), hash: query.get('hash'), fileSize: query.get('fileSize'), mimeType: query.get('mimeType'), purpose: query.get('purpose') });
     const asset = await readRawUploadResult(identity);
     if (asset) return NextResponse.json({ success: true, asset }, { headers: { 'Cache-Control': 'private, no-store' } });
     const state = await readRawUploadState(identity);
@@ -190,7 +190,7 @@ export async function POST(request: NextRequest) {
     const preparedRequest = suppliedNonce !== null || request.headers.get('x-raw-upload-version') !== null;
     if (preparedRequest) {
       if (request.headers.get('x-raw-upload-version') !== '2' || !suppliedNonce || !/^[a-f0-9]{48}$/.test(suppliedNonce)) throw new VerifiedUploadError('UPLOAD_PREPARATION_REQUIRED', '原上传准备信息无法确认，未接收文件', 409);
-      const identity = rawUploadIdentity(user.id, { requestId, hash: request.headers.get('x-file-hash'), fileSize, mimeType });
+      const identity = rawUploadIdentity(user.id, { requestId, hash: request.headers.get('x-file-hash'), fileSize, mimeType, purpose: request.headers.get('x-upload-purpose') });
       const asset = await readRawUploadResult(identity);
       if (asset) return NextResponse.json({ success: true, asset });
       await transitionRawUpload(identity, suppliedNonce, 'prepared', 'receiving');
@@ -210,7 +210,7 @@ export async function POST(request: NextRequest) {
 
     ({ fileName, mimeType, fileSize } = upload.payload);
     const { buffer } = upload.payload;
-    const identity = rawUploadIdentity(user.id, { requestId: requestId || randomUUID(), hash: uploadDigest(buffer), fileSize, mimeType });
+    const identity = rawUploadIdentity(user.id, { requestId: requestId || randomUUID(), hash: uploadDigest(buffer), fileSize, mimeType, purpose: request.headers.get('x-upload-purpose') });
     originalRequestId = identity.requestId;
     if (receiving) {
       if (identity.hash !== receiving.identity.hash || identity.fileSize !== receiving.identity.fileSize || identity.mimeType !== receiving.identity.mimeType) {
@@ -250,7 +250,7 @@ export async function POST(request: NextRequest) {
     // Once writing has been acquired, no failure may declare notAccepted.
     const writing = receiving;
     receiving = null;
-    const uploadResult = await uploadSiteAsset(buffer, fileName, mimeType, fileSize, user.id, null, identity.requestId);
+    const uploadResult = await uploadSiteAsset(buffer, fileName, mimeType, fileSize, user.id, null, identity.requestId, identity.purpose);
     await transitionRawUpload(identity, writing.nonce, 'writing', 'completed').catch(() => {});
 
     await recordAssetUploadLog({

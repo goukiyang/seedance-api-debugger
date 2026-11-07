@@ -43,6 +43,8 @@ async function main() {
     assert.equal(forbiddenCalls, 0); console.log(JSON.stringify(result)); return;
   }
   if (kind === 'authoring-ui') {
+    const { runPricingFocusEngineering } = await import('./pricing-focus-engineering');
+    await runPricingFocusEngineering();
     const { runPricingAuthoringUiContractFixture } = await import('./pricing-authoring-ui-contract-fixture');
     const result = runPricingAuthoringUiContractFixture();
     assert.equal(forbiddenCalls, 0); console.log(JSON.stringify({ fixture: 'pricing-authoring-ui-contract', completed: true,

@@ -2,10 +2,9 @@ import { createHash } from 'node:crypto';
 import type { PricingMenuSources } from './image-menu-inputs';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { calculateEstimatedCost, calculateEnhanceVideoEstimatedCost } from '@/lib/pricing';
 import { getProviderConfig, isApiKeyConfigured } from '@/lib/provider/jimeng';
 import { SEEDANCE_VIDEO_MODEL_OPTIONS } from '@/lib/provider/seedance-models';
-import { VOLCENGINE_IP_MODEL_OPTIONS } from '@/lib/integrations/volcengine-ip-models';
+import { VOLCENGINE_IP_MODEL_OPTIONS, volcengineIpModelResolutions } from '@/lib/integrations/volcengine-ip-models';
 import { getVolcengineIpApiSettings, isVolcengineIpApiReady, VOLCENGINE_IP_API_SETTING_KEY } from '@/lib/integrations/volcengine-ip';
 import { getAiMediaKitApiSettings, isAiMediaKitApiReady, AIMEDIAKIT_API_SETTING_KEY } from '@/lib/integrations/aimediakit';
 import { getH3ApiSettings, H3_API_SETTING_KEY, H3_PRESET_OPTIONS, isH3Operational } from '@/lib/integrations/h3';
@@ -56,11 +55,13 @@ export async function assertPricingCatalogIdentity(identity: PricingAdminIdentit
     }
     const settings = await selectPricingImageGenerationSettings(channels, identity.modelId, identity.channelId, client, menu?.inputs.image);
     const capability = channel.models[identity.modelId as typeof IMAGE_STUDIO_MODELS[number]];
-    const adoptingFixed = fixedPriceConfirmed && identity.billingMode === 'fixed' && settings.modelCapabilities[identity.modelId as typeof IMAGE_STUDIO_MODELS[number]]?.billingMode === 'fixed';
+    const configuredCapability = settings.modelCapabilities[identity.modelId as typeof IMAGE_STUDIO_MODELS[number]];
+    const adoptingFixed = Boolean(fixedPriceConfirmed && identity.billingMode === 'fixed'
+      && configuredCapability && configuredCapability.billingMode !== 'actual');
     const validationSettings = adoptingFixed ? { ...settings, modelCapabilities: { ...settings.modelCapabilities,
-      [identity.modelId]: { ...settings.modelCapabilities[identity.modelId as typeof IMAGE_STUDIO_MODELS[number]]!, fixedPoints: 0 } } } : settings;
+      [identity.modelId]: { ...configuredCapability!, billingMode: 'fixed' as const, fixedPoints: 0 } } } : settings;
     assertPricingImageAvailability(validationSettings, identity, specifications);
-    if (!capability || capability.billingMode !== identity.billingMode) return reject();
+    if (!capability || !adoptingFixed && capability.billingMode !== identity.billingMode) return reject();
     if (!capability.ready && !adoptingFixed) {
       throw new PricingItemUnavailableError(identity, 'evidence_unconfirmed', capability.disabledReason || '该型号的计价依据尚未就绪');
     }
@@ -80,6 +81,7 @@ export async function assertPricingCatalogIdentity(identity: PricingAdminIdentit
       await validateSources(client, 'ip', menu);
       const settings = await getVolcengineIpApiSettings(client, menu?.inputs.ip);
       if (!isVolcengineIpApiReady(settings) || !VOLCENGINE_IP_MODEL_OPTIONS.some(model => model.id === identity.modelId) && settings.default_model !== identity.modelId) reject();
+      if (specifications.resolution && !volcengineIpModelResolutions(identity.modelId).includes(specifications.resolution)) reject();
       return;
     }
     reject();
@@ -191,28 +193,28 @@ export async function getPricingCatalog(client: PricingClient = prisma, menu?: P
     credential: pricingFingerprint(process.env.SEEDANCE_API_KEY || ''), models: seedance.model_options },
   process.env.SEEDANCE_API_KEY, 'environment');
   for (const model of SEEDANCE_VIDEO_MODEL_OPTIONS) {
-    const price = calculateEstimatedCost('1080p', 1, model.id).finalCostPerSecond;
-    add(row({ kind: 'video', channelId: 'seedance', modelId: model.id, billingMode: 'fixed', unit: 'second', specifications: {} },
-      model.label, '视频接口', true, isApiKeyConfigured(), price, '尚未配置视频接口', ['普通视频', 'Draft 升级', '全部合法分辨率'], model.id === seedance.model), seedanceBinding);
-    for (const resolution of ['480p', '720p', '1080p']) add(row({ kind: 'video', channelId: 'seedance', modelId: model.id,
-      billingMode: 'fixed', unit: 'second', specifications: { resolution, referenceVideo: 'none', pricingPurpose: 'standard' } },
-    `${model.label} ${resolution}`, '视频接口', true, isApiKeyConfigured(), price, '尚未配置视频接口', ['普通生成', '无参考视频', resolution], model.id === seedance.model), seedanceBinding);
+    for (const resolution of ['480p', '720p', '1080p']) {
+      add(row({ kind: 'video', channelId: 'seedance', modelId: model.id,
+        billingMode: 'fixed', unit: 'second', specifications: { resolution, referenceVideo: 'none', pricingPurpose: 'standard' } },
+      `${model.label} ${resolution}`, '视频接口', true, isApiKeyConfigured(), null, '尚未配置视频接口', ['普通生成', '无参考视频', resolution], model.id === seedance.model), seedanceBinding);
+      add(row({ kind: 'video', channelId: 'seedance', modelId: model.id,
+        billingMode: 'fixed', unit: 'second', specifications: { resolution } },
+      `${model.label} ${resolution} · 通用`, '视频接口', true, isApiKeyConfigured(), null, '尚未配置视频接口', ['样片', '带参考视频', 'Draft 升级', resolution], model.id === seedance.model), seedanceBinding);
+    }
   }
   const ip = await getVolcengineIpApiSettings(client, menu?.inputs.ip);
   const ipModels = [...VOLCENGINE_IP_MODEL_OPTIONS];
   if (ip.default_model && !ipModels.some(model => model.id === ip.default_model)) ipModels.push({ id: ip.default_model, label: ip.default_model, detail: '当前配置型号' });
   const ipBinding = binding('volcengine_ark', ip, ip.api_key, sources.get(VOLCENGINE_IP_API_SETTING_KEY) || 'legacy-default');
-  for (const model of ipModels) add(row({ kind: 'video', channelId: 'volcengine_ark', modelId: model.id,
-    billingMode: 'fixed', unit: 'second', specifications: {} }, model.label, '火山 IP 视频', ip.enabled,
-  isVolcengineIpApiReady(ip), calculateEstimatedCost('1080p', 1, model.id).finalCostPerSecond,
-  'IP 视频接口未就绪', [model.detail, 'IP 视频'], model.id === ip.default_model), ipBinding);
+  for (const model of ipModels) for (const resolution of volcengineIpModelResolutions(model.id)) add(row({ kind: 'video', channelId: 'volcengine_ark', modelId: model.id,
+    billingMode: 'fixed', unit: 'second', specifications: { resolution } }, `${model.label} ${resolution}`, '火山 IP 视频', ip.enabled,
+  isVolcengineIpApiReady(ip), null, 'IP 视频接口未就绪', [model.detail, 'IP 视频', resolution], model.id === ip.default_model), ipBinding);
   const enhance = await getAiMediaKitApiSettings(client, menu?.inputs.enhance);
   const enhanceBinding = binding('volcengine_mediakit', enhance, enhance.api_key, sources.get(AIMEDIAKIT_API_SETTING_KEY) || 'legacy-default');
   for (const resolution of ['480p', '720p', '1080p', '2k', '4k']) for (const toolVersion of ['standard', 'professional']) for (const fpsTier of ['lte30', 'gt30', 'gt60']) {
-    const price = calculateEnhanceVideoEstimatedCost({ duration: 1, resolution, toolVersion, fps: fpsTier === 'lte30' ? 30 : fpsTier === 'gt30' ? 60 : 120 }).finalCostPerSecond;
     add(row({ kind: 'enhance', channelId: 'volcengine_mediakit', modelId: 'enhance-video', billingMode: 'fixed', unit: 'second',
       specifications: { resolution, toolVersion, fpsTier } }, `视频增强 ${resolution} · ${toolVersion === 'professional' ? '专业' : '普通'} · ${fpsTier === 'gt60' ? '>60且≤120fps' : fpsTier === 'gt30' ? '>30且≤60fps' : '≤30fps'}`,
-    'AI MediaKit', enhance.enabled, isAiMediaKitApiReady(enhance), price, '增强视频接口未就绪', ['人民币整点规则按毫秒估算，旧合同保留原整秒计量',
+    'AI MediaKit', enhance.enabled, isAiMediaKitApiReady(enhance), null, '增强视频接口未就绪', ['人民币规则按毫秒估算，旧合同保留原整秒计量',
       ...(resolution === '480p' ? ['含原 240p / 360p / 540p 同价档，不改变请求输出尺寸'] : [])], true), enhanceBinding);
   }
   const h3 = await getH3ApiSettings(client, menu?.inputs.h3);
@@ -265,7 +267,7 @@ export async function appendPricingCatalogScopes(catalog: PricingCatalog, identi
     if (catalog.rows.some(row => row.id === id)) continue;
     const original = catalog.rows.find(row => row.identity.kind === identity.kind && row.identity.channelId === identity.channelId
       && row.identity.modelId === identity.modelId && row.identity.billingMode === identity.billingMode
-      && row.identity.unit === identity.unit && !Object.keys(row.identity.specifications).length);
+      && row.identity.unit === identity.unit && (identity.kind === 'video' || !Object.keys(row.identity.specifications).length));
     if (!original) throw new Error('精确收费项缺少真实供应商范围');
     if (validate) await assertPricingCatalogIdentity(identity, client, true);
     const defaultQualities = original.defaultQualities?.filter(quality => !identity.specifications.quality || quality === identity.specifications.quality);

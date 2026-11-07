@@ -85,11 +85,14 @@ async function result(db: Db, user: SessionUser, value: Stored) {
   if (!VIDEO_PROMPT_GROUP_WRITES_ENABLED && draft?.video_prompt_groups !== undefined) return { status: 200, body: {
     reuse: { ...reuse, code: 'REUSE_RESULT_UNAVAILABLE', message: '原复用结果包含提示词组，请更新后继续；当前输入保留。' },
   } };
-  if (value.status === 'applied') {
-    try { await assertSource(db, user, value.sourceTaskId); await assertItems(db, user, value.payload.workspace_assets as TaskReuseWorkspaceItem[]); }
+  if (value.status === 'applied' || draft) {
+    try {
+      await assertSource(db, user, value.sourceTaskId);
+      if (value.status === 'applied') await assertItems(db, user, value.payload.workspace_assets as TaskReuseWorkspaceItem[]);
+    }
     catch (error) {
       if (!(error instanceof AuthError)) throw error;
-      return { status: 200, body: { reuse: { ...reuse, code: 'REUSE_RESULT_UNAVAILABLE', message: '服务器已完成原复用；部分内容当前无权读取，当前草稿未替换。' } } };
+      return { status: 200, body: { reuse: { ...reuse, code: 'REUSE_RESULT_UNAVAILABLE', message: '原复用内容当前无权读取，当前草稿未替换。' } } };
     }
   }
   return { status: value.httpStatus, body: { ...value.payload, reuse } };
@@ -133,14 +136,18 @@ export async function finishTaskReuseOperation(user: SessionUser, sourceTaskId: 
           const current = await workspaceItems(tx, request.workspaceId);
           const canonical = (items: TaskReuseWorkspaceItem[]) => JSON.stringify([...items].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
           if (canonical(current) !== canonical(request.expectedWorkspaceAssets)) throw new TaskReuseOperationError('REUSE_WORKSPACE_CONFLICT', '参考区已被更新，未覆盖后来编辑。');
-          if (input.rejection) throw new TaskReuseOperationError(input.rejection.code, input.rejection.message, input.rejection.status);
-          mark('authorize_items');
-          await assertItems(tx, user, input.items);
-          mark('replace_items');
-          await tx.workspaceAsset.deleteMany({ where: { workspace_id: request.workspaceId } });
-          if (input.items.length) await tx.workspaceAsset.createMany({ data: input.items.map((item, index) => ({ workspace_id: request.workspaceId,
-            asset_id: item.assetId, reference_image_id: item.referenceImageId, role: item.role, sort_order: index })) });
-          status = 'applied'; payload = { ...input.payload, workspace_id: request.workspaceId, workspace_assets: await workspaceItems(tx, request.workspaceId) };
+          if (input.rejection) {
+            status = 'rejected'; httpStatus = input.rejection.status;
+            payload = { ...input.payload, code: input.rejection.code, error: input.rejection.message, message: input.rejection.message };
+          } else {
+            mark('authorize_items');
+            await assertItems(tx, user, input.items);
+            mark('replace_items');
+            await tx.workspaceAsset.deleteMany({ where: { workspace_id: request.workspaceId } });
+            if (input.items.length) await tx.workspaceAsset.createMany({ data: input.items.map((item, index) => ({ workspace_id: request.workspaceId,
+              asset_id: item.assetId, reference_image_id: item.referenceImageId, role: item.role, sort_order: index })) });
+            status = 'applied'; payload = { ...input.payload, workspace_id: request.workspaceId, workspace_assets: await workspaceItems(tx, request.workspaceId) };
+          }
         } catch (error) {
           if (!(error instanceof TaskReuseOperationError) && !(error instanceof AuthError)) throw error;
           status = 'rejected'; httpStatus = error.status;

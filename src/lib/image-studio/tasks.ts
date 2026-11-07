@@ -2,7 +2,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { observeOperation } from '@/lib/performance/server-operations';
 import { likedStudioTaskPage } from './liked-task-page';
 import { studioClaimScanPage } from './claim-scan';
-import { readPrivateStudioDefinition, transformPrivateImageTask } from './private-storage.server';
+import { readPrivateStudioDefinition, readPrivateImageTaskSnapshot, transformPrivateImageTask } from './private-storage.server';
+import { privateFieldOrigins } from '@/lib/security/private-prompt-fields.server';
+import { validStudioPresetId } from './preset-id';
 import { isStoredPrivatePrompt, privateOrigin } from '@/lib/security/private-prompts.server';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -114,9 +116,7 @@ export function parseSharedStudioIntent(value: unknown): SharedStudioIntent | un
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new StudioError('共享模板请求无效', 400);
   const intent = value as Record<string, unknown>;
   if (Object.keys(intent).some(key => !['protocol', 'presetId', 'definitionToken'].includes(key))
-    || intent.protocol !== 'shared-live-v1' || typeof intent.presetId !== 'string'
-    || (!/^[a-zA-Z0-9-]{1,120}$/.test(intent.presetId)
-      && !/^module-source:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(intent.presetId))
+    || intent.protocol !== 'shared-live-v1' || !validStudioPresetId(intent.presetId)
     || typeof intent.definitionToken !== 'string' || !intent.definitionToken || intent.definitionToken.length > 256) {
     throw new StudioError('共享模板协议或版本无效，请重新读取模板', 409);
   }
@@ -178,7 +178,7 @@ export async function resolveStudioTaskRestoredSettings(actor: ImageStudioIdenti
   const source = transformPrivateImageTask(storedSource, false);
   let snapshot: Record<string, unknown>;
   try {
-    const parsed: unknown = JSON.parse(source.snapshot_json!);
+    const parsed: unknown = readPrivateImageTaskSnapshot(source);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
     snapshot = parsed as Record<string, unknown>;
   } catch { throw new StudioError('原记录没有完整恢复设置，请使用当前模板', 409); }
@@ -1210,6 +1210,11 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       }
       if (billingContract.pricing) await assertNewPricingCharge(billingContract.pricing, billingContract.pricing.revision, tx);
     }
+    const frozenDefinition = restored?.snapshot ?? sharedDefinition ?? workspace;
+    const frozenDefinitionOrigins = frozenDefinition ? [
+      ...privateFieldOrigins(frozenDefinition, restored ? 'moduleContext' : 'context'),
+      ...privateFieldOrigins(frozenDefinition, restored || sharedDefinition ? 'templatePrompt' : 'prompt'),
+    ] : undefined;
     for (let i = 0; i < input.count; i++) {
       const id = `${billingContract.pricing ? 'rate-' : ''}${batchId}-${i}`;
       const candidate = sheet ? undefined : avatar?.candidates[i];
@@ -1233,7 +1238,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       taskData.snapshot_json = JSON.stringify({ ...JSON.parse(taskData.snapshot_json || '{}'),
         safeRetryRuleIds: RETRY_RULES.filter(rule => retryPolicy.enabledIds.includes(rule.id)).map(rule => `${rule.id}@${rule.version}`) });
       const protectedTaskData = transformPrivateImageTask({ ...taskData, id, owner_id: ownerId,
-        prompt: taskPrompt, context, snapshot_json: taskData.snapshot_json ?? null }, true);
+        prompt: taskPrompt, context, snapshot_json: taskData.snapshot_json ?? null }, true, frozenDefinitionOrigins);
       if (preparation) await preparation.save(tx, protectedTaskData);
       else {
         submissionStage = 'task-insert';

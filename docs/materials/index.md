@@ -14,8 +14,25 @@
 
 # 项目资料索引
 
+## RATE-VIDEO01 视频人民币计价补齐
+
+[原单最新交付](../../tasks/todo/2026-11-05-ledger-rate-accounting.md#rate-video01-最终交付)：v0.134.7已部署，正常CAS新增16条跟随金额规则、移除2条旧通用固定点数，56成员含22视频/4图片/30增强统一10点/元；旧40金额来源开关、历史冻结/账本及赠分关闭保持。双完整工程/构建和公网健康通过，功能待用户手验。当前价全字段SHA e52bb566，旧03db仅为保存前；私有[配置核对](2026-11-05-ledger-rate-accounting/release/video-money10-20261106/attempt01/post-config-proof.json)及同目录source-pair/public-deployed原证不上Git。
+
+## RATE-10 统一每元10点与关闭新用户赠分
+
+[原单](../../tasks/todo/2026-11-06-points-scale10-welcome.md)与[交付说明](2026-11-06-points-scale10/README.md)：v0.134.5已部署，40项统一人民币费率已正常CAS改为10并回读，赠分false/default0；旧余额、原账及已受理合同不重算。完整工程、构建、健康通过，实际生成待用户手验；原私有回执不上Git。
+
+<!-- RATE-ENABLE01-20261105 -->
+## RATE-ENABLE01 费率单项启停
+
+[原单](../../tasks/todo/2026-11-05-pricing-item-activation.md)与[资料说明](2026-11-05-pricing-item-activation/README.md)：v0.134.3/7dc33318a及新相容guard0e840e2d已保护部署，主/guard完整工程、类型和构建通过，7服务4timer与公网资源有证；原价格、旧冻结合同及账本保留，功能待用户手验。失败尝试和HD工程待核线索保原证，不含数据库、环境或媒体原件。
+<!-- /RATE-ENABLE01-20261105 -->
+
+
 <!-- LEDGER-RATE-ACCOUNTING-MATERIALS-20261105 -->
 ## COST-CHECK01 账本费用核算接入（2026-11-05）
+
+当前价重算v0.134.1 / aff41ac30 / BUILD yInCrZREmBsu5NEEsZ-R6已于UTC 2026-11-06T06:04:46Z部署，待用户手验。[原单](../../tasks/todo/2026-11-05-ledger-rate-accounting.md)、[公网收口](2026-11-05-ledger-rate-accounting/release/attempt05/public-deployed.json)、[主/guard配对](2026-11-05-ledger-rate-accounting/release/attempt05/source-pair-contract.json)、[完整构建](2026-11-05-ledger-rate-accounting/release/attempt05/main-build-success.json)、[健康](2026-11-05-ledger-rate-accounting/release/attempt05/service-health.json)。统一当前参考价/折合点数，不混加历史实扣；旧型号及默认档可编辑，失败/在途不计合计，导出保快照。3448视频+763图片全有价，11文字+1排队抠图待设置；不改原账/旧点数/费率，无DDL/收费生成/浏览器验收。继承765与d2ee guard，窗口已释放；下方为旧批次证据。
 
 追加已部署v0.133.6 / 213c0596e / BUILD72IjU8mLcMmyT8I1ANeIB，19:52:26Z收口，待用户手验。[追加发布回执](2026-11-05-ledger-rate-accounting/release/attempt03/public-deployed.json)、[最终只读核对](2026-11-05-ledger-rate-accounting/release/followup-gap-audit/sd2-cost-gap-after1336-20261105.json)、[剩余351条清单](2026-11-05-ledger-rate-accounting/release/followup-gap-audit/sd2-remaining-cost-gaps-20261105.csv)。97图片旧参考价及3明确免费H3已补算；31专项及完整候选工程通过，原费率/账本/点数保持。下列为首批发布历史。
 
@@ -485,3 +502,7 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 - [六项限定Ego观察](2026-11-01-admin-usage-read-snapshot/ego-stage2-observation-summary.json)、[独立B媒体补样](2026-11-01-admin-usage-read-snapshot/ego-stage2-B-supplement-summary.json)及[统计CSV](2026-10-31-navigation-performance/post-snapshot-statistics.csv)已归档，原用户页保留；旧缺口不补造。四向调查与[统一实施方案](2026-11-01-admin-usage-read-snapshot/implementation-plan.md)已完成，三项已随v0.125.2/88a73464保护部署：展示菜单解除长写事务、回执精确失效归类、明确失效后省旧版往返。B handler外等待及四结构残留如实保留；当前源码已提交推送，Linux完整工程、真实非零菜单/DTO等价/fresh charge、30断言有效consumer与两段索引计划有证；原采集FAIL和writer非重叠保留。[本批部署回执](2026-11-01-admin-usage-read-snapshot/release/stage3-attempt01/deployment-result.json)可接续；本批无DDL，59fb仅程序回退保表/数据，[部署后两项限定观察](2026-11-01-admin-usage-read-snapshot/ego-stage3/summary.json)已完成：设置正文1.424s且无旧计价事务，目录主区仍7.380s；B点击7.097s、首字节3.578s/handler61.5ms，外段继续诊断。其他功能待手验，CHAR02只规划、SUNBURST上游原因未证且不造4K；原证本机私有，公开仅脱敏固定记录。
 
 - 封面媒体定点接续仅增短时日志并已恢复原配置；同一B/640/revision2自然点击5.256s、媒体TTFB2.390s，对应Nginx上游头/完整响应均113ms、总时长888ms，Node响应构造89.7ms。已把主要等待缩到观察的上游处理区间之外，公网/前置代理/浏览器等细因仍未证；不冒新修复或全站改善。[原代理计时](2026-11-01-admin-usage-read-snapshot/media-edge-diagnostic/attempt02/timing-snapshot.jsonl)、[配置恢复证明](2026-11-01-admin-usage-read-snapshot/media-edge-diagnostic/attempt02/automatic-restore.json)保留；App未重启、源88/v0.125.2不变。
+
+<!-- CHARACTER-INDEPENDENT-CONTEXT-20261107 -->
+[角色上下文独立原单§15](../../tasks/todo/2026-10-31-character-reference-replan.md#15-正脸侧脸与前后身上下文独立2026-11-07)：v0.134.16主16c57e550/guard2d3ab523已保护部署，待用户手验。私有2026-11-07-character-independent-context/implementation/attempt02保存精确源码/Git delta、两版18组读者/原生摘要/完整构建、source-pair-contract、public-deployed/public-character-css/service-health及切换/备份原证；attempt01保首轮类型失败与修正检查，未将失败冒成功。服务器同名stage含原始日志/回退入口/备份；无新用户附件，无浏览器或收费生成。
+<!-- /CHARACTER-INDEPENDENT-CONTEXT-20261107 -->

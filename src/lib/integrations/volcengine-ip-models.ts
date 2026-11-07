@@ -30,7 +30,7 @@ export const VOLCENGINE_IP_MODEL_OPTIONS: VolcengineIpModelOption[] = [
   {
     id: SEEDANCE_2_5_IP_MODEL_ID,
     label: 'Seedance 2.5（IP生成）',
-    detail: '4-30 秒 · 480p / 720p / 1080p · 4.5 点/秒，总点数向上取整',
+    detail: '4-30 秒 · 480p / 720p / 1080p · 按费率页人民币价格自动换算点数',
   },
 ];
 

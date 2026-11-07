@@ -2,6 +2,8 @@ import { pricingCanonical } from './catalog';
 import { compareDecimal, multiplyDecimal, normalizeDecimal, roundDecimal, divideDecimal, subtractDecimal } from './math';
 import type { PricingAdminIdentity, PricingAdminRow } from './admin-contract';
 import type { PricingAuthoring, PricingAuthoringEntry } from './pricing-authoring-contract';
+import { SEEDANCE_VIDEO_MODEL_OPTIONS, SEEDANCE_2_5_IP_MODEL_ID } from '@/lib/provider/seedance-models';
+import { VOLCENGINE_IP_MODEL_OPTIONS, volcengineIpModelResolutions } from '@/lib/integrations/volcengine-ip-models';
 
 export function emptyPricingAuthoring(policyRevision: string): PricingAuthoring {
   return { schemaVersion: 1, revision: 'unconfigured', policyRevision, globalPointsPerCny: null, members: [], entries: {} };
@@ -39,7 +41,7 @@ export function parsePricingAuthoring(raw: string, policyRevision: string): Pric
     }
     if (entry.baseRelation) {
       const relation = entry.baseRelation;
-      if (typeof relation.parentId !== 'string' || relation.factor !== '1.5' || typeof relation.parentRevision !== 'string') throw new Error('基价跟随关系损坏');
+      if (typeof relation.parentId !== 'string' || !['1', '1.5'].includes(relation.factor) || typeof relation.parentRevision !== 'string') throw new Error('基价跟随关系损坏');
       normalizeDecimal(relation.exactProduct, { maxScale: 18, max: '1000000', allowZero: false });
     }
   }
@@ -54,8 +56,24 @@ export function derivedPricingBase(parent: string, factor: string) {
   if (compareDecimal(adopted, '0') <= 0 || compareDecimal(adopted, '1000000') > 0) throw new Error('派生基价超界或舍入为零，未保存');
   return { exact, adopted };
 }
-export function assertPricingBaseRelation(parent: PricingAdminIdentity, child: PricingAdminIdentity) {
-  if (parent.kind !== 'video' || child.kind !== 'video' || parent.channelId !== 'seedance' || child.channelId !== parent.channelId
+export function assertPricingBaseRelation(parent: PricingAdminIdentity, child: PricingAdminIdentity, factor = '1.5') {
+  if (factor === '1') {
+    const resolution = parent.specifications.resolution;
+    const seedance = child.channelId === 'seedance' && SEEDANCE_VIDEO_MODEL_OPTIONS.some(model => model.id === child.modelId);
+    const ip = child.channelId === 'volcengine_ark' && VOLCENGINE_IP_MODEL_OPTIONS.some(model => model.id === child.modelId)
+      && volcengineIpModelResolutions(child.modelId).includes(resolution);
+    const generation = child.modelId === SEEDANCE_2_5_IP_MODEL_ID || /seedance.*2[.\-]5/i.test(child.modelId) ? '2-5' : '2-0';
+    if (parent.kind !== 'video' || child.kind !== 'video' || parent.channelId !== 'seedance'
+      || parent.modelId !== `dreamina-seedance-${generation}-${generation === '2-5' ? '260628' : '260128'}`
+      || !['480p', '720p', '1080p'].includes(resolution) || parent.specifications.referenceVideo !== 'none'
+      || parent.specifications.pricingPurpose !== 'standard' || Object.keys(parent.specifications).length !== 3
+      || parent.billingMode !== 'fixed' || child.billingMode !== 'fixed' || parent.unit !== 'second' || child.unit !== 'second'
+      || Object.keys(child.specifications).length !== 1 || child.specifications.resolution !== resolution || !seedance && !ip) {
+      throw new Error('仅已知同代视频型号及合法分辨率可跟随站内人民币基价');
+    }
+    return;
+  }
+  if (factor !== '1.5' || parent.kind !== 'video' || child.kind !== 'video' || parent.channelId !== 'seedance' || child.channelId !== parent.channelId
     || !/seedance.*2[.\-]0/i.test(parent.modelId) || !/seedance.*2[.\-]5/i.test(child.modelId)
     || parent.billingMode !== 'fixed' || child.billingMode !== 'fixed'
     || pricingCanonical(parent.specifications) !== pricingCanonical(child.specifications)

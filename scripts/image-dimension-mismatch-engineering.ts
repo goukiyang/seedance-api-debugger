@@ -269,6 +269,26 @@ async function main() {
     await assert.rejects(finishRejectedStudioDimensions(await seed('corrupt-output'), png.subarray(0, 50)));
     assert.equal((await db.imageStudioTask.findUniqueOrThrow({ where: { id: 'corrupt-output' } })).asset_id, null);
     checks.push('plain_failure_corrupt_or_unproven_output_stays_unavailable');
+    // A normal completed original is usable at its real size. Explicit old
+    // rejection checkpoints above retain their historical refund policy.
+    const validDifferentSize = await seed('valid-returned-size', true);
+    await delivery.createStudioBase64Delivery(validDifferentSize, png.toString('base64'), {});
+    await db.imageStudioTask.update({ where: { id: validDifferentSize.id }, data: { lease_until: new Date(Date.now() - 1000) } });
+    const beforeValid = await db.creditAccount.findUniqueOrThrow({ where: { user_id: owner } });
+    await worker.recoverStudioTasks();
+    const accepted = await db.imageStudioTask.findUniqueOrThrow({ where: { id: validDifferentSize.id } });
+    assert.equal(accepted.status, 'succeeded'); assert.equal(accepted.actual_credits, 1); assert.equal(accepted.error, null);
+    assert.equal(accepted.output_size, '32x32');
+    const acceptedAsset = await db.asset.findUniqueOrThrow({ where: { id: accepted.asset_id! } });
+    assert.equal(acceptedAsset.width, 16); assert.equal(acceptedAsset.height, 16);
+    await sharp(readFileSync(path.join(directory, 'public', acceptedAsset.original_url))).raw().toBuffer();
+    assert.equal(JSON.parse(acceptedAsset.metadata_json!).validation.requestedSize, '32x32');
+    assert.equal(await db.creditLedger.count({ where: { related_task_id: accepted.id } }), 2);
+    const afterValid = await db.creditAccount.findUniqueOrThrow({ where: { user_id: owner } });
+    assert.equal(afterValid.balance, beforeValid.balance - 1); assert.equal(afterValid.frozen_credits, beforeValid.frozen_credits - 1);
+    await worker.recoverStudioTasks();
+    assert.equal(await db.creditLedger.count({ where: { related_task_id: accepted.id } }), 2);
+    checks.push('valid_size_difference_completes_original_and_settles_once_without_provider');
     assert.equal(forbiddenCalls, 0); completed = true;
   } finally {
     mock.restoreAll(); await db.$disconnect(); process.chdir(root);

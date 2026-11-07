@@ -156,7 +156,7 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
     stage = 'normalize'; await assertLease();
     if (delivery) await updateStudioDelivery(delivery, { phase: 'validate' });
     const exactSize = task.output_size && /^\d+x\d+$/.test(task.output_size) ? task.output_size : undefined;
-    const { png, validation } = await validateGeneratedStudioImage(original, { size: exactSize, format: exactSize ? 'png' : undefined },
+    const { png, validation } = await validateGeneratedStudioImage(original, { size: exactSize, format: exactSize ? 'png' : undefined, requireExactDimensions: Boolean(retainedOriginal) },
       async value => { observedValidation = value; if (delivery) await updateStudioDelivery(delivery, { validation: value }); });
     stage = 'save'; await assertLease();
     if (delivery) await updateStudioDelivery(delivery, { phase: 'save', validation });
@@ -456,7 +456,7 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
     stage = 'normalize'; await assertLease();
     if (delivery) await updateStudioDelivery(delivery, { phase: 'validate' });
     const exactSize = task.output_size && /^\d+x\d+$/.test(task.output_size) ? task.output_size : undefined;
-    const { png, validation } = await validateGeneratedStudioImage(original, { size: exactSize, format: exactSize ? 'png' : undefined },
+    const { png, validation } = await validateGeneratedStudioImage(original, { size: exactSize, format: exactSize ? 'png' : undefined, requireExactDimensions: Boolean(retainedOriginal) },
       async value => { observedValidation = value; if (delivery) await updateStudioDelivery(delivery, { validation: value }); });
     stage = 'save'; await assertLease();
     if (delivery) await updateStudioDelivery(delivery, { phase: 'save', validation });

@@ -3,7 +3,7 @@ import 'server-only';
 import { Prisma } from '@prisma/client';
 import type { SessionUser } from '@/lib/auth/session';
 import { workAccessSql } from './access';
-import { canUseWorksPreview } from './rollout.server';
+import { canUseWorksRecommendationTrial } from './rollout.server';
 import { replayWorkRecommendation, WORK_RECOMMENDATION_RULE } from './recommendation-score';
 
 const PAGE_SIZE = 24;
@@ -16,7 +16,7 @@ type Source = { id: string; version: string | null; completed_at: Date; links: s
 type Visible = { id: string; version: string; evidence_at: Date | null; own_image: number | bigint };
 
 export async function readWorkRecommendationBatch(db: Prisma.TransactionClient, user: SessionUser, cursor: string) {
-  if (!canUseWorksPreview(user)) throw new Error('Work recommendation trial is restricted to the existing preview account');
+  if (!canUseWorksRecommendationTrial(user)) throw new Error('Work recommendation trial is restricted to the existing preview account');
   // Seek on the primary key before joining. The per-asset limit also bounds popular inputs.
   const sources = await db.$queryRaw<Source[]>(Prisma.sql`WITH page AS MATERIALIZED (
     SELECT id, current_version_id, medium, discoverable, completed_at FROM Work
@@ -37,7 +37,7 @@ export async function readWorkRecommendationBatch(db: Prisma.TransactionClient, 
   const facts: Array<{ workId: string; mediaVersion: string; evidence: Link; score: number; qualified: boolean }> = [];
   if (candidates.length) {
     const access = await workAccessSql(db, user);
-    if (!canUseWorksPreview(access.user)) throw new Error('Work recommendation preview account has changed');
+    if (!canUseWorksRecommendationTrial(access.user)) throw new Error('Work recommendation preview account has changed');
     const ids = Array.from(new Set(candidates.flatMap(({ source, links }) => [source.id, ...links.map(link => link.id)])));
     const visible = await db.$queryRaw<Visible[]>(Prisma.sql`WITH ${access.ctes}
       SELECT w.id, v.id AS version, image_source.created_at AS evidence_at,

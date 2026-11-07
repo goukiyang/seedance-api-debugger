@@ -15,6 +15,7 @@ export async function quotePricingCharge(identity: PricingAdminIdentity, quantit
   const resolved = await resolvePricingCharge(identity, client, menu);
   if (!resolved) return null;
   const row = resolved.row;
+  if (row.pricingEnabled === false) throw new PricingChargeError('该费率已停用，不接受新请求；原任务保持原合同');
   if (row.mode === 'unset') throw new PricingChargeError('当前收费规则尚未设置');
   if (!row.enabled || row.availability !== 'ready' || row.confirmation === 'needs_review') {
     throw new PricingChargeError(row.unavailableReason || '该收费依据需要重新核实，原任务保持原合同');
@@ -37,7 +38,7 @@ export async function quotePricingCharge(identity: PricingAdminIdentity, quantit
 export async function assertNewPricingCharge(charge: FrozenPricingCharge, expectedRevision: unknown, client: Client = prisma) {
   if (expectedRevision !== charge.revision) throw new PricingChargeError();
   const current = await resolvePricingCharge(charge.identity, client);
-  if (!current || current.revision !== charge.revision || current.ruleId !== charge.ruleId
+  if (!current || current.row.pricingEnabled === false || current.revision !== charge.revision || current.ruleId !== charge.ruleId
     || JSON.stringify(current.binding) !== JSON.stringify(charge.binding)) throw new PricingChargeError();
   if (charge.identity.kind === 'image') await assertPricingImageConsumerReady(client);
 }

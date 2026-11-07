@@ -2,6 +2,7 @@ import type { PricingAdminBasis, PricingAdminIdentity, PricingAdminMode, Pricing
 
 export type PricingIdentity = PricingAdminIdentity;
 export type PricingRule = {
+  pricingEnabled?: boolean;
   id: string;
   identity: PricingIdentity;
   basisKind: PricingAdminBasis;

@@ -5,6 +5,7 @@ import { X } from 'lucide-react';
 import { RelativeTime } from '@/components/RelativeTime';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import type { PricingAdminAction, PricingAdminBasis, PricingAdminHistory, PricingAdminHistoryEntry, PricingAdminSnapshot } from '@/lib/pricing/admin-contract';
+import { pricingAdminEnabled } from '@/lib/pricing/admin-client-state';
 import dialogStyles from '@/components/ProductDialog.module.css';
 import styles from './pricing.module.css';
 
@@ -61,6 +62,7 @@ export default function PricingHistory({ snapshot, onClose, onRestore, onUnautho
             <input type="checkbox" disabled={!exists} checked={selected.revision === entry.revisionId && selected.rows.includes(change.id)} onChange={() => toggle(entry, change.id)} />
             <span>{change.label}<small>{change.before.currentPointsPerCny || '未设置'} → {change.after.currentPointsPerCny || '未设置'} 点/元 · {change.before.currentUnitCredits ?? '待核'} → {change.after.currentUnitCredits ?? '待核'} 点{!exists ? ' · 当前对象不存在，无法恢复' : ''}</small>
               {change.specifications && <small>适用规格：{Object.values(change.specifications).join(' / ') || '通用规格'}</small>}
+              {pricingAdminEnabled(change.before) !== pricingAdminEnabled(change.after) && <small>费率：{pricingAdminEnabled(change.before) ? '开启' : '关闭'} → {pricingAdminEnabled(change.after) ? '开启' : '关闭'}</small>}
               {change.before.baseCny !== change.after.baseCny && <small>基价 ¥{change.before.baseCny ?? '待核'} → ¥{change.after.baseCny ?? '待核'}</small>}
               {change.before.authoringRateMode !== change.after.authoringRateMode && <small>点元关系：{change.before.authoringRateMode === 'follow_global' ? '跟随统一' : change.before.authoringRateMode === 'legacy_follow' ? '旧标准' : '单独设置'} → {change.after.authoringRateMode === 'follow_global' ? '跟随统一' : change.after.authoringRateMode === 'legacy_follow' ? '旧标准' : '单独设置'}</small>}
               {JSON.stringify(change.before.authoringEntry) !== JSON.stringify(change.after.authoringEntry) && <small>基价关系或来源依据已调整，恢复预览会重核适用关系。</small>}

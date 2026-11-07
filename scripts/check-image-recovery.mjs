@@ -51,6 +51,7 @@ const dimensionMismatchChecks = [
   'settled_backfill_idempotent_hidden_by_default_exact_visibility_cas',
   'normal_actions_follow_owner_source_permissions_not_size_status',
   'plain_failure_corrupt_or_unproven_output_stays_unavailable',
+  'valid_size_difference_completes_original_and_settles_once_without_provider',
 ];
 const fixtures = [
   { file: 'scripts/works-engineering.ts', schema: 'works-engineering.v1', marker: 'Works engineering receipt: ', checks: WORKS_CHECKS, sources: WORKS_SOURCES },
@@ -111,7 +112,7 @@ const fixtures = [
       'client_per_file_recovery', 'upload_entry_contracts_preserved'], sources: [
       'scripts/upload-private-directory-engineering.ts', 'scripts/upload-client-recovery-engineering.ts',
       'scripts/upload-raw-recovery-engineering.mjs', 'scripts/upload-root-cure-smoke.ts',
-      'src/lib/assets/verified-upload.ts', 'src/lib/assets/raw-upload-state.ts', 'src/lib/assets/upload-log.ts',
+      'src/lib/assets/verified-upload.ts', 'src/lib/assets/raw-upload-state.ts', 'src/lib/assets/upload-purpose.ts', 'src/lib/assets/upload-log.ts',
       'src/lib/assets/storage.ts', 'src/lib/assets/site-upload.ts', 'src/lib/http/file-upload.ts',
       'src/lib/assets/direct-upload.ts', 'src/lib/assets/direct-upload-error.ts', 'src/app/api/assets/upload-proxy/route.ts',
       'src/lib/http/upload-session.ts', 'src/lib/hooks/useWorkspace.ts', 'src/components/ResourceLibraryPicker.tsx',
@@ -221,7 +222,7 @@ const publicUsageFixtures = [
     ] },
   { file: 'scripts/studio-restored-settings-engineering.ts', schema: 'studio-restored-settings-engineering.v1',
     databaseFlag: 'applicationDatabaseOpened', sources: [
-      'src/lib/image-studio/restored-settings.ts', 'src/lib/image-studio/tasks.ts',
+      'src/lib/image-studio/restored-settings.ts', 'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/preset-id.ts',
       'src/lib/image-studio/personal-prompt.ts', 'src/lib/image-studio/personal-prompt.server.ts',
       'src/lib/image-studio/skills.ts', 'src/lib/image-studio/private-storage.server.ts',
       'src/lib/security/private-prompts.server.ts', 'src/lib/security/private-prompt-fields.server.ts', 'scripts/server-runtime.cjs',

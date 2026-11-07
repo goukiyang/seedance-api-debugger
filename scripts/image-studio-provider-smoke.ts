@@ -30,6 +30,30 @@ async function main() {
   const geminiBody = JSON.parse(String(geminiRequests[0].init.body));
   assert.equal(geminiBody.contents[0].parts.length, 2);
   assert.deepEqual(geminiBody.generationConfig.imageConfig, { aspectRatio: '16:9', imageSize: '4K' });
+  const nativeUri = 'https://example.invalid/native-pro.png';
+  const nativePng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j3ioAAAAASUVORK5CYII=', 'base64');
+  let nativeDownloads = 0;
+  const nativeParams = { ...params, model: 'gemini-3-pro-image-preview', protocol: 'gemini_native' as const,
+    quality: 'auto', ratio: '1:1', size: '2K', deliverRemoteImage: async (url: string) => {
+      assert.equal(url, nativeUri); nativeDownloads++; return nativePng;
+    } };
+  for (const fileData of [{ fileUri: nativeUri }, { fileUri: nativeUri, mimeType: 'image/png' }]) {
+    const remote = await requestStudioImages(nativeParams, async () => Response.json({
+      candidates: [{ content: { parts: [{ fileData }] }, finishReason: 'STOP' }],
+    }));
+    assert.deepEqual(remote.images, [nativePng.toString('base64')]);
+  }
+  assert.equal(nativeDownloads, 2, 'missing declaration MIME uses the normal image download checkpoint');
+  for (const fileData of [{ fileUri: nativeUri, mimeType: 'text/html' }, { fileUri: 'http://127.0.0.1/private.png' }]) {
+    await assert.rejects(requestStudioImages(nativeParams, async () => Response.json({
+      candidates: [{ content: { parts: [{ fileData }] } }],
+    })), error => error instanceof StudioProviderError);
+  }
+  assert.equal(nativeDownloads, 2, 'explicit non-image MIME and unsafe URLs never reach delivery');
+  if (process.argv.includes('--native-remote')) {
+    console.log('PASS: native remote image URLs with and without declared MIME; explicit non-image MIME and unsafe URL rejected; no provider calls.');
+    return;
+  }
   await requestStudioImages({ ...params, images: [
     { bytes: new Uint8Array([1]), mimeType: 'image/png' },
     { bytes: new Uint8Array([2]), mimeType: 'image/jpeg' },

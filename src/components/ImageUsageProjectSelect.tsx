@@ -26,7 +26,7 @@ export function useImageUsageProject(ownerId: string, workspace: string) {
     } };
 }
 
-type Project = { id: string; name: string; can_generate?: boolean };
+type Project = { id: string; name: string; owner_user_id: string; can_generate?: boolean };
 export function ImageUsageProjectSelect({ ownerId, value, onChange, disabled, storageIssue }: {
   ownerId: string; value: string | null; onChange: (id: string | null) => void; disabled?: boolean; storageIssue?: string;
 }) {
@@ -38,12 +38,12 @@ export function ImageUsageProjectSelect({ ownerId, value, onChange, disabled, st
     const sequence = ++epoch.current;
     const controller = new AbortController();
     setState({ owner: ownerId, projects: [], loading: true, error: '' });
-    void fetch('/api/projects?lite=true&include_all=true', { cache: 'no-store', signal: controller.signal })
+    void fetch('/api/projects?lite=true&scope=owned', { cache: 'no-store', signal: controller.signal, headers: { 'x-app-session-user': ownerId } })
       .then(async response => {
         const data = await response.json();
         if (!response.ok || !Array.isArray(data.projects)) throw new Error('项目暂未读到，请重试');
         if (controller.signal.aborted || sequence !== epoch.current) return;
-        setState({ owner: ownerId, projects: data.projects.filter((p: Project) => validId(p.id) && p.can_generate === true), loading: false, error: '' });
+        setState({ owner: ownerId, projects: data.projects.filter((p: Project) => validId(p.id) && p.owner_user_id === ownerId && p.can_generate === true), loading: false, error: '' });
       }).catch(() => {
         if (!controller.signal.aborted && sequence === epoch.current) setState({ owner: ownerId, projects: [], loading: false, error: '项目暂未读到，当前选择保留' });
       });
@@ -55,15 +55,15 @@ export function ImageUsageProjectSelect({ ownerId, value, onChange, disabled, st
   return <div style={{ minWidth: 0, marginBlock: 8 }}>
     <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
       <label htmlFor={id}>项目</label>
-      <ProjectSelector onCatalogChange={() => setRevision(value => value + 1)} id={id} value={value || ''} disabled={disabled || state.loading || state.owner !== ownerId}
+      <ProjectSelector catalogScope="owned" onCatalogChange={() => setRevision(value => value + 1)} id={id} value={value || ''} disabled={disabled || state.loading || state.owner !== ownerId}
         style={{ minWidth: 120, maxWidth: '100%', flex: '1 1 160px' }} onChange={event => onChange(event.target.value || null)}>
         <option value="">未归属</option>
-        {value && !selected && <option value={value}>{state.loading ? '正在核对原项目' : state.error ? '原项目待核对' : '原项目不可用，请重新选择'}</option>}
+        {value && !selected && <option value={value} disabled>{state.loading ? '正在核对原项目' : state.error ? '原项目待核对' : '原归属不在我的项目中'}</option>}
         {projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
       </ProjectSelector>
       {value && <button type="button" aria-label="清除项目选择" title="清除项目选择" disabled={disabled} onClick={() => onChange(null)}><X size={15} /></button>}
       {state.error && <button type="button" aria-label="重新读取项目" title="重新读取项目" onClick={() => setRevision(n => n + 1)}><RefreshCw size={15} /></button>}
     </div>
-    {(unavailable || state.error || storageIssue) && <small role="status">{unavailable ? '原项目已不可用，输入保留；请选择项目或清除归属' : state.error || storageIssue}</small>}
+    {(unavailable || state.error || storageIssue) && <small role="status">{unavailable ? '原归属已保留，可选择我的项目或清除归属' : state.error || storageIssue}</small>}
   </div>;
 }
