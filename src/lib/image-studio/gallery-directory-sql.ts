@@ -6,6 +6,7 @@ import type { ImageStudioIdentity } from './access';
 import type { GalleryQuery } from './gallery-types';
 import { catalogVisibilitySql, CatalogSqlCompatibilityError } from '@/lib/assets/catalog-visibility-sql';
 import { sharedCommandFingerprint } from './shared-command-storage';
+import { studioReproductionBindingSql } from './reproduction-record-keys';
 import { catalogIdsSql, catalogKeyBatches } from '@/lib/assets/catalog-batches';
 import { usageRowSpool } from '@/lib/usage/row-spool';
 
@@ -281,7 +282,7 @@ async function assertCanonicalGalleryMetadata(db: Prisma.TransactionClient) {
       AND (json_type(${safe}, '$.policy.styleMax') IS NULL OR json_type(${safe}, '$.policy.styleMax') = 'integer' AND json_extract(${safe}, '$.policy.styleMax') BETWEEN 0 AND ${MAX_REFERENCE_IMAGES})
       AND (json_type(${safe}, '$.policy.referenceMax') IS NULL OR json_type(${safe}, '$.policy.referenceMax') = 'integer' AND json_extract(${safe}, '$.policy.referenceMax') BETWEEN 0 AND ${MAX_REFERENCE_IMAGES})
       AND NOT EXISTS (SELECT 1 FROM json_each(${safe}, '$.policy') f WHERE f.key NOT IN ('primaryIds', 'primaryMin', 'primaryMax', 'auxiliaryMax', 'styleMax', 'referenceMax', 'useFixedReferences')))
-    WHEN p."key" GLOB 'studio_shared_reproduction_v1:*' THEN NOT (
+    WHEN ${studioReproductionBindingSql(Prisma.sql`p."key"`)} THEN NOT (
       json_type(${safe}, '$.version') = 'integer' AND json_extract(${safe}, '$.version') IN (1, 2)
       AND json_type(${safe}, '$.sourceOwnerId') = 'text' AND json_type(${safe}, '$.sourceTaskId') = 'text' AND length(json_extract(${safe}, '$.sourceTaskId')) > 0
       AND json_type(${safe}, '$.moduleContext') = 'text' AND ${refsValid(field(value, '$.templateFixedReferences'))}

@@ -7,12 +7,13 @@ import { parsePrivateCredentials, stringifyPrivateCredentials } from '@/lib/secu
 import { isPrivatePromptError } from '@/lib/security/private-prompts.server';
 import { privateCredentialFetch } from '@/lib/security/private-prompt-send.server';
 import { createHash, randomUUID } from 'node:crypto';
-import { prisma } from '@/lib/prisma';
+import { prisma, retrySqliteBusy } from '@/lib/prisma';
 import { imageOutputSize, normalizeImageResolution, assertImageResolutionSupported, isGeminiImageModel, isValidImageDimension, supportsStudioFourToOne } from '@/lib/image-generation/resolution';
 import {
   IMAGE_STUDIO_MODELS,
   IMAGE_STUDIO_MODEL_QUALITY_OPTIONS,
   IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS,
+  isStandardGptImageParameter,
   normalizeImageStudioQuality,
   type ImageStudioModel,
 } from '@/lib/image-studio/model-catalog';
@@ -1450,9 +1451,10 @@ export async function captureImageGenerationChannel(
   if (channelId !== 'original' && channelId !== 'shared' && channelId !== 'banana') {
     const channels = menu ? menu.channels : await getImageGenerationChannels(tx);
     let current = selectImageGenerationSettings(channels, model, channelId);
-    if (qualityRoute) {
+    const capability = current.modelCapabilities[model as ImageStudioModel];
+    if (qualityRoute || capability?.enabled && capability.billingMode == null) {
       const { withImagePricing } = await import('@/lib/pricing/image');
-      current = (await withImagePricing(current, model, tx, undefined, { quality: qualityRoute.quality }, menu)).settings;
+      current = (await withImagePricing(current, model, tx, undefined, qualityRoute ? { quality: qualityRoute.quality } : {}, menu)).settings;
     }
     if (!current.configRevision || current.configRevision === 'unconfigured' || current.deleted || !current.enabled || !current.api_key) {
       throw new ImageGenerationChannelError('该图片供应商尚未配置或已停用，不能提交新任务', 409, 'image_channel_not_available');
@@ -1658,12 +1660,13 @@ export function validateImageGenerationChannel(
   if (capability.billingMode === 'fixed' && capability.fixedPoints === null) {
     return { ok: false, code: 'image_channel_fixed_price_missing', error: '固定点数未填写，明确免费时请填写 0' };
   }
-  const tests: Array<[string | undefined, string[] | null, string]> = [
-    [args.quality, capability.qualities, '图片质量'],
-    [args.resolution, capability.resolutions, '分辨率'],
+  const tests: Array<['quality' | 'resolution', string | undefined, string[] | null, string]> = [
+    ['quality', args.quality, capability.qualities, '图片质量'],
+    ['resolution', args.resolution, capability.resolutions, '分辨率'],
   ];
   const allowsUnconfirmed = allowsUnconfirmedGeminiProParameters(model, capability);
-  for (const [value, allowed, label] of tests) {
+  for (const [parameter, value, allowed, label] of tests) {
+    if (isStandardGptImageParameter(model, parameter, value)) continue;
     if (allowed === null && allowsUnconfirmed) continue;
     if (value !== undefined && (!allowed || !allowed.includes(value))) {
       return { ok: false, code: 'image_channel_capability_mismatch', error: label === '分辨率'
@@ -2047,6 +2050,7 @@ function imageApiGroupModelStatuses(settings: ImageGenerationResolvedSettings, g
       if (capability.actualQuoteRequired !== true) actualBillingReasons.push('该 API Key 与型号的精确账单证明未就绪');
     }
     const missingRequirements = imageApiGroupModelMissingRequirements({
+      model, enabled: capability?.enabled,
       providerSupported: isStudioImageGenerationProvider(settings.provider),
       baseUrlConfigured: Boolean(effective.base_url), apiKeyConfigured: Boolean(effective.api_key),
       protocol: capability?.protocol, qualities: capability?.qualities, resolutions: capability?.resolutions,
@@ -2201,7 +2205,7 @@ export async function saveImageApiGroupForm(input: Record<string, unknown>, acto
     if (typeof patch.baseUrl === 'string' && patch.baseUrl.trim()) validatedBases[model] = await validateManagedBaseUrl(patch.baseUrl);
   }
   try {
-    return await prisma.$transaction(async tx => {
+    return await retrySqliteBusy(() => prisma.$transaction(async tx => {
       const existing = await replay(tx);
       if (existing) return existing;
       const defaultRow = await tx.platformSetting.findUnique({ where: { key: IMAGE_GENERATION_MODEL_DEFAULTS_SETTING_KEY } });
@@ -2278,9 +2282,10 @@ export async function saveImageApiGroupForm(input: Record<string, unknown>, acto
         action: 'image_generation_group_api_save', target_type: 'PlatformSetting', target_id: source.copyId,
         detail: JSON.stringify({ requestHash, receipt }) } });
       return { receipt, replayed: false };
-    }, { timeout: 15000 });
+    }, { maxWait: 10000, timeout: 15000 }));
   } catch (error) {
     if (isRecord(error) && ['P2002', 'P2034', 'P1008', 'P2028'].includes(String(error.code))) {
+      console.warn('[ImageApiGroupSave]', JSON.stringify({ mutationId, group, code: String(error.code) }));
       const receipt = await replay(prisma);
       if (receipt) return receipt;
       throw new ImageGenerationChannelError('保存结果尚未确认，请查询原保存回执，不要重复提交', 409, 'image_group_save_unknown');

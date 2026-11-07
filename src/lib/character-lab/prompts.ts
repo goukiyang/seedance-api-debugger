@@ -30,7 +30,7 @@ export function faceLabPrompt(config: CharacterLabConfig, draft: CharacterLabDra
   return [
     ...labFaceRules(draft), config.characterContext, config.styleConstraints,
     ...(characterLabStrength(draft.diversity) === '明显' ? [config.basePrompt, config.faceVariables] : []),
-    draft.context ? `角色补充（遵守上述变化范围）：${draft.context}` : '',
+    draft.faceDescription ? `正脸补充（遵守上述变化范围）：${draft.faceDescription}` : '',
   ].filter(Boolean).join('\n\n');
 }
 
@@ -52,6 +52,15 @@ export const labDefaultViewPrompts = {
   bodyBackPrompt: '还原原角色的背部轮廓、服装结构、配饰位置和鞋，保持原设计比例、材质与配色。',
 };
 
+export const labDefaultStageStyles = {
+  sideStyleConstraints: '真实人物侧面摄影，自然皮肤纹理与合理解剖结构，统一灰色摄影背景。避免动漫、插画、游戏建模和塑料皮肤。不添加编号、字幕、标注、边框装饰或水印。',
+  bodyStyleConstraints: '真实人物全身摄影，合理人体比例与服装材质，统一灰色摄影背景。避免动漫、插画、游戏建模和塑料质感。不添加编号、字幕、标注、边框装饰或水印。',
+  resultStyleConstraints: '真实人物摄影，自然皮肤与服装材质，统一灰色摄影背景。不添加编号、字幕、标注、边框装饰或水印。',
+};
+export function labStyleField(operation: CharacterLabOperation) {
+  return operation.startsWith('body-') ? 'bodyStyleConstraints' : operation === 'refine-face' ? 'styleConstraints' : 'sideStyleConstraints';
+}
+
 export function labOperationRules(operation: CharacterLabOperation) {
   switch (operation) {
     case 'refine-face':
@@ -71,13 +80,14 @@ export function labOperationRules(operation: CharacterLabOperation) {
 
 export function labViewPrompt(config: CharacterLabPromptFields, operation: CharacterLabOperation, description: string) {
   const field = labViewPromptFields[operation];
-  return [labOperationRules(operation), config[field] || labDefaultViewPrompts[field], config.styleConstraints,
+  const style = labStyleField(operation);
+  return [labOperationRules(operation), config[field] || labDefaultViewPrompts[field], config[style] ?? (style === 'styleConstraints' ? '' : labDefaultStageStyles[style]),
     description ? `${operation.startsWith('body-') ? '本次角色补充' : '本次局部调整'}：${description}` : '',
     '保持自然摄影、平视和一致背景。遵守上述身份、参考来源与构图约束。'].filter(Boolean).join('\n\n');
 }
 export function resultLabPrompt(config: CharacterLabConfig, draft: CharacterLabDraft, hasPrevious: boolean) {
   const labels = ['左上正面头肩特写', '右上侧面头肩特写', '左下正面全身', '右下背面全身'];
-  return [config.resultPrompt, config.styleConstraints,
+  return [config.resultPrompt, config.resultStyleConstraints ?? labDefaultStageStyles.resultStyleConstraints,
     '参考图1是原始角色设计，参考图2是用户明确选中的主面部。以主面部确定唯一真人身份，并保留参考图1的服装、配色、配饰及身体比例，不把原设计图的动漫脸当最终面部。',
     draft.auxiliaryFaces.length ? `后续${draft.auxiliaryFaces.length}张为辅助面部参考，只借鉴下列指定特征，不替换主身份：${draft.auxiliaryFeatures || '整体特征方向，以主面部身份为准'}。` : '',
     draft.context ? `角色补充：${draft.context}` : '',

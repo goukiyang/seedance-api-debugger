@@ -327,6 +327,9 @@ async function requestStudioImagesImplementation(params: {
   }
   const url = studioProviderEndpoint(params);
   const basePath = url.pathname.replace(/\/v1\/images\/(?:generations|edits)$/, '');
+  // 2.6 names its strongest API quality "high"; keep the UI selection frozen.
+  const quality = ['gpt-image-2.6-flare', 'gpt-image-2.6-sunburst'].includes(params.model)
+    && (params.quality === 'max' || params.quality === 'xhigh') ? 'high' : params.quality;
   const headers: Record<string, string> = { Authorization: `Bearer ${params.apiKey}` };
   if (params.idempotencyKey) {
     if (!/^[a-zA-Z0-9_-]{1,200}$/.test(params.idempotencyKey)) throw new StudioProviderError('request', 'invalid_idempotency_key');
@@ -339,7 +342,7 @@ async function requestStudioImagesImplementation(params: {
     form.set('prompt', params.prompt);
     form.set('n', String(params.count));
     form.set('output_format', 'png');
-    if (params.quality && params.quality !== 'auto') form.set('quality', params.quality);
+    if (quality && quality !== 'auto') form.set('quality', quality);
     if (params.size) form.set('size', params.size);
     if (sendRatio) form.set('ratio', requestRatio!);
     params.images.forEach((image, index) => {
@@ -349,7 +352,7 @@ async function requestStudioImagesImplementation(params: {
   } else {
     headers['Content-Type'] = 'application/json';
     body = JSON.stringify({ model: params.upstreamModel || params.model, prompt: params.prompt, n: params.count, output_format: 'png', ...(params.size ? { size: params.size } : {}),
-      ...(sendRatio ? { ratio: requestRatio } : {}), ...(params.quality && params.quality !== 'auto' ? { quality: params.quality } : {}) });
+      ...(sendRatio ? { ratio: requestRatio } : {}), ...(quality && quality !== 'auto' ? { quality } : {}) });
   }
   let value: any;
   let response: Response | undefined;
@@ -598,7 +601,7 @@ async function requestGeminiStudioImages(params: {
         const file = (part.fileData || part.file_data) as { mimeType?: unknown; mime_type?: unknown; fileUri?: unknown; file_uri?: unknown } | undefined;
         if (!file) return null;
         const mime = file.mimeType ?? file.mime_type;
-        if (typeof mime !== 'string' || !['image/png', 'image/jpeg', 'image/webp', 'image/avif', 'image/tiff'].includes(mime)) {
+        if (mime != null && (typeof mime !== 'string' || !['image/png', 'image/jpeg', 'image/webp', 'image/avif', 'image/tiff'].includes(mime))) {
           throw new StudioProviderError('response', 'unsupported_output', response.status);
         }
         const source = file.fileUri ?? file.file_uri;

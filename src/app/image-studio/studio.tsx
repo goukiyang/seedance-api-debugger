@@ -126,7 +126,7 @@ import type { StudioReferencePolicy } from '@/lib/image-studio/reference-policy'
 import { imageStudioChannelIssue, imageStudioChannelModel, imageStudioChannelModels, imageStudioChannelReadyForModel, imageStudioChannelUnitCredits, imageStudioUsesLegacyRoute, imageStudioEffectiveChannelId, useImageStudioChannel } from '@/lib/image-studio/channels';
 import { ImageGenerationChannelSelect } from '@/components/ImageGenerationChannelSelect';
 import { fetchReadWithRetry } from '@/lib/http/read-retry';
-import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_NEW_REQUEST_MODELS, imageStudioModelForNewSelection, imageStudioNewQualityOptions, imageStudioQualityLabel, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
+import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_NEW_REQUEST_MODELS, imageStudioModelForNewSelection, imageStudioNewQualityOptions, imageStudioQualityLabel, isGptImageStudioModel, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_SHORT_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality, normalizeImageResolution, normalizeImageStudioQuality, type ImageResolution } from '@/lib/image-studio/model-catalog';
 
 import { readJsonResponse } from '@/lib/http/json-response';
 import { isEncryptedStudioPersonalPrompt } from '@/lib/image-studio/personal-prompt';
@@ -1984,11 +1984,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     setModuleModel(next);
     if (resetParameters && !replacesLegacyBanana) {
       setQuality(defaultImageStudioQuality(next)); setResolution(defaultImageResolution(next));
+    } else if (next === 'gpt-image-2' && (quality === 'max' || quality === 'xhigh')) {
+      setQuality('high');
     }
   }
-  const qualityChoices = qualityRouted ? imageStudioNewQualityOptions(moduleModel) : selectedChannelModel?.qualities ?? (legacyImageRoute || qualitySupportUnconfirmed
+  const qualityChoices = qualityRouted || isGptImageStudioModel(moduleModel) ? imageStudioNewQualityOptions(moduleModel) : selectedChannelModel?.qualities ?? (legacyImageRoute || qualitySupportUnconfirmed
     ? IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [] : []);
-  const resolutionChoices = selectedChannelModel?.resolutions ?? (legacyImageRoute || resolutionSupportUnconfirmed
+  const resolutionChoices = isGptImageStudioModel(moduleModel) ? IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS] : selectedChannelModel?.resolutions ?? (legacyImageRoute || resolutionSupportUnconfirmed
     ? IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS] || [] : []);
   const generationInputs = { sharedLive: sharedLive?.intent, personalOverrides: sharedLive ? personalOverrides : undefined, evolution: evolution ? evolutionInput : undefined, prompt, count, referenceLimit, aspectRatio, resolution: legacyImageRoute && !preserveSelectedBananaParameters ? normalizeImageResolution(moduleModel, resolution) : resolution, referenceIds: moduleDraft.referenceIds, model: moduleModel, quality: legacyImageRoute && !preserveSelectedBananaParameters ? normalizeImageStudioQuality(moduleModel, quality) : quality, channelId: imageChannelId, referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), skillIds: moduleDraft.skillIds, skillVersions: Object.fromEntries(skills.filter(group => group.promptVersion).map(group => [group.id, group.promptVersion!])), styleGroupIds: moduleDraft.styleGroupIds };
   const generationDraft = JSON.stringify({ ...generationInputs, taskSettings: studioTaskSettings(globalContextMode, globalSettingsSourceTaskId) });
@@ -4412,7 +4414,12 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         <div className={`${styles.modelQualityRow} ${templateWorkbench ? styles.templateModelQualityRow : ''}`}>
           <label className={styles.compactField} htmlFor={`studio-model-${module.id}`}><strong>生成模型</strong>
             <select id={`studio-model-${module.id}`} title={templateWorkbench ? `${IMAGE_STUDIO_MODEL_LABELS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || moduleModel}${imageChannelReady && !imageStudioChannelReadyForModel(selectedChannel, moduleModel, settings?.modelReady?.[moduleModel] ?? settings?.providerReady) ? '（未就绪）' : ''}` : undefined} disabled={!draftLoaded || draftRestoring || submissionRecoveryScope !== pendingKey || !batch.recoveryKnown || submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} value={moduleModel} onChange={event => selectModuleModel(event.target.value)}>
-              {modelChoices.map(model => <option key={model} value={model} disabled={model === 'gemini-3.1-flash-image-preview'}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || model}{imageChannelReady && !imageStudioChannelReadyForModel(selectedChannel, model, settings?.modelReady?.[model] ?? settings?.providerReady) ? '（未就绪）' : ''}</option>)}
+              {modelChoices.map(model => {
+                const modelChannelId = imageStudioEffectiveChannelId(imageChannels, model, imageChannelId,
+                  model === moduleModel ? quality : defaultImageStudioQuality(model));
+                const modelChannel = imageChannels.items.find(item => item.id === modelChannelId);
+                return <option key={model} value={model} disabled={model === 'gemini-3.1-flash-image-preview'}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || model}{imageChannelReady && !imageStudioChannelReadyForModel(modelChannel, model, settings?.modelReady?.[model] ?? settings?.providerReady) ? '（未就绪）' : ''}</option>;
+              })}
             </select>
           </label>
           {!templateWorkbench && !qualityRouted && <label className={styles.compactField} htmlFor={`studio-channel-${module.id}`}><strong>供应商</strong>
@@ -4468,7 +4475,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         {!likedResults.liked && batch.busy && batch.localPreviews.length > 0 && <div className={styles.grid} aria-label="本批准备素材">{batch.localPreviews.map((src, index) => <article key={src} className={styles.result}><div className={styles.batchInputPreview}><img src={src} alt={`本批主图 ${index + 1}`} /></div><p role="status">准备中</p></article>)}</div>}
         {resultView === 'batch' ? batch.id ? <BatchResults key={`${userId}:${batch.id}`} id={batch.id} userId={userId} autoPack={batch.pack} visible={visible && active && !hidden} onSourceChanged={onSharedRefresh} onQuickUse={taskId => void replaceMainFromResult(taskId)} onInputMainSource={source => void replaceMainFromResult(source)} /> : <p>暂无选中批次，可开始批量生成或从<a href="/assets">资产库的“我的批次”</a>找回。</p> : <>
         {downloadReady && <p role="status">已交给浏览器下载。<a href={downloadReady.url} download={downloadReady.name}>再次下载</a></p>}
-        <GeneratedImageResults key={likedResults.liked ? 'liked' : 'all'} items={sharedResults} compactInformation={templateWorkbench}
+        <GeneratedImageResults key={likedResults.liked ? 'liked' : 'all'} items={sharedResults} compactInformation={templateWorkbench} fullRows={templateWorkbench}
           onVisibleItemsChange={items => { visibleTaskIds.current = items.flatMap(item => item.task ? [item.task.id] : []); }}
           onPreviewInputMain={item => { if (item.task?.inputMainPreview) setInputPreviewSource(item.task.inputMainPreview.source); }}
           contextActionsEnabled={templateWorkbench}
@@ -4493,9 +4500,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           }}
           onQuickUse={item => { if (item.task) void replaceMainFromResult(item.task.id); }}
           renderReactionAction={templateWorkbench ? item => item.task?.asset?.id
-            ? <StudioResultPinButton userId={userId} moduleId={module.id} taskId={item.task.id} assetId={item.task.asset.id} state={visibleFeed?.pinState || null} onSaved={refreshResults}
+            ? <StudioResultPinButton showLabel userId={userId} moduleId={module.id} taskId={item.task.id} assetId={item.task.asset.id} state={visibleFeed?.pinState || null} onSaved={refreshResults}
               onPublish={unpublishedSharing && module.canChooseSharing ? () => openModuleDialog() : undefined} />
-            : item.sharedPin ? <StudioResultPinnedIndicator /> : null : undefined}
+            : item.sharedPin ? <StudioResultPinnedIndicator showLabel /> : null : undefined}
           paginationSlot={templateWorkbench ? resultPaginationSlot : undefined}
           navigationIntent={completionNavigation}
           latestPageRequest={latestResultsRequestId}
@@ -4553,12 +4560,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           </div>
 </> : sharedPin ? <><div className={styles.resultHeading}><p className={styles.prompt}>{name} · 置顶图片</p><span className={styles.resultOwner}>{sharedPin.owner?.name || '模板使用者'}</span></div>
             <div className={styles.resultMeta}><span className={styles.muted}>查看与点赞</span><RelativeTime className={styles.resultTime} value={sharedPin.createdAt} /></div></> : null}
-          renderPrimaryActions={({task, viewOnly}, waitDisplay) => {
+          renderPrimaryActions={({task}, waitDisplay) => {
             if (!task) return null;
-            if (templateWorkbench && !viewOnly && task.asset?.id && studioTaskHasViewableImage(task) && taskDisplay(task)?.sourceAvailable) {
-              return <button type="button" disabled={submitting || Boolean(pendingSubmission) || hidden || !active || sessionChanged}
-                onClick={() => void replaceMainFromResult(task.id)}><ImagePlus size={15} />用作主图</button>;
-            }
             const recovery = studioTaskAsyncRecovery(task), feedback = taskRecheckFeedback(task);
             if (recovery?.canRequestRecheck) return <button type="button" className="sd2-loading-surface" data-busy={feedback?.busy || undefined}
               disabled={Boolean(feedback?.busy) || sessionChanged || isClientSessionBlocked() || sessionUser?.id !== userId || hidden || !active || !(task.delivery?.requestId || recovery.binding)} aria-busy={feedback?.busy || undefined}

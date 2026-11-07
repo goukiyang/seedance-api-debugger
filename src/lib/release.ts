@@ -1,10 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '费率编辑与生成提示修复', outline: [
-  '切回费率页不再意外锁住金额和开关',
-  '视频暂不可生成时显示具体原因',
-  '图片模型支持人民币换算后的小数点数',
-  '邮箱账号可从顶部积分提交申请',
+const notice = { title: '修复共享模板打开与生成', outline: [
+  '修复同事打开共享模板时的读取失败',
+  '正常选择风格后可以继续生成，明确的设置错误会保留核对回执',
+  '保留当前输入、原任务和费用记录',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

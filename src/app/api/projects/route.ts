@@ -42,10 +42,13 @@ export async function GET(request: NextRequest) {
     const lite = request.nextUrl.searchParams.get('lite') === 'true';
     const viewList = !home && !lite && request.nextUrl.searchParams.get('view') === 'list';
     const includeArchived = !home && (viewList || request.nextUrl.searchParams.get('include_archived') === 'true');
-    const includeAll = !home && user.role === 'admin' && request.nextUrl.searchParams.get('include_all') === 'true';
+    const ownedOnly = lite && request.nextUrl.searchParams.get('scope') === 'owned';
+    const includeAll = !home && !ownedOnly && user.role === 'admin' && request.nextUrl.searchParams.get('include_all') === 'true';
     const statusWhere = includeArchived ? { not: 'deleted' } : 'active';
 
-    const where: Prisma.ProjectWhereInput = includeAll
+    const where: Prisma.ProjectWhereInput = ownedOnly
+      ? { status: statusWhere, type: { not: 'system' }, owner_user_id: user.id }
+      : includeAll
       ? { status: statusWhere }
       : {
           status: statusWhere,

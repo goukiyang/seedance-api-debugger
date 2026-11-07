@@ -1120,3 +1120,17 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 - 本轮额外发现已登记到[统一发现清单](discoveries.md)：D-20261101-01 至 04 分别保留生产 bundle 共享身份待核、目录全局失效放大、报表 Web 计算量和跨能力计价故障范围；均未实施额外重构，原任务与手验边界不变。
 
 - 封面媒体定点接续仅增短时日志并已恢复原配置；同一B/640/revision2自然点击5.256s、媒体TTFB2.390s，对应Nginx上游头/完整响应均113ms、总时长888ms，Node响应构造89.7ms。已把主要等待缩到观察的上游处理区间之外，公网/前置代理/浏览器等细因仍未证；不冒新修复或全站改善。[原代理计时](../docs/materials/2026-11-01-admin-usage-read-snapshot/media-edge-diagnostic/attempt02/timing-snapshot.jsonl)、[配置恢复证明](../docs/materials/2026-11-01-admin-usage-read-snapshot/media-edge-diagnostic/attempt02/automatic-restore.json)保留；App未重启、源88/v0.125.2不变。
+
+<!-- RESULT-MENU01-20261106 -->
+### RESULT-MENU01 图片结果右上角更多菜单与底部精简（2026-11-06）
+
+- 用户明确要求：右上图钉换成省略号，点击后有详细信息和置顶；下方不要卡内滚动条，删除用作主图按钮。按实际生产9ee22969f/v0.134.11/BUILD IpZ4sqJsRBpDm7vqeO5TF建立同一工作树新分支codex/result-card-more-menu-20261106，保护原分支/数据。
+- 仅compactInformation图片模板/批次结果采用新入口，非compact消费者保原详情入口。复用现有ImageResultStatusDetails、Radix Popper与useDialogDismiss；省略菜单内选择详细信息后显示原完整信息，置顶显示原状态/权限/费用可见范围提示，关闭菜单或进入详情仍保原pin组件挂载，不丢在途锁及未知原操作。底部保原下载/删除/复制参数/恢复/飞书，不改变双击直接输入主图回填、上下文菜单或其他页面。
+- 解除compact工具栏的高度上限与auto滚动，按原图标/触控尺寸自然换行；移除详情入口与用作主图后避免拥挤，不把信息搬到图下。默认作品与原操作优先、右上更多常显，错误说明仍可达。支持外点/Esc与键盘，真实菜单与详情呈现仍用户手验。
+- 已有工程证据：原结果布局合同通过，7项原置顶/发布/未知同号操作检查通过；更新原布局脚本加入菜单开关/详情/保挂载、compact顶部归位与非compact保留、无卡内滚动合同。完整类型及定向lint进行中。计划v0.134.12及同源相容guard，沿既有attempt05机制在独立result-card-menu-20261106/attempt01构建发布；不改DB/schema/模型/费用，不自动浏览器或收费验收。
+- 前项VIDEO-SUBMIT01原视频按钮现场缺口保持，不以本UI修改冒已闭环。本轮未新增范围外问题。
+<!-- /RESULT-MENU01-20261106 -->
+
+<!-- CHARACTER-INDEPENDENT-CONTEXT-20261107 -->
+**已部署，待用户手验。** 2026-11-07 01:12（洛杉矶）v0.134.16 / 16c57e550 / RfviUaNpEBzDe5Tdvrg-L上线；正脸、侧脸、前后身补充/历史恢复/风格/预览/生成独立，旧共用原文只读保留。新guard2d3ab523 / yB9pJkJEDy0F4ZeLa1cvZ保持新字段；两版各18组隔离、fresh原生/价格、完整Next/types/lint及七服务/四timer/公网JS+11CSS/health通过。首轮fixture类型错误已修，实际最终attempt02；旧原号/数据保持。原单[§15](todo/2026-10-31-character-reference-replan.md#15-正脸侧脸与前后身上下文独立2026-11-07)含发布/手验/恢复入口，侧脸4/9仍设计项。
+<!-- /CHARACTER-INDEPENDENT-CONTEXT-20261107 -->

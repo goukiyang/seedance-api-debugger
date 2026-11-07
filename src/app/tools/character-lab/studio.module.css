@@ -62,8 +62,6 @@
 .materialSection h2 { margin-bottom: 12px; }
 .root .sourceImage { display: flex; width: 100%; padding: 0; min-height: 220px; max-height: 490px; overflow: hidden; border-radius: 6px; background: var(--lab-bg); }
 .sourceImage img { width: 100%; max-height: 490px; object-fit: contain; }
-.fileRow { font-size: 12px; margin: 9px 0; color: var(--lab-muted); }
-.fileRow span { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .materialSection > .outline { width: 100%; margin-top: 5px; font-size: 12px; }
 .root .uploadEmpty { border: 1px dashed var(--lab-line); display: flex; flex-direction: column; gap: 12px; text-align: center; min-height: 280px; width: 100%; color: var(--lab-muted); background: var(--lab-bg); padding: 20px; }
 .uploadEmpty strong { color: var(--lab-text); font-size: 14px; }
@@ -79,6 +77,9 @@
 .batchList [aria-pressed='true'] { border-color: var(--lab-green); }
 .batchList span { font-size: 12px; min-width: 0; }
 .batchList small { display: block; margin-top: 4px; color: var(--lab-muted); font-size: 10px; }
+.historyFilters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; margin-bottom: 10px; }
+.root .historyFilters button { min-height: 30px; padding: 4px; font-size: 12px; border-color: var(--lab-line); }
+.root .historyFilters [aria-pressed='true'] { color: var(--lab-green); border-color: var(--lab-green); }
 .canvasColumn { min-width: 0; background: var(--lab-panel); border: 1px solid var(--lab-line); border-radius: 8px; padding: 12px; }
 .canvasHeading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; }
 .canvasActions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-inline-start: auto; }
@@ -204,7 +205,7 @@
 .recipeActions summary { cursor: pointer; padding: 8px 6px; }
 .recipeActions details[open] > button { border: 1px solid var(--lab-line); }
 .promptDialog > .recipePanel { padding: 16px; max-height: 65dvh; border-top: 1px solid var(--lab-line); }
-.viewHeadingActions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+.viewHeadingActions { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px; }
 .viewStatusDetail { white-space: pre-wrap; }
 .root .promptTrigger { flex: none; width: auto; margin: 0; padding-inline: 8px; font-size: 12px; color: var(--lab-blue); white-space: nowrap; }
 .root .adjustments > .promptTrigger { margin-top: 12px; }
@@ -227,6 +228,7 @@
 .promptPreview pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; color: var(--lab-muted); }
 .viewBoard { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 12px; }
 .viewSlot { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.viewSlot > :is(.viewImage, .viewEmpty) { margin-top: auto; flex-shrink: 0; }
 .viewSlot .settingsHeading { min-height: 38px; flex-wrap: wrap; column-gap: 4px; }
 .viewSlot .settingsHeading small { color: var(--lab-muted); }
 .root .viewImage, .viewEmpty { width: 100%; aspect-ratio: 800 / 1008; padding: 0; overflow: hidden; border: 1px solid var(--lab-line); border-radius: 6px; background: var(--lab-bg); }
@@ -272,7 +274,7 @@
 @media (min-width: 1600px) { .root { padding-inline: 25px; } .workbench { grid-template-columns: minmax(230px, 0.9fr) minmax(600px, 2.7fr) minmax(300px, 1.1fr); gap: 20px; } .candidateGrid { gap: 13px; } .controls { padding: 22px 20px; } }
 @media (max-width: 1250px) { .header { gap: 8px 18px; } .brand { flex: 1; } .steps { order: 3; width: 100%; flex-basis: 100%; justify-content: flex-start; } .workbench { grid-template-columns: minmax(150px, 0.8fr) minmax(320px, 2fr) minmax(220px, 1.05fr); gap: 9px; } .materialRail { padding: 13px 10px; } .controls { padding: 15px 12px; } .canvasColumn { padding: 9px; } }
 @media (max-width: 960px) { .workbench { grid-template-columns: minmax(150px, 0.65fr) minmax(0, 2fr); } .controls { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; align-items: start; } .controls > section + section, .controls > details { border-top: 0; padding-top: 0; } .mainActions { grid-column: 1 / -1; display: flex; flex-direction: row; justify-content: flex-end; } .mainActions button { min-width: 145px; } .canvasEmpty { min-height: 450px; } .resultState { grid-column: 1 / -1; } .controls > section:has(.actionPair) { grid-row: span 2; } .sourceImage img { max-height: 400px; } }
-@media (max-width: 640px) { .root { padding: 0 9px 12px; } .header { padding: 13px 1px 10px; } .brand { gap: 7px; } .brand strong { font-size: 15px; } .brand > span { font-size: 10px; } .brand > svg { display: none; } .headerActions { width: 100%; justify-content: flex-end; } .workspaceLabel { margin-right: auto; width: 130px; } .headerActions > button { min-height: 40px; } .steps { justify-content: space-between; gap: 0; } .steps button { gap: 5px; font-size: 11px; min-height: 43px; padding-inline: 3px; } .steps button + button::before { width: 10px; margin-right: 3px; } .steps b { height: 25px; width: 25px; } .feedback { font-size: 10px; gap: 7px; padding-block: 7px; } .workbench { display: flex; flex-direction: column; gap: 10px; } .materialRail { width: 100%; padding: 11px; } .materialRail > .materialSection:first-child { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 7px 12px; align-items: center; } .materialSection:first-child h2 { grid-column: 2; grid-row: 1; margin: 0; font-size: 13px; } .root .sourceImage { grid-column: 1; grid-row: 1 / span 3; min-height: 85px; max-height: 100px; width: 78px; } .sourceImage img { height: 100px; } .materialSection:first-child .fileRow { grid-column: 2; grid-row: 2; margin: 0; } .materialSection:first-child > .outline { grid-column: 2; grid-row: 3; width: fit-content; margin: 0; min-height: 36px; } .root .uploadEmpty { grid-column: 1 / -1; grid-row: 2; min-height: 140px; padding: 14px; gap: 8px; } .materialSection:first-child:has(.uploadEmpty) { grid-template-columns: 1fr; } .materialSection:first-child:has(.uploadEmpty) h2 { grid-column: 1; } .materialSection:first-child:has(.uploadEmpty) > .outline { display: none; } .materialSection + .materialSection { margin-top: 12px; padding-top: 12px; } .root .faceReference { max-width: 100px; height: 100px; } .faceReference img { height: 100%; } .materialSection:has(.faceReference) { display: flex; align-items: center; gap: 12px; flex-direction: row-reverse; justify-content: flex-end; } .materialSection:has(.faceReference) .sectionTitle { flex-direction: column; align-items: flex-start; margin: 0; } .batchList { flex-direction: row; overflow-x: auto; } .batchList button { flex: 0 0 130px; min-height: 64px; } .batchList img { width: 48px; height: 48px; } .canvasColumn { width: 100%; padding: 9px; } .candidateGrid { gap: 7px; } .cellActions { flex-wrap: wrap; } .cellActions button { font-size: 10px; min-height: 35px; } .cellNumber { font-size: 10px; padding: 2px 5px; } .mainBadge, .auxBadge { font-size: 9px; padding: 4px; } .canvasEmpty { min-height: 330px; padding: 20px; } .canvasEmpty h3 { font-size: 16px; } .canvasEmpty p { font-size: 12px; } .resultArea { min-height: 300px; padding: 0; } .resultImage img { max-height: none; } .controls { width: 100%; display: flex; gap: 20px; padding: 16px; } .controls > section + section, .controls > details { padding-top: 20px; border-top: 1px solid var(--lab-line); } .mainActions { width: 100%; flex-wrap: wrap; justify-content: stretch; } .mainActions button { flex: 1; min-width: 130px; } .sliderLabel input { min-height: 32px; } .selectedFaces { grid-template-columns: repeat(3, minmax(0, 1fr)); } .root button { min-height: 42px; } .selectedFaces > div > span { font-size: 11px; } .historyRows { grid-template-columns: 1fr; max-height: 400px; } .loading { grid-template-columns: 1fr; } .loading > div:not(:first-child) { display: none; } .loading > span { width: 100%; text-align: center; } }
+@media (max-width: 640px) { .root { padding: 0 9px 12px; } .header { padding: 13px 1px 10px; } .brand { gap: 7px; } .brand strong { font-size: 15px; } .brand > span { font-size: 10px; } .brand > svg { display: none; } .headerActions { width: 100%; justify-content: flex-end; } .workspaceLabel { margin-right: auto; width: 130px; } .headerActions > button { min-height: 40px; } .steps { justify-content: space-between; gap: 0; } .steps button { gap: 5px; font-size: 11px; min-height: 43px; padding-inline: 3px; } .steps button + button::before { width: 10px; margin-right: 3px; } .steps b { height: 25px; width: 25px; } .feedback { font-size: 10px; gap: 7px; padding-block: 7px; } .workbench { display: flex; flex-direction: column; gap: 10px; } .materialRail { width: 100%; padding: 11px; } .materialRail > .materialSection:first-child { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 7px 12px; align-items: center; } .materialSection:first-child h2 { grid-column: 2; grid-row: 1; margin: 0; font-size: 13px; } .root .sourceImage { grid-column: 1; grid-row: 1 / span 2; min-height: 85px; max-height: 100px; width: 78px; } .sourceImage img { height: 100px; } .materialSection:first-child > .outline { grid-column: 2; grid-row: 2; width: fit-content; margin: 0; min-height: 36px; } .root .uploadEmpty { grid-column: 1 / -1; grid-row: 2; min-height: 140px; padding: 14px; gap: 8px; } .materialSection:first-child:has(.uploadEmpty) { grid-template-columns: 1fr; } .materialSection:first-child:has(.uploadEmpty) h2 { grid-column: 1; } .materialSection:first-child:has(.uploadEmpty) > .outline { display: none; } .materialSection + .materialSection { margin-top: 12px; padding-top: 12px; } .root .faceReference { max-width: 100px; height: 100px; } .faceReference img { height: 100%; } .materialSection:has(.faceReference) { display: flex; align-items: center; gap: 12px; flex-direction: row-reverse; justify-content: flex-end; } .materialSection:has(.faceReference) .sectionTitle { flex-direction: column; align-items: flex-start; margin: 0; } .batchList { flex-direction: row; overflow-x: auto; } .batchList button { flex: 0 0 130px; min-height: 64px; } .batchList img { width: 48px; height: 48px; } .canvasColumn { width: 100%; padding: 9px; } .candidateGrid { gap: 7px; } .cellActions { flex-wrap: wrap; } .cellActions button { font-size: 10px; min-height: 35px; } .cellNumber { font-size: 10px; padding: 2px 5px; } .mainBadge, .auxBadge { font-size: 9px; padding: 4px; } .canvasEmpty { min-height: 330px; padding: 20px; } .canvasEmpty h3 { font-size: 16px; } .canvasEmpty p { font-size: 12px; } .resultArea { min-height: 300px; padding: 0; } .resultImage img { max-height: none; } .controls { width: 100%; display: flex; gap: 20px; padding: 16px; } .controls > section + section, .controls > details { padding-top: 20px; border-top: 1px solid var(--lab-line); } .mainActions { width: 100%; flex-wrap: wrap; justify-content: stretch; } .mainActions button { flex: 1; min-width: 130px; } .sliderLabel input { min-height: 32px; } .selectedFaces { grid-template-columns: repeat(3, minmax(0, 1fr)); } .root button { min-height: 42px; } .selectedFaces > div > span { font-size: 11px; } .historyRows { grid-template-columns: 1fr; max-height: 400px; } .loading { grid-template-columns: 1fr; } .loading > div:not(:first-child) { display: none; } .loading > span { width: 100%; text-align: center; } }
 @media (prefers-reduced-motion: reduce) { .root button { transition: none; } .spinner { animation: none; } }
 .sourceMismatch { background: var(--lab-bg); padding: 10px; border-radius: 5px; font-size: 12px; margin-bottom: 12px; }
 .sourceMismatch button { margin-top: 6px; color: var(--lab-green); padding-inline: 0; }
@@ -284,4 +286,30 @@
 
 .bodyPair { display: flex; flex-direction: column; gap: 12px; }
 
-.root .viewVersion { width: auto; min-height: 32px; padding: 4px 8px; }
+.root .viewVersion { width: auto; max-width: 100%; min-width: 0; min-height: 32px; padding: 4px 8px; }
+
+.root .avatarTrigger { position: relative; width: 52px; height: 52px; min-height: 52px; flex: 0 0 52px; padding: 0; border-color: var(--lab-line); overflow: hidden; background: var(--lab-bg); }
+.avatarTrigger > :is(img, svg.imageCrop) { width: 100%; height: 100%; object-fit: cover; }
+.avatarTrigger .imageUnavailable { min-height: 0; height: 100%; font-size: 9px; padding: 3px; }
+.avatarTriggerMark { position: absolute; right: 2px; bottom: 2px; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 3px; background: var(--lab-panel); color: var(--lab-green); }
+.avatarLayer { z-index: 2147000000; width: min(340px, calc(100vw - 24px)); border: 1px solid var(--lab-line); border-radius: 8px; background: var(--lab-panel); color: var(--lab-text); max-height: min(600px, calc(100dvh - 24px), var(--radix-popper-available-height)); overflow: hidden; }
+.avatarLayer > div { display: flex; flex-direction: column; max-height: inherit; }
+.avatarHeader { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 8px 10px 8px 14px; border-bottom: 1px solid var(--lab-line); }
+.avatarHeader strong { font-size: 14px; }
+.avatarBatches { max-height: min(520px, 60dvh); min-height: 0; overflow-y: auto; padding: 12px; overscroll-behavior: contain; }
+.avatarBatch + .avatarBatch { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--lab-line); }
+.avatarBatch > header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.avatarBatch > header strong { font-size: 13px; }
+.avatarBatch > header > span { font-size: 11px; color: var(--lab-muted); }
+.avatarGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.avatarGrid[data-count='9'] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.root .avatarChoice { position: relative; display: block; width: 100%; aspect-ratio: 1; min-height: 0; padding: 0; border: 2px solid var(--lab-line); overflow: hidden; background: var(--lab-bg); }
+.avatarChoice > :is(img, svg.imageCrop) { width: 100%; height: 100%; object-fit: contain; }
+.avatarChoice .imageUnavailable { min-height: 0; height: 100%; font-size: 11px; }
+.root .avatarChoice[data-viewed='true'] { border-color: var(--lab-blue); }
+.root .avatarChoice[data-adopted='true'] { border-color: var(--lab-green); }
+.avatarCellLabel { position: absolute; left: 3px; bottom: 3px; min-width: 19px; padding: 1px 4px; background: var(--lab-panel); border-radius: 3px; font-size: 11px; }
+.avatarAdopted { position: absolute; right: 3px; top: 3px; display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px; border-radius: 3px; background: var(--lab-green); color: var(--lab-green-ink); font-size: 10px; }
+
+.root .generateAfterInput { width: 100%; margin: 8px 0 12px; }
+.cellNumber, .mainBadge, .auxBadge, .avatarCellLabel, .avatarAdopted, .avatarTriggerMark { pointer-events: none; }

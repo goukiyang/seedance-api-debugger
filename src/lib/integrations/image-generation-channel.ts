@@ -22,6 +22,7 @@ export type ImageApiGroupModelDto = ImageGenerationManagedModelDto & {
 };
 
 export type ImageApiGroupModelConfiguration = {
+  model?: string; enabled?: boolean;
   providerSupported: boolean; baseUrlConfigured: boolean; apiKeyConfigured: boolean;
   protocol?: ImageGenerationChannelProtocol | null;
   qualities?: string[] | null; resolutions?: string[] | null; ratios?: string[] | null;
@@ -31,16 +32,18 @@ export type ImageApiGroupModelConfiguration = {
 /** Read-only admin diagnostics; this does not gate saving or change dispatch. */
 export function imageApiGroupModelMissingRequirements(value: ImageApiGroupModelConfiguration, actualBillingReasons: string[] = []) {
   const missing: string[] = [];
+  const allowsUnconfirmed = Boolean(value.model && allowsUnconfirmedGeminiProParameters(value.model, value));
   if (!value.providerSupported) missing.push('现有接口类型尚未支持本组型号');
   if (!value.baseUrlConfigured) missing.push('尚未配置 API 地址');
   if (!value.apiKeyConfigured) missing.push('尚未配置 API Key');
   if (value.protocol !== 'gemini_native' && value.protocol !== 'openai_images') missing.push('尚未确认请求协议');
-  if (!value.qualities?.length) missing.push('尚未确认支持的图片质量');
-  if (!value.resolutions?.length) missing.push('尚未确认支持的分辨率');
+  if (!value.qualities?.length && !(allowsUnconfirmed && value.qualities == null)) missing.push('尚未确认支持的图片质量');
+  if (!value.resolutions?.length && !(allowsUnconfirmed && value.resolutions == null)) missing.push('尚未确认支持的分辨率');
   if (!value.ratios?.length) missing.push('尚未确认支持的图片比例');
-  if (!Number.isSafeInteger(value.maxReferences) || Number(value.maxReferences) < 0) missing.push('尚未确认参考图上限');
+  if (!(allowsUnconfirmed && value.maxReferences == null)
+    && (!Number.isSafeInteger(value.maxReferences) || Number(value.maxReferences) < 0)) missing.push('尚未确认参考图上限');
   if (value.billingMode !== 'fixed' && value.billingMode !== 'actual') missing.push('尚未设置计费方式');
-  if (value.billingMode === 'fixed' && (!Number.isSafeInteger(value.fixedPoints) || Number(value.fixedPoints) < 0)) {
+  if (value.billingMode === 'fixed' && (typeof value.fixedPoints !== 'number' || !Number.isFinite(value.fixedPoints) || value.fixedPoints < 0)) {
     missing.push('固定点数未填写或无效，明确免费时请填写 0');
   }
   if (value.billingMode === 'actual') missing.push(...actualBillingReasons);
@@ -84,7 +87,7 @@ export type ImageGenerationBillingMode = 'fixed' | 'actual';
  * This is not a support claim: explicit limits, enablement and a real fixed price still apply.
  */
 export function allowsUnconfirmedGeminiProParameters(model: string, capability: {
-  enabled?: boolean; protocol?: string; billingMode?: string | null; fixedPoints?: number | null;
+  enabled?: boolean; protocol?: string | null; billingMode?: string | null; fixedPoints?: number | null;
 } | undefined) {
   return (model === 'gemini-3-pro-image-preview' || model === 'gemini-nano-banana-2.1') && capability?.enabled === true
     && capability.protocol === 'gemini_native' && capability.billingMode === 'fixed'

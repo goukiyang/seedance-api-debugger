@@ -19,6 +19,7 @@ import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
 import { canReadStudioAsset, studioVisibleAssetWhere } from '@/lib/image-studio/protected-assets';
 import { QueueCapacityError, QueueMaintenanceError } from '@/lib/image-studio/queue-capacity';
 import { ownedLabAsset, persistLabFace, labOutput, readLabReference } from './media';
+import { labIndependentDraft } from './contexts';
 import { faceLabPrompt, resultLabPrompt, labViewPrompt } from './prompts';
 import { labConfig, labConfigVersions, labId, labReference, labText, listLabWorkspaces, parseLabDraft, planKey, readLabPlan, readLabWorkspace, receiptKey, workspaceKey } from './store';
 import { characterLabOperations, characterLabSlotsOverlap, sameLabReference, type CharacterLabOperation } from './types';
@@ -75,7 +76,9 @@ export async function labPlanState(user: SessionUser, id: string) {
 export async function labWorkspaceState(user: SessionUser, id: string, includeViews = false): Promise<CharacterLabWorkspacePayload> {
   const workspace = await readLabWorkspace(user.id, id);
   const records = await prisma.platformSetting.findMany({ where: { key: { startsWith: `character-lab:v1:${user.id}:plan:` } }, orderBy: { created_at: 'desc' } });
-  const plans = records.map(row => JSON.parse(row.value_json) as CharacterLabPlan).filter(plan => plan.workspaceId === id && (includeViews || !plan.operation));
+  const ownPlans = records.map(row => JSON.parse(row.value_json) as CharacterLabPlan).filter(plan => plan.workspaceId === id);
+  workspace.draft = labIndependentDraft(workspace.draft, ownPlans, workspace.views);
+  const plans = ownPlans.filter(plan => includeViews || !plan.operation);
   const [taskByRequestId, receipts] = await Promise.all([tasksForPlans(user, plans), prisma.platformSetting.findMany({ where: { key: { in: plans.map(plan => receiptKey(user.id, plan.id)) } } })]);
   const byReceipt = new Map(receipts.map(row => [row.key, (JSON.parse(row.value_json) as Receipt).state]));
   const candidateSource = workspace.draft.sourceAssetId ? await prisma.asset.findFirst({ where: { id: workspace.draft.sourceAssetId, owner_id: user.id, type: 'image', status: 'active' }, select: { id: true, file_name: true, original_url: true } }) : null;
@@ -111,6 +114,7 @@ async function assertLabSlotClear(db: Pick<Prisma.TransactionClient, 'platformSe
   if (accepted.length !== batches.length) throw new StudioError('此处的原提交结果待确认，请先核对原请求；输入与已有结果保留', 409);
 }
 export async function prepareLab(user: SessionUser, body: Record<string, unknown>) {
+  if (body.contextProtocol !== undefined && body.contextProtocol !== 1) throw new StudioError('上下文版本不受支持，请刷新页面', 409);
   if (body.recipeProtocol !== undefined && body.recipeProtocol !== 1) throw new StudioError('生成配方版本不受支持，请刷新页面', 409);
   if (body.recipeProtocol === 1 && !CHARACTER_LAB_RECIPE_WRITES_ENABLED) throw new StudioError('当前恢复版本仅查看已有配方，暂不创建新配方', 409);
   const workspaceId = labId(body.workspaceId, '角色项目'), requestId = labId(body.requestId, '提交');
@@ -125,16 +129,20 @@ export async function prepareLab(user: SessionUser, body: Record<string, unknown
   const draft = parseLabDraft(body.draft);
   delete draft.views;
   const input = refinement ? labReference(body.input) : null;
-  const description = operation ? labText(body.description ?? (refinement ? '' : operation === 'side' ? draft.sideDescription || '' : draft.context), 3000, refinement ? '微调描述' : '角色补充') : '';
+  const description = operation ? labText(body.description ?? (refinement ? '' : operation === 'side' ? draft.sideDescription || '' : body.contextProtocol === 1 ? draft.bodyDescription || '' : draft.context), 3000, refinement ? '微调描述' : '角色补充') : '';
   if (refinement && (!input || !description)) throw new StudioError('请选择要微调的图片并填写修改要求');
   await readLabWorkspace(user.id, workspaceId);
-  const inputFingerprint = createHash('sha256').update(JSON.stringify({ workspaceId, kind, draft, operation, slotScoped, ...(operation ? { input, description } : {}) })).digest('hex');
+  const inputFingerprint = createHash('sha256').update(JSON.stringify({ workspaceId, kind, draft, operation, slotScoped, ...(operation ? { input, description } : {}), ...(body.contextProtocol === 1 ? { contextProtocol: 1 } : {}) })).digest('hex');
   const existing = await prisma.platformSetting.findUnique({ where: { key: planKey(user.id, requestId) } });
   if (existing) {
     const plan = JSON.parse(existing.value_json) as StoredPlan;
     if (plan.inputFingerprint !== inputFingerprint) throw new StudioError('原提交编号属于另一组参数，请查询原记录', 409);
     return plan;
   }
+  if (body.contextProtocol !== 1) throw new StudioError('上下文已独立，请刷新页面后生成；已有输入与原记录保留', 409);
+  const personal = operation === 'side' ? draft.sideDescription : operation?.startsWith('body-') ? draft.bodyDescription : !operation && kind === 'faces' ? draft.faceDescription : '';
+  if (personal === undefined) throw new StudioError('请刷新页面读取独立补充输入', 409);
+  if (operation && !refinement && description !== personal) throw new StudioError('当前补充与此生成区域不一致，请重新读取', 409);
   await assertLabSlotClear(prisma, user.id, { workspaceId, kind, operation, slotScoped });
   if (!draft.sourceAssetId) throw new StudioError('请先选择一张原始角色素材');
   await ownedLabAsset(user, draft.sourceAssetId);
@@ -180,14 +188,15 @@ export async function prepareLab(user: SessionUser, body: Record<string, unknown
     : kind === 'faces' ? faceLabPrompt(config, draft) : resultLabPrompt(config, draft, Boolean(previousResultPlanId));
   if (prompt.length > 20000) throw new StudioError('规则和本次描述合计过长，请精简后再生成');
   const plan: StoredPlan = { id: requestId, workspaceId, kind, createdAt: new Date().toISOString(), sourceAssetId: draft.sourceAssetId,
-    count: refinement ? 4 : draft.count, diversity: draft.diversity, context: draft.context,
+    count: refinement ? 4 : draft.count, diversity: draft.diversity, context: operation ? '' : kind === 'faces' ? draft.faceDescription! : draft.context,
     mainFace: operation === 'side' || operation === 'refine-side' || !operation && kind === 'result' ? draft.mainFace : null,
-    auxiliaryFaces: !operation && kind === 'result' ? draft.auxiliaryFaces : [], auxiliaryFeatures: draft.auxiliaryFeatures,
+    auxiliaryFaces: !operation && kind === 'result' ? draft.auxiliaryFaces : [], auxiliaryFeatures: !operation && kind === 'result' ? draft.auxiliaryFeatures : '',
     adjustment: operation ? description : kind === 'result' ? draft.adjustment : '', adjustmentCell: !operation && kind === 'result' ? draft.adjustmentCell : null,
     previousResultPlanId, configRevision: config.revision, prompt, model: draft.model, channelId: draft.channelId,
     quality, resolution, aspectRatio: kind === 'faces' || operation === 'side' || operation === 'body-pair' ? '1:1' : '2:3', settingsRevision: settings.revision,
     referenceIds: references, projectId: draft.projectId, ...(imageChannel ? { imageChannel } : {}),
     ...(operation ? { operation } : {}), ...(input ? { input } : {}), ...(slotScoped ? { slotScoped } : {}),
+    contextProtocol: 1,
     ...(body.recipeProtocol === 1 ? { recipeProtocol: 1 as const } : {}),
     ...(settingsSource ? { origin: { planId: settingsSource.id, mode: 'current' as const } } : {}), inputFingerprint };
   await prisma.$transaction(async tx => {

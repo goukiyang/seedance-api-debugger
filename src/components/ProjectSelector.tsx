@@ -13,7 +13,7 @@ import { ProjectWorkAudience } from './works/ProjectWorkAudience';
 
 type Option = { value: string; label: string; disabled: boolean; group: string; projectId: string | null };
 /** Original options remain authoritative for each selection's purpose and permissions. */
-export function ProjectSelector({ children, className, style, value, disabled, title, id: suppliedId, onCatalogChange, ...props }: SelectHTMLAttributes<HTMLSelectElement> & { onCatalogChange?: () => void }) {
+export function ProjectSelector({ children, className, style, value, disabled, title, id: suppliedId, onCatalogChange, catalogScope, ...props }: SelectHTMLAttributes<HTMLSelectElement> & { onCatalogChange?: () => void; catalogScope?: 'owned' }) {
   const { user, sessionChanged } = useAppSession();
   const ownerId = user?.id || '', revision = useProjectCatalogRevision(ownerId);
   const native = useRef<HTMLSelectElement>(null), trigger = useRef<HTMLButtonElement>(null), panel = useRef<HTMLDivElement>(null), searchInput = useRef<HTMLInputElement>(null);
@@ -62,11 +62,11 @@ export function ProjectSelector({ children, className, style, value, disabled, t
       }
       setRecovery(originals);setCreateRecovery(creating);
     } catch { setNotice('原项目操作记录暂不可读取，可继续选择项目；没有再次提交。'); }
-    void readProjectSelectorCatalog(ownerId).then(result=>{if(!cancelled){setCatalog(result.projects);setCanCreate(result.capabilities?.can_create_team_project === true && result.capabilities?.create_operation_version === 1);}})
+    void readProjectSelectorCatalog(ownerId,catalogScope).then(result=>{if(!cancelled){setCatalog(result.projects);setCanCreate(result.capabilities?.can_create_team_project === true && result.capabilities?.create_operation_version === 1);}})
       .catch(cause=>{if(!cancelled){setCatalog([]);setCanCreate(false);setNotice(cause.message);}})
       .finally(()=>{if(!cancelled)setCatalogLoading(false);});
     return ()=>{cancelled=true;};
-  },[open,ownerId,sessionChanged,revision]);
+  },[open,ownerId,sessionChanged,revision,catalogScope]);
   useDialogDismiss({open,dialogRef:panel,layerSurfaceRef:panel,branchRefs:[trigger],modal:false,initialFocusRef:searchInput,onDismiss:()=>setOpen(false)});
   useEffect(()=>{
     if(!open) return;

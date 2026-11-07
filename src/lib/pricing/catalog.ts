@@ -55,11 +55,13 @@ export async function assertPricingCatalogIdentity(identity: PricingAdminIdentit
     }
     const settings = await selectPricingImageGenerationSettings(channels, identity.modelId, identity.channelId, client, menu?.inputs.image);
     const capability = channel.models[identity.modelId as typeof IMAGE_STUDIO_MODELS[number]];
-    const adoptingFixed = fixedPriceConfirmed && identity.billingMode === 'fixed' && settings.modelCapabilities[identity.modelId as typeof IMAGE_STUDIO_MODELS[number]]?.billingMode === 'fixed';
+    const configuredCapability = settings.modelCapabilities[identity.modelId as typeof IMAGE_STUDIO_MODELS[number]];
+    const adoptingFixed = Boolean(fixedPriceConfirmed && identity.billingMode === 'fixed'
+      && configuredCapability && configuredCapability.billingMode !== 'actual');
     const validationSettings = adoptingFixed ? { ...settings, modelCapabilities: { ...settings.modelCapabilities,
-      [identity.modelId]: { ...settings.modelCapabilities[identity.modelId as typeof IMAGE_STUDIO_MODELS[number]]!, fixedPoints: 0 } } } : settings;
+      [identity.modelId]: { ...configuredCapability!, billingMode: 'fixed' as const, fixedPoints: 0 } } } : settings;
     assertPricingImageAvailability(validationSettings, identity, specifications);
-    if (!capability || capability.billingMode !== identity.billingMode) return reject();
+    if (!capability || !adoptingFixed && capability.billingMode !== identity.billingMode) return reject();
     if (!capability.ready && !adoptingFixed) {
       throw new PricingItemUnavailableError(identity, 'evidence_unconfirmed', capability.disabledReason || '该型号的计价依据尚未就绪');
     }

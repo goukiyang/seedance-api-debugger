@@ -62,7 +62,7 @@ const CircleAlert = Symbol('circle-alert');
 const Status = load(statusSource, {
   'react-dom': { createPortal: (value: unknown) => value },
   '@radix-ui/react-popper': { Root: Symbol('root'), Anchor: Symbol('anchor'), Content: Symbol('content') },
-  'lucide-react': { CircleAlert, Info: Symbol('info') }, './useDialogDismiss': { useDialogDismiss() {} },
+  'lucide-react': { CircleAlert, Info: Symbol('info'), MoreHorizontal: Symbol('more') }, './useDialogDismiss': { useDialogDismiss() {} },
 }).ImageResultStatusDetails;
 const reasonTrigger = nodes(render(Status, { detail: 'fixture', reason: true, active: true, scopeKey: 'reason' })).find(node => node.type === 'button')!;
 assert.equal(reasonTrigger.props['aria-label'], '查看原因');
@@ -72,6 +72,32 @@ assert.equal((reasonTrigger.props.children as Element).type, CircleAlert, 'the r
 const normalTrigger = nodes(render(Status, { detail: 'fixture', active: true, scopeKey: 'detail' })).find(node => node.type === 'button')!;
 assert.equal(normalTrigger.props['aria-label'], '查看详情');
 assert.equal(normalTrigger.props.children, '查看详情');
+
+const pinAction = jsx('button', { role: 'menuitem', 'data-pin-action': true });
+const moreProps = { children: 'fixture metadata', moreActions: pinAction, active: true, scopeKey: 'more' };
+render(Status, moreProps);
+slots[3] = {}; // The existing portal host effect has mounted, no browser or business request.
+const rerenderMore = () => { slot = 0; return (Status as (props: Props) => Element)(moreProps); };
+let more = rerenderMore();
+const moreTrigger = () => nodes(more).find(node => node.type === 'button' && node.props['aria-haspopup'])!;
+assert.equal(moreTrigger().props['aria-label'], '图片更多操作');
+assert.equal(moreTrigger().props['aria-expanded'], false);
+assert.ok(nodes(more).some(node => node === pinAction), 'closing the menu retains the original pin controller');
+(moreTrigger().props.onClick as (event: unknown) => void)({ preventDefault() {}, stopPropagation() {} });
+more = rerenderMore();
+assert.equal(moreTrigger().props['aria-expanded'], true);
+assert.ok(nodes(more).some(node => node.props.role === 'menu'));
+const detailsOption = nodes(more).find(node => node.type === 'button' && node.props.role === 'menuitem' && !node.props['data-pin-action'])!;
+(detailsOption.props.onClick as () => void)();
+more = rerenderMore();
+assert.equal(byClass(more, 'moreOptions').props.hidden, true);
+assert.ok(nodes(more).some(node => node.props.role === 'dialog'));
+assert.ok(nodes(more).some(node => node === pinAction), 'switching to details retains the same pin controller');
+const closeDetails = nodes(more).find(node => node.props['data-detail-close'])!;
+(closeDetails.props.onClick as () => void)();
+more = rerenderMore();
+assert.equal(moreTrigger().props['aria-expanded'], false);
+assert.ok(nodes(more).some(node => node === pinAction));
 
 const IssueDetails = load(readFileSync(resolve('src/components/ImageResultIssueDetails.tsx'), 'utf8'), {
   'react-dom': { createPortal: (value: unknown) => value },
@@ -164,7 +190,8 @@ function card(item: Props, options: Props = {}) {
   return render(child.type, child.props);
 }
 
-const ready = card({ id: 'ready', completionTaskId: 'task-ready', label: '结果', status: '已完成', media: { src: '/fixture.png' }, download: () => undefined });
+const ready = card({ id: 'ready', completionTaskId: 'task-ready', label: '结果', status: '已完成', media: { src: '/fixture.png' }, download: () => undefined }, { fullRows: true });
+assert.equal(pageOptions?.fullRows, true, 'template results opt into complete rows');
 const readyArticle = nodes(ready).find(node => node.type === 'article')!;
 assert.equal(readyArticle.props['data-result-ready'], '');
 assert.equal(readyArticle.props['data-result-task-id'], 'task-ready');
@@ -172,6 +199,16 @@ const actions = byClass(ready, 'mediaActions');
 const actionGroups = (Array.isArray(actions.props.children) ? actions.props.children : [actions.props.children]).filter(Boolean) as Element[];
 assert.equal(actionGroups.at(-1)?.props.className, 'deliveryAction');
 assert.ok(nodes(actionGroups.at(-1)).some(node => node.props['data-delivery']));
+assert.ok(byClass(ready, 'moreSlot'));
+assert.equal(nodes(actions).some(node => node.type === StatusDetails), false, 'details leave the lower toolbar');
+assert.equal(actions.props['data-compact-actions'], true);
+card({ id: 'compact-batch', label: '批次结果', media: { src: '/fixture.png' } });
+assert.equal(pageOptions?.fullRows, false, 'compact batch cards retain bounded paging without an explicit template opt-in');
+assert.ok(read('src/app/image-studio/studio.tsx').includes('fullRows={templateWorkbench}'), 'only template workbench results explicitly request complete rows');
+
+const legacy = card({ id: 'legacy', label: '结果', media: { src: '/fixture.png' } }, { compactInformation: false });
+assert.equal(pageOptions?.fullRows, false, 'other consumers retain bounded paging');
+assert.ok(byClass(legacy, 'mediaDetailAction'), 'non-compact consumers retain their existing details entry');
 
 const pending = card({ id: 'pending', label: '处理中', status: '生成中', pending: true,
   generationWait: { status: 'running' }, error: '原任务返回异常' }, { renderDelete: undefined, renderActions: undefined, renderDeliveryAction: undefined });
@@ -203,6 +240,20 @@ const issueLayout = declarations('.pendingStatusIssue')[0];
 assert.equal(issueLayout.position, 'absolute'); assert.equal(issueLayout.top, 'calc(100% + 8px)');
 const mediaLayout = declarations('.mediaActions')[0];
 assert.equal(mediaLayout['flex-wrap'], 'wrap'); assert.equal(mediaLayout['overflow-x'], 'hidden');
+const compactLayout = declarations('.mediaActions[data-compact-actions]')[0];
+assert.equal(compactLayout['max-block-size'], 'none'); assert.equal(compactLayout.overflow, 'visible');
+const hiddenMore = declarations('.moreTrigger').find(rule => rule.opacity === '0');
+assert.equal(hiddenMore?.['pointer-events'], 'none');
+for (const selector of ['.media:hover .moreTrigger', '.media:focus-within .moreTrigger', '.moreTrigger[aria-expanded="true"]']) {
+  const revealed = declarations(selector).find(rule => rule.opacity === '1');
+  assert.equal(revealed?.['pointer-events'], 'auto');
+}
+css.walkRules(rule => {
+  if (rule.selectors.includes('.moreTrigger') && rule.nodes.some(node => node.type === 'decl' && node.prop === 'opacity' && node.value === '0')) {
+    assert.equal(rule.parent?.type, 'atrule');
+    assert.equal((rule.parent as import('postcss').AtRule).params, '(hover: hover) and (pointer: fine)', 'touch retains a visible more button');
+  }
+});
 const visibleDeliveryFailure = declarations('.card .mediaActions:has(button[data-state="failed"], button[data-state="unknown"], button[data-state="sent_navigation_unknown"], button[data-state="sent_navigation_failed"])')[0];
 assert.equal(visibleDeliveryFailure.opacity, '1'); assert.equal(visibleDeliveryFailure['pointer-events'], 'auto');
 const square = declarations('.mediaActions[data-cover-context-delete] button')[0];

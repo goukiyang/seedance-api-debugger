@@ -225,14 +225,24 @@ async function main() {
     const compositions = await import('../src/lib/character-lab/composition');
     const workspaceId = randomUUID();
     const workspace = await store.createLabWorkspace(owner, workspaceId, '独立四格', 'gpt-image-2');
-    const draft = { ...workspace.draft, sourceAssetId, count: 9, diversity: 0, quality: 'medium', resolution: '2K' };
+    const draft = { ...workspace.draft, faceDescription: 'FACE_ONLY_SENTINEL', sideDescription: 'SIDE_ONLY_SENTINEL', bodyDescription: 'BODY_ONLY_SENTINEL', context: 'UNASSIGNED_LEGACY_SENTINEL', sourceAssetId, count: 9 as const, diversity: 0, quality: 'medium', resolution: '2K' };
     const prepare = (kind: 'faces' | 'result', operation?: string, overrides?: Record<string, unknown>) =>
-      service.prepareLab(user, { workspaceId, requestId: randomUUID(), workbench: 2, kind, operation, draft, ...overrides });
+      service.prepareLab(user, { workspaceId, requestId: randomUUID(), workbench: 2, contextProtocol: 1, kind, operation, draft, ...overrides });
     const first = await prepare('faces');
     assert.equal(first.count, 9);
     assert.match(first.prompt, /3×3宫格/);
     assert.match(first.prompt, /保留人物身份/);
     assert.doesNotMatch(first.prompt, /结构方向|系统性改变/);
+    assert.match(first.prompt, /FACE_ONLY_SENTINEL/);
+    assert.doesNotMatch(first.prompt, /SIDE_ONLY_SENTINEL|BODY_ONLY_SENTINEL|UNASSIGNED_LEGACY_SENTINEL/);
+    assert.equal(first.context, draft.faceDescription);
+    await assert.rejects(prepare('faces', undefined, { contextProtocol: undefined }), /上下文已独立/);
+    const legacyInput = store.parseLabDraft({ ...draft, faceDescription: undefined, sideDescription: undefined, bodyDescription: undefined });
+    const legacyId = randomUUID();
+    const legacyFingerprint = sha(JSON.stringify({ workspaceId, kind: 'faces', draft: legacyInput, operation: undefined, slotScoped: true }));
+    const legacyExisting = { ...plan(legacyId), workspaceId, inputFingerprint: legacyFingerprint };
+    await createPlan(legacyExisting);
+    assert.deepEqual(await service.prepareLab(user, { workspaceId, requestId: legacyId, workbench: 2, kind: 'faces', draft: legacyInput }), legacyExisting);
     const high = await prepare('faces', undefined, { draft: { ...draft, diversity: 75 } });
     assert.match(high.prompt, /第9格结构方向/);
 
@@ -268,6 +278,9 @@ async function main() {
     assert.deepEqual(side.mainFace, face);
     assert.deepEqual(side.referenceIds, faceRefinement.referenceIds);
     assert.match(side.referenceIds[0], /^clab-/);
+    assert.match(side.prompt, /SIDE_ONLY_SENTINEL/);
+    assert.doesNotMatch(side.prompt, /FACE_ONLY_SENTINEL|BODY_ONLY_SENTINEL|UNASSIGNED_LEGACY_SENTINEL/);
+    assert.equal(side.context, '');
     const sideAsset = await paint(side, '#00ff00');
     const sideRefinement = await prepare('faces', 'refine-side', {
       draft: picked, input: { planId: side.id }, description: '收一点下颌',
@@ -290,10 +303,26 @@ async function main() {
     assert.equal(bodyFront.mainFace, null);
     await paint(bodyFront, '#0000ff');
     await paint(bodyBack, '#ffff00');
+    assert.match(bodyFront.prompt, /BODY_ONLY_SENTINEL/);
+    assert.doesNotMatch(bodyFront.prompt, /FACE_ONLY_SENTINEL|SIDE_ONLY_SENTINEL|UNASSIGNED_LEGACY_SENTINEL/);
+    assert.equal(bodyFront.context, '');
+    assert.equal(faceRefinement.context, '');
+    assert.doesNotMatch(faceRefinement.prompt, /FACE_ONLY_SENTINEL|SIDE_ONLY_SENTINEL|BODY_ONLY_SENTINEL/);
+    const contexts = await import('../src/lib/character-lab/contexts');
+    assert.deepEqual(contexts.labPersonalFields(first), { faceDescription: draft.faceDescription });
+    assert.deepEqual(contexts.labPersonalFields(side), { sideDescription: draft.sideDescription });
+    assert.deepEqual(contexts.labPersonalFields({ ...bodyFront, context: 'OLD_FACE_TEXT', adjustment: '' }), { bodyDescription: '' });
+    const recovered = contexts.labIndependentDraft({ ...draft, faceDescription: undefined, sideDescription: undefined, bodyDescription: undefined, mainFace: face }, [bodyFront, side, first]);
+    assert.equal(recovered.faceDescription, draft.faceDescription);
+    assert.equal(recovered.sideDescription, draft.sideDescription);
+    assert.equal(recovered.bodyDescription, draft.bodyDescription);
+    assert.equal(recovered.context, draft.context);
+    assert.equal(contexts.labIndependentDraft({ ...draft, faceDescription: '', bodyDescription: '' }, [bodyFront, first]).faceDescription, '');
+    assert.equal(contexts.labIndependentDraft({ ...draft, faceDescription: undefined, bodyDescription: undefined }, [{ ...first, sourceAssetId: 'other-source' }]).faceDescription, '');
 
-    const pairInput = { ...picked, context: '保持腰带与衣服细节' };
+    const pairInput = { ...picked, bodyDescription: '保持腰带与衣服细节' };
     const pair = service.CHARACTER_LAB_BODY_PAIRS_ENABLED
-      ? await prepare('result', 'body-pair', { draft: pairInput, description: pairInput.context })
+      ? await prepare('result', 'body-pair', { draft: pairInput, description: pairInput.bodyDescription })
       : { ...plan(randomUUID()), workspaceId, kind: 'result' as const, operation: 'body-pair' as const,
           slotScoped: true as const, count: 4 as const, aspectRatio: '1:1' as const, mainFace: null, referenceIds: [sourceAssetId] };
     if (service.CHARACTER_LAB_BODY_PAIRS_ENABLED) {
@@ -303,7 +332,7 @@ async function main() {
       assert.match(pair.prompt, /左半区严格正面/);
       assert.match(pair.prompt, /右半区严格背面/);
       assert.match(pair.prompt, /保持腰带与衣服细节/);
-      assert.equal(pair.adjustment, pairInput.context);
+      assert.equal(pair.adjustment, pairInput.bodyDescription);
       const quote = await service.quoteLab(user, pair.id);
       assert.equal(quote.estimatedCredits, quote.unitCredits);
       const submitted = await service.submitLab(user, { planId: pair.id, billingQuoteId: quote.billingQuoteId,
@@ -397,6 +426,14 @@ async function main() {
     await assert.rejects(recipes.labRecipe({ ...user, id: 'other-fixture-owner' }, first.id), /不存在或无权访问/);
     const restored = await recipes.restoreLabSettings(user, { workspaceId, planId: first.id });
     assert.equal(restored.patch.count, 9);
+    assert.equal(restored.patch.faceDescription, draft.faceDescription);
+    assert.equal(restored.patch.context, undefined); assert.equal(restored.patch.bodyDescription, undefined);
+    const bodyRestored = await recipes.restoreLabSettings(user, { workspaceId, planId: bodyFront.id });
+    assert.equal(bodyRestored.patch.bodyDescription, draft.bodyDescription);
+    assert.equal(bodyRestored.patch.faceDescription, undefined); assert.equal(bodyRestored.patch.context, undefined);
+    const sideRestored = await recipes.restoreLabSettings(user, { workspaceId, planId: side.id });
+    assert.equal(sideRestored.patch.sideDescription, draft.sideDescription);
+    assert.equal(sideRestored.patch.faceDescription, undefined); assert.equal(sideRestored.patch.bodyDescription, undefined);
     assert.equal(restored.patch.mainFace, undefined); assert.equal(restored.patch.sourceAssetId, undefined);
     assert.equal(restored.patch.views, undefined);
     assert.equal((await db.platformSetting.findUniqueOrThrow({ where: { key: store.workspaceKey(owner, workspaceId) } })).value_json, beforeRead.workspace);
@@ -404,11 +441,25 @@ async function main() {
     assert.equal(saved.compositions?.[0].layout, 'sheet-2x2-v1');
     assert.deepEqual(saved.compositions?.[0].sources, { sourceAssetId, mainFace: face, side: views.side, front: views['body-front'], back: views['body-back'] });
 
-    await store.saveLabConfig(user, 0, { ...store.defaultLabConfig, styleConstraints: 'NEW_SAVED_RULES_FOR_NEXT_GENERATION' });
+    await store.saveLabConfig(user, 0, { ...store.defaultLabConfig, styleConstraints: 'NEW_SAVED_RULES_FOR_NEXT_GENERATION', sideStyleConstraints: 'SIDE_STYLE_SENTINEL', bodyStyleConstraints: 'BODY_STYLE_SENTINEL' });
     const nextDraft = { ...savedByLegacy.draft, ...restored.patch };
-    const preview = await recipes.previewLabPrompt(user, { workspaceId, kind: 'faces', draft: nextDraft });
+    const preview = await recipes.previewLabPrompt(user, { workspaceId, contextProtocol: 1, kind: 'faces', draft: nextDraft });
     assert.match(preview.prompt || '', /NEW_SAVED_RULES_FOR_NEXT_GENERATION/);
     assert.doesNotMatch((await recipes.labRecipe(user, first.id)).completePrompt || '', /NEW_SAVED_RULES_FOR_NEXT_GENERATION/);
+    const sidePreview = await recipes.previewLabPrompt(user, { workspaceId, contextProtocol: 1, kind: 'result', operation: 'side', draft: nextDraft, description: 'FOREIGN_OVERRIDE' });
+    assert.match(sidePreview.prompt || '', /SIDE_STYLE_SENTINEL/);
+    assert.match(sidePreview.prompt || '', /SIDE_ONLY_SENTINEL/);
+    assert.doesNotMatch(sidePreview.prompt || '', /NEW_SAVED_RULES_FOR_NEXT_GENERATION|BODY_STYLE_SENTINEL|FACE_ONLY_SENTINEL|FOREIGN_OVERRIDE/);
+    const bodyPreview = await recipes.previewLabPrompt(user, { workspaceId, contextProtocol: 1, kind: 'result', operation: 'body-pair', draft: nextDraft });
+    assert.match(bodyPreview.prompt || '', /BODY_STYLE_SENTINEL/);
+    assert.match(bodyPreview.prompt || '', /BODY_ONLY_SENTINEL/);
+    assert.doesNotMatch(bodyPreview.prompt || '', /NEW_SAVED_RULES_FOR_NEXT_GENERATION|SIDE_STYLE_SENTINEL|FACE_ONLY_SENTINEL/);
+    const savedText = await store.updateLabWorkspace(owner, workspaceId, savedByLegacy.revision, savedByLegacy.name, nextDraft);
+    const oldPageDraft = { ...savedText.draft, faceDescription: undefined, bodyDescription: undefined, sideDescription: undefined };
+    const oldPageSaved = await store.updateLabWorkspace(owner, workspaceId, savedText.revision, savedText.name, oldPageDraft);
+    assert.equal(oldPageSaved.draft.faceDescription, nextDraft.faceDescription);
+    assert.equal(oldPageSaved.draft.bodyDescription, nextDraft.bodyDescription);
+    assert.equal(oldPageSaved.draft.sideDescription, nextDraft.sideDescription);
     if (service.CHARACTER_LAB_RECIPE_WRITES_ENABLED) {
       const continued = await prepare('faces', undefined, { draft: nextDraft, recipeProtocol: 1 });
       assert.deepEqual(continued.origin, { planId: first.id, mode: 'current' });
@@ -448,7 +499,8 @@ async function main() {
         'legacy_quote_rejected_before_submitting_or_fees', 'nine_grid_and_strength_rules', 'refinement_and_view_references',
         'same_slot_pending_only', 'body_pair_single_task_description_crops_and_slot_conflicts', 'legacy_projection_and_writer', 'composition_png_order_identity_and_idempotency',
         'recipe_detail_full_context_and_member_projection', 'restore_reads_only_and_composition_lineage',
-        'current_rules_vs_historical_quote_and_single_submission', 'recipe_guard_preserves_unknown_receipts'],
+        'current_rules_vs_historical_quote_and_single_submission', 'recipe_guard_preserves_unknown_receipts',
+        'independent_context_prepare_and_old_request_lookup', 'independent_history_empty_and_workspace_preservation', 'independent_style_and_preview_scopes'],
       taskId: created.id, batchId: created.batch_id, databasePath, productionWrites: 0, paidRequests: 0,
       browserRuns: 0, forbiddenCalls }, null, 2));
   } finally {

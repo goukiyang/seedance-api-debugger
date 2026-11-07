@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import type { SessionUser } from '@/lib/auth/session';
 import { getCanvasImageQuote, type CanvasQuoteInput } from '@/lib/canvas-quote';
@@ -6,6 +7,9 @@ import { capturePricingImageMenu, getPricingImageChannelOptions, resolvePricingI
 import { PricingItemUnavailableError, isPricingItemUnavailable } from '@/lib/pricing/item-unavailable';
 import { captureImageGenerationRequestChannel, getImageGenerationApiSettings, getImageGenerationChannels, readPricingImageActualReadiness,
   resolveImageGenerationChannelSnapshot, IMAGE_GENERATION_API_SETTING_KEY, BANANA_IMAGE_API_SETTING_KEY } from '@/lib/integrations/image-generation';
+import { IMAGE_GENERATION_CHANNEL_REGISTRY_SETTING_KEY } from '@/lib/integrations/image-generation';
+import { stringifyPrivateCredentials } from '@/lib/security/private-credentials.server';
+import { getAdminPricingSnapshot, previewAdminPricing, saveAdminPricing } from '@/lib/pricing/policy';
 import { IMAGE_GENERATION_MODEL_DEFAULTS_SETTING_KEY, ImageGenerationQualityRouteError } from '@/lib/integrations/image-generation-defaults';
 import { IMAGE_STUDIO_SETTING_KEY, DEFAULT_STUDIO_PRICES } from '@/lib/image-studio/settings';
 import { PRICING_POLICY_KEY } from '@/lib/pricing/admin-contract';
@@ -222,6 +226,47 @@ export async function runPricingImageCandidateContractFixture(db: PrismaClient, 
     await putRaw(BANANA_IMAGE_API_SETTING_KEY, bananaBeforeChange.value_json);
     const otherIdentity = { ...flareRoute.identity, modelId: 'gemini-3-pro-image-preview' };
     equal(isPricingItemUnavailable(new PricingItemUnavailableError(otherIdentity, 'disabled', 'fixture'), flareRoute.identity), false);
+
+    // A newly configured managed API has no legacy price. The unified price is
+    // sufficient after a real preview/save, without writing a second API price.
+    const newChannel = `image-${randomUUID()}`, configRevision = randomUUID(), model = 'gpt-image-2.6-flare';
+    const modelCapabilities = { [model]: { enabled: true, protocol: 'openai_images', qualities: ['auto'],
+      resolutions: ['1K'], ratios: ['1:1'], maxReferences: 0, billingMode: null, fixedPoints: null, billingSource: null } };
+    const registryRaw = await db.platformSetting.findUnique({ where: { key: IMAGE_GENERATION_CHANNEL_REGISTRY_SETTING_KEY } });
+    const registry = registryRaw ? JSON.parse(registryRaw.value_json) : { version: 1, channels: [] };
+    registry.channels.push({ id: newChannel, configRevision, label: 'Onboarding fixture', supplierName: 'Onboarding fixture',
+      supplierKind: 'other', protocol: 'openai_images', baseUrl: 'https://fixture.invalid/onboarding',
+      enabled: true, deleted: false, modelCapabilities });
+    await put(IMAGE_GENERATION_CHANNEL_REGISTRY_SETTING_KEY, registry);
+    const versionKey = `image_generation_channel_version_v1:${newChannel}:${configRevision}`;
+    await putRaw(versionKey, stringifyPrivateCredentials(versionKey, { version: 1, channelId: newChannel, configRevision,
+      label: 'Onboarding fixture', supplierName: 'Onboarding fixture', supplierKind: 'other', protocol: 'openai_images',
+      managedChannel: true, deleted: false, modelCapabilities, modelApiKeys: {},
+      settings: { ...await getImageGenerationApiSettings(db), enabled: true, provider: 'ai_media_vip',
+        base_url: 'https://fixture.invalid/onboarding', api_key: 'synthetic-onboarding-key' } }));
+    await reject(() => quote({ model, channelId: newChannel }), error => error instanceof PricingItemUnavailableError);
+    const actor = { id: user.id, displayName: user.name, avatarUrl: user.avatar_url || null };
+    const current = await getAdminPricingSnapshot(actor);
+    const row = current.rows.find(item => item.identity.channelId === newChannel && item.identity.modelId === model)!;
+    ok(row); equal(row.mode, 'unset'); equal(row.pricingEnabled, false);
+    const input = { expectedRevision: current.revision, expectedAuthoringRevision: current.authoring?.revision,
+      catalogFingerprint: current.catalogFingerprint, action: { kind: 'save' as const, changes: { rows: [{ id: row.id,
+        pricingEnabled: true, mode: 'custom' as const, customPointsPerCny: '10', basisKind: 'site_base_cny' as const,
+        base: { amount: '0.5', currency: 'CNY' as const, unit: 'image' as const, source: { type: 'admin_defined' as const,
+          reference: 'isolated onboarding', note: 'Synthetic site price, not supplier cost.' } } }] } } };
+    const preview = await previewAdminPricing(actor, input);
+    const saved = await saveAdminPricing(actor, { ...input, operationId: randomUUID(), previewToken: preview.previewToken });
+    equal(saved.state, 'succeeded');
+    const priced = await quote({ model, channelId: newChannel });
+    equal(priced.unitCredits, 5); equal(priced.estimatedCredits, 15);
+    equal((await getImageGenerationChannels(db, true)).managed.find(item => item.channelId === newChannel)!
+      .modelCapabilities[model]!.billingMode, null);
+    const retained = await quote({ model, channelId: newChannel, quality: 'max', resolution: '4K' });
+    equal(retained.unitCredits, 5); equal(retained.estimatedCredits, 15);
+    equal(retained.imageChannel?.channelId, newChannel);
+    equal(retained.imageChannel?.configRevision, configRevision);
+    equal(retained.specifications.quality, 'max'); equal(retained.specifications.resolution, '4K');
+    await reject(() => quote({ model, channelId: newChannel, quality: 'unlisted-quality' }), error => error instanceof Error);
     equal(await db.imageStudioTask.count(), taskCount); equal(await db.creditAccount.findMany({ orderBy: { id: 'asc' } }), accounts);
   } finally {
     await db.$transaction(async tx => {
