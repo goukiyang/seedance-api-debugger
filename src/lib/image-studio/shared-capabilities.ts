@@ -3,6 +3,7 @@ import type { ImageStudioChannel } from './channels';
 import { IMAGE_25_QUALITY_MODEL, isImage25Quality } from './quality-routing';
 import { isStandardStudioRatio, normalizeStudioRatio } from './ratios';
 import { MAX_REFERENCE_IMAGES } from './limits';
+import { isStandardGptImageParameter } from './model-catalog';
 
 export type ImageChannelValues = { legacyReady?: boolean; quality?: string; resolution?: string; ratio?: string; referenceCount?: number; legacyRoute?: boolean };
 export function sharedImageStudioChannelIssue(channel: ImageStudioChannel | undefined, model: string, values: ImageChannelValues) {
@@ -23,8 +24,8 @@ export function sharedImageStudioChannelIssue(channel: ImageStudioChannel | unde
   if (!capability || !capability.ready) return capability?.disabledReason || '当前供应商的所选型号尚未就绪；当前选择和素材已保留，请联系管理员检查配置。';
   if (!capability.billingMode) return '当前生图通道的计费方式尚未确认，暂不能生成；请联系管理员检查配置。';
   if (capability.billingMode === 'fixed' && !capability.pricingBySpecification && capability.fixedPoints == null && !['shared', 'banana'].includes(channel.id)) return '当前生图通道的固定点数尚未配置，暂不能生成；请联系管理员检查配置。';
-  if (capability.qualities && (!capability.qualities.length || values.quality !== undefined && !capability.qualities.includes(values.quality))) return '当前生图通道不支持所选图片质量，请手动调整后再生成。';
-  if (capability.resolutions && (!capability.resolutions.length || values.resolution !== undefined && !capability.resolutions.includes(values.resolution))) return '当前通道暂不提供所选分辨率；选择和素材已保留，请手动调整。';
+  if (!isStandardGptImageParameter(model, 'quality', values.quality) && capability.qualities && (!capability.qualities.length || values.quality !== undefined && !capability.qualities.includes(values.quality))) return '当前生图通道不支持所选图片质量，请手动调整后再生成。';
+  if (!isStandardGptImageParameter(model, 'resolution', values.resolution) && capability.resolutions && (!capability.resolutions.length || values.resolution !== undefined && !capability.resolutions.includes(values.resolution))) return '当前通道暂不提供所选分辨率；选择和素材已保留，请手动调整。';
   if (values.ratio !== undefined && !isStandardStudioRatio(values.ratio) && !capability.ratios?.some(value => {
     try { return normalizeStudioRatio(value) === normalizeStudioRatio(values.ratio); } catch { return false; }
   })) return '当前生图通道不支持所选比例，请手动调整后再生成。';
