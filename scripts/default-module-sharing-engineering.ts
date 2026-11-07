@@ -222,7 +222,7 @@ async function main() {
     assert.equal(opened.prompt, ''); assert.equal(opened.context, '');
     const colleagueDTO = await studioModuleDTOForUser(colleague, opened.id);
     assert.equal(colleagueDTO.context, ''); assert.equal(colleagueDTO.prompt, '');
-    assert.ok(colleagueDTO.sharedLive?.definitionToken);
+    assert.ok('sharedLive' in colleagueDTO && colleagueDTO.sharedLive?.definitionToken);
     assert.equal(JSON.stringify(colleagueDTO).includes('synthetic protected'), false);
     checks.push('ordinary_colleague_opens_encrypted_dynamic_source_and_full_dto_hides_private_definition');
     const repeatOpen = await sharing.openSharedStudioModule(colleague, encryptedSource.id, openRequestId);
