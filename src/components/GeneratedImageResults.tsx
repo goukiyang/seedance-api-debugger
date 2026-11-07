@@ -238,10 +238,11 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
   </article>;
 }
 
-export function GeneratedImageResults<T extends GeneratedImageResult>({ items, scope, visible = true, loading = false, busy = false, error = '', emptyLabel = '暂无生成结果', hasMore = false, total, loadMore = noMore, onRetry, selectedId, onSelect, previewId, onPreviewChange, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderDeliveryAction, renderOverlay, renderSupplement, renderReactionAction, paginationSlot, latestPageRequest, onLatestPageRequestHandled, onQuickUse, contextActionsEnabled = false, coverDeleteWithContextActions = false, compactInformation = false, onPreviewInputMain, contextActions, onVisibleItemsChange, navigationIntent }: ResultRenderers<T> & {
+export function GeneratedImageResults<T extends GeneratedImageResult>({ items, scope, visible = true, loading = false, busy = false, error = '', emptyLabel = '暂无生成结果', hasMore = false, total, loadMore = noMore, onRetry, selectedId, onSelect, previewId, onPreviewChange, renderMetadata, renderActions, renderPrimaryActions, renderDelete, renderDeliveryAction, renderOverlay, renderSupplement, renderReactionAction, paginationSlot, latestPageRequest, onLatestPageRequestHandled, onQuickUse, contextActionsEnabled = false, coverDeleteWithContextActions = false, compactInformation = false, fullRows = false, onPreviewInputMain, contextActions, onVisibleItemsChange, navigationIntent }: ResultRenderers<T> & {
   items: T[]; scope: string; visible?: boolean; loading?: boolean; busy?: boolean; error?: string; emptyLabel?: string;
   hasMore?: boolean; loadMore?: () => Promise<unknown>; onRetry?: () => void;
   total?: number | null;
+  fullRows?: boolean;
   /** A supplied slot owns pagination placement; null reserves it until mounted. */
   paginationSlot?: HTMLElement | null;
   /** A confirmed generation request asks this list to replace restored paging with its newest page. */
@@ -299,7 +300,7 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
   const readBusy = busy || loading || readState.scope === scope && readState.busy;
   const readError = error || (readState.scope === scope ? readState.error : '');
   const pages = useResultPages({ items, storageKey: scope, visible, busy: readBusy, error: Boolean(readError), hasMore, total, loadMore: readMore,
-    currentId: activePreview || currentSelection || null, navigationIntent });
+    currentId: activePreview || currentSelection || null, navigationIntent, fullRows });
   const visibleItemsCallback = useRef(onVisibleItemsChange); visibleItemsCallback.current = onVisibleItemsChange;
   const visibleItemIds = pages.pageItems.map(item => item.id).join('\0');
   useEffect(() => { if (visible) visibleItemsCallback.current?.(pages.pageItems); }, [scope, visible, visibleItemIds]);

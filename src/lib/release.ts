@@ -1,9 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '生图参数选择修复', outline: [
-  '切换生图模型时保留已选质量和分辨率',
-  '修复生图选项误拦截，保留原任务与费用保护',
-  '完整原图按实际尺寸交付，尺寸差异不再记为失败',
+const notice = { title: '优化角色图片复制与历史候选', outline: [
+  '单格支持右键复制图片，历史候选统一放在左下方',
+  '完善图片结果浏览、本人项目选择和素材价格展示',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

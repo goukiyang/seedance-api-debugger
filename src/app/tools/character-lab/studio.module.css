@@ -77,6 +77,9 @@
 .batchList [aria-pressed='true'] { border-color: var(--lab-green); }
 .batchList span { font-size: 12px; min-width: 0; }
 .batchList small { display: block; margin-top: 4px; color: var(--lab-muted); font-size: 10px; }
+.historyFilters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; margin-bottom: 10px; }
+.root .historyFilters button { min-height: 30px; padding: 4px; font-size: 12px; border-color: var(--lab-line); }
+.root .historyFilters [aria-pressed='true'] { color: var(--lab-green); border-color: var(--lab-green); }
 .canvasColumn { min-width: 0; background: var(--lab-panel); border: 1px solid var(--lab-line); border-radius: 8px; padding: 12px; }
 .canvasHeading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; }
 .canvasActions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-inline-start: auto; }
@@ -309,3 +312,4 @@
 .avatarAdopted { position: absolute; right: 3px; top: 3px; display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px; border-radius: 3px; background: var(--lab-green); color: var(--lab-green-ink); font-size: 10px; }
 
 .root .generateAfterInput { width: 100%; margin: 8px 0 12px; }
+.cellNumber, .mainBadge, .auxBadge, .avatarCellLabel, .avatarAdopted, .avatarTriggerMark { pointer-events: none; }

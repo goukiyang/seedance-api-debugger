@@ -10,6 +10,7 @@ type Catalog = { projects: ProjectSelectorRecord[]; capabilities: { can_create_t
 const catalogs = new Map<string, { at: number; promise: Promise<Catalog> }>();
 export function publishProjectCatalogChange(change: ProjectCatalogChange) {
   catalogs.delete(change.ownerId);
+  catalogs.delete(`${change.ownerId}:owned`);
   window.dispatchEvent(new CustomEvent(PROJECT_CATALOG_CHANGED, { detail: change }));
 }
 /** Consumers rerun their own original query; this never substitutes a wider option list. */
@@ -25,16 +26,18 @@ export function useProjectCatalogRevision(ownerId?: string | null) {
   }, [ownerId]);
   return revision;
 }
-export function readProjectSelectorCatalog(ownerId: string) {
-  const old = catalogs.get(ownerId);
+export function readProjectSelectorCatalog(ownerId: string, scope?: 'owned') {
+  const key = scope === 'owned' ? `${ownerId}:owned` : ownerId;
+  const old = catalogs.get(key);
   if (old && Date.now() - old.at < 30000) return old.promise;
-  const promise = fetch('/api/projects?lite=true&include_all=true&include_archived=true', {
+  const query = scope === 'owned' ? 'lite=true&scope=owned&include_archived=true' : 'lite=true&include_all=true&include_archived=true';
+  const promise = fetch(`/api/projects?${query}`, {
     cache: 'no-store', headers: { 'x-app-session-user': ownerId }, signal: AbortSignal.timeout(15000),
   }).then(async response => {
     const value = await readJsonResponse<Catalog>(response);
     if (!response.ok || !Array.isArray(value.projects)) throw new Error('项目管理资料暂未读到，可继续选择原列表中的项目。');
     return value;
-  }).catch(cause => { catalogs.delete(ownerId); throw cause; });
-  catalogs.set(ownerId, { at: Date.now(), promise });
+  }).catch(cause => { catalogs.delete(key); throw cause; });
+  catalogs.set(key, { at: Date.now(), promise });
   return promise;
 }

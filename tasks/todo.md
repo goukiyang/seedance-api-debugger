@@ -1130,3 +1130,7 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 - 已有工程证据：原结果布局合同通过，7项原置顶/发布/未知同号操作检查通过；更新原布局脚本加入菜单开关/详情/保挂载、compact顶部归位与非compact保留、无卡内滚动合同。完整类型及定向lint进行中。计划v0.134.12及同源相容guard，沿既有attempt05机制在独立result-card-menu-20261106/attempt01构建发布；不改DB/schema/模型/费用，不自动浏览器或收费验收。
 - 前项VIDEO-SUBMIT01原视频按钮现场缺口保持，不以本UI修改冒已闭环。本轮未新增范围外问题。
 <!-- /RESULT-MENU01-20261106 -->
+
+<!-- CHARACTER-INDEPENDENT-CONTEXT-20261107 -->
+**已部署，待用户手验。** 2026-11-07 01:12（洛杉矶）v0.134.16 / 16c57e550 / RfviUaNpEBzDe5Tdvrg-L上线；正脸、侧脸、前后身补充/历史恢复/风格/预览/生成独立，旧共用原文只读保留。新guard2d3ab523 / yB9pJkJEDy0F4ZeLa1cvZ保持新字段；两版各18组隔离、fresh原生/价格、完整Next/types/lint及七服务/四timer/公网JS+11CSS/health通过。首轮fixture类型错误已修，实际最终attempt02；旧原号/数据保持。原单[§15](todo/2026-10-31-character-reference-replan.md#15-正脸侧脸与前后身上下文独立2026-11-07)含发布/手验/恢复入口，侧脸4/9仍设计项。
+<!-- /CHARACTER-INDEPENDENT-CONTEXT-20261107 -->

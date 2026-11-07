@@ -2387,8 +2387,7 @@ function AssetsPageContent() {
                 const previewed = previewSet.has(item.id);
                 const duration = formatDuration(item.duration);
                 const specText = formatAssetSpec(item);
-                const costBadge = item.referenceQuote ? `参考 ¥${usageCnyDisplay(item.referenceQuote.amountCnyMicros)}${item.referenceQuote.points ? ` · ${item.referenceQuote.points}点` : ''}`
-                  : item.source === 'video_task' ? '参考价待设置' : '';
+                const costBadge = item.referenceQuote ? `¥${usageCnyDisplay(item.referenceQuote.amountCnyMicros)}` : '';
                 const enhanceMenuOpen = enhanceMenuItemId === item.id;
                 const enhanceReason = enhanceMenuOpen ? enhanceDisabledReason(item) : '';
                 const estimatedEnhanceCost = enhanceMenuOpen ? enhanceEstimatedCost(item) : null;

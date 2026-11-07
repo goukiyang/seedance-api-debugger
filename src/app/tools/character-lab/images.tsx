@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useId, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { useHdImageSource } from '@/lib/hooks/use-hd-image-source';
 import { acquireImageRead, type ImageReadResult } from '@/lib/media/image-read-session';
@@ -54,56 +54,54 @@ function useCharacterLabImage(source: string) {
     return acquireImageRead(account, readSource, version, 0, result => setRead({ key, result }));
   }, [account, readSource, version, key]);
   const result = read?.key === key ? read.result : null;
-  return { ...resolved, imageSrc: result?.imageSrc || '', failed: hd.denied || result?.progress.phase === 'unavailable' || !resolved.src };
-}
-
-export function CharacterLabImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
-  const image = useCharacterLabImage(src), clipId = useId();
-  if (!image.imageSrc) return <span className={styles.imageUnavailable}>{image.failed ? '图片暂不可读取' : '正在读取高清图'}</span>;
-  if (!image.crop) return <img src={image.imageSrc} alt={alt} className={className} />;
-  const { x, y, width, height } = image.crop;
-  const parentRatio = (image.aspectRatio || 1) * height / width;
-  return <svg className={`${styles.imageCrop} ${className || ''}`} style={{ aspectRatio: image.aspectRatio }}
-    viewBox={`${x * parentRatio} ${y} ${width * parentRatio} ${height}`} role="img" aria-label={alt}>
-    <defs><clipPath id={clipId}><rect x={x * parentRatio} y={y} width={width * parentRatio} height={height} /></clipPath></defs>
-    <image href={image.imageSrc} width={parentRatio} height={1} preserveAspectRatio="none" clipPath={`url(#${clipId})`} />
-  </svg>;
-}
-
-export function CharacterLabPreview({ src, alt, onClose }: { src: string; alt: string; onClose: () => void }) {
-  const image = useCharacterLabImage(src), crop = image.crop;
-  const key = JSON.stringify([image.imageSrc, crop]);
+  const imageSrc = result?.imageSrc || '', isCropped = Boolean(resolved.crop);
+  const { x, y, width: cropWidth, height: cropHeight } = resolved.crop || { x: 0, y: 0, width: 1, height: 1 };
+  const cropKey = JSON.stringify([imageSrc, isCropped, x, y, cropWidth, cropHeight]);
   const [cropped, setCropped] = useState<{ key: string; src: string } | null>(null);
   const [failed, setFailed] = useState('');
-  const loadingRef = useRef<HTMLDivElement>(null);
-  const backdropRef = useRef<HTMLDivElement>(null);
-  const ready = crop ? cropped?.key === key ? cropped.src : '' : image.imageSrc;
-  useDialogDismiss({ open: !ready, dialogRef: loadingRef, dismissSurfaceRef: backdropRef, modal: true, onDismiss: onClose });
   useEffect(() => {
-    if (!image.imageSrc || !crop) return;
+    if (!imageSrc || !isCropped) return;
     let active = true, objectUrl = '';
     const original = new Image();
     original.onload = () => {
-      const left = Math.floor(original.naturalWidth * crop.x), top = Math.floor(original.naturalHeight * crop.y);
-      const width = Math.floor(original.naturalWidth * (crop.x + crop.width)) - left;
-      const height = Math.floor(original.naturalHeight * (crop.y + crop.height)) - top;
+      const left = Math.floor(original.naturalWidth * x), top = Math.floor(original.naturalHeight * y);
+      const width = Math.floor(original.naturalWidth * (x + cropWidth)) - left;
+      const height = Math.floor(original.naturalHeight * (y + cropHeight)) - top;
       const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
       const context = canvas.getContext('2d');
-      if (!context) { if (active) setFailed(key); return; }
+      if (!context) { if (active) setFailed(cropKey); return; }
       context.drawImage(original, left, top, width, height, 0, 0, width, height);
       canvas.toBlob(blob => {
         if (!active) return;
-        if (!blob) { setFailed(key); return; }
-        objectUrl = URL.createObjectURL(blob); setCropped({ key, src: objectUrl });
-      }, 'image/webp', 0.92);
+        if (!blob) { setFailed(cropKey); return; }
+        objectUrl = URL.createObjectURL(blob); setCropped({ key: cropKey, src: objectUrl });
+      }, 'image/png');
     };
-    original.onerror = () => { if (active) setFailed(key); };
-    original.src = image.imageSrc;
+    original.onerror = () => { if (active) setFailed(cropKey); };
+    original.src = imageSrc;
     return () => { active = false; original.onload = null; original.onerror = null; original.removeAttribute('src'); if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [image.imageSrc, crop?.x, crop?.y, crop?.width, crop?.height, key]);
-  if (ready) return <ZoomableImagePreview src={ready} alt={alt} fileName="character-reference.webp" previewOnly imageSharing={false} onClose={onClose} />;
+  }, [imageSrc, isCropped, x, y, cropWidth, cropHeight, cropKey]);
+  return { ...resolved, imageSrc: isCropped ? cropped?.key === cropKey ? cropped.src : '' : imageSrc,
+    failed: hd.denied || result?.progress.phase === 'unavailable' || !resolved.src || failed === cropKey };
+}
+
+export function CharacterLabImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
+  const image = useCharacterLabImage(src);
+  if (!image.imageSrc) return <span className={styles.imageUnavailable}>{image.failed ? '图片暂不可读取' : '正在读取高清图'}</span>;
+  // Native image commands must target the cell PNG rather than a visual clip of the sheet.
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={image.imageSrc} alt={alt} className={image.crop ? `${styles.imageCrop} ${className || ''}` : className}
+    style={image.crop ? { aspectRatio: image.aspectRatio, objectFit: 'contain' } : undefined} />;
+}
+
+export function CharacterLabPreview({ src, alt, onClose }: { src: string; alt: string; onClose: () => void }) {
+  const image = useCharacterLabImage(src);
+  const loadingRef = useRef<HTMLDivElement>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
+  useDialogDismiss({ open: !image.imageSrc, dialogRef: loadingRef, dismissSurfaceRef: backdropRef, modal: true, onDismiss: onClose });
+  if (image.imageSrc) return <ZoomableImagePreview src={image.imageSrc} alt={alt} fileName={image.crop ? 'character-reference.png' : 'character-reference.webp'} previewOnly imageSharing={false} onClose={onClose} />;
   return <div ref={backdropRef} className={`${styles.root} ${styles.imagePreviewBackdrop}`}><div ref={loadingRef} className={styles.imagePreviewLoading} role="dialog" aria-modal="true" aria-label="高清图片预览">
-    <p role="status">{image.failed || failed === key ? '图片暂不可读取，请关闭后重试' : '正在读取高清图…'}</p>
+    <p role="status">{image.failed ? '图片暂不可读取，请关闭后重试' : '正在读取高清图…'}</p>
     <button type="button" onClick={onClose}>关闭</button>
   </div></div>;
 }
