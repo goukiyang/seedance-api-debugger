@@ -289,3 +289,26 @@ guard原生/价格完整通过后，包装输入误将两个reader标签串成�
 原始证据仅归档在正式根私有目录：[实测与发布原证](/Volumes/Data/Projects/video-api-debugger/docs/materials/2026-11-06-sharing-readback/)。其中sharing-before/after.png为原截图，sharing-off/on/persisted.json为页面实测，sharing-data-before/after.json为原字段指纹，sharing-recipient-projection.json为同事getter核对；构建/发布/错误探针与一致备份元数据同目录。截图、原始私有数据不推Git，数据库文件不外拷。Ego专用空间9已完成并关闭。
 
 本次用户指定的“过度帧能打开、共享关闭/开启、刷新保持”已实地通过；原联合单的侧栏、封面及其他工具不因此冒充已手验。视频复用同批部署，前端待用户手验；2.6仍未开放真实通道。未新增任务外产品缺陷。
+
+
+<!-- SHARE-COLLEAGUE01-20261107 -->
+### 16.3 SHARE-COLLEAGUE01 同事打开与正常生成两条链路（2026-11-07）
+
+已部署，待用户手动验收。实际主源9ae7ab0cb318adc0a5d34d2af632257e1ff2b508，v0.134.20，BUILD NWJKE_YesaMnvCSTysJFY，UTC 2026-11-07T15:56:15.763706Z切换，15:57:27Z健康收口。承接原生产v0.134.19/6f8106ed8与19最终配置，没有覆盖前序18结果UI/角色单格复制、19最高画质切换及此前任务。
+
+三处根因和修法：
+
+1. 普通同事的过度帧live工作区已创建，源共享开启且定义/素材权限正常。空prompt/context却在完整moduleDTO返回前被私密定义reader按新module-source别名推断作者，静态来源未登记而503。现只对严格空字符串跳过来源推断；密文仍核AEAD、原来源及kind/id/field，非空与空白字符串未知来源仍拒绝。已有密文字节和归属不改，不需要按每个新模板迁移私密名册。
+2. generationPayload对普通/shared本次风格选择发送styleGroupVersions（空风格也传{}），旧assertRestoredStudioDraft却限制只有显式恢复才可传，提前409。现去掉这一冲突限制；实际消费端继续鲜核风格权限与版本，显式恢复仍核原来源、禁止混未保存定义并要求完整版本。
+3. 单张/批量API遗漏共享、恢复、设置三类明确业务错误的拒绝回执，导致明确拒绝仍停在“查询这次提交”。现沿原rejectStudioSubmission的新鲜证据事务及耐久屏障处理；任意HTTP4xx、网络/数据库失败、有费用/调用/部分受理证据仍保持unknown，不自动重发或解锁。
+
+完整数据对照：同一267444224字节一致生产备份、真实普通同事工作区，基线19过度帧503→当前20完整DTO可返回（200），技能03原本200→200；两者普通同事的私密上下文返回均0字，源prompt/context与工作区四字段指纹在对照中相同。上线后又只读核真实生产两模块，四字段仍与之前相同。最初直接只读Prisma事务的StringExpected来自BEGIN IMMEDIATE与只读连接不相容的探针，改用私有隔离备份复核，不能把该探针错误当线上故障；备份不外拷、不做恢复。
+
+工程与发布证据：真实加密9组、Linux真实SQLite完整同事选用/DTO/原选用重放/撤回23组、真实API及原号/费用/部分受理/数据库异常保护14组，以及普通与恢复风格工程通过。前两轮完整构建分别因新增fixture的联合类型收窄和ES编译目标下iterator写法失败，未停服；随后先完整tsc退出0、补受影响14组，再由最终源完成新鲜Linux原生、计价及完整Next/types/lint。原失败、原时间与前期fixture参数失败均保留，不改编译目标或跳过类型门。
+
+正常保护切换退出0，6项实际main/guard启动门通过，7服务/4timer、1页公网JS同SHA、3匿名401、内外health200且发布控制器0。费率两键全字段8f4ab818…前后保持；没有本轮新生成或收费验收、手工业务行/密文迁移或权限扩大。guard841ad62a9e4b59ee8f1f903c2c67f27c745f71d7/Al_ZSWzar0oc5c7xDQE3R复用原完整产物/时间，只回程序不回DB/配置数据/媒体/账本/回执。发布前发现继承脚本仍静态断言旧18基线，已在本次新stage绑定真实19并记录前后SHA，未改原历史脚本、未线上演练恢复。
+
+剩余边界：最近fc68b61d-5bfb-49b1-a33b-aeac1408230d日志为input409且无耐久拒绝，符合本次机制；原账号和完整原请求体尚未取得，不能冒称截图旧原号已结束。旧pending保留，只查原号，不自动关闭/回填/重发。前项VIDEO-SUBMIT01原视频页现场缺口仍保留。诊断浏览器没有取得该同事原页，不把数据快照对照冒充真实同事浏览器操作或实际出图验收。
+
+证据：正式根docs/materials/2026-11-07-template-colleague-open/，最终attempt03；服务器stage同名attempt03。原attempt01/02失败保持，最终source/BUILD取本节实值，不取文档HEAD。本轮未新增范围外问题。
+<!-- /SHARE-COLLEAGUE01-20261107 -->
