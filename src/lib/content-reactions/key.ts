@@ -5,7 +5,9 @@ export function tryContentKeyParts(input: unknown): { key: ContentKey; type: Con
   const separator = input.indexOf(':');
   if (separator < 1) return null;
   const type = input.slice(0, separator), id = input.slice(separator + 1);
-  const legacy = type === 'image_template' && /^module-source:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+  const legacy = type === 'image_template' && (
+    /^module-source:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
+    || /^module-source:default-[a-zA-Z0-9_-]+$/.test(id));
   if (!CONTENT_TYPES.includes(type as ContentType) || !id || (!legacy && !/^[a-zA-Z0-9_-]+$/.test(id))) return null;
   return { key: input as ContentKey, type: type as ContentType, id };
 }
