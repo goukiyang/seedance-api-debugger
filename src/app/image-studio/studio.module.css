@@ -484,3 +484,12 @@
 .resolutionTargets { padding: 0; list-style: none; max-height: 240px; overflow: auto; }
 .resolutionTargets li { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; border-bottom: 1px solid var(--border, #dedee3); }
 .sharedOrigin { color: var(--text-secondary, #9ca3af); font-size: 12px; font-weight: 400; white-space: nowrap; flex-shrink: 0; }
+
+.deletionFeedback { position: relative; color: #ef8b91; }
+.deletionFeedback > summary { display: grid; place-items: center; width: 34px; height: 34px; cursor: pointer; list-style: none; font-size: 20px; }
+.deletionFeedback > summary::-webkit-details-marker { display: none; }
+.deletionFeedback > div { position: absolute; right: 0; top: calc(100% + 6px); z-index: 50; width: min(300px, 80vw); padding: 12px; border: 1px solid #46504d; border-radius: 7px; background: #1b2422; color: #dde6e2; box-shadow: 0 8px 24px #0006; }
+.deletionFeedback p { font-size: 13px; line-height: 1.5; }
+.deletionFeedback button { margin-top: 8px; }
+
+.deletionFeedback > summary > span { display: grid; place-items: center; width: 18px; height: 18px; border: 1.5px solid currentColor; border-radius: 50%; font-size: 13px; line-height: 1; }

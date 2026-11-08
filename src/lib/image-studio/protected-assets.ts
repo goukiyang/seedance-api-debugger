@@ -79,12 +79,12 @@ function hiddenStudioBindings<T extends Protection>(user: ImageStudioIdentity | 
 // Asset row with the same URL, so checking just the source id leaves a bypass.
 export async function studioHiddenAssetUrls(user: ImageStudioIdentity | null, client: Client = prisma, assetIds?: string[]): Promise<string[]> {
   const sqlClient = client as Prisma.TransactionClient;
-  if (user && assetIds && assetIds.length <= 240 && typeof sqlClient.$queryRaw === 'function' && sqlClient.user) {
+  if (assetIds && assetIds.length <= 240 && typeof sqlClient.$queryRaw === 'function' && sqlClient.user) {
     if (!assetIds.length) return [];
     try {
-      const visibility = await catalogVisibilitySql(sqlClient, user, user.id === 'module-cover-audience');
+      const visibility = await catalogVisibilitySql(sqlClient, user || { id: 'module-cover-audience' }, !user || user.id === 'module-cover-audience');
       const rows = await sqlClient.$queryRaw<Array<{ url: string }>>(Prisma.sql`WITH ${visibility.ctes}
-        SELECT DISTINCT hidden.url FROM hidden_urls hidden JOIN "Asset" a ON a."original_url" = hidden.url
+        SELECT DISTINCT hidden.url FROM hidden_urls hidden JOIN "Asset" a ON a."original_url" = hidden.url OR a."thumbnail_url" = hidden.url
         WHERE a."id" IN (${Prisma.join(assetIds)})`);
       return rows.map(row => row.url);
     } catch (error) { if (!(error instanceof CatalogSqlCompatibilityError)) throw error; }

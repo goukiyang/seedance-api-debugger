@@ -107,7 +107,7 @@ export function useStudioDeletion({ userId, onSettled, blocked }: {
     const url = command.objectKind === 'workspace'
       ? `/api/image-studio/modules?mode=delete-status&id=${encodeURIComponent(command.id)}&requestId=${encodeURIComponent(command.requestId)}`
       : `/api/image-studio/presets?mode=delete-status&presetId=${encodeURIComponent(command.id)}&requestId=${encodeURIComponent(command.requestId)}`;
-    const result: StudioDeletionStatus = await responseJson(await fetch(url, { cache: 'no-store' }));
+    const result: StudioDeletionStatus = await responseJson(await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
     if (!current(expected)) return;
     if (result.status !== 'completed') throw new Error('暂未查到原删除回执，结果仍待确认；不会重新删除');
     const state: unknown = result.current;
@@ -126,55 +126,74 @@ export function useStudioDeletion({ userId, onSettled, blocked }: {
     catch (cause) { if (current(expected)) setError(cause instanceof Error ? cause.message : '原删除仍待确认'); }
     finally { if (current(expected)) { busy.current = false; setBusyId(''); } }
   }
+  const checkOriginal = useRef(check); checkOriginal.current = check;
+  useEffect(() => {
+    // One original receipt read on restoration; an unknown read does not change
+    // `pending` and therefore cannot turn into a polling or deletion loop.
+    if (pending.length && !busy.current) void checkOriginal.current(pending[0]);
+  }, [pending, userId]);
   async function request(target: StudioDeletionTarget, name: string, anchor?: HTMLElement) {
     if (busy.current || target.actorId !== userId || isClientSessionBlocked()) return;
     let original: Pending | null;
     try { original = read(userId, target.objectKind, target.id) || pendingRef.current.find(value => value.actorId === userId && value.objectKind === target.objectKind && value.id === target.id) || null; }
     catch (cause) { setError(cause instanceof Error ? cause.message : '原删除记录无法确认'); return; }
-    if (original) { await check(original); return; }
     const reason = callbacks.current.blocked(target);
     if (!target.allowed || reason) { setError(reason || target.reason || '当前对象不能删除，请重新读取'); return; }
     const expected = scope.current;
-    const message = target.objectKind === 'workspace'
-      ? `删除“${name}”的个人工作区？配置会移除，已生成图片和历史保留，不退积分；共享原件不受影响。刷新不会自动重新创建，之后仍可在模板库主动选用。`
-      : `删除模板原件“${name}”？共享使用者将不能再使用该原件；已有图片和历史保留，不退积分。`;
-    await confirm(message, { title: target.objectKind === 'workspace' ? '删除工作区' : '删除原模板', confirmLabel: '删除', danger: true, anchor,
+    const message = original ? `继续上次删除“${name}”？只处理原来的配置版本，图片、历史和已受理任务保留。` : target.objectKind === 'workspace'
+      ? `删除个人工作区“${name}”？配置会移除，图片、历史和已受理任务保留。`
+      : `删除共享模板“${name}”？同事将不能再使用；已有图片和历史保留。`;
+    await confirm(message, { title: original ? '继续原删除' : target.objectKind === 'workspace' ? '删除工作区' : '删除原模板', confirmLabel: original ? '继续删除' : '删除', danger: true, anchor,
       onSubmit: async () => {
         if (!current(expected)) throw new Error('账号已变化，未继续删除');
-        // A second confirm after an unknown result reads the original receipt, never POSTs again.
+        // A newly discovered command from another tab is only queried. An
+        // explicit "continue" may repeat the exact retained id/version below.
         const retained = read(userId, target.objectKind, target.id) || pendingRef.current.find(value => value.actorId === userId && value.objectKind === target.objectKind && value.id === target.id);
-        if (retained) { await query(retained, expected); return; }
+        if (retained && retained.requestId !== original?.requestId) { await query(retained, expected); return; }
         const blockedReason = callbacks.current.blocked(target);
         if (blockedReason) throw new Error(blockedReason);
-        const command: Pending = { version: 1, actorId: userId, objectKind: target.objectKind, id: target.id,
+        const command: Pending = original || { version: 1, actorId: userId, objectKind: target.objectKind, id: target.id,
           requestId: crypto.randomUUID(), ...(target.objectKind === 'workspace' ? { moduleRevision: target.moduleRevision } : { sourceRevision: target.sourceRevision }) };
         busy.current = true; setBusyId(`${target.objectKind}:${target.id}`); setError('');
         let sent = false;
         try {
-          await claim(command);
-          if (!current(expected)) { await clear(command); return; }
+          if (!original) await claim(command);
+          if (!current(expected)) { if (!original) await clear(command); return; }
           reload(); sent = true;
           const result = await responseJson(await fetch(target.objectKind === 'workspace' ? '/api/image-studio/modules' : '/api/image-studio/presets', {
             method: target.objectKind === 'workspace' ? 'DELETE' : 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(20000),
-            body: JSON.stringify(target.objectKind === 'workspace' ? { action: 'delete-module', id: target.id, revision: target.moduleRevision, requestId: command.requestId }
-              : { action: 'delete', presetId: target.id, revision: target.sourceRevision, requestId: command.requestId, entryPoint: 'workbench' }),
+            body: JSON.stringify(target.objectKind === 'workspace' ? { action: 'delete-module', id: target.id, revision: command.moduleRevision, requestId: command.requestId }
+              : { action: 'delete', presetId: target.id, revision: command.sourceRevision, requestId: command.requestId, entryPoint: 'workbench' }),
           }));
           if (!current(expected)) return;
-          await settle(command, result, expected);
+          if (original) await query(command, expected);
+          else await settle(command, result, expected);
         } catch (cause) {
           const outcome = (cause as { commandOutcome?: unknown })?.commandOutcome;
           const rejected = plain(outcome) && outcome.status === 'not-applied' && outcome.actorId === command.actorId
             && outcome.objectKind === command.objectKind && outcome.id === command.id && outcome.requestId === command.requestId;
+          if (sent && !rejected && current(expected)) {
+            try { await query(command, expected); return; }
+            catch { /* Only an actual original receipt confirms deletion. */ }
+          }
           if (!sent || rejected) await clear(command);
           if (!current(expected)) return;
           if (!sent || rejected) pendingRef.current = pendingRef.current.filter(value => value.requestId !== command.requestId);
           reload();
           const message = !sent || rejected ? cause instanceof Error ? cause.message : '删除尚未提交'
             : '删除结果待确认，请核对原请求；不会重复发送删除';
-          setError(message); throw new Error(message);
+          // The existing confirmation owns this feedback. Unknown commands
+          // stay available in the header tools, without another page-level wall.
+          throw new Error(message);
         } finally { if (current(expected)) { busy.current = false; setBusyId(''); } }
       },
     });
   }
-  return { request, check, pending, busyId, error, productDialog };
+  function continueOriginal(command: Pending, name: string, anchor?: HTMLElement) {
+    const target: StudioDeletionTarget = command.objectKind === 'workspace'
+      ? { version: 1, actorId: command.actorId, objectKind: 'workspace', id: command.id, moduleRevision: command.moduleRevision!, allowed: true, reason: null }
+      : { version: 1, actorId: command.actorId, objectKind: 'source', id: command.id, sourceRevision: command.sourceRevision!, allowed: true, reason: null };
+    return request(target, name, anchor);
+  }
+  return { request, check, continueOriginal, pending, busyId, error, productDialog };
 }
