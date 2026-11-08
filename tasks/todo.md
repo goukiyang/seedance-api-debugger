@@ -1,3 +1,9 @@
+<!-- STUDIO-READ-LOCK01-20261108 -->
+## STUDIO-READ-LOCK01 生图模块长时间读取
+
+已部署v0.138.3 / 2239a1eaaa8e91bf53cb7e6f18a99a4c5a1cb1ed / BUILD rn8XdBxbJp9LDnH00cgyr，23:14:57Z收口。实际worker依赖创建两应用SDK，单CPU共享引擎却按client分别排队，引起约10秒COMMIT饥饿；改原native入口的进程共享FIFO，保正文、原号、权限与费用。真实依赖图合成5020ms/P1008→59.95ms双成功；生产约8分钟84事务全成功，提交最慢5.8ms；revision首60秒最慢10.15s→0.427s（21/28次均保留），暖读3次97–102ms。首次3次仍有1.74秒及同段2.45秒报价，另登后续，不冒全流程1秒。完整原生/计价/Next/types/lint与发布检查通过，无DDL/费率/CPU预算变化，界面待用户手验。详[原单](todo/2026-11-08-studio-module-read-latency.md)；138.2工程已过而性能未过的否决证据保留。
+<!-- /STUDIO-READ-LOCK01-20261108 -->
+
 <!-- HD-DISPLAY-LABEL01-20261108 -->
 ## 大图高清／原图标识（已部署，待用户手验）
 

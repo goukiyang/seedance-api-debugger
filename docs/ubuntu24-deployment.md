@@ -1,5 +1,14 @@
 # Ubuntu 24 部署文档
 
+<!-- STUDIO-READ-LOCK01-RELEASE-20261108 -->
+## 2026-11-08 生图模块读取调度修复
+
+最终应用2239a1eaaa8e91bf53cb7e6f18a99a4c5a1cb1ed / v0.138.3 / BUILD rn8XdBxbJp9LDnH00cgyr；基线fc82/138.2，run 1ea81450-aedc-435c-8f4d-77af3dd23113，stage `/data/video-api-debugger/release-staging/studio-read-lock-fix-20261108/attempt04`。23:13:32Z完整成品、23:14:57Z切版、23:15:37Z健康；15原生/16用量/计价/Next含types/lint、9项专项、6启动门、7服务4timer、48资源及3匿名401通过。源码及保护成品核对、旧writer排空、一致备份、137迁移只读继承及原三价格合同保持有证，本轮无DDL或数据还原。
+
+生产同CPU预算约8分钟84事务全成功、提交收尾最慢5.8ms；模块暖读3次97–102ms、首60秒revision最慢427ms，首轮1.74秒与报价2.45秒保留为后续，不冒完整首开/高清一秒或多人容量。138.2上线后性能仍失败，故未作为最终修复；attempt01/02工程失败与真实启动对照均保留。仅回程序的原bbeb guard沿原完整成品/原时间复用（1491字节项鲜核），不回业务数据，回退可能恢复旧卡顿。已部署，待用户手动验收。完整事实与原证入口见[工单](../tasks/todo/2026-11-08-studio-module-read-latency.md)。
+<!-- /STUDIO-READ-LOCK01-RELEASE-20261108 -->
+
+
 
 <!-- HD-DISPLAY-LABEL01-RELEASE-20261108 -->
 ## 2026-11-08 大图实际类型标识补丁
