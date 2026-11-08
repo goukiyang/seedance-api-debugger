@@ -1168,3 +1168,9 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 <!-- CHARACTER-SINGLE-WORKBENCH-DESIGN-20261107 -->
 - [ ] 角色统一成品工作台：用户已批准最新左右互换稿与右侧缩窄/可拖分隔条，正在实施真实4/9、独立历史输入与候选采用/细调闭环。原单[§18](tasks/todo/2026-10-31-character-reference-replan.md#18-统一成品工作台实施2026-11-07用户已授权)，本批候选28待继承27热修主/guard，工程与上线未完成；实际功能用户手验。
 <!-- /CHARACTER-SINGLE-WORKBENCH-DESIGN-20261107 -->
+
+<!-- ALL-MODELS-CONNECTIVITY-20261106 -->
+## MODEL-ALL01 生图模型连通与修复（11月7日接续）
+
+[原单：两个2.6参考图最终结果](todo/2026-11-06-all-model-connectivity.md)：Flare、Sunburst已各用同一本人PNG带图成功生成一张1024²，原图GET/完整解码/视觉对照和正常结算通过，实扣5＋2共7点；当前两型号各开放合计1参考图，default15，沿现有29/2266/q6NJ和F0guard配置生效，无应用源码变化/重建。只正常CAS改两refcap与原价绑定、恢复Flare原5点启用，Sunburst保原2点；另58费率规则逐字保持。新policy92ac99c7/authoring37404d45、价格SHA d03c539d、同Key目的策略image26-reference-20261107-01/35fc8b70。旧五笔11.9快照/冻结/合同/账本保持、未重发，文字/视频调用0、两新任务retries0且新增待核0。前期GPT2上游失败/待核继续保留，不因本轮冒GPT2已通；其它功能用户手验。正式私有材料reference-tests-20261107含完整原证，未新增范围外问题。
+<!-- /ALL-MODELS-CONNECTIVITY-20261106 -->

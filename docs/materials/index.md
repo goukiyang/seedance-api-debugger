@@ -510,3 +510,15 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 <!-- CHARACTER-INDEPENDENT-CONTEXT-20261107 -->
 [角色上下文独立原单§15](../../tasks/todo/2026-10-31-character-reference-replan.md#15-正脸侧脸与前后身上下文独立2026-11-07)：v0.134.16主16c57e550/guard2d3ab523已保护部署，待用户手验。私有2026-11-07-character-independent-context/implementation/attempt02保存精确源码/Git delta、两版18组读者/原生摘要/完整构建、source-pair-contract、public-deployed/public-character-css/service-health及切换/备份原证；attempt01保首轮类型失败与修正检查，未将失败冒成功。服务器同名stage含原始日志/回退入口/备份；无新用户附件，无浏览器或收费生成。
 <!-- /CHARACTER-INDEPENDENT-CONTEXT-20261107 -->
+
+<!-- IMAGE-MODEL-CONNECTIVITY-20261106 -->
+## MODEL-ALL01 生图模型与参考图实测
+
+[原单](../../tasks/todo/2026-11-06-all-model-connectivity.md)统一保存历史、决策及本轮结果。私有排除Git目录2026-11-06-image-model-connectivity/reference-tests-20261107（0700/0600）保存两2.6参考图真实成功原证：
+
+- [两新原号/原图解码/结算](2026-11-06-image-model-connectivity/reference-tests-20261107/image26-reference-results-poll2.json)、[最终旧五单/价格/费用只读审计](2026-11-06-image-model-connectivity/reference-tests-20261107/final-reference-audit.json)。
+- [输入及源图SHA](2026-11-06-image-model-connectivity/reference-tests-20261107/input.json)、[正常API/CAS原回执](2026-11-06-image-model-connectivity/reference-tests-20261107/image26-reference-final-controls7.json)、[主29/guardF0策略正反检查](2026-11-06-image-model-connectivity/reference-tests-20261107/policy-prepared.json)、[同源运行核对](2026-11-06-image-model-connectivity/reference-tests-20261107/policy-runtime-complete.json)。
+- [Flare原PNG](2026-11-06-image-model-connectivity/reference-tests-20261107/image26-flare-reference-result.png)、[Sunburst原PNG](2026-11-06-image-model-connectivity/reference-tests-20261107/image26-sunburst-reference-result.png)、[本人原参考图](2026-11-06-image-model-connectivity/reference-tests-20261107/image26-reference-source.png)。两图保主体与左右位置，只改深蓝背景，n1/ref1；本轮实扣7、旧11.9保持、文字/视频0，不泛化多参考上限或所有规格。
+
+历史v8/v11/v17/v19及此前仅文档未知状态仍在原单和私有资料保留；本次实际成功补齐2.6参考图结论，不改GPT2待核、历史失败和现金账单未核事实。凭据、签名token和私有媒体不提交Git。
+<!-- /IMAGE-MODEL-CONNECTIVITY-20261106 -->
