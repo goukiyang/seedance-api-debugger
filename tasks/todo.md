@@ -1,7 +1,7 @@
 <!-- WORKS-REC02-PUBLIC-20261108 -->
-## WORKS-REC02 全员预计算推荐
+## WORKS-REC02 全员预计算推荐（已部署，待用户手验）
 
-v0.137.0候选继承0.136.0及已上线首页/侧栏/模板修正，新增真实加减分、12进入/低于8退出、按当前权限的全员后台结果和「推荐」筛选。页面不重放历史、不启动算分；首次8分不能虚构已入选，迟到证据沿真实资格历史纠正。隔离工程13组Works及40项既有HD检查通过，未调用生产数据/模型/浏览器；聚焦实现dd4acdcc9已推送。最终完整候选检查、保护部署与用户手验待完成。详细合同和实际回执沿正式根原作品工单§18，公开源码说明见[实现记录](todo/2026-11-02-team-works-implementation.md#works-rec02-background-recommendation-for-internal-feishu-users-2026-11-08)。本轮未新增范围外问题。
+v0.137.0／应用9207ebe0ce48a7605011b55d16282394941e24c3／BUILD _Sz4vFnV4E2oNSCz6S9zg，2026-11-08T19:25:47Z健康收口。真实加减分、12进入/低于8退出、按原权限的内部飞书全员后台结果与「推荐」筛选已接通；页面不重放历史、不启动算分。隔离13组Works、40项HD、最终完整原生/计价/Next含types/lint、6启动门、7服务4timer、33资源字节/2登录307及GET3/POST2匿名401有证，无浏览器或模型验收。三派生表+7显式索引和SQLite自动内部表成功增加，旧schema/行及价格不改；首次对象检查漏计内部表已事务撤销并程序恢复，第二次只修预期集合后复用同一主/guard成品原时间续发，未回业务数据。后台未开页已推进，历史逐批处理，当前记录尚无达标，不补造分数。功能/界面/多人手感待用户手验；CodeGraph本树准备/查询超时，已定向源码复核。详[实现记录](todo/2026-11-02-team-works-implementation.md#works-rec02-background-recommendation-for-internal-feishu-users-2026-11-08)及正式根原单§18；本轮未新增范围外问题。
 <!-- /WORKS-REC02-PUBLIC-20261108 -->
 
 <!-- WORKS-RECOMMENDATION-AUDIT-PUBLIC-20261108 -->
