@@ -7,6 +7,7 @@ import { studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismat
 import { isTaskHiddenFromRegularUsers } from '@/lib/tasks/retention';
 import { worksRegistrationPaused, worksSchemaReady } from './source-policy';
 import { backfillWorkContexts, indexWorkContext, worksContextSchemaReady } from './context-index';
+import { workVideoSourceRevision } from './source-revision';
 
 type SourceKind = 'image_task' | 'video_task' | 'multiview_work';
 const sourceKinds: SourceKind[] = ['image_task', 'video_task', 'multiview_work'];
@@ -42,7 +43,7 @@ async function readySource(db: Prisma.TransactionClient, kind: SourceKind, id: s
       && task.public_video_cached_at && task.public_video_file_size ? task.public_video_url : null);
     if (!sourceUrl) return null; // Never use a temporary provider result URL.
     const stamp = (task.public_video_cached_at || task.delivery_completed_at)!;
-    return { kind, id, revision: sha(JSON.stringify([sourceUrl, stamp.toISOString(), task.public_video_file_size])), updatedAt: task.updated_at,
+    return { kind, id, revision: workVideoSourceRevision(sourceUrl, stamp, task.public_video_file_size), updatedAt: task.updated_at,
       authorId: (task.owner_user_id || task.user_id)!, projectId: task.project_id, title: '视频作品', medium: 'video', assetId: null,
       videoTaskId: task.id, sourceUrl, sourceUpdatedAt: stamp, hash: null, width: null, height: null, duration: task.duration,
       thumbnailUrl: null, completedAt: stamp };

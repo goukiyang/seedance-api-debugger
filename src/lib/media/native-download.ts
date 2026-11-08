@@ -41,7 +41,7 @@ export async function handHdImageDownloadToBrowser(options: {
   ensureCurrent();
   const original = new URL(source, location.href);
   if (original.origin !== location.origin || original.username || original.password
-    || !/^\/api\/(?:image-studio\/(?:(?:assets|template-assets)\/[^/]+|style-groups\/[^/]+\/assets\/[^/]+)|reference-images\/[^/]+\/content|content-reactions\/media)$/.test(original.pathname)
+    || !/^\/api\/(?:image-studio\/(?:(?:assets|template-assets)\/[^/]+|style-groups\/[^/]+\/assets\/[^/]+)|reference-images\/[^/]+\/content|content-reactions\/media|works\/[^/]+\/media)$/.test(original.pathname)
     || !sourceVersion || sourceVersion !== sourceVersion.trim() || sourceVersion.length > 256) throw Error('高清下载地址或版本无效，请重新打开图片');
   const versionedSource = (mode: 'hd' | 'hd-download') => {
     const target = new URL(imageDisplaySource(`${original.pathname}${original.search}`, mode), location.href);

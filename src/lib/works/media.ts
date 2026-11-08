@@ -12,6 +12,7 @@ import { getWorkAccess, type WorkAccess } from './access';
 import { resolveExistingWorkVideoPoster, resolveWorkPreviewFile } from './preview-files';
 import { WorkError } from './types';
 import { workHeaders } from './http';
+import { observeWorkDownload } from './recommendation-events';
 
 async function privatePreview(request: Request, file: string) {
   const info = await stat(file);
@@ -111,5 +112,5 @@ export async function workMediaResponse(request: Request, user: SessionUser, wor
   else throw new WorkError('视频预览仍在后台准备，原作品已保留', 409);
   for (const [name, value] of Object.entries(workHeaders)) response.headers.set(name, value);
   response.headers.set('X-Work-Media-Version', media.id);
-  return response;
+  return variant === 'download' || variant === 'hd-download' ? observeWorkDownload(request, response, user, work.id, media.id) : response;
 }

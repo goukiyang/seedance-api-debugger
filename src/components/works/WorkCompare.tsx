@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ExperienceActions } from '@/components/experience/ExperienceParts';
 import { AssetPlaybackCoordinator, releaseAssetMediaSource } from '@/lib/media/asset-playback';
-import { worksRead } from '@/lib/works/client';
+import { worksRead, recordWorkEvidence } from '@/lib/works/client';
 import type { WorkCard } from '@/lib/works/types';
 import type { WorkContext, WorkMethod } from '@/lib/works/context-types';
 import { WorkPreviewImage } from './WorkPreviewImage';
@@ -26,6 +26,8 @@ export function WorkCompare({ work, viewerId, candidates, playback, disabled = f
   const [audio, setAudio] = useState<'none' | 'left' | 'right'>('none'), [rate, setRate] = useState(1);
   const left = useRef<HTMLVideoElement>(null), right = useRef<HTMLVideoElement>(null), session = useRef(0);
   const pairOwner = useRef('');
+  const comparisonId = useRef('');
+  const displayed = useRef([false, false]);
   const onActive = useRef(onActiveChange); onActive.current = onActiveChange;
   const identity = `${viewerId}:${work.id}:${work.mediaVersion}`, current = useRef(identity); current.current = identity;
   const options = useMemo(() => Array.from(new Map(candidates.filter(item => item.id !== work.id && item.medium === work.medium).map(item => [item.id, item])).values()).slice(0, 96), [candidates, work.id, work.medium]);
@@ -91,6 +93,8 @@ export function WorkCompare({ work, viewerId, candidates, playback, disabled = f
       playback.stopAll('selection');
       setAudio('none'); setRate(1); setDurations([null, null]); setTime(0); setPlaying(false);
       setReversed(false); pairOwner.current = captured; setMethods([first.method, second.method]); setPair([first.work, second.work]);
+      comparisonId.current = crypto.randomUUID();
+      displayed.current = [false, false];
     } catch (cause) {
       if (current.current === captured && session.current === attempt) setError(cause instanceof Error ? cause.message : '比较读取未完成，请重试。');
     } finally { if (current.current === captured && session.current === attempt) setBusy(false); }
@@ -137,7 +141,12 @@ export function WorkCompare({ work, viewerId, candidates, playback, disabled = f
   return <section className={styles.compare} aria-label="作品比较">
     <div className={styles.heading}><h2>并排比较</h2>{activePair && <ExperienceActions label="对比操作">
       <button type="button" onClick={() => { pause(); setReversed(value => !value); }}>交换左右</button>
-      <button type="button" onClick={close}>退出比较</button>
+      <button type="button" onClick={() => {
+        if (activePair && comparisonId.current && displayed.current.every(Boolean)) recordWorkEvidence(viewerId, work.id, work.mediaVersion, {
+          kind: 'revisit', comparedWorkId: activePair[1].id, comparisonId: comparisonId.current,
+        });
+        close();
+      }}>退出比较</button>
     </ExperienceActions>}</div>
     {error && <p className={styles.error} role="status">{error}</p>}
     {!activePair ? <div className={styles.row}><label className={styles.compareSelect}>比较作品<select value={selected} disabled={busy || disabled} onChange={event => setSelected(event.target.value)}>
@@ -147,10 +156,10 @@ export function WorkCompare({ work, viewerId, candidates, playback, disabled = f
         const item = activePair[index];
         return <figure key={`${item.id}:${item.mediaVersion}`} className={styles.pane}>
         <figcaption>{item.title}<span>{item.author.name}</span></figcaption>
-        <div className={styles.comparisonMedia}>{item.medium === 'image' ? <WorkPreviewImage work={item} attempt={0} onFailure={mediaError} /> :
+        <div className={styles.comparisonMedia}>{item.medium === 'image' ? <WorkPreviewImage work={item} attempt={0} onFailure={mediaError} onDisplayed={() => { displayed.current[index] = true; }} /> :
           <video ref={index === 0 ? left : right} src={source(item)!} poster={item.thumbnailUrl || undefined} playsInline muted={audio !== (index === 0 ? 'left' : 'right')} preload="metadata"
             aria-label={`${index === columns[0] ? '左侧' : '右侧'}比较视频：${item.title}`} onError={mediaError} onEnded={pause}
-            onPause={() => { const other = index === 0 ? right.current : left.current; other?.pause(); setPlaying(false); }}
+            onLoadedData={() => { displayed.current[index] = true; }} onPause={() => { const other = index === 0 ? right.current : left.current; other?.pause(); setPlaying(false); }}
             onTimeUpdate={index === 0 ? tick : undefined} onLoadedMetadata={event => { const value = event.currentTarget.duration;
               setDurations(previous => index === 0 ? [Number.isFinite(value) && value > 0 ? value : null, previous[1]] : [previous[0], Number.isFinite(value) && value > 0 ? value : null]); }} />}</div>
       </figure>;

@@ -12,6 +12,8 @@ import { isVideoDeliveryFastPathTask } from '@/lib/video/delivery-policy';
 import { startTaskLocalization } from '@/lib/video/task-localization-runner';
 import { localPublicVideoPath } from '@/lib/video/thumbnail';
 import { VIDEO_SAVE_TOTAL_TIMEOUT_MS } from '@/lib/video/save-lock';
+import { observeVideoTaskDownload, recordVideoTaskTake } from '@/lib/works/recommendation-events';
+import { workVideoSourceRevision } from '@/lib/works/source-revision';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -47,6 +49,7 @@ async function loadAuthorizedTask(taskId: string) {
         { status: 401 },
       ),
       task: null,
+      user: null,
     };
   }
 
@@ -61,6 +64,7 @@ async function loadAuthorizedTask(taskId: string) {
         { status: 404 },
       ),
       task: null,
+      user: null,
     };
   }
 
@@ -74,32 +78,36 @@ async function loadAuthorizedTask(taskId: string) {
           { status: error.status },
         ),
         task: null,
+        user: null,
       };
     }
     throw error;
   }
 
-  return { error: null, task };
+  return { error: null, task, user };
 }
 
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } },
 ) {
-  void request;
   const taskId = params.id;
 
   try {
-    const { error, task } = await loadAuthorizedTask(taskId);
+    const { error, task, user } = await loadAuthorizedTask(taskId);
     if (error) return error;
-    if (!task) {
+    if (!task || !user) {
       return NextResponse.json(
         { success: false, error: 'Task not found', message: `Task ${taskId} not found` },
         { status: 404 },
       );
     }
 
+    const source = task.local_video_path || task.public_video_url, stamp = task.public_video_cached_at || task.delivery_completed_at;
+    const revision = source && stamp ? workVideoSourceRevision(source, stamp, task.public_video_file_size) : null;
     if (task.public_video_url) {
+      if (revision && request.method === 'GET' && !request.headers.has('range'))
+        void recordVideoTaskTake(user, task.id, revision, false).catch(() => console.warn('[works] video download intent deferred'));
       return NextResponse.redirect(task.public_video_url, 302);
     }
 
@@ -112,10 +120,11 @@ export async function GET(
         info = null;
       }
       if (info?.isFile() && info.size > 0) {
-        return new NextResponse(nodeStreamToWebReadable(createReadStream(absolutePath)), {
+        const response = new NextResponse(nodeStreamToWebReadable(createReadStream(absolutePath)), {
           status: 200,
           headers: downloadHeaders(taskId, info.size),
         });
+        return revision ? observeVideoTaskDownload(request, response, user, task.id, revision) : response;
       }
     }
 

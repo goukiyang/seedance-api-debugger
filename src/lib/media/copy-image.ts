@@ -2,7 +2,24 @@
 
 import { invalidateImageReadSource, localFrameMatches, type LocalFrameContext } from './image-read-session';
 
-type ImageCopyOptions = { isCurrent?: () => boolean; authorizationSource?: string; expectedVersion?: string; representationVersion?: string; localFrame?: LocalFrameContext };
+type ImageCopyOptions = { actorId?: string; isCurrent?: () => boolean; authorizationSource?: string; expectedVersion?: string; representationVersion?: string; localFrame?: LocalFrameContext };
+
+function recordOriginalCopy(source: string, actorId?: string) {
+  if (!actorId) return;
+  try {
+    const url = new URL(source, location.href);
+    if (url.origin !== location.origin || ['thumbnail', 'preview', 'detail', 'hd-description'].some(key => url.searchParams.get(key) === '1')
+      || url.searchParams.has('variant') && !['original', 'hd'].includes(url.searchParams.get('variant')!)) return;
+    const assetId = /^\/api\/image-studio\/assets\/([A-Za-z0-9_-]+)$/.exec(url.pathname)?.[1]
+      || (url.pathname === '/api/content-reactions/media' ? /^asset:([A-Za-z0-9_-]+)$/.exec(url.searchParams.get('key') || '')?.[1] : null);
+    const referenceImageId = /^\/api\/reference-images\/([A-Za-z0-9_-]+)\/content$/.exec(url.pathname)?.[1];
+    if (!assetId && !referenceImageId) return;
+    void fetch('/api/works/evidence', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-app-session-user': actorId },
+      body: JSON.stringify({ viewerId: actorId, ...(assetId ? { assetId } : { referenceImageId }) }), keepalive: true, signal: AbortSignal.timeout(5000),
+    }).catch(() => { /* Scoring evidence cannot fail a successful clipboard operation. */ });
+  } catch { /* Optional evidence never changes clipboard success. */ }
+}
+
 async function imagePng(src: string, options: ImageCopyOptions): Promise<Blob> {
   const current = () => { if (options.isCurrent && !options.isCurrent()) throw new DOMException('图片已变化，复制已取消', 'AbortError'); };
   current();
@@ -69,7 +86,9 @@ export function copyImage(src: string, options: ImageCopyOptions = {}): Promise<
     return Promise.reject(new Error('浏览器不支持按钮复制，请在图片上右键复制'));
   }
   // Start the clipboard request inside the click event, before image loading yields.
-  return navigator.clipboard.write([new ClipboardItem({ 'image/png': imagePng(src, options) })]);
+  return navigator.clipboard.write([new ClipboardItem({ 'image/png': imagePng(src, options) })]).then(() => {
+    if (!options.isCurrent || options.isCurrent()) recordOriginalCopy(options.authorizationSource || src, options.actorId);
+  });
 }
 
 /** Keep the clipboard call in the user event; callers may prepare an authorized PNG asynchronously. */

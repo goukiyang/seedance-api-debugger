@@ -345,6 +345,12 @@ export async function runHdDisplayEngineering(): Promise<string[]> {
     releases.push(workPreview.subscribe(() => {})); workPreview.release(); await flush();
     assert.equal(workPreview.getSnapshot().displayKind, 'hd');
     assert.equal(workPreview.getSnapshot().result.decoded, true); noOriginal();
+    workPreview.markDisplayed();
+    const workDownload = await downloads.handHdImageDownloadToBrowser({ account, source: '/api/works/work-a/media?version=work-v1&variant=detail',
+      sourceVersion: 'source-v1', fileName: 'work.png', isCurrent: () => true });
+    assert.equal(workDownload.reused, true, 'Work HD download reuses the authorized complete same-version Blob');
+    assert.match(clicked.at(-1)!, /^blob:engineering-/);
+    assert.ok(requests.some(request => request.id === 'work-a' && request.method === 'HEAD' && request.variant === 'hd-download'));
     checks.push('work_detail_reuses_hd_with_exact_work_version');
 
     reset();

@@ -2733,6 +2733,52 @@ model WorkRecommendationTrial {
   @@id([viewer_id, work_id])
 }
 
+// Business evidence is recorded independently from the recommendation read model.
+// A null signal retracts the named fact. Only background consumers replay events.
+model WorkRecommendationEvent {
+  id                        Int @id @default(autoincrement())
+  event_key                 String @unique
+  work_id                   String
+  media_version_id          String
+  actor_id                  String
+  purpose_key               String
+  chain_key                 String
+  fact_key                  String
+  signal                    String?
+  slot_key                  String?
+  evidence_work_id          String?
+  evidence_media_version_id String?
+  occurred_at               DateTime
+  created_at                DateTime @default(now())
+  @@index([work_id, media_version_id, occurred_at, id])
+  @@index([actor_id, purpose_key, slot_key, occurred_at, id])
+  @@index([evidence_work_id])
+}
+
+model WorkRecommendationJob {
+  work_id       String @id
+  revision      Int @default(1)
+  viewer_cursor String @default("")
+  updated_at    DateTime @default(now())
+  @@index([updated_at, work_id])
+}
+
+model WorkRecommendationResult {
+  viewer_id        String
+  work_id          String
+  media_version_id String
+  work_revision    Int
+  rule_version     Int
+  qualified        Boolean @default(false)
+  qualified_at     DateTime?
+  history_from     DateTime?
+  score            Int @default(0)
+  evidence_json    String @default("[]")
+  evaluated_at     DateTime @default(now())
+  @@id([viewer_id, work_id])
+  @@index([viewer_id, qualified, rule_version, work_id])
+}
+
 model WorkContext {
   work_id          String @id
   media_version_id String
@@ -2746,6 +2792,7 @@ model WorkContext {
   indexed_at       DateTime @default(now())
   @@index([submission_key, work_id])
   @@index([template_module, template_id, template_version, work_id])
+  @@index([indexed_at, work_id])
 }
 
 model WorkSourceLink {

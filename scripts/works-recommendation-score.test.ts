@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { replayWorkRecommendation, type RecommendationStep } from '../src/lib/works/recommendation-score';
+import { replayWorkRecommendation, WORK_RECOMMENDATION_RULE, type RecommendationStep } from '../src/lib/works/recommendation-score';
 
 function change(id: string, order: number, changes: RecommendationStep['changes']): RecommendationStep {
   return { id, order, changes };
@@ -31,7 +31,7 @@ test('deduplicates replacement, reverses it and floors each purpose at zero', ()
 test('replays the transition history in effective order and resets the entry gate without it', () => {
   const versionOnly = change('version-only', 4, { version: { purpose: 'shot', chain: 'swap', signal: 'superseded' } });
   const steps = [versionOnly, input, retained, download, retained];
-  assert.deepEqual(replayWorkRecommendation(steps, 1), { rule: 1, score: 8, qualified: true });
+  assert.deepEqual(replayWorkRecommendation(steps, 1), { rule: WORK_RECOMMENDATION_RULE, score: 8, qualified: true });
   assert.equal(replayWorkRecommendation(steps).qualified, false);
   assert.equal(replayWorkRecommendation(steps, 9).qualified, false);
   assert.equal(replayWorkRecommendation([input, retained, replacement], 1).qualified, false);
@@ -46,4 +46,23 @@ test('caps comparative revisits and fails closed on conflicting replay ids', () 
   assert.equal(replayWorkRecommendation(revisits).score, 3);
   assert.throws(() => replayWorkRecommendation([input, { ...input, order: 42 }]), /Conflicting/);
   assert.throws(() => replayWorkRecommendation([input, { ...download, order: input.order }]), /Ambiguous/);
+});
+
+test('unknown purpose overlaps known purposes without double counting or punishing another positive use', () => {
+  const unknown = change('unknown', 1, { unknown: { purpose: 'actor:a', chain: 'unknown', signal: 'input', actor: 'a', ambiguous: true } });
+  const shot = change('shot', 2, { shot: { purpose: 'canvas:a:shot', chain: 'shot', signal: 'input', actor: 'a' } });
+  const cover = change('cover', 3, { cover: { purpose: 'canvas:a:cover', chain: 'cover', signal: 'input', actor: 'a' } });
+  assert.equal(replayWorkRecommendation([unknown, shot]).score, 8);
+  assert.equal(replayWorkRecommendation([unknown, shot, cover]).score, 16);
+  const kept = change('kept', 4, { kept: { purpose: 'actor:a', chain: 'unknown', signal: 'retained', actor: 'a', ambiguous: true } });
+  assert.equal(replayWorkRecommendation([unknown, shot, kept]).score, 12);
+  assert.equal(replayWorkRecommendation([unknown, shot, cover, kept]).score, 16);
+});
+
+test('distinct real projects are independent while a project and its own canvas overlap', () => {
+  const projectA = change('project-a', 1, { a: { purpose: 'project:a', chain: 'a', signal: 'input', actor: 'person', ambiguous: true, family: 'a' } });
+  const projectB = change('project-b', 2, { b: { purpose: 'project:b', chain: 'b', signal: 'input', actor: 'person', ambiguous: true, family: 'b' } });
+  const canvasA = change('canvas-a', 3, { canvas: { purpose: 'canvas:a:node', chain: 'node', signal: 'input', actor: 'person', family: 'a' } });
+  assert.equal(replayWorkRecommendation([projectA, canvasA]).score, 8);
+  assert.equal(replayWorkRecommendation([projectA, projectB, canvasA]).score, 16);
 });

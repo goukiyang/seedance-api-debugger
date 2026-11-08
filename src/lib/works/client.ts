@@ -77,7 +77,7 @@ export function parseWorksQuery(params: URLSearchParams): WorkQuery {
   const query: WorkQuery = {};
   const medium = params.get('medium'), scope = params.get('scope');
   if (medium === 'image' || medium === 'video') query.medium = medium;
-  if (scope && ['mine', 'favorites', 'hidden', 'managed'].includes(scope)) query.scope = scope as WorkQuery['scope'];
+  if (scope && ['recommended', 'mine', 'favorites', 'hidden', 'managed'].includes(scope)) query.scope = scope as WorkQuery['scope'];
   for (const key of ['author', 'project', 'collection'] as const) { const value = params.get(key); if (value && /^[A-Za-z0-9_-]{1,100}$/.test(value)) query[key] = value; }
   const q = params.get('q')?.trim().slice(0, 120); if (q) query.q = q;
   return query;
@@ -87,4 +87,12 @@ export function workWorkspaceTabId() {
   let tabId = sessionStorage.getItem('workspace_tab_id');
   if (!tabId) { tabId = `tab_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`; sessionStorage.setItem('workspace_tab_id', tabId); }
   return tabId;
+}
+
+/** Optional evidence never blocks copying, viewing, navigation or generation. */
+export function recordWorkEvidence(viewerId: string, workId: string, mediaVersion: string, evidence: Record<string, string>) {
+  void fetch(`/api/works/${encodeURIComponent(workId)}/evidence`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-app-session-user': viewerId },
+    body: JSON.stringify({ viewerId, mediaVersion, ...evidence }), signal: AbortSignal.timeout(5000), keepalive: true,
+  }).catch(() => { /* Missing evidence is unknown; it never changes the real operation. */ });
 }

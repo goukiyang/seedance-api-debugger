@@ -112,6 +112,10 @@ function AccountWorks({ viewerId, account, embedded, layoutReady, layoutKey }: {
       if (!latest && !anchor) return;
       const token = epoch.current, navigation = navigationEpoch.current, params = new URLSearchParams(queryKey);
       if (!latest && current[0]) { params.set('window', current[0].window); params.set('anchor', anchor!.id); }
+      if (!latest && query.scope === 'recommended') {
+        const cached = current.flatMap(page => page.items), position = cached.findIndex(work => work.id === anchor?.id);
+        params.set('check', cached.slice(Math.max(0, position - 12), Math.max(0, position - 12) + 48).map(work => work.id).join(','));
+      }
       loadBusy.current = true; lastRead.current = Date.now();
       try {
         const data = await worksRead<WorkPage>(`/api/works?${params}`, viewerId);
@@ -120,15 +124,20 @@ function AccountWorks({ viewerId, account, embedded, layoutReady, layoutKey }: {
         if (latest) { pagesRef.current = [data]; setPages([data]); loadedQueryRef.current = queryKey; }
         else {
           const fresh = new Map(data.items.map(work => [work.id, work]));
-          let geometryChanged = false;
-          const nextPages = pagesRef.current.map(page => ({ ...page, items: page.items.map(work => {
+          const omitted = new Set(data.omittedIds || []);
+          const nearby = anchor && omitted.has(anchor.id) ? Array.from(pageElement.current?.querySelectorAll<HTMLElement>('[data-work-card]') || [])
+            .filter(card => card.dataset.workCard && !omitted.has(card.dataset.workCard))
+            .sort((a, b) => Math.abs(a.getBoundingClientRect().top - anchor.offset) - Math.abs(b.getBoundingClientRect().top - anchor.offset))[0] : null;
+          const retainedAnchor = nearby ? { id: nearby.dataset.workCard!, offset: nearby.getBoundingClientRect().top } : anchor;
+          let geometryChanged = omitted.size > 0;
+          const nextPages = pagesRef.current.map(page => ({ ...page, items: page.items.filter(work => !omitted.has(work.id)).map(work => {
             const next = fresh.get(work.id);
             if (!next || next.personal.version < work.personal.version || next.revision < work.revision) return work;
             geometryChanged ||= next.width !== work.width || next.height !== work.height;
             return next;
           }) }));
           pagesRef.current = nextPages; setPages(nextPages);
-          if (geometryChanged && anchor) setRestore({ ...anchor, navigationEpoch: navigation, generation: ++restoreGeneration.current });
+          if (geometryChanged && retainedAnchor) setRestore({ ...retainedAnchor, navigationEpoch: navigation, generation: ++restoreGeneration.current });
         }
         setError('');
       } catch (cause) {
@@ -141,7 +150,7 @@ function AccountWorks({ viewerId, account, embedded, layoutReady, layoutKey }: {
     const timer = window.setInterval(resume, 30_000);
     window.addEventListener('focus', resume); window.addEventListener('online', resume); window.addEventListener('scroll', atHead, { passive: true }); document.addEventListener('visibilitychange', resume);
     return () => { cancelled = true; clearInterval(timer); window.removeEventListener('focus', resume); window.removeEventListener('online', resume); window.removeEventListener('scroll', atHead); document.removeEventListener('visibilitychange', resume); };
-  }, [ready, workId, queryKey, viewerId]);
+  }, [ready, workId, queryKey, viewerId, query.scope]);
   function updateQuery(patch: Partial<WorkQuery>) {
     navigationEpoch.current++; remember(); resetWindow.current = true; setRestore(null); setClassify(null); const next = { ...query, ...patch };
     for (const key of Object.keys(next) as Array<keyof WorkQuery>) if (!next[key] || next[key] === 'all') delete next[key];
@@ -290,7 +299,7 @@ function AccountWorks({ viewerId, account, embedded, layoutReady, layoutKey }: {
     <header className={styles.toolbar} aria-label="作品浏览工具栏">
       <h1 className={styles.visuallyHidden}>作品广场</h1>
       <select className={styles.scopePicker} aria-label="作品范围" value={query.scope || 'all'} onChange={event => updateQuery({ scope: event.target.value as WorkQuery['scope'], collection: undefined })}>
-        {([['all', '全部作品'], ['mine', '我的作品'], ['favorites', '我的收藏'], ['hidden', '已隐藏'], ['managed', '作品管理']] as const).map(([scope, label]) => <option key={scope} value={scope}>{label}</option>)}
+        {([['all', '全部作品'], ['recommended', '推荐'], ['mine', '我的作品'], ['favorites', '我的收藏'], ['hidden', '已隐藏'], ['managed', '作品管理']] as const).map(([scope, label]) => <option key={scope} value={scope}>{label}</option>)}
       </select>
       <form onSubmit={event => { event.preventDefault(); updateQuery({ q: search.trim() || undefined }); }} className={styles.search}><input type="search" value={search} maxLength={120} aria-label="搜索作品标题" placeholder="搜索作品标题" onChange={event => setSearch(event.target.value)} /><button type="submit" aria-label="搜索作品" title="搜索作品"><Search size={17} /></button></form>
       <Popper.Root>
@@ -325,7 +334,7 @@ function AccountWorks({ viewerId, account, embedded, layoutReady, layoutKey }: {
       <section className={styles.feed} aria-label="作品内容">{first?.previousCursor && <div className={styles.pageControl}><button type="button" disabled={loading} onClick={() => void load('before')}>读取前面的作品</button></div>}
         {error && failedDirection !== 'after' && <OperationReceipt className={styles.readError} status={error}
           actions={<button type="button" disabled={loading} onClick={() => void load(failedDirection)}>重试读取</button>} />}
-        {items.length > 0 ? <WorksMasonry items={items} playback={playback} contextKey={`${viewerId}:${queryKey}`} layoutKey={layoutKey} detailOpen={Boolean(workId || classify || adding)} busyKeys={busyKeys} operate={operate} onClassify={setClassify} onOpen={open} onFilter={(key, id) => chooseFilter(key, id)} restore={layoutReady ? restore : null} navigationEpoch={navigationEpoch} onRestored={onRestored} /> : loading ? <div className={styles.skeletonGrid} role="status" aria-label="正在读取作品">{Array.from({ length: 6 }, (_, i) => <div key={i} className={styles.skeleton} />)}</div> : !error && <ExperienceEmpty className={styles.empty} title={hasFilters ? '没有匹配的作品' : query.scope === 'favorites' ? '先收藏喜欢的作品' : query.scope === 'hidden' ? '没有对你隐藏的作品' : query.scope === 'managed' ? '没有可管理的作品分享' : '这里还没有作品'} description={hasFilters ? '试试清除筛选，或换一个标题关键词。' : query.scope === 'favorites' ? '先收藏到全部收藏，之后可按需归类。' : query.scope === 'hidden' ? '隐藏的作品可在这里恢复显示。' : '已有成品会按原有权限显示，也可以明确加入本人上传的作品。'}>{hasFilters ? <button type="button" onClick={clearFilters}>清除筛选</button> : <><button type="button" onClick={() => updateQuery({ scope: 'mine' })}>我的作品</button><button type="button" className={styles.primary} onClick={() => setAdding(true)}>添加作品</button></>}</ExperienceEmpty>}
+        {items.length > 0 ? <WorksMasonry items={items} playback={playback} contextKey={`${viewerId}:${queryKey}`} layoutKey={layoutKey} detailOpen={Boolean(workId || classify || adding)} busyKeys={busyKeys} operate={operate} onClassify={setClassify} onOpen={open} onFilter={(key, id) => chooseFilter(key, id)} restore={layoutReady ? restore : null} navigationEpoch={navigationEpoch} onRestored={onRestored} /> : loading ? <div className={styles.skeletonGrid} role="status" aria-label="正在读取作品">{Array.from({ length: 6 }, (_, i) => <div key={i} className={styles.skeleton} />)}</div> : !error && <ExperienceEmpty className={styles.empty} title={hasFilters ? '没有匹配的作品' : query.scope === 'recommended' ? '暂时没有推荐作品' : query.scope === 'favorites' ? '先收藏喜欢的作品' : query.scope === 'hidden' ? '没有对你隐藏的作品' : query.scope === 'managed' ? '没有可管理的作品分享' : '这里还没有作品'} description={query.scope === 'recommended' ? '先看看全部作品。' : hasFilters ? '试试清除筛选，或换一个标题关键词。' : query.scope === 'favorites' ? '先收藏到全部收藏，之后可按需归类。' : query.scope === 'hidden' ? '隐藏的作品可在这里恢复显示。' : '已有成品会按原有权限显示，也可以明确加入本人上传的作品。'}>{query.scope === 'recommended' ? <button type="button" onClick={() => updateQuery({ scope: 'all' })}>查看全部作品</button> : hasFilters ? <button type="button" onClick={clearFilters}>清除筛选</button> : <><button type="button" onClick={() => updateQuery({ scope: 'mine' })}>我的作品</button><button type="button" className={styles.primary} onClick={() => setAdding(true)}>添加作品</button></>}</ExperienceEmpty>}
         {error && failedDirection === 'after' && <div className={styles.readError} role="status"><p>{error}</p><button type="button" disabled={loading} onClick={() => void load('after')}>在这里重试</button></div>}
         <div ref={sentinel} className={styles.sentinel} aria-hidden="true" />
         {last?.nextCursor && <div className={styles.pageControl}><button type="button" disabled={loading} onClick={() => void load('after')}>{loading ? '正在读取…' : '更多作品'}</button></div>}{loading && items.length > 0 && <p className={styles.muted} role="status">正在读取作品…</p>}

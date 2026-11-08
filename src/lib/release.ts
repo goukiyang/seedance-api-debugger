@@ -1,8 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '工具菜单入口补齐', outline: [
-  '顶部“工具”菜单加入角色融合提示词',
-  '角色组合、双语与对话建卡集中访问',
+const notice = { title: '作品推荐自动更新', outline: [
+  '真实使用行为自动判断作品是否进入推荐',
+  '推荐结果后台提前准备，打开即可浏览',
+  '内部飞书同事沿原权限查看图片和视频',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

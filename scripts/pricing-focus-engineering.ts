@@ -7,6 +7,7 @@ export async function runPricingFocusEngineering(source = readFileSync('src/app/
   const file = ts.createSourceFile('AdminPricingClient.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const variables = new Map<string, ts.Expression>();
   let initialize: ts.Expression | undefined;
+  let moneyInputDisabled: ts.Expression | undefined, compactChange: ts.Expression | undefined;
   const hasActorAssignment = (node: ts.Node): boolean => {
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
       && node.left.getText(file) === 'currentActor.current' && node.right.getText(file) === 'actorId') return true;
@@ -14,6 +15,13 @@ export async function runPricingFocusEngineering(source = readFileSync('src/app/
   };
   const visit = (node: ts.Node) => {
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) variables.set(node.name.text, node.initializer);
+    if (ts.isVariableDeclaration(node) && node.initializer?.getText(file).includes('moneyRows.get(row.id)')) compactChange = node.initializer;
+    if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(file) === 'input'
+      && node.attributes.properties.some(item => ts.isJsxAttribute(item) && item.name.getText(file) === 'aria-label'
+        && item.initializer?.getText(file).includes('人民币单价'))) {
+      const attribute = node.attributes.properties.find(item => ts.isJsxAttribute(item) && item.name.getText(file) === 'disabled');
+      if (attribute && ts.isJsxAttribute(attribute) && attribute.initializer && ts.isJsxExpression(attribute.initializer)) moneyInputDisabled = attribute.initializer.expression;
+    }
     if (ts.isCallExpression(node) && node.expression.getText(file) === 'useEffect'
       && node.arguments[0] && hasActorAssignment(node.arguments[0])) initialize = node.arguments[0];
     ts.forEachChild(node, visit);
@@ -105,8 +113,23 @@ export async function runPricingFocusEngineering(source = readFileSync('src/app/
     assert.equal(evaluate(expression('canSave'), saving), false, `${key} still prevents a save`);
     saving[key] = previous;
   }
+
+  const editing: Record<string, any> = { Boolean, pending: null, saving: false, conflict: true, reading: false, readError: '',
+    recoveringDraft: false, complexDraft: false, cannotEnable: false, row: { id: 'own-draft' },
+    moneyRows: new Map([['own-draft', { id: 'own-draft', base: { amount: '0.051' }, pricingEnabled: false }]]) };
+  vm.createContext(editing);
+  assert.ok(moneyInputDisabled && compactChange, 'Real compact price controls must be found');
+  assert.equal(evaluate(expression('disabled'), editing), false, 'A stale revision blocks saving, not switch draft editing');
+  assert.equal(evaluate(moneyInputDisabled, editing), false, 'A stale revision must not lock the amount draft');
+  assert.equal(evaluate(compactChange, editing), editing.moneyRows.get('own-draft'), 'Conflicting draft values stay visible');
+  for (const key of ['pending', 'saving', 'reading', 'readError', 'complexDraft', 'cannotEnable']) {
+    const previous = editing[key]; editing[key] = key === 'readError' ? 'Read failed' : true;
+    assert.equal(evaluate(expression('disabled'), editing), true, `${key} retains its switch guard`);
+    editing[key] = previous;
+  }
   return { completed: true, actualSourceCallbacks: true, checks: ['same-actor visibility', 'failed refresh keeps editor/draft',
-    'fresh success', '401/403/mismatched actor cleared', 'late reply ignored', 'actor initialization masked', 'unmount ignored', 'write barriers retained'],
+    'fresh success', '401/403/mismatched actor cleared', 'late reply ignored', 'actor initialization masked', 'unmount ignored', 'write barriers retained',
+    'conflict allows draft edits', 'conflicting draft stays visible', 'switch guards retained'],
   networkCalls: 0, databaseWrites: 0, paidRequests: 0 };
 }
 

@@ -7,7 +7,7 @@ import { GuidedDemo } from '@/components/experience/demo/GuidedDemo';
 import { ExperienceActions, OperationReceipt } from '@/components/experience/ExperienceParts';
 import { RelativeTime } from '@/components/RelativeTime';
 import { WorkActions, reuseWorkTemplate, type WorkOperate } from './WorkActions';
-import { worksRead, WorksClientError, workWorkspaceTabId } from '@/lib/works/client';
+import { worksRead, WorksClientError, workWorkspaceTabId, recordWorkEvidence } from '@/lib/works/client';
 import { workAudienceLabels, type WorkActivity, type WorkCard } from '@/lib/works/types';
 import { AssetPlaybackCoordinator, releaseAssetMediaSource } from '@/lib/media/asset-playback';
 import { WorkMedia } from './WorkMedia';
@@ -221,6 +221,6 @@ export function WorkDetail({ id, viewerId, preparation, revision, likesRevision,
       </div>
       {remainingGroups.length > 0 && <details className={styles.metadata}><summary>更多相关作品</summary><div className={styles.relatedBelow}>{remainingGroups.map(renderGroup)}</div></details>}
     </>}
-    {zoomed && work && previewSource && !error && !replacement && <ZoomableImagePreview src={previewSource} thumbnailSrc={work.thumbnailUrl || undefined} alt={work.title || '作品图片'} previewKey={`work:${work.id}:${work.mediaVersion}`} previewOnly={!work.downloadUrl} imageSharing={false} safeDetails={{ width: work.width || undefined, height: work.height || undefined }} resolveDownload={() => work.downloadUrl ? () => { window.location.assign(work.downloadUrl!); } : undefined} onClose={() => setZoomed(false)} />}
+    {zoomed && work && previewSource && !error && !replacement && <ZoomableImagePreview src={previewSource} thumbnailSrc={work.thumbnailUrl || undefined} alt={work.title || '作品图片'} previewKey={`work:${work.id}:${work.mediaVersion}`} previewOnly={!work.downloadUrl} imageSharing={false} onFullSizeCopied={() => recordWorkEvidence(viewerId, work.id, work.mediaVersion, { kind: 'copy' })} safeDetails={{ width: work.width || undefined, height: work.height || undefined }} resolveDownload={() => work.downloadUrl ? () => { window.location.assign(work.downloadUrl!); } : undefined} onClose={() => setZoomed(false)} />}
   </article>;
 }

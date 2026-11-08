@@ -90,6 +90,12 @@ with sqlite3.connect(sys.argv[1]) as db:
         AND (CASE WHEN json_valid(result_json) THEN json_extract(result_json,'$.workId') END) IN (?)""", ('synthetic',)))
     assert any('SEARCH WorkOperation USING INDEX WorkOperation_successful_method_work_idx' in row[3] for row in plan), plan
 `, databasePath, path.join(root, 'prisma/migrations/20261104_works_activity_trial/migration.sql')], { env, timeout: 30000 });
+  execFileSync('python3', ['-c', `
+import sqlite3,sys
+with sqlite3.connect(sys.argv[1]) as db:
+    db.executescript(open(sys.argv[2]).read())
+    assert db.execute('PRAGMA integrity_check').fetchone()[0]=='ok'
+`, databasePath, path.join(root, 'prisma/migrations/20261108_works_recommendation/migration.sql')], { env, timeout: 30000 });
   for (const key of Object.keys(process.env)) if (!(key in env)) delete process.env[key];
   Object.assign(process.env, env);
   const { PrismaClient } = await import('@prisma/client');
@@ -634,6 +640,11 @@ with sqlite3.connect(sys.argv[1]) as db:
     delete process.env.WORKS_PREVIEW_USER_ID;
     checks.push(WORKS_CHECKS[10]);
     checks.push(WORKS_CHECKS[11]);
+    const { runRecommendationEngineering } = await import('./works-recommendation-engineering');
+    metrics.recommendation = await runRecommendationEngineering(database, owner, colleague, admin, createImage, statements);
+    const { runHdDisplayEngineering } = await import('./hd-display-engineering');
+    metrics.recommendationHd = await runHdDisplayEngineering();
+    checks.push(WORKS_CHECKS[12]);
     assert.deepEqual(checks, WORKS_CHECKS); assert.equal(forbiddenCalls, 0); completed = true;
   } finally {
     await database.$disconnect(); mock.restoreAll();

@@ -103,7 +103,7 @@ export function runPricingEnabledUiContractFixture() {
   const css = readFileSync('src/app/admin/pricing/pricing.module.css', 'utf8');
   assert.match(client, /role="switch" aria-checked=\{enabled\}/);
   assert.equal(client.split('renderPricingSwitch(row, change)').length - 1, 2, 'Compact and recovery UI both expose the switch');
-  assert.match(client, /pending \|\| saving \|\| conflict/);
+  assert.match(client, /pending \|\| saving \|\| reading \|\| readError/);
   assert.match(client, /stagePricingAdminEnabled\(changes, row, !enabled\)/);
   assert.match(client, /!enabled && !canEnablePricingAdminRow\(row, change\)/);
   assert.match(client, /row.unavailableReason \|\| '当前通道不可用'/);

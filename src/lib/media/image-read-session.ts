@@ -473,7 +473,7 @@ export function borrowImageRead(account: string, source: string, version: string
     canonical = canonicalImageReadSource(source);
     const url = new URL(canonical, location.href);
     const assetRoute = /^\/api\/image-studio\/(?:(?:assets|template-assets)\/[^/]+|style-groups\/[^/]+\/assets\/[^/]+)$/.test(url.pathname);
-    const variantRoute = /^\/api\/reference-images\/[^/]+\/content$/.test(url.pathname) || url.pathname === '/api/content-reactions/media';
+    const variantRoute = /^\/api\/reference-images\/[^/]+\/content$/.test(url.pathname) || url.pathname === '/api/content-reactions/media' || /^\/api\/works\/[^/]+\/media$/.test(url.pathname);
     if (url.origin !== location.origin || url.username || url.password || !reusableSource(canonical)
       || url.searchParams.getAll('hd-version').length !== 1 || url.searchParams.get('hd-version') !== version
       || ['thumbnail', 'preview', 'detail', 'download', 'hd-description', 'hd-download'].some(name => url.searchParams.has(name))
