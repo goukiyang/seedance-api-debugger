@@ -867,3 +867,29 @@ CodeGraph准备已成功核对本工作区cbaf、1962文件及0待同步/0缺失
 同一点击中change恢复本格补充、adopt使用显式传入的候选引用，避免读取尚未更新的base；父updateDraft为函数式合并，文字与views/mainFace的不同字段在同一事件保留。旧正脸产生的侧脸仍只可查看/按新正脸生成，不绕身份一致性门。撤销保存上次部位/采用引用与mainFace/views快照，恢复中间图及右侧编辑底图/对应补充，只把真实draft字段传给父更新，不把界面状态写入工作区。不触发生成/计费，不改请求、数据结构或素材权限。
 
 风格与该交互同批交付；原5文件风格代码的隔离19/类型已通过，早期类型的冗余收窄判断、随后夹具小幅模式未执行基础词的断言失配均已修正并保失败原件；最终19/类型双0。新增workbench只补受影响类型检查，最终封源后fresh原生/Next统一包括此改动，实际点击/撤销/历史及小屏仍用户手验。无浏览器或真实生图。
+
+
+#### 20.2 实发基线继承与最终封源
+
+15的135.4于2026-11-08T11:45:54.989619Z健康收口并交还窗，实际源38fc52f1a8497046578ceeb2bf37be40019c94b0 /BUILD tbnrYXNkjO59pkM8oPhi3，stage pin-recovery-20261108/attempt02。本批已三方完整继承该实发源，保置顶/分页/个人快速删除25文件、角色135.3铺满及新PNG；不从旧135.3整包覆盖。冻结应用源7c63d87752af0abfc4298a1b256bfaa91e20278e /v0.135.6，主对实际135.4恰13文件（6角色实现/工程、3版本、4记录），主对F0共58文件，源码已推正确origin。新stage固定character-style-settings-20261108/attempt01；恢复脚本两锚点绑定自身及38fc，不借用旧锚点。
+
+早期隔离preflight01的19组、风格类型、追加采用同步类型分别exit0，精确6文件SHA与封源一致；首轮类型冗余收窄比较和次轮测试夹具使用小幅模式却断言明显档基础词的失败原件保留。没有新功能构建失败或生产动作。当前封源主fresh19已通过，完整原生/计价/Next继续跑；代码冻结后不再追加产品修改，构建/部署不冒功能验收。
+
+15后补的a81a8ec99仅三份tasks记录，经代码差异为空核对后，已在文档HEAD 5e9d9e9三方合入，保其联合工单§16.8.4、PIN-RECOVERY01/DELETE-FAST01已部署待手验状态和discoveries本人段；正式根仅改角色自己的段，不覆盖其它记录/脏改。应用源与构建始终7c63，不因这次纯文档合并重建。CodeGraph已核对7c63的1966文件，0待同步/0缺失/0解析错；context调用未返回的既有缺口继续回源码核对，未称查询成功。
+
+
+#### 20.3 最终交付与发布证据
+
+**已部署v0.135.6，待用户手动验收。** 正式入口：[角色工作台](https://sd2.youdooart.com/tools/character-lab)。实际应用源7c63d87752af0abfc4298a1b256bfaa91e20278e，BUILD opoORRWORWxECYRKKHewm；公网收口2026-11-08T12:08:12.236344Z，健康收口12:08:41.548839Z。cutover0，无恢复；健康后已向15新preset任务及离线3交精确源/stage并交还窗，本轮后续仅文档提交推送，无生产写。
+
+- 独立管理员“风格提示词”入口与弹窗已实现，一份styleConstraints用于正脸、侧脸、微调、前后身和旧整图的新生成。默认风格集中一个常量，内容弹窗只保构图/身份/细节规则；已知旧内置真人/摄影/灰色背景片段运行时归位，不改历史原文。切版前只读核对的保存配置为rev3，补查characterContext只含角色身份/发型/配饰，faceVariables为原“-”，无另存的阶段规则或风格覆盖；没有为上线自动写规则或批量迁移。新管理保存按scope分开、既有CAS/版本与管理员鲜核保持；风格显式保存仅改风格并镜像既有三兼容字段，内容保存不改风格。
+- 追加采用同步已实现：明确点击可用候选即同步中间采用图，三部位一致；蓝色选中及绿色采用均跟实际引用。历史浏览/放大/右键复制不替换成品，旧正脸侧脸不能绕过身份门；撤销恢复前一部位/引用/图及对应底图输入。候选选择不触发生成或扣费，个人补充仍按部位和底图独立缓存/恢复，未采用历史底图仍可微调。
+- 最终源fresh19组隔离SQLite、fresh原生/计价、完整Next/types/lint通过；构建完成2026-11-08T12:05:58.881383Z。19组包含所有新生成出口共享风格、无额外摄影锁、内容/风格保存互不覆盖、兼容镜像、陈旧CAS拒绝及原实际提示词不变；早期两处类型/夹具失败已修正留原件，最终源完整构建一次0。生产写、收费、浏览器及禁止外部调用均0，不冒真实出图或用户功能验收。
+- F0 guard原19组/读者/原生/完整构建证据按原源、原BUILD _JwQu0Zzx5P5dk89dyQd9及原时2026-11-08T05:29:46.672838Z复用，1469原编译文件逐一核对，未重建/改时。角色类型、工作区读写尾段、旧裁切和PNG读取函数与相容guard一致；compose新排版保持实发135.3原字节，schema/migrations无变。config仍原字段/原JSON形状，无新增存储或回填，已受理/未知/历史原请求与账单不重写、不重发。
+- 6次真实main/guard启动、7服务实际cwd、4timer、首页及角色页8唯一JS/CSS资源SHA、3匿名接口401、内外health200通过，控制器0。旧writer自然退出，配置/一致SQLite备份仅留服务器，未回灌DB/素材/账本/历史；价格2行全字段SHA d03c539d74a31b5e2a6a0305724b1b9f193e0ade878370898c7632d1bdc96539与policy92ac99c7/authoring37404d45/capability f4a48550保持，private policy SHA35fc8b70fc57df1f64e164b5439f1ba8f99d76cf12ab3ad3d8dea588edad2ff0保持。
+- 恢复脚本绑定自身style-settings attempt01/实际135.4的38fc，shell语法及首段只读预检通过；仅在内存适配“尚未切版/备份尚未建立”的时序条件，其余guard/配对/reader/允许源照原检查。scriptSHA47b7a02468b28bd884a2c2fe8bf5c0c3eccbd54d972e3ee2a90c13cdce4cbecc，原shell未执行，无恢复演练；真正失败只回程序和消费者配置，不回数据。
+
+安全证据固定私有`docs/materials/2026-11-08-character-style-settings/attempt01/`，服务器对应`/data/video-api-debugger/release-staging/character-style-settings-20261108/attempt01`；final-evidence-summary仅保原run/receipt/日志SHA等元证，未下载buildEnv、生产DB/配置备份或原始价格行。低优先preflight原件及6文件SHA留同批上层，实际功能（风格保存/版本切换、候选点击及撤销、历史浏览/独立补充、旧侧脸提示、触摸键盘和真实风格效果）由用户手验。原发现及他人已部署/待核状态保持。
+
+
+**D-20261108-STYLE-PREVIEW-REFRESH｜待核线索 / P3。** `CharacterLabPromptPanel`的下次规则预览按previewPayload签名/tab/previewEpoch触发，配置修订不在签名内；弹窗保存配置更新bootstrap/configDraft，不改workspace draft，原已打开的下次预览因此没有直接的修订刷新依赖。已有window focus/visibility及切tab会重查；实际浏览器是否在同页保存后短暂保留旧预览，待用户手验确认。实际新生成在服务器读取新保存规则，历史原提示词应保原文；本轮不扩改既有预览刷新链。来源：`src/app/tools/character-lab/prompt-panel.tsx`、`studio.tsx`的saveConfig以及`workbench.tsx`的previewPayload。若确认复现，最小修法是让预览显式订阅已保存配置修订，保原当前图片冻结提示词、失败恢复与草稿。沿角色原单§20收口记录；不据此声称已证实际旧预览或触发生图。

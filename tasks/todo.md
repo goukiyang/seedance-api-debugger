@@ -1178,7 +1178,7 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 <!-- /CHARACTER-SINGLE-WORKBENCH-DESIGN-20261107 -->
 
 <!-- CHARACTER-UNIFIED-STYLE-20261108 -->
-- [ ] 角色风格独立入口/统一弹窗：一份风格覆盖各部位新生成，内容弹窗不混风格；清除硬编码摄影锁，style/content保存互不覆盖，旧字段镜像保读者及历史原词。5文件实现及隔离19已完成，类型/最终构建与接续保护部署进行中；预留135.6，先继承实际发布基线。[原单§20](tasks/todo/2026-10-31-character-reference-replan.md)。
+- [x] 角色统一风格/候选同步已部署v0.135.6 /7c63d8775 /opoORRWORWxECYRKKHewm，待用户手验。独立风格入口/弹窗，一份风格用于各部位新生成，内容保存不改风格、风格保存不改内容；历史/独立补充保持。点击可用候选即采用到中间，标记跟实际引用，历史浏览不采用，支持同步撤销。继承实发38fc及其25文件，a81三份完成记录已纯文档合入；fresh19/native/计价/完整Next types lint、F0原1469、6启动/7服务4timer/8资源/3匿名401/health200过，cutover0无恢复，价/原数据保持。仅记录规则预览刷新依赖待核线索D-20261108-STYLE-PREVIEW-REFRESH，未扩改。[原单§20.3](tasks/todo/2026-10-31-character-reference-replan.md)。
 <!-- /CHARACTER-UNIFIED-STYLE-20261108 -->
 
 

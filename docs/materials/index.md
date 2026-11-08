@@ -515,6 +515,8 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 
 2026-11-08统一风格独立弹窗沿角色原单§20，5文件覆层/隔离19及类型检查、最终来源配对/发布安全元证归私有`2026-11-08-character-style-settings/`。不迁移历史或生产配置，默认风格单一来源；已有三兼容字段由显式风格保存镜像。工程检查不冒浏览器/真实出图手验。
 
+最终v0.135.6 /7c63d8775 /opoORRWORWxECYRKKHewm已部署，包含用户追加候选点击同步采用/撤销，共6角色实现工程文件。证据`attempt01/final-evidence-summary.json`含fresh主19/native/完整Next、F0原1469、切版0/公网/健康；恢复自身首段只读预检留`recovery-readonly-preflight.json`，无恢复演练。旧规则/原请求/个人补充及PNG保持，实际效果待手验；预览刷新依赖线索另记discoveries，不冒已证/已修。
+
 2026-11-08图片铺满及选中标记补正沿同一原单§19；用户截图及本批安全工程/发布元证归私有`2026-11-08-character-image-fit/`。新PNG按800/1600行，旧PNG及旧生成裁切不迁移。原31恢复脚本锚点补正证据留movable-layout/attempt04/anchor-fix-proof.json，未执行线上恢复。
 
 最终v0.135.3 /cbaf2390e /VFqcM3XS-0vUU6QIqpZ0a已部署，待用户手动验收。新批`attempt01/final-evidence-summary.json`保fresh主19/native/完整Next、原guard1469、切版0/公网/健康安全元证；`recovery-readonly-preflight.json`核自身stage/135及原guard，无恢复演练。配置/DB/原始价格行及buildEnv仅留服务器，不下载；CodeGraph exact-source索引成功、context未返回的缺口在原单。

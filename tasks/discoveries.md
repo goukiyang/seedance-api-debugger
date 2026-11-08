@@ -75,3 +75,6 @@ PIN相关原四项处理：135.4/38fc52f已部署目录恢复、本人管理/取
 
 
 **D-20261108-ROLE-RECOVERY｜已确认并修正本单恢复入口锚点。** 同类发布模板复用后，角色31/movable-layout/attempt04的program-recovery.sh首段仍断言pin-wide旧stage与3516旧baseline，自动恢复未触发，因此此前cutover0并不能证明入口可执行。按15/4证据，仅修本单两常量至role31 stage/179f，保原脚本及SHA；只读首段通过guard检查后正确拒绝后继135，未执行停服/切版/写配置/数据。新135.3恢复入口匹配本单stage及实际135，发布前验证自身首段。详见角色原单§19、movable-layout/attempt04/anchor-fix-proof.json与image-fit新批证据。不扩改其他发布或创建治理系统。
+
+
+**D-20261108-STYLE-PREVIEW-REFRESH｜待核线索 / P3。** `CharacterLabPromptPanel`的下次规则预览按previewPayload签名/tab/previewEpoch触发，配置修订不在签名内；弹窗保存配置更新bootstrap/configDraft，不改workspace draft，原已打开的下次预览因此没有直接的修订刷新依赖。已有window focus/visibility及切tab会重查；实际浏览器是否在同页保存后短暂保留旧预览，待用户手验确认。实际新生成在服务器读取新保存规则，历史原提示词应保原文；本轮不扩改既有预览刷新链。来源：`src/app/tools/character-lab/prompt-panel.tsx`、`studio.tsx`的saveConfig以及`workbench.tsx`的previewPayload。若确认复现，最小修法是让预览显式订阅已保存配置修订，保原当前图片冻结提示词、失败恢复与草稿。沿角色原单§20收口记录；不据此声称已证实际旧预览或触发生图。
