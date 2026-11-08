@@ -4,6 +4,22 @@
 
 `sd2.youdooart.com` 已有生产数据与持久启动屏障，**只走本节保护流程**。下方从零安装示例不是现网更新、迁移、回退或删目录命令，不得直接执行。所有候选、日志与发布材料沿真实挂载的 `/data`；只回程序，不回业务数据库、价格、媒体、账本、回执或历史证书。
 
+<!-- DEPLOY-CHECK-R01-20261108 -->
+### 相容备用源码与手工资源核对（2026-11-08补正）
+
+相容备用源码使用当前工作区的`node scripts/create-pricing-compatible-guard.mjs --source MAIN_FULL_SHA --ref refs/heads/codex/points-pricing-settings-guard-YYYYMMDD`。它保留当前主版全部reader，仅改版本及六项既有恢复关闭位：费率写、成员抠图、角色body/recipe/grid与反馈上传。输入必须是真实完整主源；生成成功不是构建或可恢复证明，仍沿原构建/相容性/许可流程。已受理/未知请求、价格、数据与媒体不回滚。
+
+手工发布的资源核对统一用下列只读入口，不再复制历史私有`public-proof.py`的静态文件200假设：
+
+```bash
+python3 ops/sd2-public-assets-proof.py --root /ABSOLUTE/MANAGED_RELEASE --origin https://sd2.youdooart.com --page /image-studio/page > /ABSOLUTE/PRIVATE/public-assets.json
+```
+
+`--root`须为本次已核对的实际服务工作目录，前后仍沿原流程核服务来源、BUILD与健康。Next脚本从实际构建清单定位，要求公网200且字节相同；`/tools/ultimate-canvas/index.html`与`app.js`要求307到同源`/login`并保留原资源`next`，本地文件另记摘要。登录跳转不冒充登录后的文件字节或界面验收，公开脚本也不能用登录页代替。该入口不带账号、不改鉴权、不生成作品、不读写业务数据库；不能替代原发布控制器或相容恢复检查。
+
+修改这两处工具时，运行`node scripts/pricing-compatible-guard-engineering.mjs`及`python3 ops/sd2-public-assets-proof.test.py`，其真实Git/HTTP隔离正反例不调用模型。历史封存包与正在执行的发布工具保持原字节；新修复只供新工具安装与后继材料引用。
+<!-- /DEPLOY-CHECK-R01-20261108 -->
+
 固定准备入口为 `ops/sd2-release-prepare.mjs`，控制来源由同目录 `sd2-release-profile.json` 锁定。它先逐字核实正式根私有 `docs/materials/2026-10-19-upload-unknown-recovery/release-r16/` 的36个成功控制模块及原成功证据；ADMIN-USAGE另封新控制包，经profile的promotion精确锁定新增及允许变动文件，其余原模块逐字保留，不另建发布引擎、不上传私有材料到Git。r16及其原run只读，禁止复制旧run/PID/价格修订冒新鲜现场。根因及原附件见正式根费率工单§24.5。
 
 ```bash
