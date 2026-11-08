@@ -738,6 +738,24 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
     });
   }
 
+  function renderVersions(onInspect?: (reference: CharacterLabReference) => void) {
+    if (!workspace) return null;
+    return Boolean(workspace.compositions?.length) && <details className={styles.versionShelf} aria-label="已保存的合成图">
+        <summary>成品版本 · {workspace.compositions?.length} 个</summary>
+        <div className={styles.savedSheets}>{workspace.compositions?.map(item => {
+          const url = compositionUrl(workspace.id, item.id);
+          return <div key={item.id}><button type="button" onClick={() => setPreview({ src: url, alt: item.name })}>{item.name}</button>
+            <a href={url + '&download=1'} download={item.name + '.png'}>下载</a>
+            {item.sources && <button type="button" disabled={locked || unresolved} onClick={() => { const refs = item.sources!; updateDraft({ sourceAssetId: refs.sourceAssetId, mainFace: refs.mainFace, views: { side: refs.side, 'body-front': refs.front, 'body-back': refs.back } }); setLegacyView(false); setNotice('已将此版本作为当前工作底稿，原成品版本保留。'); }}>继续编辑</button>}
+            {item.sources ? <details><summary>生成来源</summary><div className={styles.recipeActions}>{([['mainFace', '正脸'], ['side', '侧脸'], ['front', '正面全身'], ['back', '背面全身']] as const).map(([slot, label]) => <button type="button" key={slot} disabled={locked} onClick={() => {
+              const reference = item.sources?.[slot];
+              if (onInspect && reference) { onInspect(reference); return; }
+              setCompositionSlot({ id: item.id, slot }); setRecipeTab('current'); setRecipeTarget(slot === 'mainFace' ? 'front' : slot === 'side' ? 'side' : slot === 'front' ? 'body-front' : 'body-back');
+            }}>{label}提示词</button>)}</div></details> : <span className={styles.hint}>旧成品未记录分格来源</span>}</div>;
+        })}</div>
+      </details>;
+  }
+
   return <CharacterLabMediaProvider value={{ plans, tasks }}><main className={styles.root} aria-busy={loading}>
     <header className={styles.header}>
       <div className={styles.brand}><UserRound size={21} /><strong>CHARACTER LAB</strong><span>角色参考图工作台</span></div>
@@ -758,7 +776,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
       {unresolved && <span className={styles.pending}>原提交结果待确认 <button type="button" disabled={locked} onClick={() => void run('query', refreshTasks)}>核对原请求</button></span>}
     </div>
     {!sessionReady ? <div className={styles.welcome}><UserRound size={36} /><p>正在核对当前账号，工作现场已保留。</p></div> : loading && !workspace ? <div className={styles.loading}><div /><div /><div /><span>正在恢复角色工作区…</span></div> : !workspace || !draft ? <section className={styles.welcome}><ImagePlus size={44} /><h1>从一张角色原图开始</h1><p>探索不同的真人面孔，再制作完整的角色参考图。</p><button type="button" className={styles.primary} disabled={locked || !bootstrap} onClick={() => void createWorkspace()}><Plus size={17} />新建角色</button>{error && <button type="button" onClick={() => window.location.reload()}>重新读取</button>}</section> : <>
-      {!legacyView ? <CharacterLabWorkbench key={`${ownerId}:${workspace.id}:${draft.sourceAssetId || ''}`} initialPart={bodyOpen ? 'body' : 'overview'} ownerId={ownerId} workspace={workspace} draft={draft} plans={plans} tasks={tasks} isAdmin={isAdmin} locked={locked} pending={pendingPlanIds} allHistory={historyOpen} settings={renderGenerationSettings()}
+      {!legacyView ? <CharacterLabWorkbench key={`${ownerId}:${workspace.id}:${draft.sourceAssetId || ''}`} initialPart={bodyOpen ? 'body' : 'overview'} ownerId={ownerId} workspace={workspace} draft={draft} plans={plans} tasks={tasks} isAdmin={isAdmin} locked={locked} pending={pendingPlanIds} allHistory={historyOpen} settings={renderGenerationSettings()} versions={renderVersions}
         onUpdate={updateDraft} onSource={() => setPickerOpen(true)} onPreview={(src, alt) => setPreview({ src, alt })} onQuery={() => void run('query', refreshTasks)}
         onGenerate={intent => generate(!intent.operation || intent.operation === 'refine-face' || intent.operation === 'refine-side' ? 'faces' : 'result', intent.operation, undefined, undefined, intent)}
         onLegacy={plan => { setLegacyView(true); browseHistoryPlan(plan); }} onManage={target => { setPromptTarget(target); setConfigError(''); }}
@@ -833,20 +851,8 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
         </aside>
       </div>
       </>}
-      {Boolean(workspace.compositions?.length) && <details className={styles.versionShelf} aria-label="已保存的合成图">
-        <summary>成品版本 · {workspace.compositions?.length} 个</summary>
-        <div className={styles.savedSheets}>{workspace.compositions?.map(item => {
-          const url = compositionUrl(workspace.id, item.id);
-          return <div key={item.id}><button type="button" onClick={() => setPreview({ src: url, alt: item.name })}>{item.name}</button>
-            <a href={url + '&download=1'} download={item.name + '.png'}>下载</a>
-            {item.sources && <button type="button" disabled={locked || unresolved} onClick={() => { const refs = item.sources!; updateDraft({ sourceAssetId: refs.sourceAssetId, mainFace: refs.mainFace, views: { side: refs.side, 'body-front': refs.front, 'body-back': refs.back } }); setLegacyView(false); setNotice('已将此版本作为当前工作底稿，原成品版本保留。'); }}>继续编辑</button>}
-            {item.sources ? <details><summary>生成来源</summary><div className={styles.recipeActions}>{([['mainFace', '正脸'], ['side', '侧脸'], ['front', '正面全身'], ['back', '背面全身']] as const).map(([slot, label]) => <button type="button" key={slot} onClick={() => {
-              setCompositionSlot({ id: item.id, slot }); setRecipeTab('current'); setRecipeTarget(slot === 'mainFace' ? 'front' : slot === 'side' ? 'side' : slot === 'front' ? 'body-front' : 'body-back');
-            }}>{label}提示词</button>)}</div></details> : <span className={styles.hint}>旧成品未记录分格来源</span>}</div>;
-        })}</div>
-      </details>}
+      {legacyView && renderVersions()}
     </>}
-    {!legacyView && recipeTarget && !refinementVisible && renderRecipePanel()}
     <ResourceLibraryPicker open={pickerOpen} renderImagePreview={props => <CharacterLabPreview {...props} />} imageOnly target="image-studio" purpose="character-lab-source" contextKey={`${ownerId}:character-lab:${workspace?.id || 'draft'}`} title="选择角色原始素材" confirmLabel="使用这张原图" maxSelection={1} currentCount={0} currentAssetIds={[]} onClose={() => setPickerOpen(false)} onUploadFile={async (file: File, onProgress?: UploadProgressHandler) => { assertActive(); const capturedScope = scope.current; setUploading(true); try { const asset = await uploadFileAsAsset(file, { onProgress, ownerId }); if (capturedScope !== scope.current || !active.current) throw new Error('当前角色或账号已变化，图片没有替换到当前工作区'); return asset; } finally { if (alive.current) setUploading(false); } }} onConfirm={async (ids, assets) => { assertActive(); if (!draftRef.current || !ids[0] || busyRef.current) return false; const asset = assets?.find(item => item.id === ids[0]); setSource({ id: ids[0], url: asset?.originalUrl || `/api/image-studio/assets/${encodeURIComponent(ids[0])}`, thumbnailUrl: asset?.thumbnailUrl || '', fileName: asset?.fileName || '角色原始素材' }); updateDraft({ sourceAssetId: ids[0], facePlanId: null, resultPlanId: null, mainFace: null, auxiliaryFaces: [], views: {}, stage: bodyOpen ? 'result' : 'faces' }); sourceArrival.mark([ids[0]]); return true; }} />
     {preview && sessionReady && <CharacterLabPreview src={preview.src} alt={preview.alt} onClose={() => setPreview(null)} />}
     {refinementVisible && refinement && renderRefinement(refinement)}

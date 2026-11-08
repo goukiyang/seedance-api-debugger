@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '角色工作台提示词与生成衔接优化', outline: [
-  '管理提示词后回到当前编辑区，继续生成更顺手',
-  '正侧脸新候选统一遵循四格、九格设置',
-  '历史原样复现保留原版式，并准确显示生成数量',
+const notice = { title: '角色工作台布局与制作栏优化', outline: [
+  '素材、成品和制作三栏支持拖动换位及调整宽度',
+  '提示词、补充输入、生成设置和成品版本集中到制作栏',
+  '布局按账号记忆，可一键恢复默认；历史上下文保持独立',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

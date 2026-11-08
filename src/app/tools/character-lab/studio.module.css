@@ -405,3 +405,54 @@
 @media (max-width: 560px) { .unifiedWorkbench { display: flex; flex-direction: column; } .unifiedRail { display: grid; grid-template-columns: 90px 95px minmax(100px, 1fr); gap: 10px; width: 100%; } .unifiedRail .lowerHistory { border: 0; padding: 0; } .unifiedBatches { max-height: 145px; } .miniComposition { max-height: 145px; } .unifiedBatches img { width: 30px; height: 30px; } .historyTabs { flex-wrap: wrap; } .root .historyTabs button { font-size: 10px; padding: 2px; } .editorSplit { width: 100%; } .adoptedViewport { height: 420px; } .root { padding-inline: 8px; } .brand strong { font-size: 14px; } .headerActions { width: 100%; } }
 
 @media (min-width: 851px) { .candidateSection { max-height: max(240px, calc(100dvh - 570px)); overflow-y: auto; } }
+
+/* Layout preferences move panels, never their editing or generation state. */
+.workspaceLayout { min-width: 0; }
+.workspaceLayoutTools { display: flex; justify-content: flex-end; margin-bottom: 5px; }
+.root .workspaceLayoutTools button { min-height: 26px; padding: 2px 5px; font-size: 11px; color: var(--lab-muted); }
+.workspaceColumns { display: grid; align-items: start; min-width: 0; }
+.workspacePane { min-width: 0; border: 1px solid var(--lab-line); border-radius: 8px; background: var(--lab-panel); }
+.workspacePane[data-dragging] { position: relative; z-index: 3; opacity: 0.88; outline: 1px solid var(--lab-green); }
+.workspacePaneHeading { display: flex; align-items: center; gap: 4px; min-height: 32px; padding: 2px 8px; border-bottom: 1px solid var(--lab-line); color: var(--lab-muted); font-size: 11px; }
+.root .paneDragHandle { flex: 0 0 28px; min-height: 28px; width: 28px; padding: 0; color: var(--lab-muted); cursor: grab; touch-action: none; }
+.paneDragHandle:active { cursor: grabbing; }
+.workspacePaneBody { min-width: 0; }
+.workspacePaneBody > .unifiedRail, .workspacePaneBody > .adoptedCanvas, .workspacePaneBody > .candidateEditor { border: 0; border-radius: 0; background: none; }
+.workspacePaneBody > .unifiedRail { display: flex; width: auto; padding: 10px; }
+.workspacePaneBody > .adoptedCanvas { position: static; }
+.workspacePane[data-pane='preview'], .workspacePane[data-pane='editor'] { position: sticky; top: 12px; }
+.workspacePane[data-pane='editor'] { display: flex; flex-direction: column; max-height: calc(100dvh - 125px); }
+.workspacePane[data-pane='editor'] > .workspacePaneBody { overflow: auto; min-height: 0; overscroll-behavior: contain; }
+.workspacePane .adoptedViewport { height: max(360px, calc(100dvh - 270px)); }
+.workspaceSeparator { display: flex; align-items: center; justify-content: center; align-self: stretch; min-height: 420px; color: var(--lab-muted); cursor: col-resize; touch-action: none; user-select: none; }
+.workspaceSeparator:hover, .workspaceSeparator:focus-visible { color: var(--lab-green); background: var(--lab-raised); outline: none; }
+.generationTabs { display: flex; gap: 4px; padding: 10px 12px 0; }
+.root .generationTabs button { flex: 1; min-height: 30px; padding: 4px 6px; font-size: 12px; }
+.generationTabs [aria-pressed='true'] { background: var(--lab-raised); color: var(--lab-text); border-color: var(--lab-blue); }
+.workspacePane .candidateSection { max-height: none; overflow: visible; }
+.workspacePane .inlineEditor { padding: 10px 12px 14px; gap: 9px; }
+.candidateEditor > .recipePanel { padding: 12px; border-top: 1px solid var(--lab-line); max-height: none; }
+.candidateEditor > .recipePanel > .recipeBody { overflow: visible; }
+.candidateEditor .versionShelf { margin: 0; padding: 12px; border: 0; border-top: 1px solid var(--lab-line); border-radius: 0; }
+.candidateEditor .savedSheets { display: flex; flex-direction: column; }
+.candidateEditor .savedSheets > div { min-width: 0; flex-wrap: wrap; }
+.candidateEditor .recipeIdentity > span { overflow-wrap: anywhere; }
+@media (max-width: 1100px) { .workspacePaneHeading { padding-inline: 4px; } .workspacePane .adoptedCanvas > header { padding: 8px; } }
+.workspaceColumns[data-compact] { display: flex; flex-direction: column; gap: 12px; }
+.workspaceColumns[data-compact] > .workspacePane { width: 100%; position: static; max-height: none; }
+.workspaceColumns[data-compact] > .workspaceSeparator { display: none; }
+.workspaceColumns[data-compact] .workspacePaneBody { overflow: visible; }
+.workspaceColumns[data-compact] .adoptedViewport { height: 440px; }
+.workspaceColumns[data-compact] .unifiedRail { display: grid; grid-template-columns: minmax(90px, 0.5fr) minmax(95px, 0.5fr) minmax(140px, 1fr); gap: 12px; }
+.workspaceColumns[data-compact] .lowerHistory { border: 0; padding: 0; }
+.workspaceColumns[data-compact] .unifiedBatches { max-height: 200px; }
+.workspaceColumns[data-compact] .originalThumb { max-height: 150px; }
+.workspaceColumns[data-compact] .miniComposition { max-height: 200px; }
+@media (max-width: 560px) {
+  .workspaceColumns[data-compact] .unifiedRail { grid-template-columns: minmax(80px, 1fr) minmax(90px, 1fr); }
+  .workspaceColumns[data-compact] .lowerHistory { grid-column: 1 / -1; }
+  .workspaceColumns[data-compact] .unifiedBatches { flex-direction: row; overflow-x: auto; max-height: none; }
+  .workspaceColumns[data-compact] .unifiedBatches > button { flex: 0 0 155px; }
+  .workspaceColumns[data-compact] .adoptedViewport { height: 400px; }
+  .workspacePane .inlineEditor .field textarea { font-size: 16px; }
+}

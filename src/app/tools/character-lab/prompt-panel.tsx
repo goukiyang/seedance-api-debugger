@@ -92,12 +92,12 @@ export function CharacterLabPromptPanel(props: Props) {
             {current.hasImage && <button type="button" onClick={() => props.onPreview(reference)} aria-label="放大当前记录图片"><CharacterLabImage src={characterLabMediaUrl(reference.planId, reference.cell)} alt="当前生成记录图片" /></button>}
             <span><strong>{current.plan.operation === 'body-pair' ? '正背面同次生成' : characterLabIsGrid(current.plan) ? `${current.plan.count}宫格${reference.cell !== undefined ? ` · 第${reference.cell + 1}格` : ''}` : '角色生成记录'}</strong><RelativeTime value={current.plan.createdAt} /><small>记录 {current.plan.id.slice(0, 8)}</small></span>
           </div>
-          <dl className={styles.recipeFacts}>
+          <details className={styles.recipeDetail}><summary>生成参数</summary><dl className={styles.recipeFacts}>
             <div><dt>模型</dt><dd>{current.plan.model}</dd></div><div><dt>画质 / 分辨率</dt><dd>{current.plan.quality} / {current.plan.resolution}</dd></div>
             <div><dt>规则版本</dt><dd>v{current.plan.configRevision}</dd></div><div><dt>比例</dt><dd>{current.plan.aspectRatio}</dd></div>
             <div><dt>渠道</dt><dd>{current.plan.channelId}</dd></div>
             {current.plan.kind === 'faces' && !current.plan.operation && <div><dt>面部变化</dt><dd>{characterLabStrength(current.plan.diversity)}</dd></div>}
-          </dl>
+          </dl></details>
           <label className={styles.field}><span>本次补充要求</span><textarea readOnly rows={3} value={current.personalText || '本次没有补充要求'} /></label>
           {props.isAdmin && <details className={styles.recipeDetail}><summary>{current.completePrompt !== null ? '实际生效的完整提示词' : '待生成的规则预览'}</summary>
             <pre>{current.completePrompt ?? current.instruction}</pre>
@@ -116,7 +116,7 @@ export function CharacterLabPromptPanel(props: Props) {
             <button type="button" className={styles.outline} disabled={acting || props.disabled} onClick={() => void act(async () => {
               if (props.onRestorePersonal(current.plan, current.personalText)) {
                 props.onTab('next');
-                requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('#character-recipe-panel textarea:not([readonly])')?.focus());
+                requestAnimationFrame(() => (document.querySelector<HTMLTextAreaElement>('#character-recipe-panel textarea:not([readonly])') || document.getElementById('character-supplement'))?.focus());
               }
             })}>仅恢复补充</button>
             <details><summary>更多</summary><button type="button" disabled={acting || props.disabled || current.plan.operation === 'body-front' || current.plan.operation === 'body-back'} onClick={() => void act(() => props.onReproduce(current.plan.id))}>按原设置重新生成</button></details>
