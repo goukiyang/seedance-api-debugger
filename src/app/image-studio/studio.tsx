@@ -2821,7 +2821,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         await onPresetSaved(); return;
       }
       if (!navigator.locks) throw new Error('浏览器暂不能安全保留设置保存记录，本次未发送');
-      const original = readNamedSave();
+      let original = readNamedSave();
       if (original) {
         const result = await readResponse(await fetchReadWithRetry(`/api/image-studio/module-settings?moduleId=${encodeURIComponent(module.id)}&requestId=${encodeURIComponent(original.requestId)}`));
         if (quickPresetReadScope.current !== scope) return;
@@ -2847,6 +2847,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
               const raw = JSON.stringify(command); localStorage.setItem(namedSaveKey, raw);
               if (localStorage.getItem(namedSaveKey) !== raw) throw new Error('设置保存记录未能保留，本次未发送');
             });
+            original = command;
             setNamedSavePending(true);
             const result = await readResponse(await fetch('/api/image-studio/module-settings', { method: 'POST',
               headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(command), signal: AbortSignal.timeout(20000) }));
@@ -2861,7 +2862,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           } catch (cause) {
             const outcome = (cause as { commandOutcome?: { status?: string; moduleId?: string; requestId?: string } }).commandOutcome;
             if (outcome?.status === 'not-applied' && outcome.moduleId === command.moduleId && outcome.requestId === command.requestId) {
-              await clearNamedSave(command);
+              await clearNamedSave(command); original = null;
               if (quickPresetReadScope.current === scope) setNamedSavePending(false);
             }
             throw cause;
@@ -3543,7 +3544,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       moduleId: module.id, model: retryTask?.model || moduleModel, quality: retryTask?.quality || quality, reproduceFromTaskId: !sharedLive && !restoredTaskSettings ? reproduceSourceTaskId || undefined : undefined, count: retryTask ? 1 : count, aspectRatio: retryTask?.aspectRatio || aspectRatio, resolution: retryTask?.snapshot?.resolution || resolution, revision: settings!.revision, channelId: (retryTask?.model || moduleModel) === 'gpt-image-2.5-sunburst' ? 'original' : imageChannelId,
       referenceIds: retryTask?.referenceIds || generationReferenceIds,
       ...(historicalEvolution || evolution ? { evolution: historicalEvolution || evolutionInput } : {}),
-      draft: { moduleContext: !sharedLive && !reproduceSourceTaskId && !restoredTaskSettings && contextEditable ? effectiveGenerationDefinition.context || '' : undefined,
+      draft: { personalStyleSelection: namedSettingStyles && !retryTask && !restoredTaskSettings && sharedLive ? true : undefined,
+        moduleContext: !sharedLive && !reproduceSourceTaskId && !restoredTaskSettings && contextEditable ? effectiveGenerationDefinition.context || '' : undefined,
         fixedReferences: !sharedLive && !reproduceSourceTaskId && !restoredTaskSettings && fixedEditable ? fixedReferencePayload(effectiveGenerationDefinition.fixedReferences || []) : undefined,
         skillIds: restoredTaskSettings && !retryTask ? restoredSkillsChanged ? generationSkills.map(group => group.id) : undefined : sharedLive || reproduceSourceTaskId ? undefined : generationSkills.map(group => group.id),
         skillVersions: restoredTaskSettings && !retryTask ? restoredSkillsChanged ? Object.fromEntries(generationSkills.filter(group => group.promptVersion).map(group => [group.id, group.promptVersion!])) : undefined : sharedLive || reproduceSourceTaskId ? undefined : Object.fromEntries(generationSkills.filter(group => group.promptVersion).map(group => [group.id, group.promptVersion!])),

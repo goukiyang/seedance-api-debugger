@@ -100,10 +100,12 @@ async function main() {
     await assert.rejects(save(author, badReference), { status: 409 });
     assert.equal((await status(author, freshModule.id, badReference.requestId)).status, 'not-found');
     checks.push('unavailable temporary reference rejects atomically; no successful-looking settings record remains');
-    const draft = parseStudioRequest({ requestId: randomUUID(), prompt: '', count: 1, revision: 1, referenceIds: [], draft: { styleGroupIds: [] } });
+    const draft = parseStudioRequest({ requestId: randomUUID(), prompt: '', count: 1, revision: 1, referenceIds: [], draft: { personalStyleSelection: true, styleGroupIds: [] } });
     const binding = { protocol: 'shared-live-v1', ownerId: author.id, presetId: rootId, mode: 'publisher' as const };
     normalizeSharedAuthorDraftForUse(author, { binding, definition: { ...definition.definition, styleGroupIds: ['saved-style'] } } as never, draft);
     assert.deepEqual(draft.draft?.styleGroupIds, []);
+    const ordinary = parseStudioRequest({ requestId: randomUUID(), prompt: '', count: 1, revision: 1, referenceIds: [], draft: { styleGroupIds: [] } });
+    assert.throws(() => normalizeSharedAuthorDraftForUse(author, { binding, definition: { ...definition.definition, styleGroupIds: ['saved-style'] } } as never, ordinary), { status: 409 });
     const forbidden = parseStudioRequest({ requestId: randomUUID(), prompt: '', count: 1, revision: 1, referenceIds: [], draft: { moduleContext: 'unsaved change', styleGroupIds: [] } });
     assert.throws(() => normalizeSharedAuthorDraftForUse(author, { binding, definition: definition.definition } as never, forbidden), { status: 409 });
     checks.push('explicit per-use style choice works for author too; unsaved template context retains original publication protection');

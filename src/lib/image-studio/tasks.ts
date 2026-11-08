@@ -219,7 +219,7 @@ export function normalizeSharedAuthorDraftForUse(actor: ImageStudioIdentity,
   const consumer = shared.binding.mode !== 'publisher' || shared.binding.ownerId !== actor.id || shared.definition.sourceOwnerId !== actor.id;
   // A pure per-use style selection is available to authors and colleagues alike.
   // Only explicit named-settings application sends this for an author; template drafts still use saved definitions.
-  if (input.reproduceFromTaskId === undefined && draft?.moduleContext === undefined && draft?.fixedReferences === undefined
+  if ((consumer || draft?.personalStyleSelection === true) && input.reproduceFromTaskId === undefined && draft?.moduleContext === undefined && draft?.fixedReferences === undefined
     && draft?.skillIds === undefined && draft?.skillVersions === undefined) return;
   if (consumer) {
     throw new StudioError('共享模板的历史定义不能直接用于生成；请重新读取当前模板，个人设置仍保留', 409);
@@ -301,6 +301,7 @@ type StudioTaskDraft = {
   fixedReferences?: StudioFixedReference[];
   styleGroupIds?: string[];
   styleGroupVersions?: Record<string, number>;
+  personalStyleSelection?: true;
   skillIds?: string[];
   skillVersions?: Record<string, string>;
   referencePolicy?: StudioReferencePolicy;
@@ -328,7 +329,7 @@ function parseStudioTaskDraft(value: unknown, referenceIds: string[]): StudioTas
   if (value === undefined) return undefined;
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new StudioError('当前生成草稿无效');
   const record = value as Record<string, unknown>;
-  const allowed = ['moduleContext', 'globalContext', 'fixedReferences', 'styleGroupIds', 'styleGroupVersions', 'skillIds', 'skillVersions', 'referencePolicy'];
+  const allowed = ['moduleContext', 'globalContext', 'fixedReferences', 'styleGroupIds', 'styleGroupVersions', 'personalStyleSelection', 'skillIds', 'skillVersions', 'referencePolicy'];
   if (Object.keys(record).some(key => !allowed.includes(key))) throw new StudioError('当前生成草稿包含不支持的字段');
   if (record.moduleContext !== undefined && (typeof record.moduleContext !== 'string' || record.moduleContext.length > 20000)) throw new StudioError('模块上下文最多 20000 字');
   if (record.globalContext !== undefined && (typeof record.globalContext !== 'string' || record.globalContext.length > 20000)) throw new StudioError('通用上下文最多 20000 字');
@@ -357,6 +358,10 @@ function parseStudioTaskDraft(value: unknown, referenceIds: string[]): StudioTas
       || Object.entries(record.styleGroupVersions).some(([id, version]) => !draft.styleGroupIds?.includes(id)
         || !Number.isSafeInteger(version) || Number(version) < 0)) throw new StudioError('风格版本无效');
     draft.styleGroupVersions = record.styleGroupVersions as Record<string, number>;
+  }
+  if (record.personalStyleSelection !== undefined) {
+    if (record.personalStyleSelection !== true || draft.styleGroupIds === undefined) throw new StudioError('本次风格选择无效');
+    draft.personalStyleSelection = true;
   }
   if (record.referencePolicy !== undefined) {
     try { draft.referencePolicy = parseStudioReferencePolicy(record.referencePolicy, referenceIds); }

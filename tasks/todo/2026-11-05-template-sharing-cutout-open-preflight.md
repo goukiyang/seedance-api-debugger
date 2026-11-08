@@ -577,3 +577,6 @@ F0兼容guard source `f0fc87f9896daa685c1067bb341e85ee21933a9a`、BUILD `_JwQu0Z
 **已验证与首错保留。** 同服务器独立verify01合成SQLite fixture05通过12项（作者/非作者不增模板/工作区、源默认不变、账号/模块隔离、原号幂等/状态、篡改同号拒绝、版本冲突确未应用、多个方案、临时参考失效、模板风格使用、作者纯风格且定义保护、撤回来源、task/ledger/network为0）。当前实现未做生产写或浏览器验收。首次Mac schema engine在建临时库阶段非零、无功能断言；local tsc01仅quality字符串类型不匹配，已按受校验模型质量类型修正。Linux fixture02用他人的default ID查询，正确400而测试误期望not-found；03给共享源注入私人风格使源本身依现规则不可用，改为有效shared风格；04另一个纯parse用例遗漏原requestId，补齐真实请求合同。均保原失败日志，未放宽保护或改业务数据；复查了调用方合同后05完整通过，未将夹具输入错误写成生产根因。
 
 当前分支codex/template-named-settings-20261108，实际工作目录沿pin-recovery工作树，初始a81完整保135.4修复，并完整合入实际135.6/7c63角色更新。待135.7完整构建/发布，功能继续用户手动验收；不因12项隔离检查冒真实网页完成。
+
+
+**构建差量与真实回归（e639未部署）。** 首次冻结e639在原native末尾失败1项studio-restored-settings-engineering:318，原“没有恢复标记的作者风格草稿应拒绝”检查正确；其余14项native、其它public fixtures及pricing已通过并保原证。原因是初版为了命名方案放行所有作者纯style选择，超出了普通B合同。现改为请求draft显式`personalStyleSelection=true`，只在前端明确套用命名方案、且非历史恢复/重试时发送；没有标记仍原拒绝，混入上下文/固定定义不放行。报价与创建复用同一parser/normalizer，旧冻结输出不改。verify01 fixture06-marker十二项及原完整restored-contract-marker用例均退出0；并补同一命名弹窗内丢回执后的原命令接续，保留原body/号、不另起保存。此次为真实行为回归，不能靠改旧断言或重标旧成功遮掉；新冻结源须补受影响构建，未编辑任何运行中的发布器，线上135.6保持。
