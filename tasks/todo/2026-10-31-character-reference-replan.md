@@ -789,3 +789,14 @@ CodeGraph准备覆盖准确29源1953文件，无missing/extra/hashMismatch/parse
 同范围复核发现已存版本若直接嵌旧RecipePanel，会同时保留另一份旧生成表单。已改为版本来源回调进入同一现代部位/底图/提示词链，不产生第二个补充或生成入口；旧独立视图保原默认路径。最终两TSX差量补类型/lint，不为布局新增功能测试或重做未变后台检查。
 
 18.7构建修正：首轮30源0ae8c8b27完整Next在框架类型门失败，因为新UI组件误命名为保留文件layout.tsx，Next把它当路由Layout并拒绝CharacterLabLayout具名导出；普通tsc/lint未检查此框架约定。我已纠正为workbench-layout.tsx及其唯一import，布局逻辑不变。源01的19角色/原生计价曾过，但失败Next不冒成功、不复用于变更源；原全部日志/退出1保留，无停服或切版，线上29正常。改名后新源仍30，不抬版本，attempt02从真实29重新组合并执行fresh主工程/完整Next；F0 guard原文件/原时刻继续复用。此轮实际构建失败累计1次，若同类再失败须按规则升级，不换目录清零。
+
+
+### 18.8 保留上传热修的31封源与最终交付（2026-11-07）
+
+第二源b897a0f521e3a279e82196110cacd7a5e4f4fabb /13430在07:39:23Z完成fresh19/原生计价/完整Next types lint，BUILD XMyzPMAIRpkIwWXTpM9FC。配对/1469 guard编译文件/runtime-links与价格d03准备通过；07:41停服前鲜核发现7服务实际已为179f267043dc27580400f403c18f93213fdf74bd /13430 /h-oDly_LBDBj_eojlNFNQ，故在任何停服前保护停住。没有把cfg改成新baseline冒源码继承，没有触发程序恢复；02完整保成功构建和未切版事实。01保留文件名导致的Next失败仍累计1次，目录变化不清零。
+
+实际owner5确认桥上传SQLite稳定性修复07:28:44Z已切版收口并交还后端窗，原stage bridge-diag-rootcause-20261108/attempt01；同F0/_JwQu guard原证原时复用，价d03/policy35fc未写。其后仅sd2b独立nginx/data静态五包发布，路径/data/sd2-ext/mj/sd2b，不依赖managed release public；保持nginx/auth接线，本批不用改候选。owner4独立fusion135主动停止自身离线构建，等本批31完成后完整继承，其他原生/配置不插入本轮。
+
+新角色版本13431通过三方合并完整保留179f源码、原单及固定todo：prepareRawUpload仅在同一原key/nonce下retrySqliteBusy，唯一键胜者读取不重置；upload-ticket对P1008真实busy503，相关3工程脚本含源依赖均逐字等于179f。新增角色只在5UI、版本及自己的记录，未修改上传修法、协议/数据结构/权限/价格；guard兼容沿实际已发源与原编译证据。新主必须从实际179f source.tar+精确Git delta组装并重新fresh native/Next，不能把b897旧成功当新源成功。空白引导一并改为“制作栏”，换位后不依赖左右方位。最终stage为character-movable-workbench-20261107/attempt03，配对/恢复固定同F0 guard，只回程序，不回数据。
+
+合并时唯一发布说明冲突最初因提前整理又被未结束的merge写回标记；私有准备断言和git diff --check先后拒绝，未提交或构建坏源。确认merge结束后再解唯一公告块，保全部热修逻辑/桥todo条目。CodeGraph修正源两次因git ls-files30秒读取超时无法同步，保原日志；未用0ae8旧索引冒最终新源，布局/回调及继承影响均回源码和不可变Git差量核对。实际页面/拖动/触摸/生成仍用户手验。本轮未新增范围外应用问题，当前31待最终工程与部署事实补齐。
