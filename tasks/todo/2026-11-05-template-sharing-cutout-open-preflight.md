@@ -622,3 +622,17 @@ F0兼容guard source `f0fc87f9896daa685c1067bb341e85ee21933a9a`、BUILD `_JwQu0Z
 兼容guard实际沿`bbeb854c82e47650ba3ea703f1918800af96881b` / `0.135.9+points-pricing-guard.2` / BUILD `bQTt2tX_GFRrdmNPmYcpf`，核原1491编译文件及全部源码，保2026-11-08T16:31:10.996871Z原完整构建时间、不重建。保持model-access reader、FEEDBACK_UPLOADS_ENABLED=false与反馈提交打开；新增可选原文sourceRevision由旧reader忽略，回退不承诺新UI功能等价。恢复入口 `bash /data/video-api-debugger/release-staging/template-sharing-conflict-20261108/attempt01/program-recovery.sh /data/video-api-debugger/release-staging/template-sharing-conflict-20261108/attempt01/release-input.json`，锚点本attempt01及原135.10/008；17:42:43Z只执行真实第一段Python读取准入成功，未执行停服、repoint或数据恢复，后继运行源变化后不得执行本脚本。只回程序，不回数据库/设置/媒体/账本/回执。
 
 原证按白名单归档正式根私有 `docs/materials/2026-11-07-pin-wide-gallery/recovery-20261108/sharing-conflict-13511/`；只含源码指纹、合成夹具日志、构建、健康和恢复元数据，没有下载DB备份、价格正文或环境/私有策略配置。17:42Z已向原后继任务交接实际a50/build/guard/发布窗，本批余下仅文档收口，不再修改运行产物。已部署，待用户手动验收；截图对应模板ID/账号尚无生产实页证据，不声称逐模板或普通同事实地通过。
+
+### 16.11 SHARE-CHAIN01 共享全链路审计（2026-11-08，审计完成/整改待实施）
+
+用户要求把整个共享及交集上下游摊开，查问题与防复发；本轮以实际135.11/a50为固定基线，覆盖原文/默认保存、首次发布/共享意图/已发布开关、目录/封面、作者/同事工作区、固定素材/私有正文、个人命名设置、报价/受理/冻结任务、历史/媒体和置顶输出的交集。完整关系图、证据、范围与R1–R5见[全链路审计](../../docs/template-sharing-chain-audit-2026-11-08.md)。
+
+新增已复现：A01实际React轮询旧请求在确认版本8后仍接收7并回退token；A02实际共享事务推进publisher revision，但页面回调丢掉回执moduleRevision，示例回执9/页面8；A03普通定义保存原号只在ref、草稿不留，真实重挂后丢身份（服务器回执未丢，不冒重复生成/扣费）；A04作者只读definition拿到存储密文，而private-editor返回授权明文，读取组件直接展示。A05仅改名且生成参数/正文/参考不变仍改definitionToken，属展示/生成合同耦合；A06无关合成坏reproduction使全目录/旧revision失败，健康定向模板正常，故障撤除恢复。前四项为缺陷，后两项按结构耦合/已复现故障隔离风险处理；均尚未修改上线。
+
+新工程仅隔离补缺，不重测原17项/完整构建：audit01 18:02:47Z、audit02实际React18.3.1交错/重挂18:04:59Z、audit03正文读取18:11:33Z，均退出0表示成功复现预期问题，不代表共享健康。源码SHA对应实际a50，临时SQLite/合成加密策略/私有物理依赖、无.env/storage生产链接，productionWrites/paidRequests/browserRuns/networkCalls全0。原始版本与每批脚本SHA保留。
+
+生产只读元数据18:02Z：46原件/38标记共享，117工作区/106有source，82binding/32publisher/17reproduction/277回执，相关JSON异常0、来源缺失0；18:08Z关系：82binding（32publisher/50live）找不到workspace0、owner/source不一致0。另24个有source无binding工作区、11个共享原件无新式publisher映射，属于需分类的真实兼容路径，不冒坏数据或批量迁移授权。未读取生产正文/凭据、未登录写共享，未逐个旧模板或实页生成验收。
+
+整改优先：R1共同接收确认状态/拒旧读并完整消费回执；R2耐久原号恢复/私有正文读取边界；R3分离展示CAS与生成输入指纹；R4按条目故障隔离并缩小读范围；R5旧路径样本、必要回归接入现有工程入口和安全元数据关联。继续保CAS、真实撤权、私有策略、本人当前输入、旧任务/冻结费用和未知只查原号。现有部分测试已接构建，17项共享接线与旧sharing专用脚本尚未在统一入口直接接齐，不把“有脚本”冒自动保护；新增诊断脚本必须在修复时转成目标行为的红绿回归，不能原样当健康检查。
+
+本轮只交审计、诊断和待办，不升版本/部署/占后继发布窗。正式根私有原证归档sharing-chain-audit，业务应用仍沿135.11发布记录，新增缺陷待实施；已受理、收费和真实浏览器证据沿原边界保留。
