@@ -1,3 +1,9 @@
+<!-- HD-DISPLAY-LABEL01-20261108 -->
+## 大图高清／原图标识（已部署，待用户手验）
+
+v0.138.1 / e8ef6eabf147b58999073c58977ee970ac080bb1 / BUILD kbIXWCclwPsqKnmEk3Hcu 已于2026-11-08T21:04:53Z健康收口。大图与双图对比按实际画面常显高清、原图或轻量预览；不提前把加载目标当已显示。完整候选内置门与Next/types/lint、6启动门、7服务4timer、48资源及3匿名401通过；原件/权限/费用不变，无DDL或付费生成，功能待手验，1秒目标不冒完成。详[原单](todo/2026-11-02-hd-delivery-stability.md#hd-display-label01-大图实际显示类型常显2026-11-08)。本轮未新增范围外问题。
+<!-- /HD-DISPLAY-LABEL01-20261108 -->
+
 <!-- WORKS-REC02-PUBLIC-20261108 -->
 ## WORKS-REC02 全员预计算推荐（已部署，待用户手验）
 

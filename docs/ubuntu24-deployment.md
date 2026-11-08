@@ -1,5 +1,14 @@
 # Ubuntu 24 部署文档
 
+
+<!-- HD-DISPLAY-LABEL01-RELEASE-20261108 -->
+## 2026-11-08 大图实际类型标识补丁
+
+实际运行源 `e8ef6eabf147b58999073c58977ee970ac080bb1` / v0.138.1 / BUILD `kbIXWCclwPsqKnmEk3Hcu`，承接88899/v0.138.0；21:03:47Z公网资源核对、21:04:53Z服务健康。完整候选含内置原生/计价/Next/types/lint通过，6启动门、7服务4timer、48资源字节及3匿名401有证，界面待用户手验。改动仅共用大图已有状态条按实际显示类型常显，不改schema、依赖、权限、画质或费用。
+
+本次暂存 `/data/video-api-debugger/release-staging/image-kind-label-20261108/attempt01`，pair `9305c3cc-07ba-4690-9000-8d0d3405d417`；原始构建、保护备份、许可、公开资源和health记录保留。相容备用仍为 `bbeb854c82e47650ba3ea703f1918800af96881b` / v0.135.9+points-pricing-guard.2 / BUILD `bQTt2tX_GFRrdmNPmYcpf`，1491份产物字节按原完整构建证明鲜核复用；继承137推荐派生表迁移，不重复DDL、不自动回业务数据/价格/媒体/账本/回执。程序恢复沿本stage已冻结的 `program-recovery.sh release-input.json`，须先核当前所有者及实际源；不是后续不同版本任意套用的命令。功能详情见高清工单HD-DISPLAY-LABEL01。
+<!-- /HD-DISPLAY-LABEL01-RELEASE-20261108 -->
+
 ## sd2 现网发布入口（2026-10-21）
 
 `sd2.youdooart.com` 已有生产数据与持久启动屏障，**只走本节保护流程**。下方从零安装示例不是现网更新、迁移、回退或删目录命令，不得直接执行。所有候选、日志与发布材料沿真实挂载的 `/data`；只回程序，不回业务数据库、价格、媒体、账本、回执或历史证书。
