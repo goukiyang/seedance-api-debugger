@@ -280,3 +280,13 @@ attempt02 的29组native通过，13/14 pricing组通过后，旧image-spec断言
 本轮实扣合计7点，新增待核0；本目标生图历史实扣22.8后累计29.8。旧五笔11.9的状态、snapshot/freeze/billing_contract SHA和全部账本再次逐项相等，原号重发0；文字/视频模型调用0。原审计准备只因成功回执已从delivery移到billing而读取失败，修正只读路径后核对通过，不改任何业务行或历史数据。
 
 实际证据：正式私有材料reference-tests-20261107内保存输入/源图SHA、两次202和原号查询、原图GET/完整解码、正常CAS回执、主guard策略验证与同源运行检查、最终只读审计final-reference-audit.json、两PNG和原参考。未将密钥、签名token或私有媒体提交Git。旧文档阶段未知、准备失败与历史待核记录均保留。本轮未新增范围外问题。
+
+### 用户补充的 AI Media VIP Sunburst 接口资料（2026-11-07洛杉矶）
+
+来源为本轮用户粘贴的《GPT Image 2.6 参考图与 GIF 接口》，属于接口资料，不把其中 curl 和 GIF 示例当作新增调用指令。原说明指定 `gpt-image-2.6-sunburst`、`POST https://api.ai-media.vip/v1/images/edits?async=true`、multipart 三个同名 `image[]` 字段；静态图示例为 `size=3840x2160`、`quality=max`、`n=1`、`output_format=png`、`response_format=b64_json`。这说明该资料描述了三图输入能力，不把三张示例反推成模型的绝对上限，也不外推 Flare。GIF 的帧参数仅保留为资料，本任务仍只处理静态生图。
+
+本次实时只读查询 `image_generation_channels_v1`：既有 `api.ai-media.vip` 通道 `image-2c29f604-0476-4fe2-8b41-73681d4e7bb1` 为 enabled=false，只有 GPT2/2.5 型号能力，无2.6；已实测两个2.6的启用通道仍为 `api.uselg.top` 的 EFE，auto/1K、maxReferences=1。当前开放1张是该通道已发布的实测配置，不是模型本身的参考图上限。两域名尚无同账户/同分组/同路由的对应证据，不把这份新资料冒充现用 FluxPort 线路已通过三图4K测试。
+
+源码 `src/lib/image-studio/provider.ts` 已支持逐图 multipart `image[]`、异步原号受理和原件保存；现有两个2.6的最高档枚举会把 max/xhigh 发送为 high，源于原 FluxPort 适配。若接入新资料所列目的地，须按其 `quality=max` 合同核对该差异，不能仅凭同型号名套用 high；本次未启用 VIP 的2.6或修改这一行为，不冒该停用线路已发生真实生成故障。公开网页读取未能取得此新接口的独立文档确认，首页404也不当作 edits 不支持的证据。
+
+本次为资料和现状核对：新增模型调用0、配置/策略/价格/生产文件写0，旧待核重发0；不扩大上轮两个单样本的测试数。保留现有已测通配置及2号持有的30构建/切版窗口，仅同步本原单和固定todo。未新增范围外问题。
