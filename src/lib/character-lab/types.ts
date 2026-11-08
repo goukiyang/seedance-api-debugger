@@ -91,6 +91,8 @@ export type CharacterLabPlan = {
   referenceIds: string[]; projectId: string | null;
   imageChannel?: { channelId: string; configRevision: string };
   operation?: CharacterLabOperation;
+  // Historical single sides also carried count metadata; only explicit grids use it.
+  outputLayout?: 'grid';
   input?: CharacterLabReference;
   slotScoped?: true;
   origin?: { planId: string; mode: 'current' | 'historical' };
@@ -133,4 +135,11 @@ export type CharacterLabQuote = {
 
 export function characterLabMediaUrl(planId: string, cell?: number) {
   return `/api/character-lab/media?plan=${encodeURIComponent(planId)}${cell === undefined ? '' : `&cell=${cell}`}`;
+}
+
+export function characterLabIsGrid(plan: Pick<CharacterLabPlan, 'kind' | 'operation' | 'outputLayout'>) {
+  return plan.outputLayout === 'grid' || plan.kind === 'faces';
+}
+export function characterLabCellCount(plan: Pick<CharacterLabPlan, 'kind' | 'operation' | 'outputLayout' | 'count'>) {
+  return plan.operation === 'body-pair' ? 2 : characterLabIsGrid(plan) ? plan.count : plan.operation ? 1 : 4;
 }

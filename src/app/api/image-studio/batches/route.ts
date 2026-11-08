@@ -15,6 +15,7 @@ import { rejectStudioSubmission, studioSubmitFailureDetail, StudioSubmitReceiptE
 import { StudioSharingError } from '@/lib/image-studio/shared-command-storage';
 import { RestoredStudioSettingsError } from '@/lib/image-studio/restored-settings';
 import { StudioTaskSettingsError } from '@/lib/image-studio/task-settings';
+import { StudioStyleError } from '@/lib/image-studio/style-groups';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
@@ -69,7 +70,7 @@ async function handle(request: NextRequest, write = false) {
     const expected = error instanceof VideoFeishuError || error instanceof ImageGenerationChannelError
       || error instanceof QueueCapacityError || error instanceof QueueMaintenanceError || error instanceof StudioError
       || error instanceof ContextVersionError || error instanceof StudioSubmitReceiptError || isPrivatePromptError(error)
-      || error instanceof StudioSharingError || error instanceof RestoredStudioSettingsError || error instanceof StudioTaskSettingsError;
+      || error instanceof StudioSharingError || error instanceof RestoredStudioSettingsError || error instanceof StudioTaskSettingsError || error instanceof StudioStyleError;
     const detail = studioSubmitFailureDetail(error, 'batch-api');
     const requestId = validStudioSubmitRequestId(submittedBody?.requestId) ? submittedBody.requestId : undefined;
     if (creating) logImagePricingFailure('acceptance', error, startedAt, requestId, detail.stage);

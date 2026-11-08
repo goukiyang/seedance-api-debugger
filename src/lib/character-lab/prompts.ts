@@ -1,5 +1,12 @@
 import { characterLabStrength, type CharacterLabConfig, type CharacterLabDraft, type CharacterLabOperation, type CharacterLabPromptFields } from './types';
 
+// Separate known rendering phrases in older built-in content without rewriting saved versions.
+export function labContentPrompt(value: string) {
+  return value.replaceAll('真人面部候选', '人物面部候选').replaceAll('真人面孔', '人物面孔')
+    .replaceAll('摄影环境', '环境').replaceAll('统一灰色背景、镜头与光线', '统一镜头与光线')
+    .replaceAll('头肩照', '头肩图').replaceAll('全身照', '全身图').replaceAll('站姿照', '站姿图');
+}
+
 const faceDirections = [
   '长脸型，较窄下颌与拉长的中庭，细长眼形，窄直鼻梁，较薄嘴唇',
   '方脸型，较宽的下颌角，较强眉骨，低平颧骨，宽鼻翼，较短人中',
@@ -18,7 +25,7 @@ export function labFaceRules(draft: Pick<CharacterLabDraft, 'count' | 'diversity
     ? '围绕同一个基准面孔，仅改变一到两处局部比例。保留人物身份、年龄、脸型和骨相，各格不能换成不同人物。'
     : strength === '中等'
       ? '保留角色辨识点和基础骨相，在眼鼻比例、下颌轮廓等两三处做适度变化。保持发型、年龄和表情一致。'
-      : '允许探索明显不同的真人面孔，在脸型、骨相和五官组合上拉开差距，保留角色年龄感与标志性特征。';
+      : '允许探索明显不同的人物面孔，在脸型、骨相和五官组合上拉开差距，保留角色年龄感与标志性特征。';
   return [
     `输出一张1:1正方形${n}×${n}宫格，恰好${draft.count}个等宽等高格子，对齐等分坐标。每格独立呈现正面头肩照，不跨格、不留空。`,
     `面部变化强度为${strength}。${degree}`,
@@ -28,8 +35,8 @@ export function labFaceRules(draft: Pick<CharacterLabDraft, 'count' | 'diversity
 }
 export function faceLabPrompt(config: CharacterLabConfig, draft: CharacterLabDraft) {
   return [
-    ...labFaceRules(draft), config.characterContext, config.styleConstraints,
-    ...(characterLabStrength(draft.diversity) === '明显' ? [config.basePrompt, config.faceVariables] : []),
+    ...labFaceRules(draft).map(labContentPrompt), labContentPrompt(config.characterContext), config.styleConstraints,
+    ...(characterLabStrength(draft.diversity) === '明显' ? [config.basePrompt, config.faceVariables].map(labContentPrompt) : []),
     draft.faceDescription ? `正脸补充（遵守上述变化范围）：${draft.faceDescription}` : '',
   ].filter(Boolean).join('\n\n');
 }
@@ -52,14 +59,12 @@ export const labDefaultViewPrompts = {
   bodyBackPrompt: '还原原角色的背部轮廓、服装结构、配饰位置和鞋，保持原设计比例、材质与配色。',
 };
 
+export const labDefaultStyle = '真实人物摄影，自然皮肤纹理、服装材质与合理解剖结构，统一灰色摄影背景。避免动漫、插画、游戏建模和塑料质感。不添加编号、字幕、标注、边框装饰或水印。';
 export const labDefaultStageStyles = {
-  sideStyleConstraints: '真实人物侧面摄影，自然皮肤纹理与合理解剖结构，统一灰色摄影背景。避免动漫、插画、游戏建模和塑料皮肤。不添加编号、字幕、标注、边框装饰或水印。',
-  bodyStyleConstraints: '真实人物全身摄影，合理人体比例与服装材质，统一灰色摄影背景。避免动漫、插画、游戏建模和塑料质感。不添加编号、字幕、标注、边框装饰或水印。',
-  resultStyleConstraints: '真实人物摄影，自然皮肤与服装材质，统一灰色摄影背景。不添加编号、字幕、标注、边框装饰或水印。',
+  sideStyleConstraints: labDefaultStyle,
+  bodyStyleConstraints: labDefaultStyle,
+  resultStyleConstraints: labDefaultStyle,
 };
-export function labStyleField(operation: CharacterLabOperation) {
-  return operation.startsWith('body-') ? 'bodyStyleConstraints' : operation === 'refine-face' ? 'styleConstraints' : 'sideStyleConstraints';
-}
 
 export function labOperationRules(operation: CharacterLabOperation) {
   switch (operation) {
@@ -78,17 +83,27 @@ export function labOperationRules(operation: CharacterLabOperation) {
   }
 }
 
-export function labViewPrompt(config: CharacterLabPromptFields, operation: CharacterLabOperation, description: string) {
+export function labViewPrompt(config: CharacterLabPromptFields, operation: CharacterLabOperation, description: string, layout?: { count: 4 | 9; bodyInput?: boolean }) {
   const field = labViewPromptFields[operation];
-  const style = labStyleField(operation);
-  return [labOperationRules(operation), config[field] || labDefaultViewPrompts[field], config[style] ?? (style === 'styleConstraints' ? '' : labDefaultStageStyles[style]),
+  const headGrid = layout && (operation === 'side' || operation === 'refine-side' || operation === 'refine-face');
+  const rules = headGrid
+    ? `输出一张1:1正方形${layout.count === 9 ? '3×3' : '2×2'}等分宫格，恰好${layout.count}格；每格为1:1头肩照，统一大小、背景、镜头和光线，不跨格、不留空、不添加文字。`
+      + (operation === 'refine-face' ? '唯一参考是选定的正脸底图，各格保持同一个人的身份、年龄、骨相和发型，只微调本次指定细节。'
+        : operation === 'side' ? '唯一参考是当前采用的正脸，各格都为同一人的90°纯侧面，面朝画面左侧、视线水平、保留头顶。各方案只做小幅细节变化，不探索不同人物。'
+          : '参考1是当前采用的正脸，用于锁定身份；参考2是选定的侧脸底图。各格都为同一个人的90°左侧面，保持侧脸方向，只微调本次指定细节，不改变身份。')
+    : layout?.bodyInput && operation === 'body-pair'
+      ? labOperationRules(operation).replace('仅用原始角色设计图作为参考', '参考1是原始角色设计，决定身体比例、服装、材质、配饰与细节；参考2是本次要调整的既有正背面整组，在原设计约束下只修改本次要求')
+      : labOperationRules(operation);
+  const savedRule = config[field] === labDefaultViewPrompts[field] || config[field] === '保留这张正脸的年龄感、骨相、发型与辨识特征，四个方案只在指定细节上做小幅变化。' || config[field] === '保留同一个人的身份和侧脸方向，只细调指定部分，四个版本的变化应小而可辨。' ? '' : config[field];
+  return [labContentPrompt(rules), labContentPrompt(savedRule || (headGrid && operation === 'refine-face' ? '仅在指定细节上做小幅、可辨的变化。' : headGrid && operation === 'refine-side' ? '保留同一身份和侧脸方向，仅细调指定部分。' : labDefaultViewPrompts[field])), config.styleConstraints,
     description ? `${operation.startsWith('body-') ? '本次角色补充' : '本次局部调整'}：${description}` : '',
-    '保持自然摄影、平视和一致背景。遵守上述身份、参考来源与构图约束。'].filter(Boolean).join('\n\n');
+    headGrid ? `本次输出数量与布局最终以${layout.count}格、${layout.count === 9 ? '3×3' : '2×2'}等分方形宫格为准；各格同一身份，不能按补充文字中的旧数量改变布局。` : '',
+    '遵守上述身份、参考来源与构图约束。'].filter(Boolean).join('\n\n');
 }
 export function resultLabPrompt(config: CharacterLabConfig, draft: CharacterLabDraft, hasPrevious: boolean) {
   const labels = ['左上正面头肩特写', '右上侧面头肩特写', '左下正面全身', '右下背面全身'];
-  return [config.resultPrompt, config.resultStyleConstraints ?? labDefaultStageStyles.resultStyleConstraints,
-    '参考图1是原始角色设计，参考图2是用户明确选中的主面部。以主面部确定唯一真人身份，并保留参考图1的服装、配色、配饰及身体比例，不把原设计图的动漫脸当最终面部。',
+  return [labContentPrompt(config.resultPrompt), config.styleConstraints,
+    '参考图1是原始角色设计，参考图2是用户明确选中的主面部。以主面部确定唯一人物身份，并保留参考图1的服装、配色、配饰及身体比例，原始设计图仅作为角色设计参考。',
     draft.auxiliaryFaces.length ? `后续${draft.auxiliaryFaces.length}张为辅助面部参考，只借鉴下列指定特征，不替换主身份：${draft.auxiliaryFeatures || '整体特征方向，以主面部身份为准'}。` : '',
     draft.context ? `角色补充：${draft.context}` : '',
     hasPrevious ? '最后一张参考是用户正在调整的既有成品，保留其有效人物与构图。' : '',

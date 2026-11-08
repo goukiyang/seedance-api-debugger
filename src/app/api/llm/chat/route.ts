@@ -1,3 +1,4 @@
+import { assertSupplementaryModelEnabled } from '@/lib/pricing/model-access.server';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession, AuthError } from '@/lib/auth/session';
 import {
@@ -194,6 +195,7 @@ export async function POST(request: NextRequest) {
       }
       model = requestedModel;
     }
+    await assertSupplementaryModelEnabled('text', model);
     const muskMessages = await prepareMuskChatMessages(messages, user.id, request.signal);
 
     if (stream) {

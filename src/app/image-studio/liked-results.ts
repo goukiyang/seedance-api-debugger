@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { readStudioDirectory } from './result-directory-recovery';
 import type { ContentKey } from '@/lib/content-reactions/types';
 import { STUDIO_RESULT_FEED, type StudioResultFeedExtras, type SharedStudioPinnedImage } from '@/lib/image-studio/result-pin-types';
 
@@ -36,50 +37,57 @@ export function useLikedStudioResults<T extends { id: string; asset?: { id?: str
     const valid = () => !controller.signal.aborted && request.current === controller && current.current.scope === scope && current.current.liked;
     setData(previous => ({ ...previous, scope, loading: true, error: '' }));
     try {
-      const pages = 1;
-      let next: string | null = cursor || null;
-      const tasks: T[] = [];
-      const sharedPins: SharedStudioPinnedImage[] = [], resultOrder: string[] = [];
-      let feed: StudioResultFeedExtras | undefined;
-      let total: number | null = null;
-      for (let page = 0; page < pages; page++) {
-        const query = new URLSearchParams({ moduleId, liked: '1', feed: STUDIO_RESULT_FEED, projection: 'studio-task-summary-v1' });
-        if (next) query.set('cursor', next);
-        const response = await fetch(`/api/image-studio/tasks?${query}`, { cache: 'no-store', signal: controller.signal });
-        const result = await response.json();
-        if (!response.ok || !Array.isArray(result.tasks)) throw new Error(result.error || '喜欢结果读取失败，请重试');
-        if (result.viewerId !== userId) throw new Error('账号已变化，请重新打开当前模板');
-        if (result.protocol !== STUDIO_RESULT_FEED || !Array.isArray(result.sharedPins) || !Array.isArray(result.resultOrder) || !result.pinState) throw new Error('置顶目录协议尚未就绪，请刷新页面');
-        if (!valid()) return;
-        tasks.push(...result.tasks);
-        sharedPins.push(...result.sharedPins); resultOrder.push(...result.resultOrder); feed = result;
-        total = Number.isSafeInteger(result.total) && result.total >= 0 ? result.total : null;
-        next = typeof result.nextCursor === 'string' ? result.nextCursor : null;
-        if (!next) break;
-      }
-      const checkedIds = !cursor ? (visibleIds?.current || []).slice(0, 24) : [];
-      let exactTasks: T[] = [];
-      if (checkedIds.length) {
-        const query = new URLSearchParams({ moduleId, liked: '1', projection: 'studio-task-summary-v1' });
-        checkedIds.forEach(id => query.append('id', id));
-        const response = await fetch(`/api/image-studio/tasks?${query}`, { cache: 'no-store', signal: controller.signal });
-        const result = await response.json();
-        if (!response.ok || result.viewerId !== userId || result.projection !== 'studio-task-summary-v1') throw new Error(result.error || '喜欢结果读取失败，请重试');
-        exactTasks = result.tasks;
-      }
-      if (!valid()) return;
+      const { page, restarted } = await readStudioDirectory(cursor, async pageCursor => {
+        const pages = 1;
+        let next: string | null = pageCursor || null;
+        const tasks: T[] = [];
+        const sharedPins: SharedStudioPinnedImage[] = [], resultOrder: string[] = [];
+        let feed: StudioResultFeedExtras | undefined;
+        let total: number | null = null;
+        for (let page = 0; page < pages; page++) {
+          const query = new URLSearchParams({ moduleId, liked: '1', feed: STUDIO_RESULT_FEED, projection: 'studio-task-summary-v1' });
+          if (next) query.set('pageCursor', next);
+          const response = await fetch(`/api/image-studio/tasks?${query}`, { cache: 'no-store', signal: controller.signal });
+          const result = await response.json();
+          if (!response.ok || !Array.isArray(result.tasks)) throw Object.assign(new Error(result.error || '喜欢结果读取失败，请重试'), { status: response.status, code: result.code });
+          if (result.viewerId !== userId) throw new Error('账号已变化，请重新打开当前模板');
+          if (result.protocol !== STUDIO_RESULT_FEED || !Array.isArray(result.sharedPins) || !Array.isArray(result.resultOrder) || !result.pinState) throw new Error('置顶目录协议尚未就绪，请刷新页面');
+          if (!valid()) return null;
+          tasks.push(...result.tasks);
+          sharedPins.push(...result.sharedPins); resultOrder.push(...result.resultOrder); feed = result;
+          total = Number.isSafeInteger(result.total) && result.total >= 0 ? result.total : null;
+          next = typeof result.nextCursor === 'string' ? result.nextCursor : null;
+          if (!next) break;
+        }
+        const checkedIds = !pageCursor ? (visibleIds?.current || []).slice(0, 24) : [];
+        let exactTasks: T[] = [];
+        if (checkedIds.length) {
+          const query = new URLSearchParams({ moduleId, liked: '1', projection: 'studio-task-summary-v1' });
+          checkedIds.forEach(id => query.append('id', id));
+          const response = await fetch(`/api/image-studio/tasks?${query}`, { cache: 'no-store', signal: controller.signal });
+          const result = await response.json();
+          if (!response.ok || result.viewerId !== userId || result.projection !== 'studio-task-summary-v1') throw Object.assign(new Error(result.error || '喜欢结果读取失败，请重试'), { status: response.status, code: result.code });
+          exactTasks = result.tasks;
+        }
+        return { tasks, sharedPins, resultOrder, feed, total, next, checkedIds, exactTasks };
+      }, () => { pageReads.current = 1; });
+      if (!valid() || !page) return;
+      const { tasks, sharedPins, resultOrder, feed, total, next, checkedIds, exactTasks } = page;
+      const pageCursor = restarted ? undefined : cursor;
       loaded.current = true;
-      if (cursor) pageReads.current++;
+      if (pageCursor) pageReads.current++;
       setData(previous => {
+        const changed = Boolean(previous.feed?.directoryVersion && previous.feed.directoryVersion !== feed?.directoryVersion);
+        if (changed || restarted) pageReads.current = 1;
         const exact = new Map(exactTasks.map(task => [task.id, task]));
         const retained = previous.tasks.filter(task => !checkedIds.includes(task.id) || exact.has(task.id)).map(task => exact.get(task.id) || task);
-        const combined = cursor ? [...previous.tasks, ...tasks] : [...tasks, ...retained.filter(task => !tasks.some(fresh => fresh.id === task.id))];
-        const combinedPins = cursor || pageReads.current > 1 ? [...(previous.feed?.sharedPins || []), ...sharedPins] : sharedPins;
-        const combinedOrder = cursor ? [...(previous.feed?.resultOrder || []), ...resultOrder] : [...resultOrder, ...(previous.feed?.resultOrder || [])];
+        const combined = pageCursor ? [...previous.tasks, ...tasks] : [...tasks, ...retained.filter(task => !tasks.some(fresh => fresh.id === task.id))];
+        const combinedPins = pageCursor || pageReads.current > 1 || restarted || changed ? [...(previous.feed?.sharedPins || []), ...sharedPins] : sharedPins;
+        const combinedOrder = pageCursor ? [...(previous.feed?.resultOrder || []), ...resultOrder] : [...resultOrder, ...(previous.feed?.resultOrder || [])];
         return { scope, tasks: Array.from(new Map(combined.filter(task => !removed.current.has(task.asset?.id || '')).map(task => [task.id, task])).values()),
-          feed: feed && { ...feed, sharedPins: Array.from(new Map(combinedPins.filter(pin => !removed.current.has(pin.assetId)
+          feed: feed && { ...feed, pinTaskReasons: { ...previous.feed?.pinTaskReasons, ...feed.pinTaskReasons }, sharedPins: Array.from(new Map(combinedPins.filter(pin => !removed.current.has(pin.assetId)
             && (feed!.eligiblePinAssetIds || feed!.pinState.assetIds).includes(pin.assetId)).map(pin => [pin.id, pin])).values()), resultOrder: Array.from(new Set(combinedOrder)) },
-          nextCursor: !cursor && pageReads.current > 1 ? previous.nextCursor : next, total, error: '', loading: false };
+          nextCursor: !pageCursor && pageReads.current > 1 && !changed && !restarted ? previous.nextCursor : next, total, error: '', loading: false };
       });
     } catch (error) {
       if (valid()) setData(previous => ({ ...previous, error: error instanceof Error ? error.message : '喜欢结果读取失败，请重试', loading: false }));

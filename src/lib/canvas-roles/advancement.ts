@@ -1,3 +1,4 @@
+import { assertSupplementaryModelEnabled } from '@/lib/pricing/model-access.server';
 import { randomUUID } from 'crypto';
 import type { CanvasRoleTaskRun, CanvasRoleWork } from '@prisma/client';
 import type { SessionUser } from '@/lib/auth/session';
@@ -48,6 +49,7 @@ async function buildGrant(db: RoleDb, user: SessionUser, run: CanvasRoleTaskRun,
   }
   const settings = await getMuskApiSettings(db), policy = await readRoleTextPolicy(db, settings);
   const hasText = executors.some(e => e.model);
+  for (const executor of executors) if (executor.model) await assertSupplementaryModelEnabled('text', executor.model, db);
   if (hasText && (!isMuskApiReady(settings) || new URL(settings.base_url).origin !== 'https://api.muskapis.com'
     || !policy?.enabled || !policy.allowUnpricedText || executors.some(e => e.model && !policy.allowedModels.includes(e.model)))) {
     throw new RoleError('角色文字尚未启用或所选模型未获管理员允许，请管理员核对角色文字设置', 409, 'role_text_policy_disabled');

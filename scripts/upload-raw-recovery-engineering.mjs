@@ -36,16 +36,23 @@ function boundary(run) {
 }
 const check = async (name, run) => { await run(); checks.push(name); };
 const fixtureBytes = Buffer.from('synthetic-preflight-no-decoding');
+const busyRetry = evaluate(declarations(read('src/lib/prisma.ts'), ['retrySqliteBusy']));
 
-function environment({ rejectDirectory = false, rejectExisting = false, preflightError, failAfterWriting = false, refuseRejectionCas = false, retiredProof = false, foreignCommittedAsset = false } = {}) {
+function environment({ rejectDirectory = false, rejectExisting = false, preflightError, failAfterWriting = false, refuseRejectionCas = false, retiredProof = false, foreignCommittedAsset = false, ticketBusy = 0, busyAfterCommit = false } = {}) {
   const rows = new Map(), receipts = new Map(), phases = [], logs = [], committedAssets = new Map(), hdRequests = [];
   let writes = 0, directoryChecks = 0, hdAssetReads = 0;
+  let ticketCreates = 0;
+  const ticketInputs = [];
   const owner = 'isolated-upload-owner';
   const prisma = { platformSetting: {
     async findUnique({ where }) { return rows.has(where.key) ? structuredClone(rows.get(where.key)) : null; },
     async create({ data }) {
+      ticketCreates++; ticketInputs.push(structuredClone(data));
+      if (ticketCreates <= ticketBusy) throw Object.assign(new Error('database busy'), { code: 'P1008' });
       if (rows.has(data.key)) throw Object.assign(new Error('duplicate'), { code: 'P2002' });
-      rows.set(data.key, structuredClone(data)); phases.push(JSON.parse(data.value_json).phase); return data;
+      rows.set(data.key, structuredClone(data)); phases.push(JSON.parse(data.value_json).phase);
+      if (busyAfterCommit && ticketCreates === 1) throw Object.assign(new Error('response after commit unavailable'), { code: 'P1008' });
+      return data;
     },
     async updateMany({ where, data }) {
       const row = rows.get(where.key), next = JSON.parse(data.value_json);
@@ -83,10 +90,18 @@ function environment({ rejectDirectory = false, rejectExisting = false, prefligh
   const metadata = { validateSiteUploadMetadata: () => null, sameOriginPublicUrlForLocalUpload: value => value, isLocalPublicUploadUrl: () => true };
   const state = evaluate(read('src/lib/assets/raw-upload-state.ts'), {
     './upload-purpose': evaluate(declarations(read('src/lib/assets/upload-purpose.ts'), ['FEEDBACK_UPLOADS_ENABLED'])),
-    'node:crypto': crypto, '@/lib/prisma': { prisma }, './verified-upload': verified, './site-upload': metadata,
+    'node:crypto': crypto, '@/lib/prisma': { prisma, ...busyRetry }, './verified-upload': verified, './site-upload': metadata,
     './public-storage': { isPubliclyReachableUrl: () => true },
     './upload-similarity': { uploadSimilarityStatus: async () => ({ state: 'disabled' }) },
     './raw-upload-recovery-proof': { readRawUploadRecoveryProof: async (_key, value) => retiredProof ? base.uploadDigest(value) : null },
+  });
+  const ticket = evaluate(read('src/app/api/assets/upload-ticket/route.ts'), {
+    'next/server': { NextResponse: { json: (data, init) => Response.json(data, init) } },
+    '@/lib/auth/session': { getSession: async () => ({ id: owner }) },
+    '@/lib/assets/verified-upload': verified, '@/lib/assets/raw-upload-state': state,
+    '@/lib/assets/direct-upload': { createDirectUploadTicket: async () => { throw new Error('non-raw ticket is outside this fixture'); } },
+    '@/lib/assets/site-upload': { getSiteUploadKind: () => 'image' },
+    '@/lib/assets/upload-log': { recordAssetUploadLog: async value => logs.push(value) },
   });
   const route = evaluate(read('src/app/api/assets/upload/route.ts'), {
     'next/server': { NextResponse: { json: (data, init) => Response.json(data, init) } },
@@ -117,9 +132,50 @@ function environment({ rejectDirectory = false, rejectExisting = false, prefligh
       'X-File-Name': 'fixture.png', 'X-File-Hash': identity.hash, 'X-Upload-Owner-Id': owner,
       'X-Upload-Request-Id': identity.requestId, 'X-Raw-Upload-Version': '2', 'X-Raw-Upload-Nonce': nonce }, body: fixtureBytes,
   }));
-  return { state, route, identity, post, rows, receipts, phases, logs, hdRequests,
+  return { state, route, ticket, identity, post, rows, receipts, phases, logs, hdRequests, ticketInputs,
+    ticketCreates: () => ticketCreates,
     counters: () => ({ writes, directoryChecks, hdAssetReads }) };
 }
+
+await check('transient_ticket_busy_retries_only_the_same_preparation_without_sending_bytes', async () => {
+  const env = environment({ ticketBusy: 1 });
+  const result = await env.state.prepareRawUpload(env.identity);
+  assert.equal(result.rawUpload.phase, 'prepared');
+  assert.equal(result.rawUpload.purpose, undefined);
+  assert.equal(env.ticketCreates(), 2); assert.equal(env.rows.size, 1);
+  assert.equal(env.ticketInputs[0].value_json, env.ticketInputs[1].value_json, 'request and nonce stay frozen across the busy retry');
+  assert.equal(env.counters().writes, 0, 'preparation retry is not a file upload retry');
+});
+await check('feedback_preparation_respects_the_actual_build_capability_without_writing_when_paused', async () => {
+  const env = environment();
+  const { FEEDBACK_UPLOADS_ENABLED } = evaluate(declarations(read('src/lib/assets/upload-purpose.ts'), ['FEEDBACK_UPLOADS_ENABLED']));
+  if (FEEDBACK_UPLOADS_ENABLED) {
+    const result = await env.state.prepareRawUpload({ ...env.identity, purpose: 'feedback' });
+    assert.equal(result.rawUpload.purpose, 'feedback');
+    assert.equal(env.ticketCreates(), 1);
+  } else {
+    await assert.rejects(() => env.state.prepareRawUpload({ ...env.identity, purpose: 'feedback' }), { code: 'FEEDBACK_UPLOAD_UNAVAILABLE' });
+    assert.equal(env.ticketCreates(), 0); assert.equal(env.rows.size, 0);
+  }
+  assert.equal(env.counters().writes, 0);
+});
+await check('ambiguous_ticket_commit_recovers_the_original_nonce_instead_of_replacing_it', async () => {
+  const env = environment({ busyAfterCommit: true });
+  const result = await env.state.prepareRawUpload(env.identity);
+  const original = JSON.parse(env.ticketInputs[0].value_json);
+  assert.equal(result.rawUpload.nonce, original.nonce); assert.equal(env.rows.size, 1);
+  assert.equal(env.counters().writes, 0);
+});
+await check('persistent_ticket_busy_stops_with_503_without_internal_database_details_or_file_writes', async () => {
+  const env = environment({ ticketBusy: 10 });
+  const response = await env.ticket.POST(new Request('https://fixture.invalid/api/assets/upload-ticket', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...env.identity, mode: 'raw' }),
+  }));
+  const data = await response.json();
+  assert.equal(response.status, 503); assert.equal(env.ticketCreates(), 3);
+  assert.equal(data.code, 'UPLOAD_PREPARE_BUSY'); assert.doesNotMatch(data.error, /prisma|database|\/data\//i);
+  assert.equal(env.rows.size, 0); assert.equal(env.counters().writes, 0);
+});
 
 await check('preflight_rejection_retains_cause_and_current_nonce_without_file_write', async () => {
   const env = environment({ rejectDirectory: true }), prepared = await env.state.prepareRawUpload(env.identity);

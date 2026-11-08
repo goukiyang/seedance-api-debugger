@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 export async function checkPrivateWorkerFailures({ root, ts, db, crypto, task }) {
   function actualFunction(file, name, dependencies) {
@@ -13,12 +14,16 @@ export async function checkPrivateWorkerFailures({ root, ts, db, crypto, task })
     return new Function('exports', ...Object.keys(dependencies), `${output}\nreturn ${name};`)({}, ...Object.values(dependencies));
   }
   const forbidden = () => { throw new Error('Unexpected settlement or external operation'); };
-  const privateFailure = () => { throw new crypto.PrivatePromptError(); };
+  const otherCrypto = await import(pathToFileURL(path.join(root, 'src/lib/security/private-prompts.server.ts')).href);
+  const foreignError = new otherCrypto.PrivatePromptError();
+  assert.equal(foreignError instanceof crypto.PrivatePromptError, false, 'Exercise a genuinely different module identity');
+  assert.equal(crypto.isPrivatePromptError(foreignError), true);
+  const privateFailure = () => { throw foreignError; };
   let sends = 0, deferred = 0;
   const dependencies = {
-    prisma: db, PrivatePromptError: crypto.PrivatePromptError, STUDIO_EXECUTION_MS: 300000,
+    prisma: db, PrivatePromptError: crypto.PrivatePromptError, isPrivatePromptError: crypto.isPrivatePromptError, STUDIO_EXECUTION_MS: 300000,
     workerProviderErrorRecorder: () => ({}), studioTaskState: (_task, state) => state,
-    publicPricingTaskState: state => state, finishStudioTask: forbidden,
+    publicPricingTaskState: state => state, finishStudioTask: forbidden, readStudioDelivery: forbidden,
     readRetainedStudioDimensionOriginal: async () => null,
     transformPrivateImageTask: value => value, safeImageChannelSnapshot: () => null,
     isPricingImageTask: () => false,
@@ -46,6 +51,17 @@ export async function checkPrivateWorkerFailures({ root, ts, db, crypto, task })
   assert.equal(after.status, 'uncertain'); assert.equal(after.lease_token, null);
   for (const field of ['id', 'prompt', 'context', 'snapshot_json', 'unit_credits', 'gateway_request_id', 'fingerprint'])
     assert.equal(after[field], before[field]);
+  const unsent = await db.imageStudioTask.update({ where: { id: task.id }, data: {
+    status: 'running', lease_token: 'private-before-send', lease_until: new Date(Date.now() + 60000),
+  } });
+  const beforeSend = actualFunction('src/lib/image-studio/worker.ts', 'executeStudioTask', {
+    ...dependencies, transformPrivateImageTask: privateFailure,
+  });
+  await beforeSend(unsent, forbidden);
+  const held = await db.imageStudioTask.findUniqueOrThrow({ where: { id: task.id } });
+  assert.equal(held.status, 'queued'); assert.equal(held.lease_token, null);
+  for (const field of ['id', 'prompt', 'context', 'snapshot_json', 'unit_credits', 'gateway_request_id', 'fingerprint'])
+    assert.equal(held[field], unsent[field]);
   for (const recovering of [false, true]) {
     const current = await db.imageStudioTask.update({ where: { id: task.id }, data: {
       status: recovering ? 'uncertain' : 'channel_running', lease_token: 'private-failure-lease', lease_until: new Date(Date.now() + 60000),

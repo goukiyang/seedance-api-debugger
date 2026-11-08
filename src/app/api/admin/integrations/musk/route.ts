@@ -1,3 +1,4 @@
+import { assertSupplementaryModelEnabled } from '@/lib/pricing/model-access.server';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
@@ -197,6 +198,7 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
+    await assertSupplementaryModelEnabled('text', settings.default_model);
     const completion = await createMuskChatCompletion({
       settings,
       timeoutMs: 20000,

@@ -34,6 +34,7 @@ import { readJsonResponse } from '@/lib/http/json-response';
 import { showVideoCardManagementUi } from '@/lib/navigation';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { SEEDANCE_2_5_MODEL_ID, SEEDANCE_VIDEO_MODEL_OPTIONS } from '@/lib/provider/seedance-models';
+import { usePricingModelAvailability } from '@/lib/pricing/use-model-availability';
 import { orderRecentTaskCards, recentTaskHasVisualPreview } from '@/lib/video/recent-task-card-order';
 
 type TemplateGenerateUser = AccountMenuUser & { id: string };
@@ -231,6 +232,7 @@ function rememberVideoCard(projectId: string, videoCardId: string) {
 }
 
 export function TemplateGenerateClient() {
+  const { isAvailable: modelAvailable, reason: modelAvailabilityReason } = usePricingModelAvailability();
   const { confirm, productDialog } = useProductDialog();
   const searchParams = useSearchParams();
   const projectPickerRef = useRef<HTMLDivElement | null>(null);
@@ -342,8 +344,10 @@ export function TemplateGenerateClient() {
           : `${h3DisabledReason(h3VideoConfig)} · 选择后点检查状态`,
       });
     }
-    return options;
-  }, [currentUser?.role, h3Ready, h3VideoConfig, selectedH3Lora?.label, selectedH3Preset?.label]);
+    return options.filter(option => option.id === H3_INLINE_MODEL_ID
+      ? modelAvailable('h3', selectedH3Preset?.id || h3VideoConfig?.default_preset_id || '')
+      : modelAvailable('video', option.id, {}, 'seedance'));
+  }, [currentUser?.role, h3Ready, h3VideoConfig, selectedH3Lora?.label, selectedH3Preset?.label, selectedH3Preset?.id, modelAvailable]);
   const activeModelLabel = 'Seedance 2.0';
   const activeProviderLabel = 'Seedance 视频';
   const refreshH3VideoConfig = useCallback(async () => {
@@ -1264,7 +1268,7 @@ export function TemplateGenerateClient() {
           pricingProvider={selectedProvider}
           pricingModelId={selectedProvider === 'h3' ? selectedH3Preset?.id || h3VideoConfig?.default_preset_id : undefined}
           providerStatus={h3MachineStatus}
-          modelLabel={activeModelLabel}
+          modelLabel={modelAvailabilityReason || (activeModelOptions.length ? "请选择已开放模型" : "暂无已开放模型")}
           modelOptions={activeModelOptions}
           onModelChange={handleGenerationModelChange}
           auxiliaryLabel="LoRA"

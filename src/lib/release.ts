@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '费率草稿编辑修复', outline: [
-  '费率更新后仍可继续编辑金额和启停',
-  '旧草稿保留，核对最新费率后再保存',
-  '现有价格、任务与账本保持不变',
+const notice = { title: '模板共享保存修复', outline: [
+  '保存模板原文后可以接续共享',
+  '版本冲突先核对新版，保留当前编辑',
+  '保存回执明确，未知结果沿原请求核对',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

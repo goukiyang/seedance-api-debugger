@@ -9,7 +9,7 @@ import { StudioError } from '@/lib/image-studio/tasks';
 import { studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
 import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
 import { readLabPlan } from './store';
-import { characterLabReferenceSlot, type CharacterLabPlan, type CharacterLabReference } from './types';
+import { characterLabIsGrid, characterLabCellCount, characterLabReferenceSlot, type CharacterLabPlan, type CharacterLabReference } from './types';
 
 export async function ownedLabAsset(user: SessionUser, id: string) {
   const asset = await prisma.asset.findFirst({ where: { id, owner_id: user.id, type: 'image', status: 'active' } });
@@ -23,16 +23,17 @@ export async function labOutput(user: SessionUser, plan: CharacterLabPlan) {
   return { task, asset: await ownedLabAsset(user, task.asset_id) };
 }
 // The provider is asked to use these same cell boundaries. Crops retain source pixels.
-export function labCellRect(width: number, height: number, plan: Pick<CharacterLabPlan, 'kind' | 'count' | 'operation'>, cell: number) {
+export function labCellRect(width: number, height: number, plan: Pick<CharacterLabPlan, 'kind' | 'count' | 'operation' | 'outputLayout'>, cell: number) {
   const pair = plan.operation === 'body-pair';
-  if (plan.operation && plan.kind !== 'faces' && !pair) throw new StudioError('独立视图没有裁切格子');
-  const columns = plan.kind === 'faces' && plan.count === 9 ? 3 : 2;
-  const count = pair ? 2 : plan.kind === 'faces' ? plan.count : 4;
+  const grid = characterLabIsGrid(plan);
+  if (plan.operation && !grid && !pair) throw new StudioError('独立视图没有裁切格子');
+  const columns = grid && plan.count === 9 ? 3 : 2;
+  const count = characterLabCellCount(plan);
   if (!Number.isInteger(cell) || cell < 0 || cell >= count) throw new StudioError('格子选择无效');
   const column = cell % columns, row = Math.floor(cell / columns);
   const left = Math.floor(width * column / columns), right = Math.floor(width * (column + 1) / columns);
-  const top = pair ? 0 : plan.kind === 'result' ? row === 0 ? 0 : Math.round(height * 0.42) : Math.floor(height * row / columns);
-  const bottom = pair ? height : plan.kind === 'result' ? row === 0 ? Math.round(height * 0.42) : height : Math.floor(height * (row + 1) / columns);
+  const top = pair ? 0 : !grid ? row === 0 ? 0 : Math.round(height * 0.42) : Math.floor(height * row / columns);
+  const bottom = pair ? height : !grid ? row === 0 ? Math.round(height * 0.42) : height : Math.floor(height * (row + 1) / columns);
   if (right <= left || bottom <= top) throw new StudioError('原图尺寸不足以拆分，原整图保留', 409);
   return { left, top, width: right - left, height: bottom - top };
 }
@@ -55,14 +56,14 @@ export async function readLabReference(user: SessionUser, workspaceId: string, s
   if (plan.workspaceId !== workspaceId || plan.sourceAssetId !== sourceAssetId || characterLabReferenceSlot(plan, choice) !== slot) {
     throw new StudioError('所选图来自其他角色、原图或视图，请重新选择', 409);
   }
-  if ((plan.kind === 'faces' || plan.operation === 'body-pair') && choice.cell !== undefined) labCellRect(1200, 1800, plan, choice.cell);
-  else if (plan.kind === 'faces' || choice.cell !== undefined) throw new StudioError('请选择有效的单格或独立视图');
+  if ((characterLabIsGrid(plan) || plan.operation === 'body-pair') && choice.cell !== undefined) labCellRect(1200, 1800, plan, choice.cell);
+  else if (characterLabIsGrid(plan) || choice.cell !== undefined) throw new StudioError('请选择有效的单格或独立视图');
   return plan;
 }
 export async function persistLabFace(user: SessionUser, choice: CharacterLabReference) {
   const plan = await readLabPlan(user.id, choice.planId);
   if (choice.cell === undefined) return (await labOutput(user, plan)).asset.id;
-  if (plan.kind !== 'faces') throw new StudioError('面部参考须来自原人脸候选', 400);
+  if (!characterLabIsGrid(plan)) throw new StudioError('面部参考须来自原人脸候选', 400);
   await labOutput(user, plan);
   const id = `clab-${createHash('sha256').update(`${user.id}:${plan.id}:${choice.cell}`).digest('hex')}`;
   const existing = await prisma.asset.findUnique({ where: { id } });

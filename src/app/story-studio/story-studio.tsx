@@ -1,4 +1,6 @@
 'use client';
+import { imageStudioPricingChannelId } from '@/lib/image-studio/channels';
+import { usePricingModelAvailability } from '@/lib/pricing/use-model-availability';
 import { studioOutputMismatchDisposition } from '@/lib/image-studio/dimension-mismatch';
 
 import { MultiviewEntry } from '@/components/MultiviewEntry';
@@ -99,6 +101,7 @@ function preparation(value: unknown): Partial<Work> {
 }
 
 export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, defaultTextModel }: { userId: string; documentId: string; nodeId: string; imageAllowed: boolean; defaultTextModel: string }) {
+  const { isAvailable: modelAvailable, reason: modelAvailabilityReason } = usePricingModelAvailability();
   const { user: sessionUser, loadingUser: sessionLoading, hasLoadedUser, userLoadError, sessionChanged, refreshUser } = useAppSession();
   const [document, setDocument] = useState<Document | null>(null);
   const [work, setWork] = useState<Work>({ draft: blank(), images: {}, references: {}, mediaNodes: {}, lineage: {}, versions: [] });
@@ -172,10 +175,10 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
   const effectiveImageChannelId = imageStudioEffectiveChannelId(imageChannel.channels, mediaSettings.imageModel, imageChannel.channelId, mediaSettings.quality);
   const channelImageModels = imageStudioChannelModels(imageChannel.channels, IMAGE_STUDIO_MODELS);
   const imageModelChoices = channelImageModels.includes(mediaSettings.imageModel) ? channelImageModels : [mediaSettings.imageModel, ...channelImageModels];
-  const qualityOptions: readonly string[] = mediaSettings.imageModel === 'gpt-image-2.5-sunburst' ? imageStudioNewQualityOptions(mediaSettings.imageModel) : selectedImageChannelModel?.qualities ?? (legacyImageRoute
-    ? IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[mediaSettings.imageModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [] : []);
-  const imageResolutions: readonly string[] = selectedImageChannelModel?.resolutions ?? (legacyImageRoute
-    ? imageResolutionOptions(mediaSettings.imageModel) : []);
+  const qualityOptions: readonly string[] = (mediaSettings.imageModel === 'gpt-image-2.5-sunburst' ? imageStudioNewQualityOptions(mediaSettings.imageModel) : selectedImageChannelModel?.qualities ?? (legacyImageRoute
+    ? IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[mediaSettings.imageModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [] : [])).filter(value => modelAvailable('image', mediaSettings.imageModel, { quality: value }, imageStudioPricingChannelId(imageChannel.channels, mediaSettings.imageModel, imageChannel.channelId, value)));
+  const imageResolutions: readonly string[] = (selectedImageChannelModel?.resolutions ?? (legacyImageRoute
+    ? imageResolutionOptions(mediaSettings.imageModel) : [])).filter(value => modelAvailable('image', mediaSettings.imageModel, { quality: mediaSettings.quality, resolution: value }, imageStudioPricingChannelId(imageChannel.channels, mediaSettings.imageModel, imageChannel.channelId, mediaSettings.quality)));
   const ratioOptions: readonly string[] = selectedImageChannelModel?.ratios ?? (legacyImageRoute ? STUDIO_RATIOS : []);
   const channelIssue = !imageChannel.ready ? '正在读取生图通道，请稍候。' : imageStudioChannelIssue(imageChannel.channel, mediaSettings.imageModel, {
     quality: mediaSettings.quality, resolution: mediaSettings.resolution, ratio: mediaSettings.ratio,
@@ -936,9 +939,9 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
       {work.request.raw && <pre className={styles.raw}>{work.request.raw}</pre>}<button disabled={blocked} onClick={() => void operate('处理文字请求', dismissRequest)}>保留原稿并结束等待</button></section>}
     {ready && <><nav className={styles.workspaceNav} aria-label="故事工作区"><a href="#story-source">故事</a><a href="#story-script">剧本</a><a href="#story-materials">素材</a><a href="#story-generation">生成设置</a><a href="#story-shots">分镜</a></nav>
     <div className={styles.grid}><section id="story-source" className={styles.section}><h2>故事</h2>
-      <label>文字模型<select disabled={blocked || Boolean(awaiting)} value={work.textModel || ''} onChange={event => change({ ...current.current, textModel: event.target.value || undefined })}>
-        <option value="">后台默认模型</option>
-        {STUDIO_TEXT_MODELS.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
+      <label>文字模型<select disabled={blocked || Boolean(awaiting)} value={modelAvailable('text', work.textModel || defaultTextModel) ? work.textModel || '' : 'model-closed'} onChange={event => change({ ...current.current, textModel: event.target.value || undefined })}>
+        <option value="model-closed" disabled>{modelAvailabilityReason || "请选择已开放模型"}</option><option value="" disabled={!modelAvailable("text", defaultTextModel)}>后台默认模型</option>
+        {STUDIO_TEXT_MODELS.filter(model => modelAvailable('text', model.id)).map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
       </select></label>
       <label>故事内容<textarea className={styles.storyText} disabled={Boolean(busy) || Boolean(localChoice)} value={work.draft.story} onChange={event => updateDraft({ story: event.target.value })} /></label>
       <button className={styles.primary} disabled={blocked || Boolean(awaiting) || !work.draft.story.trim()} onClick={() => void operate('生成完整剧本', () => generate('script'))}><WandSparkles size={16} />生成完整剧本</button>
@@ -973,13 +976,13 @@ export default function StoryStudio({ userId, documentId, nodeId, imageAllowed, 
       <button disabled={blocked || work.draft.shots.length >= 30} onClick={() => updateDraft({ shots: [...work.draft.shots, { id: `shot-${crypto.randomUUID()}`, title: `镜头 ${work.draft.shots.length + 1}`, description: '', dialogue: '', imagePrompt: '', videoPrompt: '', durationSeconds: 5 }] })}><Plus size={16} />添加镜头</button></div>
       </div>
       <details id="story-generation"><summary>生成设置</summary><div className={styles.shotFields}>
-        <label>图片模型<select disabled={blocked} value={mediaSettings.imageModel} onChange={event => change({ ...current.current, mediaSettings: { ...mediaSettings, imageModel: event.target.value } })}>{imageModelChoices.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS]||model}</option>)}</select></label>
+        <label>图片模型<select disabled={blocked} value={modelAvailable('image', mediaSettings.imageModel) ? mediaSettings.imageModel : ''} onChange={event => change({ ...current.current, mediaSettings: { ...mediaSettings, imageModel: event.target.value } })}><option value="" disabled>{modelAvailabilityReason || "请选择已开放模型"}</option>{imageModelChoices.filter(model => modelAvailable('image', model)).map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS]||model}</option>)}</select></label>
         {mediaSettings.imageModel !== 'gpt-image-2.5-sunburst' && <label>供应商<ImageGenerationChannelSelect channels={imageChannel.channels} value={imageChannel.channelId} disabled={blocked} onChange={imageChannel.select} model={mediaSettings.imageModel}/></label>}
         <label>图片质量<select disabled={blocked} value={mediaSettings.quality} onChange={event => change({ ...current.current, mediaSettings: { ...mediaSettings, quality: event.target.value } })}>{!qualityOptions.includes(mediaSettings.quality) && <option disabled value={mediaSettings.quality}>{mediaSettings.imageModel === 'gpt-image-2.5-sunburst' ? '原质量待选择' : `${mediaSettings.quality}（需重新选择）`}</option>}{qualityOptions.map(value => <option key={value} value={value}>{imageStudioQualityLabel(mediaSettings.imageModel,value)}</option>)}</select></label>
         <label>图片分辨率<select disabled={blocked} value={mediaSettings.resolution} onChange={event => change({ ...current.current, mediaSettings: { ...mediaSettings, resolution: event.target.value } })}>{!imageResolutions.includes(mediaSettings.resolution) && <option disabled value={mediaSettings.resolution}>{mediaSettings.resolution}（需重新选择）</option>}{imageResolutions.map(value => <option key={value} value={value}>{value}</option>)}</select></label>
         <label>比例<select disabled={blocked} value={mediaSettings.ratio} onChange={event => change({ ...current.current, mediaSettings: { ...mediaSettings, ratio: event.target.value } })}>{!ratioOptions.includes(mediaSettings.ratio)&&<option value={mediaSettings.ratio} disabled>{mediaSettings.ratio}（当前通道不支持）</option>}{ratioOptions.map(value => <option key={value} value={value}>{value}</option>)}</select></label>
-        <label>视频模型<select disabled={blocked} value={mediaSettings.videoModel} onChange={event => { const option = mediaCapabilities?.video.model_options.find(item => item.value === event.target.value); if (option) change({ ...current.current, mediaSettings: { ...mediaSettings, videoModel: option.value, provider: option.provider } }); }}>
-          {(mediaCapabilities?.video.model_options || []).map(item => <option key={item.value} value={item.value} disabled={!item.ready}>{item.label}{!item.ready ? '（未配置）' : ''}</option>)}</select></label>
+        <label>视频模型<select disabled={blocked} value={modelAvailable('video', mediaSettings.videoModel) ? mediaSettings.videoModel : ''} onChange={event => { const option = mediaCapabilities?.video.model_options.find(item => item.value === event.target.value); if (option) change({ ...current.current, mediaSettings: { ...mediaSettings, videoModel: option.value, provider: option.provider } }); }}>
+          <option value="" disabled>{modelAvailabilityReason || "请选择已开放模型"}</option>{(mediaCapabilities?.video.model_options || []).filter(item => modelAvailable('video', item.value, {}, item.provider === 'seedance' ? 'seedance' : 'volcengine_ark')).map(item => <option key={item.value} value={item.value} disabled={!item.ready}>{item.label}{!item.ready ? '（未配置）' : ''}</option>)}</select></label>
         <label>视频分辨率<select disabled={blocked} value={mediaSettings.videoResolution} onChange={event => change({ ...current.current, mediaSettings: { ...mediaSettings, videoResolution: event.target.value } })}>{!videoResolutions.includes(mediaSettings.videoResolution) && <option disabled value={mediaSettings.videoResolution}>{mediaSettings.videoResolution}（需重新选择）</option>}{videoResolutions.map(value => <option key={value} value={value}>{value}</option>)}</select></label>
       </div><p className={styles.status}>切换通道不会更改模型和图片参数；不支持的现有参数会阻止生成，需手动调整。{channelIssue||imageChannel.message}</p></details>
       {(work.groups || []).map((group, index) => <div className={styles.group} key={group.id}><strong>分镜组 {index + 1} · {work.draft.shots.filter(shot => group.shotIds.includes(shot.id)).length} 镜</strong><div className={styles.actions}>

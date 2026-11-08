@@ -1,3 +1,4 @@
+import { assertSupplementaryModelEnabled } from '@/lib/pricing/model-access.server';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { readTemplateSnapshot } from './drafts';
@@ -259,6 +260,7 @@ export async function createStudioRun(user: SessionUser, input: CreateStudioRunR
         return existing;
       }
       if (input.mode === 'llm') {
+        await assertSupplementaryModelEnabled('text', snapshot.llmModel!, tx);
         const active = await tx.videoStudioRun.count({ where: { owner_user_id: user.id, mode: 'llm', status: { in: ['queued', 'running'] } } });
         if (active >= TEMPLATE_STUDIO_LIMITS.activeLlmRunsPerUser) throw new StudioError('已有 AI 整理任务正在处理，请稍后再提交', 429, 'RATE_LIMITED');
         const pending = await tx.videoStudioRun.count({ where: { mode: 'llm', status: { in: ['queued', 'running'] } } });

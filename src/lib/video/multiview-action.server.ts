@@ -1,3 +1,4 @@
+import { assertSupplementaryModelEnabled } from '@/lib/pricing/model-access.server';
 import 'server-only';
 import { randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
@@ -189,6 +190,7 @@ export async function createMultiviewActionRun(user: SessionUser, input: unknown
       if (existing.purpose !== purpose || existing.draft_id !== draft.id || existing.draft_revision !== draft.revision || existing.mode !== 'llm' || snapshot(existing).llmModel !== value.llmModel) throw conflict('原请求编号已使用');
       return existing;
     }
+    await assertSupplementaryModelEnabled('text', value.llmModel!, tx);
     const current = await tx.videoStudioDraft.findFirst({ where: { id: draft.id, owner_user_id: user.id, purpose, revision: draft.revision } });
     if (!current) throw conflict('动作已变化，请重新保存');
     const [active, pending, accepted] = await Promise.all([

@@ -405,7 +405,9 @@ export async function deleteStudioModule(ownerId: string, id: unknown, revision:
       if (!current) throw new StudioModuleError('工作区不存在或已删除，请核对原请求结果', 409);
       await assertStudioWorkspaceNotDeleted(ownerId, id, tx);
       if (current.revision !== revision) throw new StudioModuleError('模板已更新，请刷新后再删除', 409);
-      await assertStudioDeletionIdle(tx, ownerId, id);
+      // Accepted tasks execute from their frozen snapshot; deleting personal
+      // configuration neither cancels them nor waits for their provider result.
+      await assertStudioDeletionIdle(tx, ownerId, id, true);
       const binding = await studioSharedBinding(ownerId, id, tx);
       if (binding && binding.presetId !== current.source_preset_id) throw new StudioModuleError('模板来源绑定已变化，请重新读取后删除', 409);
       // Remove only configuration owned through this verified workspace. Source
@@ -585,6 +587,10 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
       }
     }
     if (await studioSharedBinding(ownerId, id, tx)) throw new StudioModuleError('模块已绑定共享原件，请重新读取后明确保存个人输入或模板定义', 409);
+    if (current?.source_preset_id) {
+      const author = await tx.imageStudioPreset.findUnique({ where: { id: current.source_preset_id }, select: { owner_id: true } });
+      if (!author || author.owner_id !== ownerId) throw new StudioModuleError('只有原模板作者可以保存默认设置；请另存为自己的参数模板', 403);
+    }
     if ((current?.revision || 0) !== revision) throw new StudioModuleError('模块已在其他页面保存，请刷新后核对；当前草稿仍在本页', 409);
     const priorSettingsSource = await readStudioWorkspaceSource(tx, ownerId, id);
     assertStudioTaskSettingsWrite(priorSettingsSource?.taskSettings, taskSettings);
@@ -704,6 +710,23 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
   return moduleDTO(row, ownerId, await getImageStudioSettings(), true, isAdmin, source || undefined, sourceIdentity);
 }
 
+async function rejectUnappliedModuleSharing(ownerId: string, id: string, requestId: string, cause: unknown): Promise<never> {
+  let notApplied = false;
+  if ((cause instanceof StudioSharingError || cause instanceof StudioModuleError) && [400, 403, 404, 409, 428].includes(cause.status)
+    && (!(cause instanceof StudioSharingError) || cause.reasonCode !== 'read-unavailable')) {
+    try {
+      const actor = await assertStudioActor(ownerId);
+      notApplied = !await readOwnedReceipt(prisma, actor.id, requestId);
+    } catch { /* Unreadable identity or receipt remains unknown. */ }
+  }
+  if (notApplied && (cause instanceof StudioSharingError || cause instanceof StudioModuleError)) {
+    const rejected = new StudioModuleError(cause.message, cause.status);
+    rejected.commandOutcome = { status: 'not-applied', actorId: ownerId, moduleId: id, requestId };
+    throw rejected;
+  }
+  throw cause;
+}
+
 export async function shareSavedStudioModule(ownerId: string, body: Record<string, unknown>) {
   if (!validStudioModuleId(body.id, ownerId) || body.isShared !== true
     || typeof body.requestId !== 'string' || !/^[a-zA-Z0-9_-]{16,100}$/.test(body.requestId)
@@ -713,10 +736,26 @@ export async function shareSavedStudioModule(ownerId: string, body: Record<strin
   const published = await publishSharedStudioModule(actor, body.id, {
     requestId: body.requestId, expectedRevision: body.revision, isShared: true,
     publicationMode: 'saved-workspace-v1', prompt: '', templatePrompt: '', referenceIds: [], entryPoint: 'workbench',
-  }, undefined, { shareSavedWorkspace: true });
+  }, undefined, { shareSavedWorkspace: true }).catch(cause => rejectUnappliedModuleSharing(ownerId, body.id as string, body.requestId as string, cause));
   return { ...await studioModuleDTOForUser(actor, body.id), sharingPreference: null, canChooseSharing: false,
     sharingCommandReceipt: { action: 'share-saved-module', requestId: body.requestId, moduleId: body.id,
       expectedRevision: body.revision, revision: published.receipt.revision } };
+}
+
+export async function studioModuleSharingStatus(ownerId: string, command: { id: string; requestId: string; revision: number; isShared: boolean; action: string }) {
+  const { id, requestId, revision, isShared, action } = command;
+  if (!validStudioModuleId(id, ownerId) || !/^[A-Za-z0-9_-]{16,100}$/.test(requestId) || !Number.isSafeInteger(revision)
+    || !['set-sharing-preference', 'share-saved-module'].includes(action) || action === 'share-saved-module' && !isShared) throw new StudioModuleError('原共享查询参数无效', 400);
+  const actor = await assertStudioActor(ownerId);
+  const fingerprint = action === 'share-saved-module'
+    ? sharedCommandFingerprint(['publish-shared', id, { requestId, expectedRevision: revision, isShared: true,
+      publicationMode: 'saved-workspace-v1', prompt: '', templatePrompt: '', referenceIds: [], entryPoint: 'workbench' }])
+    : sharedCommandFingerprint(['set-sharing-preference', id, isShared, revision]);
+  const receipt = await readReceipt(prisma, actor.id, requestId, fingerprint);
+  if (!receipt) return { status: 'not-found' };
+  if (receipt.moduleId !== id || (action === 'share-saved-module' ? receipt.beforeRevision : receipt.expectedRevision) !== revision) throw new StudioModuleError('共享回执与原操作不一致', 409);
+  return { status: 'completed', result: { ...await studioModuleDTOForUser(actor, id),
+    sharingCommandReceipt: { action, requestId, moduleId: id, expectedRevision: revision, revision: receipt.revision } } };
 }
 
 export async function chooseStudioModuleSharing(ownerId: string, body: Record<string, unknown>) {
@@ -758,7 +797,7 @@ export async function chooseStudioModuleSharing(ownerId: string, body: Record<st
       expectedRevision: current.revision, noOp: false, committedAt: new Date().toISOString() };
     await writeReceipt(tx, ownerId, body.requestId, fingerprint, result);
     return result;
-  });
+  }).catch(cause => rejectUnappliedModuleSharing(ownerId, id, body.requestId as string, cause));
   const actor = await assertStudioActor(ownerId);
   return { ...await studioModuleDTOForUser(actor, id), sharingCommandReceipt: publicStudioReceipt(receipt) };
 }

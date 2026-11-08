@@ -7,11 +7,11 @@ import { canUseWorksPreview } from '@/lib/works/rollout.server';
 
 export const dynamic = 'force-dynamic';
 
-export default async function Home({ searchParams }: { searchParams: { view?: string } }) {
+export default async function Home({ searchParams }: { searchParams: { view?: string; work?: string } }) {
   const user = await getSession();
   if (!user) redirect('/register');
   const worksEnabled = canUseWorksPreview(user);
-  return <HomeWorkspace accountId={user.id} worksEnabled={worksEnabled} showWorks={worksEnabled && searchParams.view !== 'overview'}
+  return <HomeWorkspace accountId={user.id} worksEnabled={worksEnabled} showWorks={false} detailOpen={worksEnabled && Boolean(searchParams.work)}
     internal={isNavItemVisible({ label: '创作', href: '/generate', externalHidden: true }, user)}
     images={canUseCompanyTemplates(user)} admin={user.role === 'admin'} />;
 }

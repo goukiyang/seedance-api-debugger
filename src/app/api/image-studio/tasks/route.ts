@@ -27,6 +27,7 @@ import { studioMethodHistoryModuleId } from '@/lib/image-studio/shared-contract'
 import { StudioSharingError } from '@/lib/image-studio/shared-command-storage';
 import { RestoredStudioSettingsError } from '@/lib/image-studio/restored-settings';
 import { StudioTaskSettingsError } from '@/lib/image-studio/task-settings';
+import { StudioStyleError } from '@/lib/image-studio/style-groups';
 
 export const dynamic = 'force-dynamic';
 export async function PATCH(request: NextRequest) {
@@ -121,7 +122,7 @@ export async function GET(request: NextRequest) {
     observed({ rows: result.tasks.length, bytes: Buffer.byteLength(JSON.stringify(response)) });
     return NextResponse.json(response, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   }
-  catch (error) { return NextResponse.json({ error: error instanceof StudioError || error instanceof StudioPinError ? error.message : '生成记录读取失败，请重试' }, { status: error instanceof StudioError || error instanceof StudioPinError ? error.status : 503 }); }
+  catch (error) { return NextResponse.json({ error: error instanceof StudioError || error instanceof StudioPinError ? error.message : '生成记录读取失败，请重试', ...(error instanceof StudioPinError && error.code ? { code: error.code } : {}) }, { status: error instanceof StudioError || error instanceof StudioPinError ? error.status : 503 }); }
 }
 export async function POST(request: NextRequest) {
   const startedAt = Date.now();
@@ -144,7 +145,7 @@ export async function POST(request: NextRequest) {
     const expected = error instanceof VideoFeishuError || error instanceof ImageGenerationChannelError
       || error instanceof QueueCapacityError || error instanceof QueueMaintenanceError || error instanceof StudioError
       || error instanceof ContextVersionError || error instanceof StudioSubmitReceiptError || isPrivatePromptError(error)
-      || error instanceof StudioSharingError || error instanceof RestoredStudioSettingsError || error instanceof StudioTaskSettingsError;
+      || error instanceof StudioSharingError || error instanceof RestoredStudioSettingsError || error instanceof StudioTaskSettingsError || error instanceof StudioStyleError;
     const insufficientCredits = error instanceof Error && error.message.startsWith('点数不足');
     const detail = studioSubmitFailureDetail(error);
     const requestId = validStudioSubmitRequestId(body?.requestId) ? body.requestId : undefined;

@@ -23,6 +23,8 @@ import { cloneHistoricalSkills, getSkillSelection, parseSkillIds, resolveSkills,
 import { defaultStudioReferencePolicy, getStudioPresetReferencePolicy, parseStudioReferencePolicy, setStudioModuleReferencePolicy, setStudioPresetReferencePolicy, validateStudioReferenceCounts, StudioReferencePolicyError, type StudioReferencePolicy } from './reference-policy';
 import { assertStudioActor, saveSharedStudioPresetAs, replaceSharedStudioPreset, resolveSharedStudioDefinition, restoreStudioDefaultGroup, studioPublisherModule, studioSharedBinding, parseSharedStudioPersonalOverrides, StudioSharingError, studioSharedReproductionKey } from './shared-contract';
 import type { SharedStudioPersonalOverrides } from './shared-types';
+import { isParameterCopyId } from './parameter-copy';
+import { saveStudioParameterCopy } from './shared-contract';
 import { readStudioModuleSharingPreference, writeStudioModuleSharingPreference } from './module-sharing-preference';
 import { readOwnedReceipt, readReceipt, writeReceipt, sharedCommandFingerprint, publicStudioReceipt, parseStudioSharingReceipt } from './shared-command-storage';
 import { recordStudioLifecycleEvent, studioDefinitionChangedFields, publicStudioLifecycleDetail } from './shared-lifecycle-audit';
@@ -151,7 +153,7 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
   const byId = new Map(assets.map(asset => [asset.id, asset]));
   return Promise.all(visibleRows.map(async row => {
     const deletion = studioSourceDeletionCapability(user, row);
-    if (row.is_shared) {
+    if (row.is_shared || isParameterCopyId(row.id)) {
       const templateRead = (await resolveStudioTemplateAuthor(user, { presetId: row.id })).templateRead;
       try {
         const { publicDTO } = await resolveSharedStudioDefinition(user, row.id);
@@ -163,11 +165,11 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
         const state = projectSharedStudioCapabilities({ objectKind: row.owner_id === user.id ? 'publisher' : 'live', lifecycle: 'active', sharing: 'shared',
           dependency: error.reasonCode === 'dependency-invalid' ? 'invalid' : 'unknown', sourceRevision: row.updated_at.toISOString(), moduleRevision: null,
           definitionToken: error.intent?.definitionToken ?? null, actorAllowed: true, ownsWorkspace: false, canViewSource: true,
-          canManageSource: canManageStudioPreset(user, row), canViewDefinition: templateRead.canViewTemplateContext, reasonCode: error.reasonCode });
+          canManageSource: !isParameterCopyId(row.id) && canManageStudioPreset(user, row), canViewDefinition: templateRead.canViewTemplateContext, reasonCode: error.reasonCode });
         state.capabilities.editDefinition = { allowed: false, reasonCode: error.reasonCode, reason: studioStateReason[error.reasonCode] };
         state.capabilities.saveDefinition = { allowed: false, reasonCode: error.reasonCode, reason: studioStateReason[error.reasonCode] };
         return { ...state, deletion, templateRead, id: row.id, name: row.name, scope: row.scope, groupName: row.group_name, revision: row.updated_at.toISOString(), model: row.model,
-          isShared: row.is_shared, ownedByViewer: row.owner_id === user.id, canManageSharing: canManageStudioPreset(user, row),
+          isShared: row.is_shared, ownedByViewer: row.owner_id === user.id, canManageSharing: !isParameterCopyId(row.id) && canManageStudioPreset(user, row),
           unavailable: true, unavailableReason: studioStateReason[error.reasonCode], prompt: '', context: '', contextConfigured: false, referencesAvailable: false,
           fixedCover: await studioFixedCoverDTO(user, { kind: 'preset', id: row.id }), coverEditable: canManageStudioPreset(user, row),
           images: [], banner: null, fixedReferences: [], fixedReferenceCount: 0, skillIds: [] };
@@ -233,6 +235,8 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
   const taskSettings = parseStudioTaskSettings(body.taskSettings);
   if (taskSettings && Object.prototype.hasOwnProperty.call(body, 'globalContext')) throw new StudioModuleError('通用上下文不能随模板覆盖', 400);
   user = await assertStudioActor(user.id);
+  if (!replace && body.saveIntent === 'personal-parameters') return saveStudioParameterCopy(user, body as Record<string, unknown>);
+  if (replace && typeof body.presetId === 'string' && isParameterCopyId(body.presetId)) throw new StudioModuleError('参数模板请另存为，不修改原模板默认设置', 403);
   if (body.saveIntent !== undefined && body.saveIntent !== 'personal-quick') throw new StudioModuleError('模板保存方式无效', 400);
   const personalQuick = body.saveIntent === 'personal-quick';
   if (personalQuick && (replace || body.isShared !== false || typeof body.sourceModuleId !== 'string'
@@ -606,6 +610,7 @@ export async function setStudioPresetSharing(user: ImageStudioIdentity, presetId
       const current = await currentStudioSharing(tx, user.id, presetId);
       return { id: presetId, is_shared: current?.isShared ?? null, receipt, current };
     }
+    if (isParameterCopyId(presetId)) throw new StudioSharingError('个人参数模板依赖原作者授权，仅自己可见', 403);
     const preset = await tx.imageStudioPreset.findUnique({ where: { id: presetId } });
     if (!preset || !canManageStudioPreset(user, preset)) {
       throw new StudioSharingError('只有模板创建者可以修改共享状态', 403, 'access-revoked');
@@ -694,6 +699,7 @@ export async function studioPresetLifecycleHistory(user: ImageStudioIdentity, pr
 }
 
 export async function applyStudioPreset(user: ImageStudioIdentity, presetId: string) {
+  if (isParameterCopyId(presetId)) throw new StudioModuleError('请从模板目录打开个人参数模板，不能复制其内部定义', 409);
   const userId = user.id;
   const moduleId = await prisma.$transaction(async tx => {
     user = await assertStudioActor(userId, tx);

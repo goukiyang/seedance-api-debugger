@@ -20,15 +20,15 @@ import { AddWorkPicker } from './AddWorkPicker';
 import type { WorkOperate } from './WorkActions';
 import styles from './Works.module.css';
 
-export default function WorksWorkspace() {
+export default function WorksWorkspace({ embedded = false, layoutReady = true, layoutKey = '' }: { embedded?: boolean; layoutReady?: boolean; layoutKey?: string }) {
   const session = useAppSession();
   if (session.sessionChanged) return <div className="container" role="status">账号已变化，原账号的待核对操作已保留。<button type="button" className="btn btn-secondary" onClick={() => window.location.reload()}>刷新后继续</button></div>;
   if (!session.hasLoadedUser || session.loadingUser) return <div className={styles.page}><div className={styles.skeleton} role="status">正在读取账号…</div></div>;
   if (!session.user) return <div className="container" role="status">{session.userLoadError || '请先登录后查看作品。'}<button type="button" onClick={() => void session.refreshUser({ force: true })}>重试读取账号</button></div>;
   if (!session.user.works_preview) return <div className="container" role="status">此页面暂不可用。</div>;
-  return <AccountWorks key={session.user.id} viewerId={session.user.id} account={`${session.user.id}:${session.user.role || ''}:${session.user.account_type || ''}`} />;
+  return <AccountWorks key={session.user.id} embedded={embedded} layoutReady={layoutReady} layoutKey={layoutKey} viewerId={session.user.id} account={`${session.user.id}:${session.user.role || ''}:${session.user.account_type || ''}`} />;
 }
-function AccountWorks({ viewerId, account }: { viewerId: string; account: string }) {
+function AccountWorks({ viewerId, account, embedded, layoutReady, layoutKey }: { viewerId: string; account: string; embedded: boolean; layoutReady: boolean; layoutKey: string }) {
   const router = useRouter(), pathname = usePathname(), searchParams = useSearchParams(), paramsKey = searchParams.toString();
   const query = useMemo(() => parseWorksQuery(new URLSearchParams(paramsKey)), [paramsKey]), queryKey = worksQueryString(query).toString(), workId = searchParams.get('work') || '';
   const [ready, setReady] = useState(false), [pages, setPages] = useState<WorkPage[]>([]), [loading, setLoading] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState(''), [methodHref, setMethodHref] = useState(''), [failedDirection, setFailedDirection] = useState<'initial' | 'before' | 'after'>('initial');
@@ -37,6 +37,10 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
   pagesRef.current = pages; queryRef.current = queryKey; workIdRef.current = workId;
   const playback = useMemo(() => new AssetPlaybackCoordinator(), []), directory = useWorkCollections(viewerId, collectionRevision);
   const imagePreparation = useRef<PreparedWorkImage>();
+  const pageElement = useRef<HTMLDivElement>(null), lastRead = useRef(0);
+  const refreshBlocked = useRef(false);
+  refreshBlocked.current = Boolean(!layoutReady || workId || classify || adding || filtersOpen || busy.length);
+  const scrollToList = () => { if (pageElement.current) window.scrollTo({ top: window.scrollY + pageElement.current.getBoundingClientRect().top - 64, behavior: 'instant' as ScrollBehavior }); };
   useEffect(() => () => { imagePreparation.current?.handle.release(); imagePreparation.current = undefined; }, [account]);
   const filterPanelId = useId(), filterTrigger = useRef<HTMLButtonElement>(null), filterPanel = useRef<HTMLDivElement>(null);
   useDialogDismiss({ open: filtersOpen && !workId, dialogRef: filterPanel, branchRefs: [filterTrigger], modal: false, onDismiss: () => setFiltersOpen(false) });
@@ -69,7 +73,8 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
     if (queryRef.current === loadedQueryRef.current && workIdRef.current) query.work = workIdRef.current;
     const previous = savedWorkView(viewerId, loadedQueryRef.current);
     // A detail page has its own scroll; it must never overwrite the list position.
-    saveWorkView(viewerId, { query, window: current[0].window, anchor: workIdRef.current ? previous?.anchor || null : visibleWorkAnchor() });
+    const anchor = workIdRef.current ? previous?.anchor || null : visibleWorkAnchor();
+    saveWorkView(viewerId, { query, window: current[0].window, anchor, atStart: workIdRef.current ? previous?.atStart : !current[0].previousCursor && (!anchor || anchor.id === current[0].items[0]?.id) });
   }, [viewerId]);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -80,14 +85,15 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
   const load = useCallback(async (direction: 'initial' | 'before' | 'after', token = epoch.current) => {
     if (loadBusy.current) return; loadBusy.current = true; setLoading(true); setError(''); setFailedDirection(direction);
     const navigation = navigationEpoch.current, current = pagesRef.current, params = new URLSearchParams(queryKey), saved = savedWorkView(viewerId, queryKey), sameSaved = !resetWindow.current && Boolean(saved);
-    if (direction === 'initial' && sameSaved && saved) { params.set('window', saved.window); if (saved.anchor?.id) params.set('anchor', saved.anchor.id); }
+    if (direction === 'initial' && sameSaved && saved && !saved.atStart) { if (saved.anchor?.id) params.set('anchor', saved.anchor.id); }
     if (direction !== 'initial' && current.length) { params.set('window', current[0].window); const cursor = direction === 'before' ? current[0].previousCursor : current[current.length - 1].nextCursor; if (cursor) params.set(direction, cursor); }
     const anchor = direction === 'initial' ? sameSaved ? saved?.anchor || null : null : visibleWorkAnchor();
     try {
       const data = await worksRead<WorkPage>(`/api/works?${params}`, viewerId); if (!alive.current || token !== epoch.current || queryRef.current !== queryKey) return;
+      lastRead.current = Date.now();
       loadedQueryRef.current = queryKey;
       setPages(old => direction === 'initial' ? [data] : direction === 'after' ? [...old, data].slice(-6) : [data, ...old].slice(0, 6));
-      const position = direction === 'initial' ? anchor : visibleWorkAnchor();
+      const position = direction === 'initial' ? saved?.atStart && anchor && data.items[0] ? { ...anchor, id: data.items[0].id } : anchor : visibleWorkAnchor();
       restoringList.current = Boolean(!data.anchorUnavailable && position && navigation === navigationEpoch.current);
       setRestore(!data.anchorUnavailable && position && navigation === navigationEpoch.current ? { ...position, navigationEpoch: navigation, generation: ++restoreGeneration.current } : null);
       if (data.anchorUnavailable) setNotice('原位置当前不可访问，已显示附近可读作品。'); resetWindow.current = false;
@@ -95,10 +101,51 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
     finally { if (alive.current && token === epoch.current) { loadBusy.current = false; setLoading(false); } }
   }, [queryKey, viewerId]);
   useEffect(() => { if (!ready) return; const token = ++epoch.current; loadBusy.current = false; pagesRef.current = []; setPages([]); setNotice(''); playback.stopAll('filter'); void load('initial', token); }, [ready, load, refresh, playback]);
+  useEffect(() => {
+    if (!ready || workId) return;
+    let cancelled = false;
+    const revalidate = async () => {
+      const element = pageElement.current, rect = element?.getBoundingClientRect();
+      if (cancelled || document.visibilityState !== 'visible' || refreshBlocked.current || loadBusy.current || operationLocks.current.size || Date.now() - lastRead.current < 5_000
+        || !rect || rect.top >= window.innerHeight || rect.bottom <= 64 || element?.contains(document.activeElement) && document.activeElement?.matches('input, textarea, select, [contenteditable="true"]')) return;
+      const current = pagesRef.current, anchor = visibleWorkAnchor(), latest = !current[0]?.previousCursor && rect.top >= 32;
+      if (!latest && !anchor) return;
+      const token = epoch.current, navigation = navigationEpoch.current, params = new URLSearchParams(queryKey);
+      if (!latest && current[0]) { params.set('window', current[0].window); params.set('anchor', anchor!.id); }
+      loadBusy.current = true; lastRead.current = Date.now();
+      try {
+        const data = await worksRead<WorkPage>(`/api/works?${params}`, viewerId);
+        if (cancelled || !alive.current || token !== epoch.current || navigation !== navigationEpoch.current || refreshBlocked.current || operationLocks.current.size) return;
+        // Fresh head includes newly admitted work. Deeper reading keeps its cursor window and geometry.
+        if (latest) { pagesRef.current = [data]; setPages([data]); loadedQueryRef.current = queryKey; }
+        else {
+          const fresh = new Map(data.items.map(work => [work.id, work]));
+          let geometryChanged = false;
+          const nextPages = pagesRef.current.map(page => ({ ...page, items: page.items.map(work => {
+            const next = fresh.get(work.id);
+            if (!next || next.personal.version < work.personal.version || next.revision < work.revision) return work;
+            geometryChanged ||= next.width !== work.width || next.height !== work.height;
+            return next;
+          }) }));
+          pagesRef.current = nextPages; setPages(nextPages);
+          if (geometryChanged && anchor) setRestore({ ...anchor, navigationEpoch: navigation, generation: ++restoreGeneration.current });
+        }
+        setError('');
+      } catch (cause) {
+        if (!cancelled && token === epoch.current && cause instanceof WorksClientError && [401, 403].includes(cause.status)) setError('当前账号暂时无法访问作品广场，请确认登录或权限。');
+        // Keep the readable list during transient failures; the next visible refresh can recover.
+      } finally { if (token === epoch.current) loadBusy.current = false; }
+    };
+    const resume = () => { void revalidate(); };
+    const atHead = () => { if ((pageElement.current?.getBoundingClientRect().top ?? -1) >= 32) resume(); };
+    const timer = window.setInterval(resume, 30_000);
+    window.addEventListener('focus', resume); window.addEventListener('online', resume); window.addEventListener('scroll', atHead, { passive: true }); document.addEventListener('visibilitychange', resume);
+    return () => { cancelled = true; clearInterval(timer); window.removeEventListener('focus', resume); window.removeEventListener('online', resume); window.removeEventListener('scroll', atHead); document.removeEventListener('visibilitychange', resume); };
+  }, [ready, workId, queryKey, viewerId]);
   function updateQuery(patch: Partial<WorkQuery>) {
     navigationEpoch.current++; remember(); resetWindow.current = true; setRestore(null); setClassify(null); const next = { ...query, ...patch };
     for (const key of Object.keys(next) as Array<keyof WorkQuery>) if (!next[key] || next[key] === 'all') delete next[key];
-    const params = worksQueryString(next); if (!params.size) params.set('scope', 'all'); router.push(`${pathname}?${params}`, { scroll: false }); window.scrollTo({ top: 0 });
+    const params = worksQueryString(next); if (!params.size) params.set('scope', 'all'); router.push(`${pathname}?${params}`, { scroll: false }); scrollToList();
   }
   useLayoutEffect(() => {
     if (imagePreparation.current && imagePreparation.current.workId !== workId) {
@@ -117,7 +164,7 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
       const anchor = savedWorkView(viewerId, queryKey)?.anchor;
       restoringList.current = Boolean(anchor);
       setRestore(anchor ? { ...anchor, navigationEpoch: navigationEpoch.current, generation: ++restoreGeneration.current } : null);
-      if (!anchor) window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
+      if (!anchor) scrollToList();
     }
   }, [workId, queryKey, viewerId]);
   function open(work: WorkCard) {
@@ -238,7 +285,7 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
     if (id && label) setFilterNames(old => Object.fromEntries([...Object.entries(old), [`${key}:${id}`, label]].slice(-100)));
     updateQuery({ [key]: id });
   }
-  return <div className={`${styles.page} exp-browse`}>
+  return <div ref={pageElement} className={`${styles.page} ${embedded ? styles.embedded : ''} ${!workId ? styles.fullWidth : ''} exp-browse`}>
     {!workId && <>
     <header className={styles.toolbar} aria-label="作品浏览工具栏">
       <h1 className={styles.visuallyHidden}>作品广场</h1>
@@ -256,7 +303,7 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
             <WorkFilterPicker viewerId={viewerId} kind="projects" value={query.project} label={filterLabel('project')} onSelect={(id, name) => chooseFilter('project', id, name)} />
           </div>
           {query.scope === 'favorites' && <CollectionManager directory={directory} selected={query.collection} onSelect={collection => updateQuery({ collection })} operate={operate} busy={busy.length > 0 || pending.some(item => item.key.startsWith('collection:'))} />}
-          <div className={styles.filterFooter}>{hasFilters && <button type="button" onClick={clearFilters}>清除筛选</button>}<button type="button" disabled={loading} onClick={() => { navigationEpoch.current++; remember(); resetWindow.current = true; window.scrollTo({ top: 0 }); setRefresh(value => value + 1); setFiltersOpen(false); }}><RefreshCw size={16} />刷新作品</button></div>
+          <div className={styles.filterFooter}>{hasFilters && <button type="button" onClick={clearFilters}>清除筛选</button>}<button type="button" disabled={loading} onClick={() => { navigationEpoch.current++; remember(); resetWindow.current = true; scrollToList(); setRefresh(value => value + 1); setFiltersOpen(false); }}><RefreshCw size={16} />刷新作品</button></div>
         </Popper.Content>, document.body)}
       </Popper.Root>
       <button type="button" className={styles.primary} aria-label="添加作品" title="添加作品" onClick={() => setAdding(true)}><Plus size={17} /><span className={styles.toolbarLabel}>添加作品</span></button>
@@ -278,7 +325,7 @@ function AccountWorks({ viewerId, account }: { viewerId: string; account: string
       <section className={styles.feed} aria-label="作品内容">{first?.previousCursor && <div className={styles.pageControl}><button type="button" disabled={loading} onClick={() => void load('before')}>读取前面的作品</button></div>}
         {error && failedDirection !== 'after' && <OperationReceipt className={styles.readError} status={error}
           actions={<button type="button" disabled={loading} onClick={() => void load(failedDirection)}>重试读取</button>} />}
-        {items.length > 0 ? <WorksMasonry items={items} playback={playback} contextKey={`${viewerId}:${queryKey}`} detailOpen={Boolean(workId || classify || adding)} busyKeys={busyKeys} operate={operate} onClassify={setClassify} onOpen={open} onFilter={(key, id) => chooseFilter(key, id)} restore={restore} navigationEpoch={navigationEpoch} onRestored={onRestored} /> : loading ? <div className={styles.skeletonGrid} role="status" aria-label="正在读取作品">{Array.from({ length: 6 }, (_, i) => <div key={i} className={styles.skeleton} />)}</div> : !error && <ExperienceEmpty className={styles.empty} title={hasFilters ? '没有匹配的作品' : query.scope === 'favorites' ? '先收藏喜欢的作品' : query.scope === 'hidden' ? '没有对你隐藏的作品' : query.scope === 'managed' ? '没有可管理的作品分享' : '这里还没有作品'} description={hasFilters ? '试试清除筛选，或换一个标题关键词。' : query.scope === 'favorites' ? '先收藏到全部收藏，之后可按需归类。' : query.scope === 'hidden' ? '隐藏的作品可在这里恢复显示。' : '已有成品会按原有权限显示，也可以明确加入本人上传的作品。'}>{hasFilters ? <button type="button" onClick={clearFilters}>清除筛选</button> : <><button type="button" onClick={() => updateQuery({ scope: 'mine' })}>我的作品</button><button type="button" className={styles.primary} onClick={() => setAdding(true)}>添加作品</button></>}</ExperienceEmpty>}
+        {items.length > 0 ? <WorksMasonry items={items} playback={playback} contextKey={`${viewerId}:${queryKey}`} layoutKey={layoutKey} detailOpen={Boolean(workId || classify || adding)} busyKeys={busyKeys} operate={operate} onClassify={setClassify} onOpen={open} onFilter={(key, id) => chooseFilter(key, id)} restore={layoutReady ? restore : null} navigationEpoch={navigationEpoch} onRestored={onRestored} /> : loading ? <div className={styles.skeletonGrid} role="status" aria-label="正在读取作品">{Array.from({ length: 6 }, (_, i) => <div key={i} className={styles.skeleton} />)}</div> : !error && <ExperienceEmpty className={styles.empty} title={hasFilters ? '没有匹配的作品' : query.scope === 'favorites' ? '先收藏喜欢的作品' : query.scope === 'hidden' ? '没有对你隐藏的作品' : query.scope === 'managed' ? '没有可管理的作品分享' : '这里还没有作品'} description={hasFilters ? '试试清除筛选，或换一个标题关键词。' : query.scope === 'favorites' ? '先收藏到全部收藏，之后可按需归类。' : query.scope === 'hidden' ? '隐藏的作品可在这里恢复显示。' : '已有成品会按原有权限显示，也可以明确加入本人上传的作品。'}>{hasFilters ? <button type="button" onClick={clearFilters}>清除筛选</button> : <><button type="button" onClick={() => updateQuery({ scope: 'mine' })}>我的作品</button><button type="button" className={styles.primary} onClick={() => setAdding(true)}>添加作品</button></>}</ExperienceEmpty>}
         {error && failedDirection === 'after' && <div className={styles.readError} role="status"><p>{error}</p><button type="button" disabled={loading} onClick={() => void load('after')}>在这里重试</button></div>}
         <div ref={sentinel} className={styles.sentinel} aria-hidden="true" />
         {last?.nextCursor && <div className={styles.pageControl}><button type="button" disabled={loading} onClick={() => void load('after')}>{loading ? '正在读取…' : '更多作品'}</button></div>}{loading && items.length > 0 && <p className={styles.muted} role="status">正在读取作品…</p>}

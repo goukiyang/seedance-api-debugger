@@ -70,6 +70,8 @@ export function useSharingCommand({ userId, onSettled }: {
   const [state, setState] = useState({ owner: userId, key: scopeKey, items: {} as Record<string, PendingSharingCommand> });
   const controllers = useRef(new Set<AbortController>());
   const activeScopes = useRef(new Set<typeof scope.current>());
+  const readAttempts = useRef(new Map<string, number>());
+  const [reconnect, setReconnect] = useState(0);
 
   useEffect(() => {
     const current = scope.current;
@@ -88,6 +90,7 @@ export function useSharingCommand({ userId, onSettled }: {
       } catch { ready = false; }
     }
     commands.current = { scope: current, ready, items };
+    readAttempts.current.clear();
     setState({ owner: userId, key: scopeKey, items });
     // Refresh restores only metadata and a query affordance, never POST or a
     // previously accepted confirmation. Other tabs also cannot release a lock
@@ -195,5 +198,21 @@ export function useSharingCommand({ userId, onSettled }: {
   }, [valid, execute]);
   const pending: Record<string, PendingSharingCommand> = state.owner === userId && state.key === scopeKey ? state.items : {};
   const busyId = Object.values(pending).find(command => command.state !== 'unknown')?.presetId || null;
+  useEffect(() => {
+    const resume = () => { if (!document.hidden && !isClientSessionBlocked()) { readAttempts.current.clear(); setReconnect(value => value + 1); } };
+    window.addEventListener('online', resume); document.addEventListener('visibilitychange', resume);
+    return () => { window.removeEventListener('online', resume); document.removeEventListener('visibilitychange', resume); };
+  }, []);
+  useEffect(() => {
+    if (busyId || document.hidden || !navigator.onLine || !valid(scope.current)) return;
+    const command = Object.values(pending).find(item => item.state === 'unknown' && (readAttempts.current.get(item.requestId) || 0) < 3);
+    if (!command) return;
+    const count = readAttempts.current.get(command.requestId) || 0;
+    const timer = setTimeout(() => {
+      readAttempts.current.set(command.requestId, count + 1);
+      void query(command.presetId);
+    }, [1000, 3000, 8000][count]);
+    return () => clearTimeout(timer);
+  }, [pending, busyId, reconnect, query, valid]);
   return { pending, busyId, submit, query };
 }

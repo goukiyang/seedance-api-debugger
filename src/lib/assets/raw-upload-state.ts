@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { prisma } from '@/lib/prisma';
+import { prisma, retrySqliteBusy } from '@/lib/prisma';
 import { uploadDigest, uploadRequestId, readVerifiedUploadReceipt, releaseVerifiedUpload, findVerifiedOwnUpload, registerVerifiedUpload, VerifiedUploadError } from './verified-upload';
 import { validateSiteUploadMetadata, sameOriginPublicUrlForLocalUpload, isLocalPublicUploadUrl } from './site-upload';
 import { isPubliclyReachableUrl } from './public-storage';
@@ -118,7 +118,9 @@ export async function prepareRawUpload(identity: RawUploadIdentity, previousNonc
     return { rawUpload: rawUploadProof(current.state) };
   }
   const state: RawUploadState = { ...identity, version: 2, fingerprint: fingerprint(identity), nonce: newNonce(), phase: 'prepared' };
-  try { await prisma.platformSetting.create({ data: { key: stateKey(identity), value_json: JSON.stringify(state), updated_by: identity.ownerId } }); }
+  // Retry only preparation under the same unique key and frozen nonce. No
+  // bytes have been sent; an already-committed winner is read below, not reset.
+  try { await retrySqliteBusy(() => prisma.platformSetting.create({ data: { key: stateKey(identity), value_json: JSON.stringify(state), updated_by: identity.ownerId } })); }
   catch (error) {
     if ((error as { code?: string }).code !== 'P2002') throw error;
     const winner = await stateRow(identity);

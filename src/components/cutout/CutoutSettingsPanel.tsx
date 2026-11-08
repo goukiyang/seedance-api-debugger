@@ -129,7 +129,7 @@ export default function CutoutSettingsPanel({
         <summary aria-controls={advancedId}>高级设置 · 模型与阈值</summary>
         <div id={advancedId} className={styles.advancedBody}>
           <label className={styles.controlLabel} htmlFor="cutout-model-select">抠图模型</label>
-          <select id="cutout-model-select" className={styles.selectControl} value={settings.model_preference} onChange={event => update('model_preference', event.target.value)} disabled={disabled || modelOptions.length === 0}>
+          <select id="cutout-model-select" className={styles.selectControl} value={modelOptions.some(model => model.id === settings.model_preference && model.available) ? settings.model_preference : ''} onChange={event => update('model_preference', event.target.value)} disabled={disabled || !modelOptions.some(model => model.available)}>
             {modelOptions.map(model => <option key={model.id} value={model.id} disabled={!model.available}>{model.label || model.id}{model.available ? '' : `（暂不可用：${model.reason || '服务未就绪'}）`}</option>)}
           </select>
           <div className={styles.toggleGrid}>

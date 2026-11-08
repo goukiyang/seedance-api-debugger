@@ -1,3 +1,9 @@
+<!-- WORKSPACE-SIDEBAR-PAGES-PUBLIC-20261105 -->
+## 五组页面侧栏统一（v0.134.2）
+
+项目、任务、图集（含详情）、用量/费率、资料/通知/帮助侧栏整批已部署，菜单高亮与按账号恢复返回现场已接入。应用e3e4ecb11／BUILD aJIZXag_3dseg9EJD9pjB；完整工程构建、启动、服务和公网产物检查有证，功能待用户手动验收。原工单§27.1、原失败、最终索引/发布/恢复材料仅在正式工作区私有保存，本条不发布环境、数据库或用户媒体。
+<!-- /WORKSPACE-SIDEBAR-PAGES-PUBLIC-20261105 -->
+
 <!-- ASSET-TOP01-PUBLIC-20261105 -->
 ## ASSET-TOP01 资产管理顶部重构
 
@@ -7,6 +13,10 @@
 <!-- /ASSET-TOP01-PUBLIC-20261105 -->
 
 # 项目资料索引
+
+## HOME-WORKS01 首页与广场合并（v0.134.23）
+
+应用2ddbb25ef／BUILD ZaMxo4ZN_eimZIG1Y7FXy已部署，待用户手动验收。广场置于收藏模板下方，收藏默认折叠并记账号偏好；补可见目录限频更新与安全返回，原入口/权限/费用/数据不变。9组定向工程、最终原生/计价/完整类型构建和公网产物/健康通过，兼容guard沿原构建复用。原单§28、最终发布/恢复/索引与工程原证只存正式工作区私有资料，本条不发布环境、数据库或用户媒体。本轮无新增范围外问题。
 
 ## RATE-VIDEO01 视频人民币计价补齐
 
@@ -500,3 +510,19 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 <!-- CHARACTER-INDEPENDENT-CONTEXT-20261107 -->
 [角色上下文独立原单§15](../../tasks/todo/2026-10-31-character-reference-replan.md#15-正脸侧脸与前后身上下文独立2026-11-07)：v0.134.16主16c57e550/guard2d3ab523已保护部署，待用户手验。私有2026-11-07-character-independent-context/implementation/attempt02保存精确源码/Git delta、两版18组读者/原生摘要/完整构建、source-pair-contract、public-deployed/public-character-css/service-health及切换/备份原证；attempt01保首轮类型失败与修正检查，未将失败冒成功。服务器同名stage含原始日志/回退入口/备份；无新用户附件，无浏览器或收费生成。
 <!-- /CHARACTER-INDEPENDENT-CONTEXT-20261107 -->
+
+### 2026-11-07 角色统一成品工作台
+
+2026-11-08统一风格独立弹窗沿角色原单§20，5文件覆层/隔离19及类型检查、最终来源配对/发布安全元证归私有`2026-11-08-character-style-settings/`。不迁移历史或生产配置，默认风格单一来源；已有三兼容字段由显式风格保存镜像。工程检查不冒浏览器/真实出图手验。
+
+2026-11-08图片铺满及选中标记补正沿同一原单§19；用户截图及本批安全工程/发布元证归私有`2026-11-08-character-image-fit/`。新PNG按800/1600行，旧PNG及旧生成裁切不迁移。原31恢复脚本锚点补正证据留movable-layout/attempt04/anchor-fix-proof.json，未执行线上恢复。
+
+最终v0.135.3 /cbaf2390e /VFqcM3XS-0vUU6QIqpZ0a已部署，待用户手动验收。新批`attempt01/final-evidence-summary.json`保fresh主19/native/完整Next、原guard1469、切版0/公网/健康安全元证；`recovery-readonly-preflight.json`核自身stage/135及原guard，无恢复演练。配置/DB/原始价格行及buildEnv仅留服务器，不下载；CodeGraph exact-source索引成功、context未返回的缺口在原单。
+
+原单：`tasks/todo/2026-10-31-character-reference-replan.md` §18.6。已部署v0.134.29，功能待用户手验；最终29源码配对/fresh主构建/公网/健康及恢复元证见私有 `2026-11-07-character-unified-workbench/implementation/attempt03/`，guard-build-reuse记录F0原构建时刻和1469编译文件核对；attempt02保28实际发布和F0原完整工程证据，attempt01保设计、前置检查、目录权限故障及未发布替代源。原生完整日志、配置和一致DB备份仅留服务器，summary只存SHA与非敏感元证，不导出环境或价格原行。
+
+三栏可移动/右侧合并及UX复审原单§18.7–18.8：已部署v0.134.31，功能待用户手验。最终3654/BUILD iTiWbFUml0X1fllspLErl；源码/配对/主fresh19与原生构建/公网/恢复元证归私有 `2026-11-07-character-unified-workbench/movable-layout/attempt04/`。attempt03保最后提示词定位补齐前的离线替代源，attempt02保b897成功构建及停服前基线变化保护停住，attempt01保前置检查及Next保留文件名失败原证。safe summary不导出环境/价格原行/DB，F0原证原时及1469编译文件核对保留，原28/29证据不覆盖。
+
+### 2026-11-08 角色融合提示词
+
+[原工单](../../tasks/todo/2026-11-08-character-fusion.md)／[安全发布摘要](2026-11-08-character-fusion-prototype/release-summary.md)：v0.135.0 / 应用9b2eccae8 / BUILD u_Nz4s0rvT7Lzfs9T5Op8已保护部署，待用户手验。原型单文件保留正式根同名目录prototype.html；私有implementation/attempt03为同源规则、构建/类型、配对/guard复用、启动/公网/健康及一致备份元证，不含DB原件、环境或配置。前两次离线候选为主动让窗/继承新正式源而替代，未切生产，不冒已完整构建；最终attempt03完整构建及切版通过，服务器原日志和程序恢复入口保留。

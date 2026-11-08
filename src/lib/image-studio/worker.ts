@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { imageRetryGenerator, promoteImageRetry, RetryScheduled, RetryExhausted } from '@/lib/generation-retry/image';
 import { privateImageTaskOrigins, transformPrivateImageTask } from './private-storage.server';
-import { PrivatePromptError } from '@/lib/security/private-prompts.server';
+import { isPrivatePromptError } from '@/lib/security/private-prompts.server';
 import { getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudioImageGenerationProvider,
   resolveImageGenerationChannelSnapshot, isMuskImageGenerationChannel, validateImageGenerationChannel, assertImageGenerationChannelDispatchOpen, ImageGenerationChannelError,
   imageGenerationSupportsStudioFourToOne, type ImageGenerationResolvedSettings } from '@/lib/integrations/image-generation';
@@ -178,12 +178,12 @@ async function executeStudioTask(task: ImageStudioTask, generate: typeof request
       if (await finishStudioTask(task, 'failed', { error: '安全重试已结束，未交付图片；按原合同释放一次预留。' })) await completeToolFlowTask(task.id);
       return;
     }
-    if (error instanceof PrivatePromptError && (providerStarted || recovery)) {
+    if (isPrivatePromptError(error) && (providerStarted || recovery)) {
       await prisma.imageStudioTask.updateMany({ where: { id: task.id, status: studioTaskState(task, 'running'), lease_token: task.lease_token },
         data: { status: studioTaskState(task, 'uncertain'), lease_token: null, lease_until: null, error: error.message } });
       return;
     }
-    if (error instanceof PrivatePromptError && !providerStarted) {
+    if (isPrivatePromptError(error) && !providerStarted) {
       await prisma.imageStudioTask.updateMany({ where: { id: task.id, status: studioTaskState(task, 'running'), lease_token: task.lease_token },
         data: { status: studioTaskState(task, 'queued'), lease_token: null, lease_until: null, error: error.message } });
       return;
@@ -478,16 +478,16 @@ async function executeChannelStudioTask(task: ImageStudioTask, generate: typeof 
       if (await finishStudioTask(task, 'failed', { error: '安全重试已结束，未交付图片；按原合同释放一次预留。' })) await completeToolFlowTask(task.id);
       return;
     }
-    if (error instanceof PrivatePromptError && recovering) {
+    if (isPrivatePromptError(error) && recovering) {
       await deferStudioAsyncRecovery(task, error.code, true);
       return;
     }
-    if (error instanceof PrivatePromptError && (providerStarted || asyncReceipt || delivery)) {
+    if (isPrivatePromptError(error) && (providerStarted || asyncReceipt || delivery)) {
       await prisma.imageStudioTask.updateMany({ where: { id: task.id, status: studioTaskState(task, 'channel_running'), lease_token: task.lease_token },
         data: { status: studioTaskState(task, 'uncertain'), lease_token: null, lease_until: null, error: error.message } });
       return;
     }
-    if ((error instanceof PrivatePromptError || error instanceof ImageGenerationChannelError && error.code === 'image_channel_dispatch_paused') && !providerStarted) {
+    if ((isPrivatePromptError(error) || error instanceof ImageGenerationChannelError && error.code === 'image_channel_dispatch_paused') && !providerStarted) {
       if (preparedRequest) await setStudioUnsentRequestState(task, 'held');
       await prisma.imageStudioTask.updateMany({ where: { id: task.id, status: studioTaskState(task, 'channel_running'), lease_token: task.lease_token },
         data: { status: studioTaskState(task, 'channel_queued'), lease_token: null, lease_until: null, error: error.message } });
