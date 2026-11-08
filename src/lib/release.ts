@@ -1,7 +1,7 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '置顶归属与作品广场优化', outline: [
-  '旧结果置顶、查看与取消遵循统一模板归属',
+const notice = { title: '修复历史复现图片的置顶', outline: [
+  '历史复现图片按本次工作区置顶，原参考来源保持',
   '作品广场铺满宽度，增减列数而不放大缩略图',
   '作品详情按钮悬停显示，键盘和触摸仍可使用',
 ] };

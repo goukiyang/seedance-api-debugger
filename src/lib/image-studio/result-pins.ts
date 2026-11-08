@@ -51,13 +51,23 @@ export async function studioPinScope(user: SessionUser, moduleId: string, db: Sh
 }
 // Older default-template tasks legitimately predate a physical workspace row.
 const pinTaskModuleId = (task: { module_id: string | null; owner_id: string }) => task.module_id ?? defaultStudioModuleId(task.owner_id);
-export function studioPinTaskReason(task: { module_id: string | null; owner_id: string; source_preset_id: string | null;
-  status: string; asset_id: string | null; usage_json: string | null },
+// A historical reproduction retains its recipe source, independently of this
+// result's execution workspace. Only the server-frozen matching identity proves it.
+function studioPinReproduction(task: { id: string; module_id: string | null; source_preset_id: string | null; snapshot_json: string | null }) {
+  if (!task.snapshot_json) return false;
+  try {
+    const snapshot = JSON.parse(task.snapshot_json);
+    return snapshot?.version === 1 && snapshot.moduleId === task.module_id && snapshot.sourcePresetId === task.source_preset_id
+      && validId(snapshot.reproducedFromTaskId) && snapshot.reproducedFromTaskId !== task.id;
+  } catch { return false; }
+}
+export function studioPinTaskReason(task: { id: string; module_id: string | null; owner_id: string; source_preset_id: string | null;
+  status: string; asset_id: string | null; usage_json: string | null; snapshot_json: string | null },
 scope: NonNullable<Awaited<ReturnType<typeof studioPinScope>>>, historyModuleId?: string): string | null {
   const taskModule = pinTaskModuleId(task);
   if (taskModule !== scope.moduleId && taskModule !== historyModuleId) return '这张结果不属于当前模板';
   if (!studioTaskHasViewableOutput(task)) return '图片尚未完整保存，暂不能置顶';
-  if (task.source_preset_id && task.source_preset_id !== scope.presetId) return '这张结果来自其他模板，不能在当前模板置顶';
+  if (task.source_preset_id && task.source_preset_id !== scope.presetId && !studioPinReproduction(task)) return '这张结果来自其他模板，不能在当前模板置顶';
   if (!task.source_preset_id && taskModule !== scope.publisherModuleId) return '这张旧结果的模板来源无法确认，不能共享置顶';
   return null;
 }
@@ -77,6 +87,12 @@ export async function readableStudioPins(user: SessionUser, presetId: string, db
   const excludedByOwner = new Map(await Promise.all(Array.from(new Set(tasks.map(task => task.owner_id)), async ownerId =>
     [ownerId, new Set(await characterLabTaskBatchIds(ownerId, db))] as const)));
   const visibleTasks = tasks.filter(task => !excludedByOwner.get(task.owner_id)?.has(task.batch_id));
+  const differentSources = visibleTasks.filter(task => task.source_preset_id && task.source_preset_id !== presetId);
+  const reproductionProofs = differentSources.length ? await db.imageStudioTask.findMany({
+    where: { id: { in: differentSources.map(task => task.id) } },
+    select: { id: true, module_id: true, source_preset_id: true, snapshot_json: true },
+  }) : [];
+  const reproducedIds = new Set(reproductionProofs.filter(studioPinReproduction).map(task => task.id));
   const assets = await db.asset.findMany({ where: { id: { in: document.pins.map(p => p.assetId) },
     type: 'image', status: 'active' }, select: { id: true, owner_id: true, original_url: true, thumbnail_url: true,
       width: true, height: true, mime_type: true } });
@@ -86,7 +102,7 @@ export async function readableStudioPins(user: SessionUser, presetId: string, db
   const pins = document.pins.flatMap(pin => {
     const task = byTask.get(pin.taskId), asset = byAsset.get(pin.assetId);
     if (!task || !studioTaskHasViewableOutput(task) || !asset || task.asset_id !== pin.assetId || task.owner_id !== pin.ownerId || asset.owner_id !== pin.ownerId
-      || pinTaskModuleId(task) !== pin.moduleId || task.source_preset_id && task.source_preset_id !== presetId
+      || pinTaskModuleId(task) !== pin.moduleId || task.source_preset_id && task.source_preset_id !== presetId && !reproducedIds.has(task.id)
       || hidden.has(asset.original_url) || asset.thumbnail_url && hidden.has(asset.thumbnail_url)) return [];
     return [{ ...pin, task, asset }];
   });
