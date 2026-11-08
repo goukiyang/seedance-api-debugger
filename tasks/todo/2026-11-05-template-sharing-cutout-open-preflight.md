@@ -566,7 +566,7 @@ F0兼容guard source `f0fc87f9896daa685c1067bb341e85ee21933a9a`、BUILD `_JwQu0Z
 原始工程、发布、公网与只读恢复证据已按白名单存正式根私有`docs/materials/2026-11-07-pin-wide-gallery/recovery-20261108/`（本地忽略、0700）。135.1成功但未部署证据单独保留，首错fixture01/client04及修正边界仍保留；未下载DB备份、配置快照、价格全字段正文、凭据或用户媒体。后继已交还发布窗并告知从实际38fc52f源继承；本轮只做记录收口，不再改运行源。
 
 
-### 16.9 NAMED-SETTINGS01 同模板另存设置（2026-11-08，135.8准备发布）
+### 16.9 NAMED-SETTINGS01 同模板另存设置（2026-11-08，135.8已部署待手验）
 
 用户明确：生成区底部“另存为”保存同一模板下的多套不同设置，不是另建模板。135.4实发原入口作者默认勾共享，走saveSharedStudioPresetAs新建publisher工作区；非作者走personal-parameters并openShared新工作区。旧personal-quick仍创建ImageStudioPreset，且未绑定工作区会改source与共享意图，不能仅把checkbox去掉或改文案冒修复。
 
@@ -576,7 +576,7 @@ F0兼容guard source `f0fc87f9896daa685c1067bb341e85ee21933a9a`、BUILD `_JwQu0Z
 
 **已验证与首错保留。** 同服务器独立verify01合成SQLite fixture05通过12项（作者/非作者不增模板/工作区、源默认不变、账号/模块隔离、原号幂等/状态、篡改同号拒绝、版本冲突确未应用、多个方案、临时参考失效、模板风格使用、作者纯风格且定义保护、撤回来源、task/ledger/network为0）。当前实现未做生产写或浏览器验收。首次Mac schema engine在建临时库阶段非零、无功能断言；local tsc01仅quality字符串类型不匹配，已按受校验模型质量类型修正。Linux fixture02用他人的default ID查询，正确400而测试误期望not-found；03给共享源注入私人风格使源本身依现规则不可用，改为有效shared风格；04另一个纯parse用例遗漏原requestId，补齐真实请求合同。均保原失败日志，未放宽保护或改业务数据；复查了调用方合同后05完整通过，未将夹具输入错误写成生产根因。
 
-当前分支codex/template-named-settings-20261108，实际工作目录沿pin-recovery工作树，初始a81完整保135.4修复，并完整合入实际135.6/7c63角色更新。待135.7完整构建/发布，功能继续用户手动验收；不因12项隔离检查冒真实网页完成。
+当前分支codex/template-named-settings-20261108，实际工作目录沿pin-recovery工作树，初始a81完整保135.4修复，并完整合入实际135.6/7c63角色更新。最初计划135.7，后按下文完成135.8融合发布；功能继续用户手动验收，不因12项隔离检查冒真实网页完成。
 
 
 **构建差量与真实回归（e639未部署）。** 首次冻结e639在原native末尾失败1项studio-restored-settings-engineering:318，原“没有恢复标记的作者风格草稿应拒绝”检查正确；其余14项native、其它public fixtures及pricing已通过并保原证。原因是初版为了命名方案放行所有作者纯style选择，超出了普通B合同。现改为请求draft显式`personalStyleSelection=true`，只在前端明确套用命名方案、且非历史恢复/重试时发送；没有标记仍原拒绝，混入上下文/固定定义不放行。报价与创建复用同一parser/normalizer，旧冻结输出不改。verify01 fixture06-marker十二项及原完整restored-contract-marker用例均退出0；并补同一命名弹窗内丢回执后的原命令接续，保留原body/号、不另起保存。此次为真实行为回归，不能靠改旧断言或重标旧成功遮掉；新冻结源须补受影响构建，未编辑任何运行中的发布器，线上135.6保持。
@@ -584,3 +584,15 @@ F0兼容guard source `f0fc87f9896daa685c1067bb341e85ee21933a9a`、BUILD `_JwQu0Z
 **attempt02工程类型错误。** 冻结12c64的12项设置检查、完整fresh native/pricing均通过；Next编译完成后，内置types在新增fixture对只读NODE_ENV直接赋值处拒绝，未切版。仅按现有角色夹具的Reflect.set方式修正测试环境赋值；业务源码和所有断言不变，保留原native成功及Next失败日志，先完整typecheck再续最终构建。此次无线上影响，不把构建失败冒成发布成功。
 
 **最终候选合并。** attempt02类型错误仅改Reflect.set后，隔离完整tsc退出0（release02/types03-result.json）。135.7未实发。新包尚未启动时，与原角色任务共同确定只合9288682ad四文件客户端预览修复至135.8：保存revision传至预览，旧请求/旧错误按账号、工作区、revision和输入隔离；历史当前图配方仍冻结。复用原React4组红绿证据并核最终源hash，最终集成包再做原生/计价和完整Next工程构建，不扩后端、费用或配置写入。135.9后继由另一现有任务从实际135.8完整继承，本批唯一控制发布窗。
+
+**实际发布。** v0.135.8 / application source `4891252f509aa7ec38da078dd9bd62563c515561` / BUILD `8o_Bv5c-9A1PPtJd2JRtZ`。最终服务器 `template-named-settings-20261108/attempt03`，run `02db8a7a-6832-4145-b988-67e5ebd77502`；2026-11-08T13:17:15Z开始正常切版，13:17:43Z公网收口，13:18:39Z健康收口。135.7未实发；最终包完整保135.6的角色功能及135.4置顶/删除修复，仅16文件差量，归档2498源码文件。完整fresh native/pricing及Next（内置types/lint）通过，最终12项命名设置、19组角色输入合同通过；928四文件SHA一致，复用原真实React4组红绿证明，未重标原成功时间。
+
+19组补核首次未进入业务断言：工程TMPDIR指向root所有目录，tsx缓存mkdir被EACCES拒绝；保原log/exit，改用同隔离副本自己的0700临时目录后原19组完整退出0，不改断言或应用。独立源副本与最终manifest一致，物理私有Prisma依赖，无.env/storage生产链接；任务/账本均为合成库，productionWrites/paidRequests/browserRuns/forbiddenCalls全0。
+
+发布检查：六实际启动检查、7服务实际cwd同源且active、4timer active、三页面（模板/图片/角色）各实际chunk公网200并与编译SHA一致，3匿名GET401及新设置API匿名POST401；route实际在Next manifest中。内外health200、controller0，cutover0无恢复；价格全字段SHA仍d03c539d74a31b5e2a6a0305724b1b9f193e0ade878370898c7632d1bdc96539，92ac/37404/f4修订保持，私有策略/原环境和数据链接保持。原writer自然排尽后一致SQLite备份仅留服务器0600，只切程序；无schema/DDL、业务价格、旧任务/冻结快照/账本/媒体覆盖，也没有真实生成或生产设置创建/删除。
+
+相容guard沿F0 `f0fc87f9896daa685c1067bb341e85ee21933a9a` / BUILD `_JwQu0Zzx5P5dk89dyQd9`，逐个核源码及1469编译文件，保2026-11-08T05:29:46.672838Z原构建时间，不重建。恢复入口：`bash /data/video-api-debugger/release-staging/template-named-settings-20261108/attempt03/program-recovery.sh /data/video-api-debugger/release-staging/template-named-settings-20261108/attempt03/release-input.json`。锚点为本attempt03及原135.6/7c63；13:18:40Z只执行第一段Python前置读取成功，未执行停服/repoint或数据恢复。只回程序不回设置/数据库/媒体/账本/回执；出现后继发布时不执行本批恢复脚本。新命名空间记录保留，旧guard不提供新设置入口，不把回退当功能等价。
+
+**用户手验待办。** ①作者在原模板保存两套不同设置，目录不新增模板/工作区，切换参数/补充/风格/临时参考对应变化、当前主图保留；②普通同事只保存自己的方案，不改变作者默认/共享内容；③刷新后同一账号/模板仍可读取，另一模板不混入；④断网只核原保存，明确继续沿原号/原body，无重复方案；⑤原“保存共享模板”和历史快捷设置仍各沿原权限，角色保存规则后的预览更新、历史原词保持。以上均待用户实页手验，不以构建/服务健康冒功能验收。
+
+原证按白名单归档正式根私有 `docs/materials/2026-11-07-pin-wide-gallery/recovery-20261108/named-settings-1357/attempt03/`（目录名保留最初135.7计划，内含真实135.8证据），attempt01/02失败原证分别保留；未下载DB备份、价格正文或配置快照。已交2收角色文档、3从实发489继承135.9发布窗，本批后续仅文档收口，不再改运行源。本轮未新增范围外问题，原全局坏行/CAS/旧未知/CPU等残留按原单保留，不能据本次交付宣布全站无问题。
