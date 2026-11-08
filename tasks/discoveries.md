@@ -10,6 +10,16 @@
 
 ## 待核线索
 
+<!-- D-20261107-PIN-REMAINING -->
+**D-20261107-PIN-LEGACY-SOURCE｜已确认受限旧记录 / P2。** 同一9宫格旧工作区6条成功、active输出的任务与冻结source均null，当前publisher关联不存在，按现规则仍拒绝置顶。不是此前误计的42条工具样本；尚未确认这6条都应共享。先核合法执行/发布关联，不补造source或批量放行。
+
+**D-20261107-PIN-VISIBILITY-STATE｜已证行为与状态表达缺口 / P2。** 置顶记录存在时，资产/模板权限变化仍可将其从读者列表中过滤；管理员与普通同事可见性可能不同。私密撤权后的过滤已由既有隔离夹具验证，现场发生情况待核。本人缺少完整“已记录/当前可见/被过滤原因”的投影和失效记录管理，后续保密规则不放松。
+
+**D-20261107-PIN-CONFLICT-RECOVERY｜已见设计边界 / P3，频率及体验待验。** 同root整组revision使不同图片操作也可能冲突，且置顶会使旧分页游标失效；待确认的置顶原操作只存模块内Map，整页刷新不保该提示，但可重读服务器状态。未证明生产发生重复操作或数据丢失。保CAS/原号，分别验证多人和断网刷新。
+
+上述统一入口为[原联合工单§16.8.2](todo/2026-11-05-template-sharing-cutout-open-preflight.md)，只读元数据见正式根私有pin-wide-gallery/remaining-boundaries-20261107.json。应用源码与生产数据未改，无新构建/部署；规模性能继续沿D-20261107-PIN-MEDIA-SCOPE，不拆成重复修复单。
+<!-- /D-20261107-PIN-REMAINING -->
+
 <!-- D-20261107-PIN-MEDIA-SCOPE -->
 **D-20261107-PIN-MEDIA-SCOPE｜疑似扩展性问题 / P3，待测。** v27置顶链路复核发现，`resolveStudioPinnedAsset`对单个asset先查索引，再调用`readableStudioPins`核整组置顶（现有上限200），后者批量查任务/资产及私密参考URL。多个缩略图请求可能重复整组工作；尚未测真实规模增长或并发耗时，不能认定为当前延迟或本次403原因。本次只为来源不同的pin批量读可信复现证明，不逐卡查父任务，不向输出投影带出快照。后续最小取证：同环境固定1/50/200条合法置顶，比较单张媒体鉴权/DB耗时与同组多图请求，再判断是否沿现有asset索引定向核验；保root共享/撤权、私密文件和本人边界，不先建缓存或迁库。[源码](../src/lib/image-studio/result-pins.ts)，实际主源d0c1b31693125ddb9f37d70e323fdf01e3cc9040；来源[联合工单§16.8.1](todo/2026-11-05-template-sharing-cutout-open-preflight.md)。
 <!-- /D-20261107-PIN-MEDIA-SCOPE -->
