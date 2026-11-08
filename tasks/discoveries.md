@@ -75,3 +75,16 @@ PIN相关原四项处理：135.4/38fc52f已部署目录恢复、本人管理/取
 
 
 **D-20261108-ROLE-RECOVERY｜已确认并修正本单恢复入口锚点。** 同类发布模板复用后，角色31/movable-layout/attempt04的program-recovery.sh首段仍断言pin-wide旧stage与3516旧baseline，自动恢复未触发，因此此前cutover0并不能证明入口可执行。按15/4证据，仅修本单两常量至role31 stage/179f，保原脚本及SHA；只读首段通过guard检查后正确拒绝后继135，未执行停服/切版/写配置/数据。新135.3恢复入口匹配本单stage及实际135，发布前验证自身首段。详见角色原单§19、movable-layout/attempt04/anchor-fix-proof.json与image-fit新批证据。不扩改其他发布或创建治理系统。
+
+<!-- MODEL-ACCESS-DEPLOY01-20261108 -->
+## MODEL-ACCESS-DEPLOY01 发布准备的旧恢复与鉴权假设
+
+状态：已确认，工具维护待后续；本次主版0.135.9健康交付，最终bbeb相容备用完整构建与固定人工恢复材料已准备，未安装/演练。
+
+- `scripts/create-pricing-compatible-guard.mjs`仅暂停费率写入/角色新写入/成员抠图，遗漏`src/lib/assets/upload-purpose.ts`中明确要求回退关闭的FEEDBACK_UPLOADS_ENABLED。本轮生成guard77仍为true，固定恢复前置正确拒绝；未造成数据回退。后续应核对全部既有恢复限制并修正生成器，不能直接复用77或F0冒新模型开关reader。
+- 私有发布检查`release03/public-proof.py`把`/tools/ultimate-canvas/index.html`与app.js当匿名200资源，实际当前middleware对/tools要求登录，返回307。应沿真实鉴权核对，保留登录保护，不把预期登录页当产物损坏；本轮以部署字节匹配+预期跳转+4项真实Next公网脚本同SHA分别记录，未冒充登录后功能验收。
+- 原build输入可选附件误引用属于本轮准备失误，原exit1与有效main类型检查原证均保留；不归因产品代码、不扩为全项目缺陷。
+- 备用程序暂停反馈上传后，通用上传忙重试工程夹具仍硬编码feedback，导致原生门失败；已修正为普通上传并另核真实开放/暂停两种反馈能力。独立两模式检查通过，最终guard完整构建另记原单；本项是因果配套的工程夹具修复，不改被冻结的发布控制器。
+
+详细原证与实际源/构建/待验边界见[模型开放原单](todo/2026-11-08-model-availability-pricing.md)。本轮停止修改发布工具，保持健康主版；最终bbeb/bQTt的6项关闭位、fresh全门及完整Next/types/lint已过，attempt05新prepared描述与人工命令清单已保存但未安装/演练。原控制器退出1保留，独立只读核对证明真实主健康；后续工具维护沿该线索接续，不改原失败回执。
+<!-- /MODEL-ACCESS-DEPLOY01-20261108 -->
