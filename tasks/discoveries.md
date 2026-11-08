@@ -39,10 +39,10 @@
 ## 已确认问题
 
 <!-- D-20261108-RELEASE-RECOVERY-ANCHOR -->
-**D-20261108-RELEASE-RECOVERY-ANCHOR｜已确认恢复入口锚点过期 / P2，当前批次处理中。** 复用已完成135.0 stage时，program-recovery.sh仍硬断言旧pin-wide-gallery/attempt03及3516基线，与fusion实际stage/3654不符；若触发恢复会在停服前拒绝，现cutover0未调用、未发生本次运行故障。本批新stage修正为其真实stage/9b2ecc基线并核F0/contract；原发布者已告知修自己的未运行脚本。不能复制成功切版回执当恢复入口可用；无真实回退演练。[原联合工单§16.8.4](todo/2026-11-05-template-sharing-cutout-open-preflight.md)。
+**D-20261108-RELEASE-RECOVERY-ANCHOR｜已确认，相关入口已修正；未实际回退演练。** 复用135.0 stage发现program-recovery.sh仍断言旧pin-wide-gallery/attempt03及3516，与fusion真实stage/3654不符，事故时会在停服前拒绝；没有由本次切版触发现场故障。原作者4修其fusion stage、角色2修其role31入口，各保原脚本及SHA。本人最终135.4 stage pin-recovery-20261108/attempt02锚点为本stage/cbaf239基线，F0原构建1469文件验证；真实切版后marker/备份/contract齐备时第一段只读前置通过，实际恢复未执行。不能复制切版成功回执冒恢复入口可用，后继按实际源/目录接续；[原联合单§16.8.4](todo/2026-11-05-template-sharing-cutout-open-preflight.md)，私有recovery-readonly-preflight.json保存无业务写证据。
 <!-- /D-20261108-RELEASE-RECOVERY-ANCHOR -->
 
-PIN相关原四项的新进展：本批已实现目录恢复、本人管理/取消、可信旧图显式发布及单图定向权限，最终源构建部署和手验待完成，详原联合工单§16.8.4；上方§16.8.3调查事实与限制保留，不能冒已上线或全站无问题。
+PIN相关原四项处理：135.4/38fc52f已部署目录恢复、本人管理/取消、可信旧图显式发布及单图定向权限，完整22聚焦/types/native/Next及发布检查通过，待用户手验。新单图Prisma目标任务/Asset各1行，但全局兼容坏行探测与整组CAS仍保持；旧6图未批量发布，旧未知/CPU等不关闭。详原联合工单§16.8.4及正式根私有recovery-20261108证据；上方§16.8.3为原调查事实，不冒全站无问题。
 
 
 **D-20261105-ACTUAL-RATE-COVERAGE｜已修复部署，功能待用户手验**：历史aff41下已确认样片用3/4.5固定点数、IP未接人民币，原抽查30条流水与各自冻结合同一致；该历史事实保留。2026-11-06 RATE-VIDEO01/v0.134.7已正常CAS新增16条同代同分辨率人民币关系、移除2条旧通用规则，当前22条视频规则按10点/元，新缺价付费报价拒绝旧兜底。原40金额/来源/开关及旧账不改，新用户赠分仍关；站内继承不冒供应商实扣。[原单最新交付](todo/2026-11-05-ledger-rate-accounting.md#rate-video01-最终交付)为唯一详情。
