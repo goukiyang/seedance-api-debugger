@@ -1163,4 +1163,4 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 
 - TPL-OWNER-CARD02 / GALLERY03 / RATE-READ01：已部署v0.134.25 / 3516a22ee / WuPPvlzZS71IUIxEaLQ7J，待用户手动验收。继承正式24与首页限高CSS；作者保存、非作者来源关联私有参数另存、全状态卡片图下零增高、模块封面完整三行、共享常显缩小30%/有限原号核对、通用模型积分规则按费率页只读折叠均在同一批。两版各6组SQLite/13组hook/30组native+计价/完整Next types lint通过；7服务4timer、33公网资源同SHA、3匿名401、内外health及8个worker reader通过。原价/数据/策略不改，无新DDL或收费生成。新相容guard 200544768 / ymCCwzq0anLlN0zkh5tbq；仅回程序，不回数据，不可回旧21reader。原失败证据与回退入口见联合原单§16.7及2026-11-07-template-owner-card/attempt05。旧未知、视频现场缺证及CPU待核保持。
 
-- PIN-CONSIST01 / WORKS-WIDE02：置顶默认空模块/作品复用历史的读写规则统一、具体资格原因、作品列表全宽与370px只缩不放动态增列、详情按钮hover/focus/触摸规则；基正式25，候选26未部署，原共享抠图联合单§16.8，工程/发布待补、用户手验。
+- PIN-CONSIST01 / WORKS-WIDE02：已部署v0.134.26 / e730b7334 / NXJFuymZl8lJq1A317gfm，待用户手动验收。默认空模块/合法复用历史的列表、置顶写入与读出统一，具体资格原因按需、原号和版本保护保留；广场全宽＋动态增列＋370px上限＋scale-down，信息按钮hover/focus、触摸可达。线上确认42张旧默认图受旧严格module规则影响，另查38近期图；截图原号未对应，具体图待手验。两版各6 SQLite/9按钮/30原生+计价/完整Next types lint，7服务4timer、40资源同SHA、匿名置顶PUT401、8个worker reader通过。guard554ab5eb2/xqwYjnesnV5QbgJjO80dK保持新reader，回退只回程序；原价、历史及原未知保护保持。原单§16.8及私有资料含失败、实际发布与恢复入口。
