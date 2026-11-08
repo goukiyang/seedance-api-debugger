@@ -510,3 +510,7 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 <!-- CHARACTER-INDEPENDENT-CONTEXT-20261107 -->
 [角色上下文独立原单§15](../../tasks/todo/2026-10-31-character-reference-replan.md#15-正脸侧脸与前后身上下文独立2026-11-07)：v0.134.16主16c57e550/guard2d3ab523已保护部署，待用户手验。私有2026-11-07-character-independent-context/implementation/attempt02保存精确源码/Git delta、两版18组读者/原生摘要/完整构建、source-pair-contract、public-deployed/public-character-css/service-health及切换/备份原证；attempt01保首轮类型失败与修正检查，未将失败冒成功。服务器同名stage含原始日志/回退入口/备份；无新用户附件，无浏览器或收费生成。
 <!-- /CHARACTER-INDEPENDENT-CONTEXT-20261107 -->
+
+### 2026-11-07 角色统一成品工作台
+
+原单：`tasks/todo/2026-10-31-character-reference-replan.md` §18.6。已部署v0.134.29，功能待用户手验；最终29源码配对/fresh主构建/公网/健康及恢复元证见私有 `2026-11-07-character-unified-workbench/implementation/attempt03/`，guard-build-reuse记录F0原构建时刻和1469编译文件核对；attempt02保28实际发布和F0原完整工程证据，attempt01保设计、前置检查、目录权限故障及未发布替代源。原生完整日志、配置和一致DB备份仅留服务器，summary只存SHA与非敏感元证，不导出环境或价格原行。
