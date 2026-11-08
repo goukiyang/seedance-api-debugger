@@ -526,3 +526,10 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 ### 2026-11-08 角色融合提示词
 
 [原工单](../../tasks/todo/2026-11-08-character-fusion.md)／[安全发布摘要](2026-11-08-character-fusion-prototype/release-summary.md)：v0.135.0 / 应用9b2eccae8 / BUILD u_Nz4s0rvT7Lzfs9T5Op8已保护部署，待用户手验。原型单文件保留正式根同名目录prototype.html；私有implementation/attempt03为同源规则、构建/类型、配对/guard复用、启动/公网/健康及一致备份元证，不含DB原件、环境或配置。前两次离线候选为主动让窗/继承新正式源而替代，未切生产，不冒已完整构建；最终attempt03完整构建及切版通过，服务器原日志和程序恢复入口保留。
+
+<!-- MODEL-ACCESS01-MATERIALS-20261108 -->
+
+[MODEL-ACCESS01模型开关原单](../../tasks/todo/2026-11-08-model-availability-pricing.md)：本次主9d61/0.135.9/ron79已部署，待用户手验；私有[工程与发布证据索引](2026-11-08-model-availability/README.md)保release03完整构建和真实运行独立核对、原exit1/失败、release05最终bbeb/guard.2/bQTt完整工程与新prepared权限/固定人工恢复材料（未安装或演练）。金额、私有策略、持久数据和旧待核保持，无真实模型/收费/浏览器回归；原始价格行、DB/环境只留服务器，不下载或提交。
+
+R01两项发布检查修复：私有[工具安装与生图资源只读证据](2026-11-08-model-availability/release-check-fix01/README.md)，源5d1ab7c00、正式独立工具安装、真实Git/HTTP正反例、5资源200同字节/2登录307及7服务/health。应用0.135.10未重启，无模型调用或旧待核重发；原失败不改。
+<!-- /MODEL-ACCESS01-MATERIALS-20261108 -->
