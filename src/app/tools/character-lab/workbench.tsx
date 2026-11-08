@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { Check, ChevronDown, Download, GripVertical, ImagePlus, Maximize2, RefreshCw, Undo2 } from 'lucide-react';
+import { Check, Download, GripVertical, ImagePlus, Maximize2, RefreshCw, Undo2 } from 'lucide-react';
+import { ImageResultStatusDetails } from '@/components/ImageResultStatusDetails';
 import { RelativeTime } from '@/components/RelativeTime';
 import { ImageFeishuStatus } from '@/components/image-studio/ImageFeishuStatus';
 import { characterLabIsGrid, characterLabMediaUrl, characterLabStrength, sameLabReference, type CharacterLabDraft, type CharacterLabOperation, type CharacterLabPlan, type CharacterLabReference, type CharacterLabTask, type CharacterLabWorkspace } from '@/lib/character-lab/types';
@@ -155,14 +156,13 @@ export function CharacterLabWorkbench(p: Props) {
         onKeyDown={event => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); resize(event.key === 'Home' ? 280 : event.key === 'End' ? 560 : width + (event.key === 'ArrowLeft' ? 20 : -20), true); } }}><GripVertical size={16} /></div>
       <aside className={styles.candidateEditor}>
         <section className={styles.candidateSection}><header><h2>{part === 'body' ? '正背面候选' : shown ? `${shown.count === 9 && characterLabIsGrid(shown) ? '九' : characterLabIsGrid(shown) ? '四' : '单张'}选一 · ${titles[part]}` : `${titles[part]}候选`}</h2><button type="button" onClick={p.onQuery} aria-label="查询生成状态"><RefreshCw size={15} /></button></header>
-          <div className={styles.batchToolbar}><span>{shown ? `第${numbers.get(shown.id)}组` : '还没有候选'}</span>{shown && <><button type="button" onClick={() => { setPromptReference(undefined); setPrompt('current'); }}>本批提示词</button><button type="button" aria-label="放大本批候选" onClick={() => p.onPreview(characterLabMediaUrl(shown.id), '本批候选')}><Maximize2 size={14} /></button></>}</div>
+          <div className={styles.batchToolbar}><span>{shown ? `第${numbers.get(shown.id)}组` : '还没有候选'}</span>{shown && <><button type="button" onClick={() => { setPromptReference(undefined); setPrompt('current'); }}>本批提示词</button><button type="button" aria-label="放大本批候选" onClick={() => p.onPreview(characterLabMediaUrl(shown.id), '本批候选')}><Maximize2 size={14} /></button></>}{shown && p.tasks[shown.id] && <ImageResultStatusDetails active={!p.locked} scopeKey={`${p.ownerId}:${p.workspace.id}:${shown.id}:batch-status`} label="查看本批状态与来源" heading="本批状态与来源"><p>{statuses[p.tasks[shown.id]!.status] || '状态待确认'}{p.tasks[shown.id]!.error && ` · ${p.tasks[shown.id]!.error}`}</p><ImageFeishuStatus owner={p.ownerId} taskId={p.tasks[shown.id]!.id} presentationLabel="本批生成" /></ImageResultStatusDetails>}</div>
           {generationStatus && <p role="status" className={styles.inlineStatus}>{generationStatus}</p>}
           {shown ? <div className={styles.unifiedCandidates} data-columns={part === 'body' || !characterLabIsGrid(shown) ? 1 : shown.count === 9 ? 3 : 2}>{Array.from({ length: part === 'body' || !characterLabIsGrid(shown) ? 1 : shown.count }, (_, index) => {
             const ref = { planId: shown.id, ...(characterLabIsGrid(shown) ? { cell: index } : {}) };
             const adoptedHere = sameLabReference(ref, current);
             return <div key={index} className={styles.choiceFrame} data-selected={sameLabReference(ref, base)}><button type="button" className={styles.choiceImage} aria-label={part === 'body' ? '选择正背面整组作为编辑底图' : `选择候选${index + 1}作为编辑底图`} aria-pressed={sameLabReference(ref, base)} disabled={p.locked} onClick={() => change(part, ref, shown.id, true)}><CharacterLabImage src={media(ref)} alt={part === 'body' ? '正背面整组' : `候选${index + 1}`} /><span className={styles.choiceNumber}>{part === 'body' ? '整组' : index + 1}</span>{adoptedHere && <span className={styles.choiceAdopted}><Check size={12} />已采用</span>}</button><button type="button" className={styles.choiceZoom} aria-label={`放大候选${index + 1}`} onClick={() => p.onPreview(media(ref), '候选详情')}><Maximize2 size={13} /></button></div>;
           })}</div> : <div className={styles.noCandidates}><ImagePlus size={28} /><span>生成后在这里挑选</span></div>}
-          {shown && p.tasks[shown.id] && <details className={styles.batchDetails}><summary>本批状态与来源<ChevronDown size={12} /></summary><p>{statuses[p.tasks[shown.id]!.status] || '状态待确认'}{p.tasks[shown.id]!.error && ` · ${p.tasks[shown.id]!.error}`}</p><ImageFeishuStatus owner={p.ownerId} taskId={p.tasks[shown.id]!.id} presentationLabel="本批生成" /></details>}
         </section>
         <section className={styles.inlineEditor}>
           <div className={styles.editingBase}><div><strong>{validBase && base ? `基于第${numbers.get(base.planId)}组${base.cell === undefined ? '整组' : ` · 候选${base.cell + 1}`}` : part === 'side' ? '基于当前采用的正脸' : '基于原始角色'}</strong><small>{base && stale(basePlan) ? '属于旧正脸，改用当前正脸重新生成' : selectedIsAdopted ? '已用于当前成品' : validBase ? '选中作为编辑底图，尚未采用' : '生成新的候选'}</small></div>{base && <button type="button" disabled={p.locked} onClick={() => change(part, undefined, undefined, true)}>从参考重新生成</button>}</div>
