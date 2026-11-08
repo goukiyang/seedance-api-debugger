@@ -233,6 +233,9 @@ function PreviewImage({ src, thumbnailSrc, alt, original, previewOnly = false, v
       ? readProgress.message || '当前来源无法提供读取进度'
       : readProgress.phase === 'confirming' ? '正在确认图片完整性'
         : readProgress.phase === 'decoding' ? '正在显示图片' : `正在读取${displayKind === 'original' ? '原图' : displayKind === 'hd' ? '高清' : '图片'}`;
+  const visibleKind = blocked ? undefined : loaded ? displayKind : retainedSrc ? retained?.displayKind
+    : hasThumbnail && thumbnailLoaded === thumbnail ? 'preview' : undefined;
+  const visibleDescription = loaded ? state?.description : retainedSrc ? retained?.description : undefined;
   return <>
     {retainedSrc && <img key={`retained:${identity}:${retainedSrc}`} src={retainedSrc} alt={alt} className={className} style={style} draggable={false} data-image-preview-retained />}
     {hasThumbnail && !loaded && !blocked && !retainedSrc && <img ref={thumbnailImage} key={`thumbnail:${account}:${thumbnail}`} src={thumbnail} alt={alt} className={className} style={style} draggable={false} data-image-preview-thumbnail
@@ -240,9 +243,10 @@ function PreviewImage({ src, thumbnailSrc, alt, original, previewOnly = false, v
     {/* eslint-disable-next-line @next/next/no-img-element */}
     {imageSrc && !blocked && !failed && <img ref={image} key={`preview:${imageIdentity}`} src={imageSrc} alt={alt} className={className} style={{ ...style, opacity: loaded ? 1 : 0 }} draggable={false} data-image-preview-image data-preview-settled={loaded || undefined}
       onLoad={event => { const target = event.currentTarget; void (readResult?.decoded ? Promise.resolve() : target.decode()).then(() => { if (currentKeyRef.current === imageIdentity && current?.handle.isCurrent()) setLoadedKey(imageIdentity); }).catch(() => { if (currentKeyRef.current === imageIdentity) setFailedKey(imageIdentity); }); }} onError={() => { if (currentKeyRef.current === imageIdentity) setFailedKey(imageIdentity); }} />}
-    {(!loaded || displayKind === 'original' || state?.descriptorPending || state?.fallback || state?.error) && <div className={styles.imageStatus} role="status">
-      <span>{blocked ? readProgress.message || '图片权限或来源不可用' : failed ? (unsupported ? progressLabel : retainedSrc ? '图片未能加载，当前图片保留，请重试' : thumbnailLoaded === thumbnail ? '图片未能加载，缩略图仍可查看，请重试' : '图片未能加载，请重试') : loaded ? `${displayKind === 'original' ? '原图' : displayKind === 'hd' ? '高清' : '预览图'}已显示` : progressLabel}</span>
-      {state?.description && !state.error && !blocked && <span>{hdAvailabilityLabel(state.description)}</span>}
+    <div className={styles.imageStatus} role="status" aria-live="polite">
+      {visibleKind && <span>当前：{hdDisplayLabel(visibleKind, visibleDescription)}</span>}
+      {(!loaded || state?.descriptorPending || state?.fallback || state?.error) && <span>{blocked ? readProgress.message || '图片权限或来源不可用' : failed ? (unsupported ? progressLabel : retainedSrc ? '图片未能加载，当前图片保留，请重试' : thumbnailLoaded === thumbnail ? '图片未能加载，缩略图仍可查看，请重试' : '图片未能加载，请重试') : loaded ? `${displayKind === 'original' ? '原图' : displayKind === 'hd' ? '高清' : '预览图'}已显示` : progressLabel}</span>}
+      {state?.description && !state.error && !blocked && (!loaded || state.descriptorPending || state.fallback) && <span>{hdAvailabilityLabel(state.description)}</span>}
       {state?.error && !blocked && <span>暂时无法确认压缩状态</span>}
       {failed && !unsupported && readProgress.phase === 'unavailable' && <span>{readProgress.message || '当前来源无法提供读取进度'}</span>}
       {!loaded && !failed && readProgress.phase === 'reading' && readProgress.percent != null && <>
@@ -256,7 +260,7 @@ function PreviewImage({ src, thumbnailSrc, alt, original, previewOnly = false, v
         if (displaySrc) resetImageReadForRetry(displaySrc, account);
         setAttempt(value => value + 1);
       }}><RotateCcw size={16} /></button>}
-    </div>}
+    </div>
   </>;
 }
 
