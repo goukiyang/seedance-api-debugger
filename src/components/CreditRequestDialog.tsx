@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, RefreshCw, X } from 'lucide-react';
+import Link from 'next/link';
+import { ArrowLeft, Gift, RefreshCw, X } from 'lucide-react';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { canRequestCredits, CREDIT_GRANT_AMOUNTS } from '@/lib/credits/request-rules';
 import UserIdentityBadge from './UserIdentityBadge';
@@ -148,6 +149,7 @@ export default function CreditRequestDialog({ autoOpen = false }: { autoOpen?: b
           <div className={styles.balance}><span>可用 <strong>{credits?.available ?? '—'}</strong> 点</span><span>冻结 {credits?.frozen_credits ?? '—'} 点</span>
             <button type="button" title="刷新积分和记录" aria-label="刷新积分和记录" disabled={loading || busy} onClick={() => void load()}><RefreshCw size={16} /></button></div>
           <div className={styles.actions}><button type="button" className="btn btn-primary" disabled={!eligible || busy || loading} onClick={() => { setView('apply'); setNotice(''); }}>申请积分</button>
+            <Link className="btn btn-secondary" href="/points/claim" aria-disabled={busy} onClick={event => { if (busy) event.preventDefault(); else close(); }}><Gift size={16} />领取积分</Link>
             <span>{!data ? '正在确认申请状态…' : !data.enabled ? '申请暂未开放，请联系管理员' : pending ? '已有一条申请待审批' : !credits ? '积分加载失败，请刷新重试' : !canRequestCredits(credits.available) ? '少于 500 点时可申请' : '由管理员审批发放'}</span></div>
           <h3>{data?.canApprove ? '申请与审批' : '申请记录'}</h3>
           {data?.canApprove && data.pendingCount > 0 && <p>待审批 {data.pendingCount} 条</p>}
