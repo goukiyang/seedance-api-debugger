@@ -841,3 +841,20 @@ CodeGraph准备覆盖准确29源1953文件，无missing/extra/hashMismatch/parse
 最终证据：私有`docs/materials/2026-11-08-character-image-fit/attempt01/`，对应服务器`/data/video-api-debugger/release-staging/character-image-fit-20261108/attempt01`；final-evidence-summary.json只留原run/receipt/日志SHA与非敏感元证，未下载buildEnv、生产DB/配置备份或原始价格行。启动SSH因整体后台链残留标准输出在35秒超时，实际controller已继续；核对运行后未重复启动，源不变，构建最终0。应用源码已推正确origin，文档HEAD不冒运行源。
 
 CodeGraph准备已成功核对本工作区cbaf、1962文件及0待同步/0缺失/0解析错误；context调用长时间未返回，停止等待并用源码/不可变差量核对影响，未冒查询成功。本轮新增范围外已确认问题仅本单恢复脚本旧锚点，已修正并记D-20261108-ROLE-RECOVERY；未扩改其它发布或搭建治理。除该配套修正外未新增范围外应用问题。
+
+
+### 20. 风格提示词独立入口与统一编辑（2026-11-08）
+
+用户要求：所有风格提示词提炼到一处统一调整，与生成内容分开，一个独立入口和弹窗。本批按一份统一风格实施，正脸/侧脸/前后身个人补充仍各自独立。
+
+源码与只读运行证据：各部位规则弹窗混入styleConstraints/sideStyleConstraints/bodyStyleConstraints/resultStyleConstraints；labViewPrompt另硬编码“自然摄影”，旧basePrompt含真人/摄影环境、resultPrompt含灰色背景及排除动漫脸，即使换风格仍可能被内容规则锁住。实际生产config rev3只有主styleConstraints保存值，侧脸/身体/旧整图没有另存覆盖；主风格为真实人物摄影、自然皮肤纹理与合理解剖、灰色背景。只读核对未写生产规则。
+
+共享影响与修法：复用styleConstraints作为统一风格源，三部位/微调/旧整图新生成均用它；独立管理员“风格提示词”按钮/弹窗只编辑此一份，原生成内容弹窗移除所有风格输入。去除执行器额外自然摄影/真人/排除动漫锁定；已知旧内置内容片段只在生成与内容草稿展示时作精确整理，不任意分类删用户文字，不改数据库历史原文。镜头/身份/宫格/原图身体设计等内容约束保留，个人补充不改。
+
+保存复用现有CAS与版本：新增API scope区分content/style并要求新styleProtocol，旧管理页混合保存明确刷新；服务器content保存不写风格，style保存不写内容，并把同一风格镜像到既有三个兼容字段，旧reader/guard不用新数据格式也能读。新客户端即使命中旧guard API，发送的仍是原始已存内容加四个相同风格字段，不借风格保存改内容。管理员鲜核、版本冲突留草稿，显式保存成功才关闭；关闭不丢内存草稿，焦点复用现有dialog。原config版本、已受理/未知任务与图片实际完整提示词冻结不改，不批量迁移或重发。
+
+工程范围仅studio、prompts、store、角色API及原19组夹具；补统一风格遍历所有生成出口、无隐藏自然摄影锁、内容/风格保存互不覆盖、兼容字段镜像、旧CAS拒绝和历史原词不变。仅隔离SQLite/类型/原生/构建工程检查，不浏览器、不收费生图，功能用户手验。先以实际135.3源码+精确5文件覆层在私有preflight01低优先运行19组/类型，不连env/storage/生产库，最终源仍须fresh完整构建。
+
+发布接续：15已恢复并接本轮135.4置顶/分页/删除窗，我方先本地实施及隔离检查，预留135.6，3若恢复的模型门135.5不抢。最终封源前继承实际成功发布源/BUILD/同guard与原证，完整保留135.3铺满及新PNG修法，发布前再鲜核；不把旧135.1成功构建冒新基线成功。本批无schema/计价/权限扩大/新增配置存储，当前尚未发布。
+
+资料与安全工程证据归私有`docs/materials/2026-11-08-character-style-settings/`，权威状态沿本节，固定todo与资料索引只保必要入口。CodeGraph215f索引1962文件核对通过，context限时无回复，已回源码核对，不称查询成功。

@@ -59,10 +59,11 @@ export const labDefaultViewPrompts = {
   bodyBackPrompt: '还原原角色的背部轮廓、服装结构、配饰位置和鞋，保持原设计比例、材质与配色。',
 };
 
+export const labDefaultStyle = '真实人物摄影，自然皮肤纹理、服装材质与合理解剖结构，统一灰色摄影背景。避免动漫、插画、游戏建模和塑料质感。不添加编号、字幕、标注、边框装饰或水印。';
 export const labDefaultStageStyles = {
-  sideStyleConstraints: '真实人物侧面摄影，自然皮肤纹理与合理解剖结构，统一灰色摄影背景。避免动漫、插画、游戏建模和塑料皮肤。不添加编号、字幕、标注、边框装饰或水印。',
-  bodyStyleConstraints: '真实人物全身摄影，合理人体比例与服装材质，统一灰色摄影背景。避免动漫、插画、游戏建模和塑料质感。不添加编号、字幕、标注、边框装饰或水印。',
-  resultStyleConstraints: '真实人物摄影，自然皮肤与服装材质，统一灰色摄影背景。不添加编号、字幕、标注、边框装饰或水印。',
+  sideStyleConstraints: labDefaultStyle,
+  bodyStyleConstraints: labDefaultStyle,
+  resultStyleConstraints: labDefaultStyle,
 };
 
 export function labOperationRules(operation: CharacterLabOperation) {

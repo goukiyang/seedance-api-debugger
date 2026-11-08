@@ -544,7 +544,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
   }
   function closePrompts() {
     if (activePromptTarget === 'style') { setPromptTarget(null); return; }
-    if (activePromptTarget && activePromptTarget !== 'style' && legacyView) { setRecipeTarget(activePromptTarget); setRecipeTab('next'); }
+    if (activePromptTarget && legacyView) { setRecipeTarget(activePromptTarget); setRecipeTab('next'); }
     else setRecipeTarget(null);
     setPromptTarget(null);
     if (promptTarget === 'current') {

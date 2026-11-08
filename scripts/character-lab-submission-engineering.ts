@@ -587,14 +587,17 @@ async function main() {
     await assert.rejects(store.saveLabConfig(user, contentSaved.revision, { styleConstraints: 'STALE_STYLE' }, 'style'), /另一处更新/);
     assert.equal((await store.labConfig()).styleConstraints, 'ILLUSTRATION_STYLE_SENTINEL');
     const promptFunctions = await import('../src/lib/character-lab/prompts');
-    const neutralContent = { ...styleSaved, basePrompt: store.defaultLabConfig.basePrompt, resultPrompt: store.defaultLabConfig.resultPrompt };
-    const prompts = [promptFunctions.faceLabPrompt(neutralContent, draft), promptFunctions.resultLabPrompt(neutralContent, draft, false),
+    assert.ok(Object.values(promptFunctions.labDefaultStageStyles).every(style => style === store.defaultLabConfig.styleConstraints));
+    const neutralContent = { ...styleSaved, basePrompt: '根据原始角色设计图生成真人面部候选。统一摄影环境。保留用户衣服细节。',
+      resultPrompt: '生成角色参考图。统一灰色背景、镜头与光线，不加文字。' };
+    const prompts = [promptFunctions.faceLabPrompt(neutralContent, { ...draft, diversity: 100 }), promptFunctions.resultLabPrompt(neutralContent, draft, false),
       ...(['side', 'refine-face', 'refine-side', 'body-front', 'body-back', 'body-pair'] as const)
         .map(operation => promptFunctions.labViewPrompt(neutralContent, operation, '', { count: 4 }))];
     for (const prompt of prompts) {
       assert.match(prompt, /ILLUSTRATION_STYLE_SENTINEL/);
       assert.doesNotMatch(prompt, /真实人物|自然摄影|灰色|摄影环境|真人|SIDE_STYLE_SENTINEL|BODY_STYLE_SENTINEL/);
     }
+    assert.match(prompts[0], /保留用户衣服细节/);
     assert.equal((await recipes.labRecipe(user, first.id)).completePrompt, detail.completePrompt);
     assert.equal(forbiddenCalls, 0);
     console.log(JSON.stringify({ schema: 'character-lab-submission-engineering.v1', synthetic: true,
