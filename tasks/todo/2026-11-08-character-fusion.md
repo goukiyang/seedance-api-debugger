@@ -105,3 +105,11 @@
 - 范围保护：无收费模型/网络生成调用、无实站生成提交、无浏览器功能验收；旧主目录已有源码和todo/index脏改未改，本单正式记录随隔离分支提交，私有证据只新增独立子目录。本轮未新增范围外应用缺陷；工具索引超时作为本单证据缺口保留，不扩修。
 
 公开安全发布摘要：[release-summary](../../docs/materials/2026-11-08-character-fusion-prototype/release-summary.md)。原型及私有元证位于正式根 `docs/materials/2026-11-08-character-fusion-prototype/`，implementation/attempt03只导出非敏感工程/发布元证；原始DB、env、价格原行、buildEnv和配置备份未导出、未提交Git。窗口已交后继3/15，本对话仅文档收尾。
+
+### 发布保障补正（2026-11-08T10:04Z）
+
+15号复用旧发布资料时发现，本单继承的 `program-recovery.sh` 首段仍硬断言pin-wide-gallery的旧stage与3516旧baseline。实际cutover0从未调用恢复，线上应用9b2一直active；该缺陷会使事故恢复在停服前拒绝。此前把恢复入口直接报为可执行不准确，已明确更正，不能用guard构建通过代替恢复脚本自身前置验证。
+
+本轮仅修本单服务器attempt03脚本两处精确常量，绑定已冻结的character-fusion/attempt03及3654正式基线；保留所有F0/合同/后继版本拒绝保护。原脚本保留为 `program-recovery.before-anchor-fix.sh`；before SHA d3f693a1437fe6b7624173d516c6440e8baf08f1a9ea0f2f6b72d91f04298c9f，after SHA b07e5c4f3b2fa70a97bc2310e536e3b63343a4686fc4dc50fe2ac73229c2b547。`bash -n`及仅首段只读Python前置核对通过；当前F0原1469编译文件哈希再次一致。未执行恢复/stop/start/install/repoint，未改服务或运行配置、业务数据，未重建应用，也不声称实战恢复演练通过。
+
+证据：正式根私有implementation/attempt03/anchor-fix-proof.json；发现登记 [D-20261108-FUSION-RECOVERY](../discoveries.md#d-20261108-fusion-recovery)。后继15已收到更正及自身stage须绑定自身输入的说明；未扩大修改其它历史stage。运行应用版本与BUILD仍为前述0.135.0/9b2/u_Nz4。
