@@ -1,7 +1,7 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = { title: '生图模块读取卡顿修复', outline: [
-  '修复后台数据库争用引起的长时间等待',
+  '补齐后台共享数据库入口的调度，减少长时间等待',
   '保留图片处理并行与原有生成、恢复规则',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

@@ -133,6 +133,18 @@ async function main() {
     await holding; clearTimeout(timer);
     await db.$transaction(tx => tx.$queryRawUnsafe('SELECT 1'));
     assert.equal(lateCallback, false); checks.push('expired_wait_never_executes_late_callback');
+    const secondRaw = new PrismaClient({ datasources: { db: { url: databaseUrl } }, log: [],
+      __internal: { configOverride: (config: Record<string, unknown>) => ({ ...config, relativeEnvPaths: { rootEnvPath: '', schemaEnvPath: '' } }) },
+    } as ConstructorParameters<typeof PrismaClient>[0]);
+    const secondWrap = evaluate('src/lib/catalog-directory-writes.ts', {
+      '@prisma/client': { Prisma }, './image-studio/catalog-revision': revision, './performance/request-trace': trace,
+    }).catalogDirectoryWrites as (client: PrismaClient) => PrismaClient;
+    const secondClient = secondWrap(secondRaw);
+    try {
+      await secondClient.$queryRawUnsafe('SELECT 1');
+      await overlap('secondClientMs', () => secondClient.$transaction(async tx => { await tx.$queryRawUnsafe('SELECT 1'); }));
+      checks.push('separate_clients_and_module_copies_share_process_queue');
+    } finally { await secondRaw.$disconnect(); }
     assert.equal(forbiddenCalls, 0);
     const receipt = path.join(directory, 'receipt.json');
     writeFileSync(receipt, JSON.stringify({ schema: 'sqlite-transaction-scheduling-engineering.v1', synthetic: true, runId,

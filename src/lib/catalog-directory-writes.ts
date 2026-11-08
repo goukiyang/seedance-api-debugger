@@ -19,6 +19,7 @@ const templatePrefixes = ['studio_shared_', 'studio_fixed_references_', 'studio_
 const assetPrefixes = ['asset-library-removal:', 'resource-library-removal:', 'multiview_'];
 const installed = new WeakMap<object, PrismaClient>();
 const marker = Symbol.for('sd2.catalog-directory-writes.v1');
+const processState = globalThis as typeof globalThis & { sd2SqliteTransactionQueue?: { tail: Promise<void> } };
 
 function settingKeys(value: unknown): string[] | null {
   if (typeof value === 'string') return [value];
@@ -72,18 +73,19 @@ export function catalogDirectoryWrites<T extends PrismaClient>(base: T): T {
   const observedInputs = new WeakSet<object>();
   const nativeTransaction = base.$transaction;
   const sqlite = process.env.DATABASE_URL?.startsWith('file:');
-  let transactionTail: Promise<void> = Promise.resolve();
+  const queue = processState.sd2SqliteTransactionQueue ??= { tail: Promise.resolve() };
   // SQLite BEGIN waits occupy engine threads. Under a one-CPU service quota,
   // a second BEGIN can prevent the lock holder's COMMIT from ever running.
+  // The engine runtime is shared by clients, so module copies must share this queue.
   function schedule<R>(run: () => Promise<R>, maxWait?: number): Promise<R> {
     if (!sqlite) return run();
     let expired: Error | undefined, timer: ReturnType<typeof setTimeout> | undefined;
-    const pending = transactionTail.then(() => {
+    const pending = queue.tail.then(() => {
       if (expired) throw expired;
       if (timer) clearTimeout(timer);
       return run();
     });
-    transactionTail = pending.then(() => {}, () => {});
+    queue.tail = pending.then(() => {}, () => {});
     if (maxWait === undefined) return pending;
     const waiting = new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => {
