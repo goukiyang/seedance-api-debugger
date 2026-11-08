@@ -1182,7 +1182,7 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 <!-- /CHARACTER-UNIFIED-STYLE-20261108 -->
 
 <!-- CHARACTER-PREVIEW-REFRESH-20261108 -->
-- [ ] 保存风格立即刷新规则预览：已保存修订传到新旧入口、立即重查及旧响应/错误隔离，保输入防抖和历史原词。真实React同夹具修前红/修后4组绿，commit9288682ad；正接15的实发135.7后封135.8，未抢Next/切版，功能用户手验。[原单§21](tasks/todo/2026-10-31-character-reference-replan.md)。
+- [x] 保存风格立即刷新规则预览已部署v0.135.8 /4891252f5 /8o_Bv5c-9A1PPtJd2JRtZ，待用户手验。保存修订接新旧入口，立即读取新词、首提交隐藏旧词/错误，迟到响应不能覆盖；保输入防抖和历史原词。928精确4文件融合单一路由发布；真实React修前红/修后4组绿、最终19组角色隔离及完整Next/types/lint/native/计价通过，7服务/内外health200、切版0，角色页7资源同SHA。本单只读补查无额外生成/收费；原发现转已修复部署待手验。[原单§21.2](tasks/todo/2026-10-31-character-reference-replan.md)。
 <!-- /CHARACTER-PREVIEW-REFRESH-20261108 -->
 
 

@@ -906,3 +906,29 @@ CodeGraph准备已成功核对本工作区cbaf、1962文件及0待同步/0缺失
 工程修复独立commit9288682ad，3角色客户端+1离线组件夹具。服务器私有测试runtime在`/data/video-api-debugger-engineering/character-preview-refresh-20261108/runtime`，只为复用现有REQ01真实React检测方式安装精确匹配的测试包，未改应用package依赖；同夹具修前1/修后0，4组覆盖修订即刷新/首提交屏蔽旧内容、迟到响应、保存取消输入等待及错误恢复、历史原词冻结。源码SHA和原红绿日志归私有`docs/materials/2026-11-08-character-preview-refresh/`；这属于隔离工程检查，不称实页功能验收。
 
 发布接续：15的另存命名设置已封135.7并在源检查/Next窗口，我方不启动重复Next或抢切版，预留135.8，3后继模型135.9；最终封源必须继承15实际成功源/BUILD/stage/guard及其记录，不能从旧135.6覆盖。若其真实阻塞可协调先交健康基线小修窗，未获交接不擅自切版。当前真实线上仍135.6/7c63，尚未宣称本修复已部署；最终源保完整构建与保护发布，用户手验。
+
+
+#### 21.1 受限融合为最终135.8，单一路由发布
+
+15原135.7两候选分别在旧restored契约、新离线脚本NODE_ENV只读赋值处被内置检查拒绝，均未切版；纠正显式personalStyleSelection及Reflect.set后，须重新冻结来源，不改失败原证。双方同意在尚未启动的新候选中仅cherry-pick本单9288682adbe402fd4ab82ac415c2a21594376961的4文件，改为一次135.8交付命名设置与即时预览；135.7不实发。该决定替代本节早先依次等135.7→135.8的过程方案，3后继135.9仍须继承最终实发源。
+
+最终候选4891252f509aa7ec38da078dd9bd62563c515561 /v0.135.8，branch codex/template-named-settings-20261108，attempt03，实际基线仍7c63/135.6。4文件SHA已与本单implementation-proof及React原证逐一核对，绑定role-preview-reused.json复用：Panel ae1dcb4eaa765cc09c1bc12a6edf5223aa9d0f9e861d060e159111c4defdc04f；studio a49f12983fd95cd6f893f7b1c3c558af59e19e378d7593bdee2e5a40968921d6；workbench cbf8f5ff778d6f7f1ec87b2f18226868dc2d5d91274e2a4f02cb4fb758b6bfef；CJS f9b7937617fa42f30c5df41dda973324fe1a5309676d891b1f5cf5918478a64f。没有把不同代码的旧成功冒新源成功；应用依赖不增加。
+
+15为唯一构建/切版执行者，本单不动其工作树、已封包装器或线上，仅维护自己原单/正式根本人条目，最终发布后做角色资源只读核对。完整native/pricing已通过，Next进行中；考虑融合tasks.ts的新标记影响共享角色输入，双方约定在已有门结束后，以同源独立隔离目录补原scripts/character-lab-submission-engineering.ts的19组，不改业务断言、不读生产env/库、不额外生图或浏览器检查。此刻仍为待部署，不冒网站功能验收。
+
+
+#### 21.2 已部署135.8与本单收口
+
+**已部署v0.135.8，待用户手动验收。** 正式入口：[角色工作台](https://sd2.youdooart.com/tools/character-lab)。本单修复9288682ad以精确4文件受限融合进最终实发源4891252f509aa7ec38da078dd9bd62563c515561，BUILD 8o_Bv5c-9A1PPtJd2JRtZ；135.7未发布。唯一发布控制器由命名设置任务执行，run02db8a7a-6832-4145-b988-67e5ebd77502，stage `/data/video-api-debugger/release-staging/template-named-settings-20261108/attempt03`。公网2026-11-08T13:17:43Z、健康13:18:39.890974Z收口，cutover0无恢复；本单没有再开第二次构建或切版。
+
+保存风格成功返回的configRevision现已接到新旧预览入口；版本变化立即读取最新规则并在首个提交隐藏旧词/旧错误，不等待普通输入300ms防抖。旧定时器/请求取消，迟到响应不能覆盖新版本；正常输入防抖保留。当前图片/历史recipe继续显示原冻结提示词，不重写已有图、补充内容、已受理/未知请求或账单，也不触发新生成。此次没有后端协议、存储格式或应用依赖变更。
+
+同一真实React夹具修前失败、修后4组通过，最终4文件SHA与928逐一一致，正式候选role-preview-reused.json按原证复用，未重复造同一检查。最终源19组角色输入隔离合同、fresh原生/计价、完整Next/types/lint通过；完整构建完成2026-11-08T13:15:56.105295Z。角色输入首次隔离运行因TMPDIR权属在断言前停止，原件保留，修工程tmp后原19组全部通过；不修改业务断言。无浏览器、收费、生图或生产库回归。
+
+发布原证含6启动、7服务、4timer、3页JS同SHA、匿名接口拒绝及内外health200、控制器退出；价格2行全字段SHA d03c539d74a31b5e2a6a0305724b1b9f193e0ade878370898c7632d1bdc96539、既有策略及数据链接不变。F0 guard f0fc87f9896daa685c1067bb341e85ee21933a9a /BUILD _JwQu0Zzx5P5dk89dyQd9沿原产物证据复用；恢复入口仅首段只读预检通过，未执行恢复演练或数据回灌，不把构建/健康冒功能验收。
+
+本单于2026-11-08T13:23:41.198289Z只读补核实际源4文件SHA、角色页7个JS/CSS公网200与本地编译产物逐一同SHA；远端写入/业务写/收费/浏览器均0。安全原证收于私有`docs/materials/2026-11-08-character-preview-refresh/shared-attempt03/`（public-character-assets.json、deployment-receipts.json、release-identity.json），未下载生产DB、凭据、buildEnv或价格原行。原自备attempt01含PENDING的控制草案从未上传/执行，已作废，由此次单一路由共享attempt03替代；后续仅本人记录提交推送，不动运行源或命名设置§16.9。后继模型135.9已完整继承489，实际新guard与发布由其任务负责，不在本单扩大操作。
+
+D-20261108-STYLE-PREVIEW-REFRESH从待核线索经隔离复现、修复、部署转为待用户手验；旧待核阶段原文留§20。检查仅覆盖本次修复和必要发布链，未新增任务外问题；风格保存后的实页即时预览、切换历史原提示词及真实生成效果仍由用户手动验收。
+
+CodeGraph在实际角色工作区82ebb3db4（应用代码928）的准备同步于2026-11-08T13:25:59Z完成：1967源文件、0待同步/缺失/哈希不符/解析错误，sourceFingerprint 6e77fe189933b3e341cab00b644362dd64031462590d2b2a847bb2adb50885e9。既有context调用未返回的缺口不冒成功，3客户端props透传和effect关系仍以精确源码及真实React原证核对；本段后续纯文档收口不重复建索引或构建。
