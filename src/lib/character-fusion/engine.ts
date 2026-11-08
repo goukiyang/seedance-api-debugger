@@ -121,7 +121,7 @@ function uniqueName(row: FusionRow, others: FusionRow[]) {
 export function generateBatch(s: FusionSettings, seed = Date.now()) {
   const error = validateGeneration(s); if (error) throw new Error(error);
   const result: FusionRow[] = [];
-  for (const [i, category] of chooseCategories(s, seeded(seed)).entries()) result.push(uniqueName(makeRow(category, seed + i * 257), result));
+  chooseCategories(s, seeded(seed)).forEach((category, i) => result.push(uniqueName(makeRow(category, seed + i * 257), result)));
   return result;
 }
 export function bossRow(s: FusionSettings, others: FusionRow[], seed = Date.now()) {

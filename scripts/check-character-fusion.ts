@@ -34,7 +34,7 @@ assert.equal(bossRow(bossSettings, [], 88).category.source, bossSettings.boss.so
 singleton.requirements = '全局要求测试';
 assert(textFor(rows[0], singleton).includes('全局要求测试'));
 assert(csvFor([{ ...rows[0], name: '=1+1' }], singleton).includes('"\'=1+1"'));
-assert(!/[\u3400-\u9fff]/.test(textFor(rows[0], { requirements: defaults().requirements, lang: 'en' })));
+assert(rows.every(row => !/[\u3400-\u9fff]/.test(textFor(row, { requirements: defaults().requirements, lang: 'en' }))));
 const invalid = defaults(); invalid.rules.source.forEach(t => { t.status = 'exclude'; });
 assert.throws(() => generateBatch(invalid), /全部排除/);
 const capacity = defaults(); capacity.count = 4; capacity.rules.source.slice(0, 5).forEach(t => { t.status = 'must'; });
