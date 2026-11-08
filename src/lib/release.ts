@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '模型开放统一由费率页控制', outline: [
-  '各生成入口统一读取模型开放设置，关闭型号不再出现在新选择中',
-  '文字和抠图模型可在同一费率页管理开放状态',
-  '现有草稿、历史结果和已受理任务继续保留',
+const notice = { title: '角色融合卡片与对话新增', outline: [
+  '卡片默认收起，展开后拖动与调整规则',
+  '对话打磨新卡片，确认后加入组合',
+  '固定要求按开关启用，中英共用同一角色',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
