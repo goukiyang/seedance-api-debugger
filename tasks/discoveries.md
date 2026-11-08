@@ -11,17 +11,17 @@
 ## 待核线索
 
 <!-- D-20261107-PIN-REMAINING -->
-**D-20261107-PIN-LEGACY-SOURCE｜已确认受限旧记录 / P2。** 同一9宫格旧工作区6条成功、active输出的任务与冻结source均null，当前publisher关联不存在，按现规则仍拒绝置顶。不是此前误计的42条工具样本；尚未确认这6条都应共享。先核合法执行/发布关联，不补造source或批量放行。
+**D-20261107-PIN-LEGACY-SOURCE｜已确认历史谱系边界 / P2，待界定兼容发布。** 同一9宫格旧工作区6条成功active、任务与冻结source均null的结果全部早于当前共享源创建（2026-10-04T14:34:12Z）；原冻结名为未命名/表情，publisher/binding/reproduction关联均无。现规则403可复现，原图保留；不是42条工具样本，也不证明6条都应按今天源共享。现代绑定不可变，不按名字猜来源。不能回写source冒历史事实；补可信执行/显式发布关联，沿原单§16.8.3处理。
 
-**D-20261107-PIN-VISIBILITY-STATE｜已证行为与状态表达缺口 / P2。** 置顶记录存在时，资产/模板权限变化仍可将其从读者列表中过滤；管理员与普通同事可见性可能不同。私密撤权后的过滤已由既有隔离夹具验证，现场发生情况待核。本人缺少完整“已记录/当前可见/被过滤原因”的投影和失效记录管理，后续保密规则不放松。
+**D-20261107-PIN-VISIBILITY-STATE｜已复现本人管理状态投影缺口 / P2，待实施。** 私密化后stored pin保留而普通读者被正确过滤，管理员仍可见；补测普通生成者自己也可遇stored=1/visible=0，后端active=false可取消，但按钮从可见集合推断active，不能得知此记录仍已发布。应分离本人已记录管理状态与读者可见投影/原因，不放松私密或原图权限。生产本次3条pin，同asset私密引用重合0（未覆盖文件别名的ACL全判定），不冒现场发生证明。
 
-**D-20261107-PIN-CONFLICT-RECOVERY｜已见设计边界 / P3，频率及体验待验。** 同root整组revision使不同图片操作也可能冲突，且置顶会使旧分页游标失效；待确认的置顶原操作只存模块内Map，整页刷新不保该提示，但可重读服务器状态。未证明生产发生重复操作或数据丢失。保CAS/原号，分别验证多人和断网刷新。
+**D-20261107-PIN-CONFLICT-RECOVERY｜已确认目录游标恢复缺陷 / P2，待实施；CAS保留。** 隔离生产29原源码两用户对不同图从同revision提交，一成功一409；旧feed游标在置顶变化后连续两次409，新读成功。普通onRetry仍用taskRetryCursor，已翻页silent不更新nextCursor；喜欢列表refresh虽首读但pageReads>1仍保旧nextCursor，后续more可再遇同409。最小修法针对目录失效重建分页边界，保持已见结果/账号/模块/筛选；不吞全部409或移除CAS。待确认置顶原操作只存模块Map，整页刷新接续提示丢失但服务器记录不丢；未证生产重复操作、丢图或并发频率。
 
-上述统一入口为[原联合工单§16.8.2](todo/2026-11-05-template-sharing-cutout-open-preflight.md)，只读元数据见正式根私有pin-wide-gallery/remaining-boundaries-20261107.json。应用源码与生产数据未改，无新构建/部署；规模性能继续沿D-20261107-PIN-MEDIA-SCOPE，不拆成重复修复单。
+统一入口为[原联合工单§16.8.3](todo/2026-11-05-template-sharing-cutout-open-preflight.md)。新证为正式根私有pin-wide-gallery/architecture-audit-20261107下生产只读元数据与两次隔离探针（均退出0、无网络/费用）；12相关源SHA与生产29一致。原§16.8.2保留前次判断，以上为后续取证收窄，不冒已修复/功能验收，不重复建单。
 <!-- /D-20261107-PIN-REMAINING -->
 
 <!-- D-20261107-PIN-MEDIA-SCOPE -->
-**D-20261107-PIN-MEDIA-SCOPE｜疑似扩展性问题 / P3，待测。** v27置顶链路复核发现，`resolveStudioPinnedAsset`对单个asset先查索引，再调用`readableStudioPins`核整组置顶（现有上限200），后者批量查任务/资产及私密参考URL。多个缩略图请求可能重复整组工作；尚未测真实规模增长或并发耗时，不能认定为当前延迟或本次403原因。本次只为来源不同的pin批量读可信复现证明，不逐卡查父任务，不向输出投影带出快照。后续最小取证：同环境固定1/50/200条合法置顶，比较单张媒体鉴权/DB耗时与同组多图请求，再判断是否沿现有asset索引定向核验；保root共享/撤权、私密文件和本人边界，不先建缓存或迁库。[源码](../src/lib/image-studio/result-pins.ts)，实际主源d0c1b31693125ddb9f37d70e323fdf01e3cc9040；来源[联合工单§16.8.1](todo/2026-11-05-template-sharing-cutout-open-preflight.md)。
+**D-20261107-PIN-MEDIA-SCOPE｜已证读取放大 / P3，非已证当前延迟根因。** resolveStudioPinnedAsset查单asset索引后仍读整root（上限200）；可见性又读全部私密绑定，列表前后各核。生产29同源码隔离SQLite顺序6组×7暖样本：1pin/0绑定p50=5.63ms、10次查询/6返回行；200pin/0绑定10.96ms/404行；1pin/1000绑定29.98ms/2006行；200pin/1000绑定42.61ms/2404行。计数是Prisma返回行，不是底层扫描行，非HTTP/并发SLO或改造收益。生产只读当次仅3pin（最大组2）、77相关绑定/23引用/20独立asset、格式异常0，另9metadata子记录按reader排除。另在合成库添加1个无关不兼容私密引用后，两个模板的同事媒体和普通feed失败、管理员读正常，证明全局parse的故障放大；生产坏行0，属已复现风险，不冒当前根因。定向catalog SQL同样有全局兼容检查，不能只传assetIds或忽略坏行就称修复。沿[原单§16.8.3](todo/2026-11-05-template-sharing-cutout-open-preflight.md)优先按原索引缩小任务/资产范围并复用权限投影，保撤权/文件别名/私密保护，不先建缓存、表或服务；无真实坏行时不加理论兜底。原始42样本、源码身份及故障注入见正式根私有pin-wide-gallery/architecture-audit-20261107。
 <!-- /D-20261107-PIN-MEDIA-SCOPE -->
 
 <!-- D-20261107-SHARED-CPU -->
