@@ -78,11 +78,22 @@ export function labOperationRules(operation: CharacterLabOperation) {
   }
 }
 
-export function labViewPrompt(config: CharacterLabPromptFields, operation: CharacterLabOperation, description: string) {
+export function labViewPrompt(config: CharacterLabPromptFields, operation: CharacterLabOperation, description: string, layout?: { count: 4 | 9; bodyInput?: boolean }) {
   const field = labViewPromptFields[operation];
   const style = labStyleField(operation);
-  return [labOperationRules(operation), config[field] || labDefaultViewPrompts[field], config[style] ?? (style === 'styleConstraints' ? '' : labDefaultStageStyles[style]),
+  const headGrid = layout && (operation === 'side' || operation === 'refine-side' || operation === 'refine-face');
+  const rules = headGrid
+    ? `输出一张1:1正方形${layout.count === 9 ? '3×3' : '2×2'}等分宫格，恰好${layout.count}格；每格为1:1头肩照，统一大小、背景、镜头和光线，不跨格、不留空、不添加文字。`
+      + (operation === 'refine-face' ? '唯一参考是选定的正脸底图，各格保持同一个人的身份、年龄、骨相和发型，只微调本次指定细节。'
+        : operation === 'side' ? '唯一参考是当前采用的正脸，各格都为同一人的90°纯侧面，面朝画面左侧、视线水平、保留头顶。各方案只做小幅细节变化，不探索不同人物。'
+          : '参考1是当前采用的正脸，用于锁定身份；参考2是选定的侧脸底图。各格都为同一个人的90°左侧面，保持侧脸方向，只微调本次指定细节，不改变身份。')
+    : layout?.bodyInput && operation === 'body-pair'
+      ? labOperationRules(operation).replace('仅用原始角色设计图作为参考', '参考1是原始角色设计，决定身体比例、服装、材质、配饰与细节；参考2是本次要调整的既有正背面整组，在原设计约束下只修改本次要求')
+      : labOperationRules(operation);
+  const savedRule = config[field] === labDefaultViewPrompts[field] || config[field] === '保留这张正脸的年龄感、骨相、发型与辨识特征，四个方案只在指定细节上做小幅变化。' || config[field] === '保留同一个人的身份和侧脸方向，只细调指定部分，四个版本的变化应小而可辨。' ? '' : config[field];
+  return [rules, savedRule || (headGrid && operation === 'refine-face' ? '仅在指定细节上做小幅、可辨的变化。' : headGrid && operation === 'refine-side' ? '保留同一身份和侧脸方向，仅细调指定部分。' : labDefaultViewPrompts[field]), config[style] ?? (style === 'styleConstraints' ? '' : labDefaultStageStyles[style]),
     description ? `${operation.startsWith('body-') ? '本次角色补充' : '本次局部调整'}：${description}` : '',
+    headGrid ? `本次输出数量与布局最终以${layout.count}格、${layout.count === 9 ? '3×3' : '2×2'}等分方形宫格为准；各格同一身份，不能按补充文字中的旧数量改变布局。` : '',
     '保持自然摄影、平视和一致背景。遵守上述身份、参考来源与构图约束。'].filter(Boolean).join('\n\n');
 }
 export function resultLabPrompt(config: CharacterLabConfig, draft: CharacterLabDraft, hasPrevious: boolean) {

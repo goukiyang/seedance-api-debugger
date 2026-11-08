@@ -28,6 +28,7 @@ import type { CharacterLabBootstrap, CharacterLabPlan, CharacterLabQuote, Charac
 // The compatible recovery build keeps paired results readable while closing fresh generation.
 export const CHARACTER_LAB_BODY_PAIRS_ENABLED = true;
 export const CHARACTER_LAB_RECIPE_WRITES_ENABLED = true;
+export const CHARACTER_LAB_GRID_WRITES_ENABLED = true;
 
 type StoredPlan = CharacterLabPlan & { inputFingerprint: string };
 type Receipt = { state: 'prepared' | 'submitting' | 'accepted' | 'rejected'; error?: string };
@@ -124,15 +125,18 @@ export async function prepareLab(user: SessionUser, body: Record<string, unknown
   const operation = body.operation as CharacterLabOperation | undefined;
   if (operation === 'body-pair' && !CHARACTER_LAB_BODY_PAIRS_ENABLED) throw new StudioError('当前恢复版本暂不新建正背面任务，原有记录仍可查看和选用', 409);
   const refinement = operation === 'refine-face' || operation === 'refine-side';
+  if (body.layoutProtocol !== undefined && body.layoutProtocol !== 1) throw new StudioError('候选布局版本不受支持，请刷新页面', 409);
+  if (body.layoutProtocol === 1 && !CHARACTER_LAB_GRID_WRITES_ENABLED) throw new StudioError('当前恢复版本仅查看已有候选，暂不创建新版布局', 409);
+  const layout = body.layoutProtocol === 1;
   if (operation && kind !== (refinement ? 'faces' : 'result')) throw new StudioError('生成用途与输出不匹配');
   const slotScoped = operation !== undefined || body.workbench === 2 ? true as const : undefined;
   const draft = parseLabDraft(body.draft);
   delete draft.views;
-  const input = refinement ? labReference(body.input) : null;
+  const input = refinement || layout && operation === 'body-pair' ? labReference(body.input) : null;
   const description = operation ? labText(body.description ?? (refinement ? '' : operation === 'side' ? draft.sideDescription || '' : body.contextProtocol === 1 ? draft.bodyDescription || '' : draft.context), 3000, refinement ? '微调描述' : '角色补充') : '';
   if (refinement && (!input || !description)) throw new StudioError('请选择要微调的图片并填写修改要求');
   await readLabWorkspace(user.id, workspaceId);
-  const inputFingerprint = createHash('sha256').update(JSON.stringify({ workspaceId, kind, draft, operation, slotScoped, ...(operation ? { input, description } : {}), ...(body.contextProtocol === 1 ? { contextProtocol: 1 } : {}) })).digest('hex');
+  const inputFingerprint = createHash('sha256').update(JSON.stringify({ workspaceId, kind, draft, operation, slotScoped, ...(operation ? { input, description } : {}), ...(body.contextProtocol === 1 ? { contextProtocol: 1 } : {}), ...(layout ? { layoutProtocol: 1 } : {}) })).digest('hex');
   const existing = await prisma.platformSetting.findUnique({ where: { key: planKey(user.id, requestId) } });
   if (existing) {
     const plan = JSON.parse(existing.value_json) as StoredPlan;
@@ -165,6 +169,10 @@ export async function prepareLab(user: SessionUser, body: Record<string, unknown
       if (!sameLabReference(side.mainFace, draft.mainFace)) throw new StudioError('侧脸对应旧正脸，请先为当前正脸制作侧脸', 409);
       references.push(await persistLabFace(user, input));
     }
+  } else if (operation === 'body-pair' && input) {
+    const previous = await readLabPlan(user.id, input.planId);
+    if (input.cell !== undefined || previous.operation !== 'body-pair' || previous.workspaceId !== workspaceId || previous.sourceAssetId !== draft.sourceAssetId) throw new StudioError('身体微调须选择当前角色的完整正背面组', 409);
+    references.push((await labOutput(user, previous)).asset.id);
   } else if (!operation && kind === 'result') {
     if (!draft.mainFace) throw new StudioError('请先选择主面部');
     const hasAdjustment = Boolean(draft.adjustment.trim()) || draft.adjustmentCell !== null;
@@ -184,11 +192,11 @@ export async function prepareLab(user: SessionUser, body: Record<string, unknown
   }
   const effective = await resolveImageGenerationRequestChannel(draft.model, draft.channelId, undefined, quality) || 'original';
   const imageChannel = effective !== 'original' ? await captureImageGenerationRequestChannel(draft.model, quality, draft.channelId) : undefined;
-  const prompt = operation ? labViewPrompt(config, operation, description)
+  const prompt = operation ? labViewPrompt(config, operation, description, layout ? { count: draft.count, bodyInput: Boolean(input) } : undefined)
     : kind === 'faces' ? faceLabPrompt(config, draft) : resultLabPrompt(config, draft, Boolean(previousResultPlanId));
   if (prompt.length > 20000) throw new StudioError('规则和本次描述合计过长，请精简后再生成');
   const plan: StoredPlan = { id: requestId, workspaceId, kind, createdAt: new Date().toISOString(), sourceAssetId: draft.sourceAssetId,
-    count: refinement ? 4 : draft.count, diversity: draft.diversity, context: operation ? '' : kind === 'faces' ? draft.faceDescription! : draft.context,
+    count: refinement && !layout ? 4 : draft.count, diversity: draft.diversity, context: operation ? '' : kind === 'faces' ? draft.faceDescription! : draft.context,
     mainFace: operation === 'side' || operation === 'refine-side' || !operation && kind === 'result' ? draft.mainFace : null,
     auxiliaryFaces: !operation && kind === 'result' ? draft.auxiliaryFaces : [], auxiliaryFeatures: !operation && kind === 'result' ? draft.auxiliaryFeatures : '',
     adjustment: operation ? description : kind === 'result' ? draft.adjustment : '', adjustmentCell: !operation && kind === 'result' ? draft.adjustmentCell : null,
@@ -197,6 +205,7 @@ export async function prepareLab(user: SessionUser, body: Record<string, unknown
     referenceIds: references, projectId: draft.projectId, ...(imageChannel ? { imageChannel } : {}),
     ...(operation ? { operation } : {}), ...(input ? { input } : {}), ...(slotScoped ? { slotScoped } : {}),
     contextProtocol: 1,
+    ...(layout && (kind === 'faces' || operation === 'side') ? { outputLayout: 'grid' as const } : {}),
     ...(body.recipeProtocol === 1 ? { recipeProtocol: 1 as const } : {}),
     ...(settingsSource ? { origin: { planId: settingsSource.id, mode: 'current' as const } } : {}), inputFingerprint };
   await prisma.$transaction(async tx => {
@@ -214,6 +223,7 @@ export async function prepareLab(user: SessionUser, body: Record<string, unknown
 export async function reproduceLab(user: SessionUser, body: Record<string, unknown>) {
   if (!CHARACTER_LAB_RECIPE_WRITES_ENABLED) throw new StudioError('当前恢复版本仅查看已有配方，暂不创建新配方', 409);
   const source = await readLabPlan(user.id, labId(body.sourcePlanId, '原生成'));
+  if (source.outputLayout === 'grid' && !CHARACTER_LAB_GRID_WRITES_ENABLED) throw new StudioError('当前恢复版本仅查看已有新版候选', 409);
   if (source.operation === 'body-front' || source.operation === 'body-back') throw new StudioError('旧版单面记录可沿用设置；新的正背面须一起生成', 409);
   const workspace = await readLabWorkspace(user.id, labId(body.workspaceId, '角色项目'));
   if (source.workspaceId !== workspace.id || source.sourceAssetId !== workspace.draft.sourceAssetId) throw new StudioError('原设置属于另一角色或原图，当前输入保留', 409);
@@ -264,6 +274,7 @@ export async function submitLab(user: SessionUser, body: Record<string, unknown>
   if (!receipt || (JSON.parse(receipt.value_json) as Receipt).state !== 'prepared') throw new StudioError('原提交结果待确认或已结束，请查询原记录，不要重复生成', 409);
   if (plan.recipeProtocol === 1 && !CHARACTER_LAB_RECIPE_WRITES_ENABLED) throw Object.assign(new StudioError('当前恢复版本暂不创建新配方，原有记录仍可查看和选用', 409), { submitted: false });
   if (plan.operation === 'body-pair' && !CHARACTER_LAB_BODY_PAIRS_ENABLED) throw Object.assign(new StudioError('当前恢复版本暂不新建正背面任务，原有记录仍可查看和选用', 409), { submitted: false });
+  if (plan.outputLayout === 'grid' && !CHARACTER_LAB_GRID_WRITES_ENABLED) throw Object.assign(new StudioError('当前恢复版本暂不提交新版候选', 409), { submitted: false });
   const storedQuote = await prisma.platformSetting.findUnique({ where: { key: quoteKey(user.id, plan.id) } });
   if (!storedQuote) throw new StudioError('请先获取本次生成报价');
   const quote = JSON.parse(storedQuote.value_json) as CharacterLabQuote & { characterLabSourceVersion?: number };

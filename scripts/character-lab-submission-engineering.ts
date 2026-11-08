@@ -361,6 +361,62 @@ async function main() {
     await assert.rejects(media.readLabReference(user, workspaceId, sourceAssetId, { planId: pair.id }, 'body-back'), /其他角色、原图或视图/);
     await media.readLabReference(user, workspaceId, sourceAssetId, { planId: pair.id, cell: 0 }, 'body-front');
     await media.readLabReference(user, workspaceId, sourceAssetId, { planId: bodyFront.id }, 'body-front');
+    // New explicit layout never changes old single-side interpretation.
+    const layouts = await import('../src/lib/character-lab/types');
+    assert.equal(layouts.characterLabCellCount(side), 1);
+    assert.throws(() => media.labCellRect(90, 90, side, 0), /没有裁切/);
+    // Use a separate workspace; the existing pending-side fixture must remain unknown.
+    const gridWorkspace = await store.createLabWorkspace(owner, randomUUID(), '新版布局隔离', 'gpt-image-2');
+    const gridFirst = { ...first, id: randomUUID(), workspaceId: gridWorkspace.id };
+    await createPlan(gridFirst); await paint(gridFirst, '#ff0000');
+    const gridFace = { planId: gridFirst.id, cell: face.cell };
+    const gridPicked = { ...picked, mainFace: gridFace };
+    const gridPair = { ...pair, id: randomUUID(), workspaceId: gridWorkspace.id };
+    await createPlan(gridPair); await paint(gridPair, '#0000ff', '#ffff00');
+    const gridPrepare = (kind: 'faces' | 'result', operation?: string, overrides?: Record<string, unknown>) => prepare(kind, operation, { workspaceId: gridWorkspace.id, ...overrides });
+    const storedGrid = { ...side, id: randomUUID(), workspaceId: gridWorkspace.id, mainFace: gridFace, outputLayout: 'grid' as const, count: 9 as const };
+    await createPlan(storedGrid);
+    await paint(storedGrid, '#00ff00');
+    await media.readLabReference(user, gridWorkspace.id, sourceAssetId, { planId: storedGrid.id, cell: 8 }, 'side');
+    assert.equal((await sharp(await media.labPng(user, storedGrid, 8)).metadata()).width, 30);
+    if (service.CHARACTER_LAB_GRID_WRITES_ENABLED) {
+      for (const count of [4, 9] as const) {
+        const gridDraft = { ...gridPicked, count };
+        const gridSide = await gridPrepare('result', 'side', { layoutProtocol: 1, draft: gridDraft });
+        assert.equal(gridSide.outputLayout, 'grid');
+        assert.equal(gridSide.count, count);
+        assert.equal(layouts.characterLabCellCount(gridSide), count);
+        assert.match(gridSide.prompt, new RegExp(`恰好${count}格`));
+        assert.doesNotMatch(gridSide.prompt, /仅输出单张侧脸|FACE_ONLY_SENTINEL|BODY_ONLY_SENTINEL/);
+        await paint(gridSide, '#00ff00');
+        const cell = { planId: gridSide.id, cell: count - 1 };
+        await media.readLabReference(user, gridWorkspace.id, sourceAssetId, cell, 'side');
+        await assert.rejects(media.readLabReference(user, gridWorkspace.id, sourceAssetId, { ...cell, cell: count }, 'side'), /格子选择无效/);
+        const crop = await media.labPng(user, gridSide, count - 1);
+        assert.equal((await sharp(crop).metadata()).width, count === 9 ? 30 : 45);
+        const refinedSide = await gridPrepare('faces', 'refine-side', { layoutProtocol: 1, draft: gridDraft, input: cell, description: '鼻尖微调' });
+        assert.equal(refinedSide.count, count);
+        assert.equal(refinedSide.referenceIds.length, 2);
+        assert.deepEqual(refinedSide.input, cell);
+        assert.deepEqual(contexts.labPersonalFields(refinedSide), { sideDescription: '鼻尖微调' });
+        const refinedFace = await gridPrepare('faces', 'refine-face', { layoutProtocol: 1, draft: gridDraft, input: gridFace, description: '正脸微调' });
+        assert.equal(refinedFace.count, count);
+        assert.match(refinedFace.prompt, new RegExp(`恰好${count}格`));
+        assert.deepEqual(contexts.labPersonalFields(refinedFace), { faceDescription: '正脸微调' });
+      }
+      const bodyInput = { planId: gridPair.id };
+      const refinedPair = await gridPrepare('result', 'body-pair', { layoutProtocol: 1, draft: gridPicked, input: bodyInput });
+      assert.deepEqual(refinedPair.input, bodyInput);
+      assert.equal(refinedPair.referenceIds[0], sourceAssetId);
+      assert.equal(refinedPair.referenceIds.length, 2);
+      assert.match(refinedPair.prompt, /参考2是本次要调整的既有正背面整组/);
+      assert.doesNotMatch(refinedPair.prompt, /FACE_ONLY_SENTINEL|SIDE_ONLY_SENTINEL/);
+      const pairRecipe = await (await import('../src/lib/character-lab/recipe')).labRecipe(user, refinedPair.id);
+      assert.deepEqual(pairRecipe.references[1].source, bodyInput);
+      assert.match(pairRecipe.references[1].label, /正背面整组/);
+      await assert.rejects(gridPrepare('result', 'body-pair', { layoutProtocol: 1, draft: gridPicked, input: { planId: first.id } }), /完整正背面组/);
+      await assert.rejects(gridPrepare('faces', undefined, { layoutProtocol: 2 }), /布局版本不受支持/);
+    }
     const pendingWorkspace = await store.createLabWorkspace(owner, randomUUID(), '成对未知提交', 'gpt-image-2');
     const pendingPair = { ...plan(randomUUID()), workspaceId: pendingWorkspace.id, kind: 'result', operation: 'body-pair', slotScoped: true };
     await createPlan(pendingPair, 'submitting');
@@ -500,7 +556,7 @@ async function main() {
         'same_slot_pending_only', 'body_pair_single_task_description_crops_and_slot_conflicts', 'legacy_projection_and_writer', 'composition_png_order_identity_and_idempotency',
         'recipe_detail_full_context_and_member_projection', 'restore_reads_only_and_composition_lineage',
         'current_rules_vs_historical_quote_and_single_submission', 'recipe_guard_preserves_unknown_receipts',
-        'independent_context_prepare_and_old_request_lookup', 'independent_history_empty_and_workspace_preservation', 'independent_style_and_preview_scopes'],
+        'independent_context_prepare_and_old_request_lookup', 'independent_history_empty_and_workspace_preservation', 'independent_style_and_preview_scopes', 'explicit_head_4_9_crops_refine_and_body_pair_input'],
       taskId: created.id, batchId: created.batch_id, databasePath, productionWrites: 0, paidRequests: 0,
       browserRuns: 0, forbiddenCalls }, null, 2));
   } finally {

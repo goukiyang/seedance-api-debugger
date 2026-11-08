@@ -5,7 +5,7 @@ import { Copy, Loader2, X } from 'lucide-react';
 import { readJsonResponse } from '@/lib/http/json-response';
 import { RelativeTime } from '@/components/RelativeTime';
 import { CharacterLabImage } from './images';
-import { characterLabMediaUrl, characterLabStrength, type CharacterLabPlan, type CharacterLabRecipe, type CharacterLabReference } from '@/lib/character-lab/types';
+import { characterLabIsGrid, characterLabMediaUrl, characterLabStrength, type CharacterLabPlan, type CharacterLabRecipe, type CharacterLabReference } from '@/lib/character-lab/types';
 import styles from './studio.module.css';
 
 type Props = {
@@ -90,7 +90,7 @@ export function CharacterLabPromptPanel(props: Props) {
         : detailError ? <p role="status">{detailError}</p> : !current ? <p role="status"><Loader2 size={14} className="animate-spin" />正在读取这张图片的生成记录…</p> : <>
           <div className={styles.recipeIdentity}>
             {current.hasImage && <button type="button" onClick={() => props.onPreview(reference)} aria-label="放大当前记录图片"><CharacterLabImage src={characterLabMediaUrl(reference.planId, reference.cell)} alt="当前生成记录图片" /></button>}
-            <span><strong>{current.plan.operation === 'body-pair' ? '正背面同次生成' : current.plan.kind === 'faces' ? `${current.plan.count}宫格${reference.cell !== undefined ? ` · 第${reference.cell + 1}格` : ''}` : '角色生成记录'}</strong><RelativeTime value={current.plan.createdAt} /><small>记录 {current.plan.id.slice(0, 8)}</small></span>
+            <span><strong>{current.plan.operation === 'body-pair' ? '正背面同次生成' : characterLabIsGrid(current.plan) ? `${current.plan.count}宫格${reference.cell !== undefined ? ` · 第${reference.cell + 1}格` : ''}` : '角色生成记录'}</strong><RelativeTime value={current.plan.createdAt} /><small>记录 {current.plan.id.slice(0, 8)}</small></span>
           </div>
           <dl className={styles.recipeFacts}>
             <div><dt>模型</dt><dd>{current.plan.model}</dd></div><div><dt>画质 / 分辨率</dt><dd>{current.plan.quality} / {current.plan.resolution}</dd></div>

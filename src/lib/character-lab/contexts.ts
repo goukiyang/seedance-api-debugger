@@ -2,7 +2,8 @@ import type { CharacterLabDraft, CharacterLabPlan } from './types';
 
 export function labPersonalFields(plan: CharacterLabPlan): Partial<CharacterLabDraft> {
   if (plan.operation?.startsWith('body-')) return { bodyDescription: plan.adjustment };
-  if (plan.operation === 'side') return { sideDescription: plan.adjustment };
+  if (plan.operation === 'refine-face') return { faceDescription: plan.adjustment };
+  if (plan.operation === 'side' || plan.operation === 'refine-side') return { sideDescription: plan.adjustment };
   if (plan.operation) return {};
   return plan.kind === 'faces' ? { faceDescription: plan.context } : { context: plan.context, adjustment: plan.adjustment };
 }
