@@ -1,0 +1,128 @@
+{
+  "schema": "bridge-diag-rootcause-release.v1",
+  "recordedAt": "2026-11-08T07:30:55.353972+00:00",
+  "main": {
+    "source": "179f267043dc27580400f403c18f93213fdf74bd",
+    "version": "0.134.30"
+  },
+  "baseline": {
+    "source": "2266d7d8098acf531a87940929fb6263a9876444",
+    "version": "0.134.29",
+    "build": "q6NJi504KhO7IJgAleb9f"
+  },
+  "guard": {
+    "readerContract": "works-method-reader.1",
+    "cutoutReaderContract": "cutout-owner-reader.1",
+    "bodyPairReaderContract": "character-body-pair-reader.1",
+    "recipeReaderContract": "character-lab-recipe-reader.1",
+    "contextReaderContract": "character-independent-context.1",
+    "source": "f0fc87f9896daa685c1067bb341e85ee21933a9a",
+    "version": "0.134.28+character-workbench-guard.1",
+    "gridReaderContract": "character-explicit-grid.1",
+    "build": "_JwQu0Zzx5P5dk89dyQd9"
+  },
+  "build": "h-oDly_LBDBj_eojlNFNQ",
+  "fullNextBuildPassed": true,
+  "fullTypeAndLintIncluded": true,
+  "guardBuildReusedWithoutRetimestamp": true,
+  "guardCompiledFilesChecked": 1469,
+  "databaseBackup": {
+    "path": "/data/video-api-debugger/release-staging/bridge-diag-rootcause-20261108/attempt01/database-before.sqlite",
+    "sha256": "33044e454c5ed01323c190ae5f08e220423b5851e39aede7bc29bccc818929d0",
+    "consistentBackup": true,
+    "automaticDataRestore": false
+  },
+  "pricingBeforeAllFieldsSha256": "d03c539d74a31b5e2a6a0305724b1b9f193e0ade878370898c7632d1bdc96539",
+  "cutoverExit": 0,
+  "publicProof": {
+    "at": "2026-11-08T07:28:44.745666+00:00",
+    "source": "179f267043dc27580400f403c18f93213fdf74bd",
+    "version": "0.134.30",
+    "build": "h-oDly_LBDBj_eojlNFNQ",
+    "services": {
+      "sd2-gray": {
+        "MainPID": "1327414",
+        "WorkingDirectory": "/data/video-api-debugger/managed-releases/179f267043dc27580400f403c18f93213fdf74bd",
+        "ActiveState": "active"
+      },
+      "sd2-image-studio": {
+        "MainPID": "1327693",
+        "WorkingDirectory": "/data/video-api-debugger/managed-releases/179f267043dc27580400f403c18f93213fdf74bd",
+        "ActiveState": "active"
+      },
+      "sd2-hd-derivatives": {
+        "MainPID": "1327358",
+        "WorkingDirectory": "/data/video-api-debugger/managed-releases/179f267043dc27580400f403c18f93213fdf74bd",
+        "ActiveState": "active"
+      },
+      "sd2-multiview-works": {
+        "MainPID": "1327392",
+        "WorkingDirectory": "/data/video-api-debugger/managed-releases/179f267043dc27580400f403c18f93213fdf74bd",
+        "ActiveState": "active"
+      },
+      "sd2-role-coordinator": {
+        "MainPID": "1327471",
+        "WorkingDirectory": "/data/video-api-debugger/managed-releases/179f267043dc27580400f403c18f93213fdf74bd",
+        "ActiveState": "active"
+      },
+      "sd2-template-prompts": {
+        "MainPID": "1327573",
+        "WorkingDirectory": "/data/video-api-debugger/managed-releases/179f267043dc27580400f403c18f93213fdf74bd",
+        "ActiveState": "active"
+      },
+      "sd2-periodic-credits": {
+        "MainPID": "1327422",
+        "WorkingDirectory": "/data/video-api-debugger/managed-releases/179f267043dc27580400f403c18f93213fdf74bd",
+        "ActiveState": "active"
+      }
+    },
+    "timerCount": 4,
+    "release": {
+      "version": "0.134.30",
+      "channel": "production",
+      "title": "",
+      "outline": [],
+      "summary": ""
+    },
+    "assets": [
+      {
+        "page": "/page",
+        "path": "/_next/static/chunks/app/page-1dfa6f2ba3812744.js",
+        "status": 200,
+        "sha256": "2957d85e9ac36cad6db4099c3f2d462dbca0a11fba1d5a750aa013f43a6c08fd"
+      },
+      {
+        "page": "/tools/chrome-extension/page",
+        "path": "/_next/static/chunks/app/tools/chrome-extension/page-a0c5ca139cbc590f.js",
+        "status": 200,
+        "sha256": "9eff879c302fab513969847b5642dbeae486b13a95706ebaf486f97a3d0e9c49"
+      }
+    ],
+    "anonymousRoutes": [
+      {
+        "route": "/api/assets/upload",
+        "anonymousStatus": 401
+      },
+      {
+        "route": "/api/bridge/feedback",
+        "anonymousStatus": 401
+      },
+      {
+        "route": "/api/bridge/client-reports",
+        "anonymousStatus": 401
+      }
+    ],
+    "sameEnvironmentAndDataLinks": true,
+    "rolloutCodeUnchanged": true,
+    "privatePolicyUnchanged": true,
+    "pricesUnchanged": true,
+    "functionalAcceptance": false,
+    "paidRequests": 0,
+    "browserRuns": 0
+  },
+  "stage": "/data/video-api-debugger/release-staging/bridge-diag-rootcause-20261108/attempt01",
+  "recoveryCommand": "bash /data/video-api-debugger/release-staging/bridge-diag-rootcause-20261108/attempt01/program-recovery.sh /data/video-api-debugger/release-staging/bridge-diag-rootcause-20261108/attempt01/release-input.json",
+  "productionFeedbackTests": 0,
+  "paidGenerations": 0,
+  "functionalAcceptance": false
+}
