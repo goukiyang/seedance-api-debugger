@@ -1181,6 +1181,10 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 - [x] 角色统一风格/候选同步已部署v0.135.6 /7c63d8775 /opoORRWORWxECYRKKHewm，待用户手验。独立风格入口/弹窗，一份风格用于各部位新生成，内容保存不改风格、风格保存不改内容；历史/独立补充保持。点击可用候选即采用到中间，标记跟实际引用，历史浏览不采用，支持同步撤销。继承实发38fc及其25文件，a81三份完成记录已纯文档合入；fresh19/native/计价/完整Next types lint、F0原1469、6启动/7服务4timer/8资源/3匿名401/health200过，cutover0无恢复，价/原数据保持。仅记录规则预览刷新依赖待核线索D-20261108-STYLE-PREVIEW-REFRESH，未扩改。[原单§20.3](tasks/todo/2026-10-31-character-reference-replan.md)。
 <!-- /CHARACTER-UNIFIED-STYLE-20261108 -->
 
+<!-- CHARACTER-PREVIEW-REFRESH-20261108 -->
+- [ ] 保存风格立即刷新规则预览：已保存修订传到新旧入口、立即重查及旧响应/错误隔离，保输入防抖和历史原词。真实React同夹具修前红/修后4组绿，commit9288682ad；正接15的实发135.7后封135.8，未抢Next/切版，功能用户手验。[原单§21](tasks/todo/2026-10-31-character-reference-replan.md)。
+<!-- /CHARACTER-PREVIEW-REFRESH-20261108 -->
+
 
 ## CHAR-FUSION01 角色融合提示词（2026-11-07）
 

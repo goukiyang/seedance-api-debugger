@@ -893,3 +893,16 @@ CodeGraph准备已成功核对本工作区cbaf、1962文件及0待同步/0缺失
 
 
 **D-20261108-STYLE-PREVIEW-REFRESH｜待核线索 / P3。** `CharacterLabPromptPanel`的下次规则预览按previewPayload签名/tab/previewEpoch触发，配置修订不在签名内；弹窗保存配置更新bootstrap/configDraft，不改workspace draft，原已打开的下次预览因此没有直接的修订刷新依赖。已有window focus/visibility及切tab会重查；实际浏览器是否在同页保存后短暂保留旧预览，待用户手验确认。实际新生成在服务器读取新保存规则，历史原提示词应保原文；本轮不扩改既有预览刷新链。来源：`src/app/tools/character-lab/prompt-panel.tsx`、`studio.tsx`的saveConfig以及`workbench.tsx`的previewPayload。若确认复现，最小修法是让预览显式订阅已保存配置修订，保原当前图片冻结提示词、失败恢复与草稿。沿角色原单§20收口记录；不据此声称已证实际旧预览或触发生图。
+
+
+### 21. 保存风格立即刷新规则预览（2026-11-08）
+
+用户明确要求修复D-20261108-STYLE-PREVIEW-REFRESH，保存风格后立即显示最新提示词，直接上线。本节接续§20的待核线索，不改既有历史原提示词。
+
+根因已由离线真实React组件检查确认：预览依赖payload/tab/epoch，不跟随保存成功返回的config.revision；旧内容还可能在新props首个提交中继续显示，旧在途请求也不会因保存版本而取消。保持同一夹具，旧代码分别复现旧内容残留、旧请求未取消；修后4组通过。使用与项目一致的React18.3.1及匹配renderer、实际HTTP JSON解析和组件effect，不用假hook；只替代fetch边界及图片/图标叶子，无浏览器、生产库、凭据、外部业务调用或收费。
+
+局部修法：studio把已保存configRevision传到现代workbench及旧预览入口，workbench继续传给面板。预览按owner/workspace/payload/revision/epoch绑定结果与错误；保存修订变化跳过输入300ms防抖立即重查，前一scope内容在首个提交就隐藏，清定时器并取消旧请求，迟到数据不能回盖。普通连续输入保原300ms防抖，失败/恢复可继续；当前图片recipe取原冻结记录，不跟随新配置重写。无backend/API协议/配置行/计价/存储格式变更，不触发生成。
+
+工程修复独立commit9288682ad，3角色客户端+1离线组件夹具。服务器私有测试runtime在`/data/video-api-debugger-engineering/character-preview-refresh-20261108/runtime`，只为复用现有REQ01真实React检测方式安装精确匹配的测试包，未改应用package依赖；同夹具修前1/修后0，4组覆盖修订即刷新/首提交屏蔽旧内容、迟到响应、保存取消输入等待及错误恢复、历史原词冻结。源码SHA和原红绿日志归私有`docs/materials/2026-11-08-character-preview-refresh/`；这属于隔离工程检查，不称实页功能验收。
+
+发布接续：15的另存命名设置已封135.7并在源检查/Next窗口，我方不启动重复Next或抢切版，预留135.8，3后继模型135.9；最终封源必须继承15实际成功源/BUILD/stage/guard及其记录，不能从旧135.6覆盖。若其真实阻塞可协调先交健康基线小修窗，未获交接不擅自切版。当前真实线上仍135.6/7c63，尚未宣称本修复已部署；最终源保完整构建与保护发布，用户手验。
