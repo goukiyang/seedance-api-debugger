@@ -35,6 +35,7 @@ export function CharacterLabWorkbench(p: Props) {
   const [position, setPosition] = useState<Position>({ part: p.initialPart, batches: {}, bases: {}, texts: {} });
   const [ready, setReady] = useState(false), [width, setWidth] = useState(340);
   const [prompt, setPrompt] = useState<'current' | 'next' | null>(null);
+  const [promptReference, setPromptReference] = useState<CharacterLabReference | undefined>();
   const [undo, setUndo] = useState<Pick<CharacterLabDraft, 'mainFace' | 'views'> | null>(null);
   const split = useRef<HTMLDivElement>(null), lastWidth = useRef(width), positionRef = useRef(position);
   positionRef.current = position; lastWidth.current = width;
@@ -100,7 +101,7 @@ export function CharacterLabWorkbench(p: Props) {
     const nextText = texts[key] ?? (restore ? frozenText(plan) : p.draft[fields[targetPart]] || '');
     texts[key] = nextText;
     setPosition({ part: target, bases: { ...old.bases, [targetPart]: chosen }, batches: { ...old.batches, ...(nextBatch ? { [targetPart]: nextBatch } : {}) }, texts });
-    p.onUpdate({ [fields[targetPart]]: nextText }); setPrompt(null);
+    p.onUpdate({ [fields[targetPart]]: nextText }); setPromptReference(undefined); setPrompt(old => old ? 'current' : null);
   }
   function browse(plan: CharacterLabPlan) {
     const target = partOf(plan);
@@ -141,7 +142,7 @@ export function CharacterLabWorkbench(p: Props) {
     </aside>
     <div ref={split} className={styles.editorSplit} style={{ '--lab-editor-width': `${width}px` } as CSSProperties}>
       <section className={styles.adoptedCanvas}>
-        <header><div><h2>{position.part === 'overview' ? '成品预览' : `当前采用 · ${titles[part]}`}</h2>{position.part !== 'overview' && <span>{current ? `第${numbers.get(current.planId)}组${current.cell === undefined ? '' : ` · 候选${current.cell + 1}`}` : '尚未采用'}</span>}</div><div>{undo && <button type="button" disabled={p.locked} onClick={() => { p.onUpdate(undo); setUndo(null); }}><Undo2 size={14} />撤销采用</button>}{position.part !== 'overview' && <button type="button" onClick={() => change('overview')}>查看整张</button>}</div></header>
+        <header><div><h2>{position.part === 'overview' ? '成品预览' : `当前采用 · ${titles[part]}`}</h2>{position.part !== 'overview' && <span>{current ? `第${numbers.get(current.planId)}组${current.cell === undefined ? '' : ` · 候选${current.cell + 1}`}` : '尚未采用'}</span>}</div><div>{position.part !== 'overview' && current && <button type="button" onClick={() => { setPromptReference(current); setPrompt('current'); }}>采用图提示词</button>}{undo && <button type="button" disabled={p.locked} onClick={() => { p.onUpdate(undo); setUndo(null); }}><Undo2 size={14} />撤销采用</button>}{position.part !== 'overview' && <button type="button" onClick={() => change('overview')}>查看整张</button>}</div></header>
         <div className={styles.adoptedViewport}>{position.part === 'overview' ? composition() : current ? <div className={styles.currentImage} data-body={part === 'body'}>{picture(current, `已采用${titles[part]}`)}<button type="button" className={styles.enlarge} onClick={() => p.onPreview(media(current), `已采用${titles[part]}`)} aria-label="放大当前采用"><Maximize2 size={16} /></button></div> : <button type="button" className={styles.emptyCanvas} onClick={() => document.getElementById('character-supplement')?.focus()}><ImagePlus size={34} /><strong>制作{titles[part]}</strong><span>在右侧补充要求，生成后挑选采用</span></button>}</div>
         {position.part !== 'overview' && current && <div className={styles.canvasToolbar}><button type="button" disabled={p.locked || stale(currentPlan)} onClick={() => change(part, current, current.planId, true)}>基于当前采用继续微调</button><a href={media(current) + '&download=1'} download={`${titles[part]}.png`}><Download size={15} />下载这张</a>{stale(currentPlan) && <span>正脸已更换，侧脸需同步</span>}</div>}
       </section>
@@ -153,7 +154,7 @@ export function CharacterLabWorkbench(p: Props) {
         onKeyDown={event => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); resize(event.key === 'Home' ? 280 : event.key === 'End' ? 560 : width + (event.key === 'ArrowLeft' ? 20 : -20), true); } }}><GripVertical size={16} /></div>
       <aside className={styles.candidateEditor}>
         <section className={styles.candidateSection}><header><h2>{part === 'body' ? '正背面候选' : shown ? `${shown.count === 9 && characterLabIsGrid(shown) ? '九' : characterLabIsGrid(shown) ? '四' : '单张'}选一 · ${titles[part]}` : `${titles[part]}候选`}</h2><button type="button" onClick={p.onQuery} aria-label="查询生成状态"><RefreshCw size={15} /></button></header>
-          <div className={styles.batchToolbar}><span>{shown ? `第${numbers.get(shown.id)}组` : '还没有候选'}</span>{shown && <><button type="button" onClick={() => setPrompt('current')}>本批提示词</button><button type="button" aria-label="放大本批候选" onClick={() => p.onPreview(characterLabMediaUrl(shown.id), '本批候选')}><Maximize2 size={14} /></button></>}</div>
+          <div className={styles.batchToolbar}><span>{shown ? `第${numbers.get(shown.id)}组` : '还没有候选'}</span>{shown && <><button type="button" onClick={() => { setPromptReference(undefined); setPrompt('current'); }}>本批提示词</button><button type="button" aria-label="放大本批候选" onClick={() => p.onPreview(characterLabMediaUrl(shown.id), '本批候选')}><Maximize2 size={14} /></button></>}</div>
           {generationStatus && <p role="status" className={styles.inlineStatus}>{generationStatus}</p>}
           {shown ? <div className={styles.unifiedCandidates} data-columns={part === 'body' || !characterLabIsGrid(shown) ? 1 : shown.count === 9 ? 3 : 2}>{Array.from({ length: part === 'body' || !characterLabIsGrid(shown) ? 1 : shown.count }, (_, index) => {
             const ref = { planId: shown.id, ...(characterLabIsGrid(shown) ? { cell: index } : {}) };
@@ -176,7 +177,7 @@ export function CharacterLabWorkbench(p: Props) {
         </section>
       </aside>
     </div>
-    {prompt && <CharacterLabPromptPanel ownerId={p.ownerId} workspaceId={p.workspace.id} title={titles[part]} reference={shown ? { planId: shown.id } : undefined} tab={prompt} onTab={setPrompt} onClose={() => setPrompt(null)} isAdmin={p.isAdmin} disabled={p.locked}
+    {prompt && <CharacterLabPromptPanel ownerId={p.ownerId} workspaceId={p.workspace.id} title={titles[part]} reference={promptReference || (shown ? { planId: shown.id } : undefined)} tab={prompt} onTab={setPrompt} onClose={() => setPrompt(null)} isAdmin={p.isAdmin} disabled={p.locked}
       previewPayload={{ action: 'preview-prompt', contextProtocol: 1, layoutProtocol: 1, workspaceId: p.workspace.id, kind: operation === 'refine-face' || operation === 'refine-side' || !operation ? 'faces' : 'result', operation, input: validBase ? base : undefined, draft: p.draft, description: text }}
       escapeEnabled onBrowse={id => { const plan = p.plans.find(item => item.id === id); if (plan) browse(plan); }}
       onRestore={p.onRestore} onReproduce={p.onReproduce} onRestorePersonal={(plan, value) => { const target = partOf(plan); if (target !== part) return false; p.onUpdate({ ...labPersonalFields(plan), [fields[part]]: value }); setPosition(old => ({ ...old, texts: { ...old.texts, [referenceKey(part, base)]: value } })); return true; }}
