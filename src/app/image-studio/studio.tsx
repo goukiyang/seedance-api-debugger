@@ -647,7 +647,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     void refreshPresetCatalogs().catch(cause => setPresetsError(cause instanceof Error ? cause.message : '共享事实已更新，目录暂时无法读取'));
   } });
   const preferenceSharing = useModuleSharingPreference(userId, result => {
-    setModules(items => items.map(item => item.id === result.id ? { ...item, ...result } : item));
+    setModules(items => items.map(item => item.id === result.id ? receiveStudioModuleProjection(item, { ...item, ...result }) : item));
     shared.refresh();
     pool.refresh();
     void refreshPresetCatalogs().catch(cause => setPresetsError(cause instanceof Error ? cause.message : '共享事实已更新，目录暂时无法读取'));
@@ -825,7 +825,9 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       await clearSharedOpen(userId, presetId, requestId);
       if (moduleReadScope.current !== scope || sequence !== sharedOpenSequence.current || isClientSessionBlocked()) return false;
       setDeletedSourcePresetIds(current => current.filter(id => id !== presetId));
-      setModules(current => [...current.filter(item => item.id !== opened.id), opened]);
+      setModules(current => current.some(item => item.id === opened.id)
+        ? current.map(item => item.id === opened.id ? receiveStudioModuleProjection(item, studioRepairModule(opened)) : item)
+        : [...current, studioRepairModule(opened)]);
       pool.refresh();
       if (options.forCoverEditor) {
         if (opened.coverEditable !== true) throw new Error('当前模板封面不可编辑，请重新读取权限');
@@ -1371,7 +1373,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       const replacementById = new Map(replacements.map(item => [item.id, item]));
       setModules(current => current.map(item => {
         const next = replacementById.get(item.id);
-        return next && next.revision >= item.revision ? next : item;
+        return next ? receiveStudioModuleProjection(item, next) : item;
       }));
       setDirectory(current => current.map(item => replacementById.has(item.id) ? { ...item, groupName: replacementById.get(item.id)!.groupName } : item));
       if (Array.isArray(result.removedDefaultGroups)) setRemovedDefaultGroups(result.removedDefaultGroups);
@@ -1596,7 +1598,9 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       quickPresetVersion={quickPresetVersion} viewToken={requestedView.viewerId === userId && requestedView.moduleId === module.id ? requestedView.token : 0} onResultsViewed={attention.markViewed} onTemplateEntered={attention.confirmEntry} onResultsAvailable={attention.refresh}
       onGenerationAccepted={() => gallery.markOpened(galleryEntryKey(module))}
       onParameterCopySaved={next => {
-        setModules(current => [...current.filter(item => item.id !== next.id), studioRepairModule(next)]);
+        setModules(current => current.some(item => item.id === next.id)
+          ? current.map(item => item.id === next.id ? receiveStudioModuleProjection(item, studioRepairModule(next)) : item)
+          : [...current, studioRepairModule(next)]);
         shared.refresh(); pool.refresh({ invalidateRevision: true });
         navigateToModule(next.groupName || '未分组', next.id, { ensureLoaded: false });
       }}

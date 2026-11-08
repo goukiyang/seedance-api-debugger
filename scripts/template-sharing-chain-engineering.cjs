@@ -35,6 +35,9 @@ assert.equal(projection.receiveStudioModuleProjection(modules[0], {...newer,revi
 assert.equal(projection.receiveStudioModuleProjection(modules[0], { ...modules[0], definitionSyncPending: undefined }).definitionSyncPending, undefined);
 report.checks.push('actual_settlement_adopts_publisher_revision_without_changing_colleague_revision');
 report.observations.sharingAcknowledgement = { receiptRevision: 9, pageRevision: modules[0].revision, asynchronousRefreshRequested: true };
+const callbackEnv={...projection,studioRepairModule:env.studioRepairModule,setModules:env.setModules,shared:{refresh(){}},pool:{refresh(){}},refreshPresetCatalogs:async()=>{},setPresetsError(){},navigateToModule(){}};
+const receivePreference=expression(variable('preferenceSharing').initializer.arguments[1],callbackEnv);modules=[structuredClone(newer)];receivePreference(older);assert.equal(modules[0].revision,8);
+const copyAttribute=all(source,n=>ts.isJsxAttribute(n)&&n.name.getText(source)==='onParameterCopySaved')[0];assert.ok(copyAttribute);const receiveCopy=expression(copyAttribute.initializer.expression,callbackEnv);receiveCopy(older);assert.equal(modules[0].revision,8);report.checks.push('actual_preference_and_parameter_copy_callbacks_reject_older_projection');
 const pendingId = randomUUID();
 async function durableSave() {
  const saved = new Map(), scope = { exports: {}, localStorage: { getItem:k=>saved.get(k)??null,setItem:(k,v)=>saved.set(k,v),removeItem:k=>saved.delete(k) }, navigator: {locks:{request:async(k,f)=>f()}} };
