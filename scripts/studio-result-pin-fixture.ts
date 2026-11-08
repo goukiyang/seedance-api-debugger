@@ -131,6 +131,21 @@ async function main() {
     assert.equal(retained.snapshot_json, frozen);
     checks.push('same-workspace historical reproduction can pin and replay; colleague reads output while original source and snapshot stay frozen');
 
+    // The reported task ran in an older named workspace with no publisher binding.
+    const legacyPresetId = 'legacy-nine-grid-preset', legacyWorkspaceId = 'legacy-nine-grid-workspace';
+    await prisma.imageStudioPreset.create({ data: { id: legacyPresetId, owner_id: author.id, scope: 'creator',
+      is_shared: true, name: 'Legacy nine grid', model: 'fixture' } });
+    await prisma.imageStudioModule.create({ data: { id: legacyWorkspaceId, owner_id: author.id, name: 'Legacy nine grid',
+      source_preset_id: legacyPresetId } });
+    const reported = await output('reported-reproduction-shape', legacyWorkspaceId, 'another-template');
+    await prisma.imageStudioTask.update({ where: { id: reported.id }, data: { snapshot_json: JSON.stringify({ version: 1,
+      moduleId: legacyWorkspaceId, sourcePresetId: 'another-template', reproducedFromTaskId: origin.id }) } });
+    assert.equal((await listStudioResultFeed(author, legacyWorkspaceId)).pinTaskReasons[reported.id], null);
+    await mutateStudioPin(author, { ...command, moduleId: legacyWorkspaceId, taskId: reported.id, assetId: reported.asset_id!,
+      expectedRevision: 0, requestId: randomUUID() });
+    assert.ok((await readableStudioPins(colleague, legacyPresetId))?.pins.some(pin => pin.taskId === reported.id));
+    checks.push('reported legacy named-workspace shape without a publisher binding pins under its execution template');
+
     const invalidReproduction = await output('invalid-reproduction', moduleId, 'another-template');
     for (const invalid of [{ version: 1, moduleId: 'unrelated-workspace', sourcePresetId: 'another-template', reproducedFromTaskId: origin.id },
       { version: 1, moduleId, sourcePresetId: 'forged-source', reproducedFromTaskId: origin.id },
