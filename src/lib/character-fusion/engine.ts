@@ -151,7 +151,13 @@ export function changeRow(s: FusionSettings, rows: FusionRow[], id: string, chan
 }
 export function textFor(row: FusionRow, settings: Pick<FusionSettings, 'requirements' | 'lang'>) {
   const c = row.category;
-  const extras = ADDONS.filter(d => c[d.id]).map(d => `${d.title}范围「${c[d.id]}」：${row.detail[d.id]}，从母体结构与角色任务推导出合理的连接、厚度与使用方式。`).join('');
+  const featureAdaptation = ['动物', '神话', '职业'].includes(c.source) ? '保留与母体自然相连的部位' : '把特征放在母体本身合理存在的结构表面';
+  const extras = [
+    c.equipment ? `道具范围「${c.equipment}」：具体设计为「${row.detail.equipment}」，从${row.source.anchor}的结构特征推导出使用方式，服务于${row.concept.name}的任务，展示意料之外但因果成立的功能设计。` : '',
+    c.signature ? `特征范围「${c.signature}」：具体表现为「${row.detail.signature}」，${featureAdaptation}，以具体经历或使用磨损解释其来源，形成自然且可读的辨识点。` : '',
+    c.entity ? `组合范围「${c.entity}」：具体设计为「${row.detail.entity}」，明确主次角色、连接关系和拆合时的空间归属。` : '',
+    c.physique ? `轮廓范围「${c.physique}」：具体表现为「${row.detail.physique}」，组织大中小体块与重心，让整体剪影一眼可辨。` : '',
+  ].join('');
   const cn = `原创角色设计「${row.name}」。以${row.source.name}为母体，保留${row.source.shape}；融合${row.concept.name}的身份，将${row.source.anchor}转化为${row.concept.prop}。核心机制：${row.mechanism.cn}。${extras}视觉语言：${row.concept.mood}，主结构紧凑，形态层级分明。性格「${c.personality}」，通过${row.personality.pose}呈现。${settings.requirements.trim()} 单角色全身设定，三分之四正面视角，完整展示机关的形态、厚度、装配与动作逻辑。${row.advanced ? '高级融合：增加收纳态、启动态与释放态的三阶段变化；关键装置通过一条明确的结构链驱动，动作前后轮廓有强烈辨识度，同时保持角色主体的视觉主导权。' : ''}`;
   const translate = (map: object, value: string) => (map as Record<string, string>)[value] || value;
   const en = `Original character concept: ${translate(SOURCE_EN, row.source.name)} ${translate(CONCEPT_EN, row.concept.name)}${row.name.match(/ \d+$/)?.[0] || ''}. A ${translate(SOURCE_EN, row.source.name)} crossed with a ${translate(CONCEPT_EN, row.concept.name)}. Preserve a recognizable source silhouette and reinterpret its signature physical feature as a ${translate(PROP_EN, row.concept.prop)}. Main functional system: ${row.mechanism.en}. ${ADDONS.filter(d => c[d.id]).map(d => `${d.english}: ${englishDetail(d.id, c[d.id])}, derived from the source structure and character role with believable connections.`).join(' ')} Design language inspired by ${translate(EN_LABEL, c.concept)}; ${row.personality.en}. ${settings.requirements.trim() === DEFAULT_REQUIREMENTS ? 'Premium family-friendly stylized 3D cartoon, approximately 2.5 heads tall, simplified rounded geometry, bold readable silhouette, vibrant clean colors, matte materials, soft studio lighting, charming and sophisticated, clear assembly thickness and animation-friendly joints.' : `Fixed art direction: ${settings.requirements.trim()}`} One full-body character, front three-quarter view, complete visible mechanism, believable connections, strong form hierarchy.${row.advanced ? ' Advanced fusion: show stored, activated and released states, driven by one coherent mechanical chain, with a clear dominant body silhouette.' : ''}`;
