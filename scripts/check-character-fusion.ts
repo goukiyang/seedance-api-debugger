@@ -39,6 +39,9 @@ const bilingualRow = { ...rows[0], category: { ...rows[0].category, equipment: '
 assert(textFor(bilingualRow, { requirements: defaults().requirements, lang: 'en' }).includes('reverse umbrella shield'));
 bilingualRow.detail.equipment = '能反扣为浮力救生舱的肩盾';
 assert(textFor(bilingualRow, { requirements: defaults().requirements, lang: 'en' }).includes('flotation rescue capsule'));
+const custom = defaults();
+for (const c of CONFIG) custom.rules[c.id] = [{ label: '__proto__', status: 'must' }];
+assert.equal(generateBatch(custom, 12)[0].source.name, '__proto__');
 const invalid = defaults(); invalid.rules.source.forEach(t => { t.status = 'exclude'; });
 assert.throws(() => generateBatch(invalid), /全部排除/);
 const capacity = defaults(); capacity.count = 4; capacity.rules.source.slice(0, 5).forEach(t => { t.status = 'must'; });

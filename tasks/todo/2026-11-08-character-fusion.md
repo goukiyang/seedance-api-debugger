@@ -89,3 +89,6 @@
 ### 31正式交接与最终候选
 
 2026-11-08 00:52（洛杉矶）持窗者正式交接：31主3654ea83faf416f3dbdb34f7d0b099590418b304 / 0.134.31 / BUILD iTiWbFUml0X1fllspLErl，character-movable-workbench-20261107/attempt04切版0、无恢复；same F0 guard和_JwQu原构建，未重建或改原时间。本对话独立核对真实Web cwd/BUILD、cutover结果与公网release后接续，已有31源已合入，不改其5个角色UI文件、原记录、上传修复或任何生成/收费逻辑。最终本单attempt03重新绑定该正式源，并包含原型约束与双语具体细节修正；本轮源码仅本单15文件差量。
+
+
+自定义标签按真实词库条目读取，避免合法标签如constructor或__proto__被误当成JavaScript对象继承属性；只在词库读取处统一处理，不限制用户标签、不增加外层重复校验。最小脚本覆盖自定义标签正常生成。

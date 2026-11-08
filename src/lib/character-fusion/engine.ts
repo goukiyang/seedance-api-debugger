@@ -61,6 +61,7 @@ export function seeded(seed: number) {
   return () => { n = (Math.imul(n, 1664525) + 1013904223) >>> 0; return n / 4294967296; };
 }
 const pick = <T,>(items: readonly T[], rnd: () => number): T => items[Math.floor(rnd() * items.length)];
+const lookup = <T,>(bank: Record<string, T>, label: string): T | undefined => Object.prototype.hasOwnProperty.call(bank, label) ? bank[label] : undefined;
 function shuffled<T>(values: readonly T[], rnd: () => number) {
   const next = [...values];
   for (let i = next.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [next[i], next[j]] = [next[j], next[i]]; }
@@ -99,11 +100,11 @@ export function chooseCategories(s: FusionSettings, rnd: () => number): Categori
 }
 export function makeRow(category: Categories, seed: number, prior?: FusionRow, changed?: Dimension): FusionRow {
   const rnd = seeded(seed);
-  const source = prior && changed !== 'source' ? prior.source : pick((SOURCES as Record<string, Source[]>)[category.source] || [{ name: category.source, shape: `以${category.source}为基础的清晰几何主轮廓`, anchor: `${category.source}最有辨识度的主体特征`, root: category.source.slice(0, 2) }], rnd);
-  const concept = prior && changed !== 'concept' ? prior.concept : pick((CONCEPTS as Record<string, Concept[]>)[category.concept] || [{ name: category.concept + '探索者', prop: category.concept + '主题装置', mood: category.concept + '的鲜明视觉符号', suffix: '探索者' }], rnd);
+  const source = prior && changed !== 'source' ? prior.source : pick(lookup<Source[]>(SOURCES, category.source) || [{ name: category.source, shape: `以${category.source}为基础的清晰几何主轮廓`, anchor: `${category.source}最有辨识度的主体特征`, root: category.source.slice(0, 2) }], rnd);
+  const concept = prior && changed !== 'concept' ? prior.concept : pick(lookup<Concept[]>(CONCEPTS, category.concept) || [{ name: category.concept + '探索者', prop: category.concept + '主题装置', mood: category.concept + '的鲜明视觉符号', suffix: '探索者' }], rnd);
   const legacy = (id: Dimension) => { const c = CONFIG.find(c => c.id === id)!; const i = (c.tags as readonly string[]).indexOf(category[id]); return i < 0 ? category[id] : (LEGACY_TAGS as Record<string, string[]>)[id][i]; };
-  const mechanism = prior && changed !== 'mechanism' ? prior.mechanism : (MECHANISMS as Record<string, FusionRow['mechanism']>)[legacy('mechanism')] || { cn: `采用${category.mechanism}范围内的原创可视化交互，连接结构完整可读`, en: `an original functional system within ${category.mechanism}, with visible connections` };
-  const personality = prior && changed !== 'personality' ? prior.personality : (PERSONALITIES as Record<string, FusionRow['personality']>)[legacy('personality')] || { pose: `体现${category.personality}的清晰肢体语言`, en: `a readable pose expressing ${category.personality}` };
+  const mechanism = prior && changed !== 'mechanism' ? prior.mechanism : lookup<FusionRow['mechanism']>(MECHANISMS, legacy('mechanism')) || { cn: `采用${category.mechanism}范围内的原创可视化交互，连接结构完整可读`, en: `an original functional system within ${category.mechanism}, with visible connections` };
+  const personality = prior && changed !== 'personality' ? prior.personality : lookup<FusionRow['personality']>(PERSONALITIES, legacy('personality')) || { pose: `体现${category.personality}的清晰肢体语言`, en: `a readable pose expressing ${category.personality}` };
   const detail: FusionRow['detail'] = prior ? { ...prior.detail } : {};
   for (const c of ADDONS) {
     if (prior && changed !== c.id) continue;
@@ -159,7 +160,7 @@ export function textFor(row: FusionRow, settings: Pick<FusionSettings, 'requirem
     c.physique ? `轮廓范围「${c.physique}」：具体表现为「${row.detail.physique}」，组织大中小体块与重心，让整体剪影一眼可辨。` : '',
   ].join('');
   const cn = `原创角色设计「${row.name}」。以${row.source.name}为母体，保留${row.source.shape}；融合${row.concept.name}的身份，将${row.source.anchor}转化为${row.concept.prop}。核心机制：${row.mechanism.cn}。${extras}视觉语言：${row.concept.mood}，主结构紧凑，形态层级分明。性格「${c.personality}」，通过${row.personality.pose}呈现。${settings.requirements.trim()} 单角色全身设定，三分之四正面视角，完整展示机关的形态、厚度、装配与动作逻辑。${row.advanced ? '高级融合：增加收纳态、启动态与释放态的三阶段变化；关键装置通过一条明确的结构链驱动，动作前后轮廓有强烈辨识度，同时保持角色主体的视觉主导权。' : ''}`;
-  const translate = (map: object, value: string) => (map as Record<string, string>)[value] || value;
+  const translate = (map: object, value: string) => lookup(map as Record<string, string>, value) || value;
   const extrasEn = [
     c.equipment ? `Equipment: ${englishDetail('equipment', c.equipment, row.detail.equipment)}, an unexpected but functional tool derived from the source anatomy and character role.` : '',
     c.signature ? `Signature: ${englishDetail('signature', c.signature, row.detail.signature)}, integrated into ${['动物', '神话', '职业'].includes(c.source) ? 'the natural anatomy' : 'the structural surface'} with a believable backstory.` : '',
