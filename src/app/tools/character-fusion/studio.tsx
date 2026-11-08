@@ -74,6 +74,12 @@ export default function CharacterFusionStudio({ ownerId }: { ownerId: string }) 
     setSettings(s => ({ ...s, boss: { ...s.boss, [id]: value }, bossLocks: { ...s.bossLocks, [id]: true } }));
   };
   const cycleTag = (id: Dimension, label: string) => setSettings(s => reconcile({ ...s, rules: { ...s.rules, [id]: s.rules[id].map(t => t.label === label ? { ...t, status: t.status === 'default' ? 'must' : t.status === 'must' ? 'exclude' : 'default' } : t) } }));
+  const cycleCustomTag = (id: string, label: string) => setSettings(s => ({ ...s, cards: s.cards.map(c => {
+    if (c.id !== id) return c;
+    const tags = c.tags.map(t => t.label === label ? { ...t, status: (t.status === 'default' ? 'must' : t.status === 'must' ? 'exclude' : 'default') as typeof t.status } : t);
+    const valid = tags.some(t => t.label === c.value && t.status !== 'exclude');
+    return { ...c, tags, value: valid ? c.value : tags.find(t => t.status !== 'exclude')?.label || c.value, locked: valid && c.locked };
+  }) }));
   const addTag = (id: Dimension) => run(() => {
     const label = (tagInputs[id] || '').trim();
     if (!label || label.length > 30) throw new Error('请输入 1–30 字的标签。');
@@ -178,7 +184,7 @@ export default function CharacterFusionStudio({ ownerId }: { ownerId: string }) 
           const joined = builtin ? settings.bossDimensions.includes(builtin.id) : custom!.joined;
           return <RuleCard key={id} id={id} title={title} tags={tags} joined={joined} expanded={expanded.includes(id)} onToggle={() => setExpanded(list => list.includes(id) ? list.filter(v => v !== id) : [...list, id])}
             onJoin={() => builtin ? toggleDimension(builtin.id) : setSettings(s => ({ ...s, cards: s.cards.map(c => c.id === id ? { ...c, joined: !c.joined } : c) }))}
-            onTag={label => builtin ? cycleTag(builtin.id, label) : setSettings(s => ({ ...s, cards: s.cards.map(c => c.id === id ? { ...c, tags: c.tags.map(t => t.label === label ? { ...t, status: t.status === 'default' ? 'must' : t.status === 'must' ? 'exclude' : 'default' } : t) } : c) }))}
+            onTag={label => builtin ? cycleTag(builtin.id, label) : cycleCustomTag(id, label)}
             onDrop={source => moveCard(source, id)} onMove={direction => moveBy(id, direction)}>
             {builtin ? <form className={styles.addTag} onSubmit={e => { e.preventDefault(); addTag(builtin.id); }}><input aria-label={`自定义${title}标签`} placeholder="自定义标签" maxLength={30} value={tagInputs[builtin.id] || ''} onChange={e => setTagInputs(s => ({ ...s, [builtin.id]: e.target.value }))} /><button aria-label={`添加${title}标签`}><Plus size={16} /></button></form> : <div className={styles.cardTools}><button onClick={() => { setSettings(s => ({ ...s, cards: s.cards.filter(c => c.id !== id) })); setNotice('扩展卡片已从本次规则移除，已有提示词保留。'); }}>移除此卡片</button></div>}
           </RuleCard>;
