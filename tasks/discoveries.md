@@ -88,4 +88,6 @@ PIN相关原四项处理：135.4/38fc52f已部署目录恢复、本人管理/取
 - **D-20261108-SHARE-COUPLING-ISOLATION｜结构耦合及已复现风险 / P2，待实施。** 真实rename仅改名、生成正文/参数/参考不变，仍改生成token；无关合成坏复现记录使目录/旧revision整体失败，健康定向读取成功。生产本次17条复现、82binding相关JSON异常0，不冒本轮线上根因。分离展示/生成合同、目录摘要与条目解析，私密保护失败不能被静默忽略。
 - **D-20261108-SHARE-LEGACY-MATRIX｜兼容范围待核 / P2。** 生产只读有24个带source无新binding工作区、11个共享原件无新publisher映射；82新绑定owner/source匹配且无缺workspace。需分类旧apply/个人副本/历史/现代live，不按名字推断迁移，不批量回填。多人吞吐和逐模板实页未验，不把2秒轮询/32队列上限当人数承诺。
 
+- **D-20261108-SHARE-NAV-NAME｜交集待核线索 / P3。** 飞书导航label读raw workspace.name，共享源改名主要改source.name并增workspace revision。可能与站内实时源名不同；尚未专门验证新/旧受理快照及真实卡片，也未决定使用受理名还是当前名。先对照，不自动改发图或共享范围。
+
 完整证据、边界和整改顺序见[共享全链路审计](../docs/template-sharing-chain-audit-2026-11-08.md)及[原联合单§16.11](todo/2026-11-05-template-sharing-cutout-open-preflight.md)。原17项和完整构建复用，新增三批诊断仅复现新缺口，无生产业务写/收费生成/浏览器验收；上述新增缺陷尚未修改上线。
