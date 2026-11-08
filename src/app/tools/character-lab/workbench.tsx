@@ -16,7 +16,7 @@ type Part = 'faces' | 'side' | 'body';
 type Position = { part: Part | 'overview'; batches: Partial<Record<Part, string>>; bases: Partial<Record<Part, CharacterLabReference>>; texts: Record<string, string> };
 export type LabEditorIntent = { operation?: CharacterLabOperation; input?: CharacterLabReference; description: string };
 type Props = {
-  ownerId: string; workspace: CharacterLabWorkspace; draft: CharacterLabDraft; plans: CharacterLabPlan[]; tasks: Record<string, CharacterLabTask | null>;
+  ownerId: string; workspace: CharacterLabWorkspace; draft: CharacterLabDraft; plans: CharacterLabPlan[]; tasks: Record<string, CharacterLabTask | null>; configRevision: number;
   initialPart: Part | 'overview'; isAdmin: boolean; locked: boolean; pending: string[]; settings: ReactNode; versions: (inspect: (reference: CharacterLabReference) => void) => ReactNode; allHistory: boolean;
   onUpdate: (patch: Partial<CharacterLabDraft>) => void; onSource: () => void; onPreview: (src: string, alt: string) => void;
   onGenerate: (intent: LabEditorIntent) => Promise<string | undefined>; onQuery: () => void; onLegacy: (plan: CharacterLabPlan) => void;
@@ -169,7 +169,7 @@ export function CharacterLabWorkbench(p: Props) {
           {part === 'body' && <span className={styles.editHint}>以原图决定身体比例和服装，正背面一起生成、一起采用。</span>}
           {relatedPending && <p role="status" className={styles.inlineStatus}>本部位已有{statuses[p.tasks[p.pending.find(id => p.plans.some(plan => plan.id === id && partOf(plan) === part)) || '']?.status || ''] || '结果待核对'}的请求，可在候选区查询进度。</p>}
         </section>
-    {prompt && <CharacterLabPromptPanel ownerId={p.ownerId} workspaceId={p.workspace.id} title={titles[part]} reference={promptReference || base || (shown ? { planId: shown.id } : undefined)} tab={prompt} onTab={setPrompt} onClose={() => { setPrompt(null); requestAnimationFrame(() => (promptTrigger.current?.isConnected ? promptTrigger.current : document.getElementById('character-supplement'))?.focus()); }} isAdmin={p.isAdmin} disabled={p.locked}
+    {prompt && <CharacterLabPromptPanel ownerId={p.ownerId} workspaceId={p.workspace.id} configRevision={p.configRevision} title={titles[part]} reference={promptReference || base || (shown ? { planId: shown.id } : undefined)} tab={prompt} onTab={setPrompt} onClose={() => { setPrompt(null); requestAnimationFrame(() => (promptTrigger.current?.isConnected ? promptTrigger.current : document.getElementById('character-supplement'))?.focus()); }} isAdmin={p.isAdmin} disabled={p.locked}
       previewPayload={{ action: 'preview-prompt', contextProtocol: 1, layoutProtocol: 1, workspaceId: p.workspace.id, kind: operation === 'refine-face' || operation === 'refine-side' || !operation ? 'faces' : 'result', operation, input: validBase ? base : undefined, draft: p.draft, description: text }}
       escapeEnabled onBrowse={id => { const plan = p.plans.find(item => item.id === id); if (plan) browse(plan); }}
       onRestore={p.onRestore} onReproduce={async id => { const captured = positionRef.current; const generated = await p.onReproduce(id); if (generated && positionRef.current === captured) setPosition(old => ({ ...old, batches: { ...old.batches, [part]: generated } })); }} onRestorePersonal={(plan, value) => { const target = partOf(plan); if (target !== part) return false; p.onUpdate({ ...labPersonalFields(plan), [fields[part]]: value }); setPosition(old => ({ ...old, texts: { ...old.texts, [referenceKey(part, base)]: value } })); return true; }}
