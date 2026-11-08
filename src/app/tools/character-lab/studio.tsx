@@ -406,7 +406,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
         action: 'reproduce', sourcePlanId: reproducePlanId, workspaceId: current.id, requestId: crypto.randomUUID(),
       } : {
         action: 'prepare', workspaceId: current.id, requestId: crypto.randomUUID(), workbench: operation || kind === 'faces' ? 2 : undefined,
-        kind, draft: input, operation, recipeProtocol: 1, contextProtocol: 1, ...(editor ? { layoutProtocol: 1, input: editor.input, description: editor.description } : {}), ...(!editor && refine ? { input: refine.target, description: refine.text }
+        kind, draft: input, operation, recipeProtocol: 1, contextProtocol: 1, layoutProtocol: 1, ...(editor ? { input: editor.input, description: editor.description } : {}), ...(!editor && refine ? { input: refine.target, description: refine.text }
           : operation === 'side' ? { description: input.sideDescription || '' } : operation?.startsWith('body-') ? { description: input.bodyDescription || '' } : {}),
       });
       if (!reproducePlanId && plan.contextProtocol !== 1) throw new Error('当前服务器暂不支持独立上下文，请刷新页面；尚未提交生成。');
@@ -416,9 +416,8 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
       assertActive(); if (capturedScope !== scope.current) return;
       if (!validImageUiQuote(quote)) throw new Error('报价已过期或不完整，请重新获取报价；尚未提交生成。');
       setPlans(previous => [plan, ...previous.filter(item => item.id !== plan.id)]);
-      const label = editor && operation !== 'body-pair' ? `生成1张${plan.count}宫格${operation === 'side' || operation === 'refine-side' ? '侧脸' : '正脸'}候选图` : refine ? '生成1张四宫格微调方案'
-        : operation === 'body-pair' ? '生成1张正背面全身对照图' : operation ? `生成1张${viewTitles[operation as CharacterLabView]}`
-          : kind === 'faces' ? `生成1张${plan.count}宫格候选图，面部变化${characterLabStrength(plan.diversity)}` : '生成1张旧版整图';
+      const label = characterLabIsGrid(plan) ? `生成1张${plan.count}宫格${operation === 'side' || operation === 'refine-side' ? '侧脸' : '正脸'}候选图`
+        : operation === 'body-pair' ? '生成1张正背面全身对照图' : operation ? `生成1张${viewTitles[operation as CharacterLabView]}` : '生成1张旧版整图';
       if (!await confirm(`${reproducePlanId ? '按原记录的冻结提示词、参考和参数，' : ''}${label}，规则v${plan.configRevision}，${imageUiQuotePriceText(quote)}。已有图片保留。`, { title: '确认生成', confirmLabel: '开始生成' })) return;
       assertActive();
       if (capturedScope !== scope.current) throw new Error('当前角色已变化，请在原角色中查询计划。');
@@ -540,7 +539,8 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
     });
   }
   function closePrompts() {
-    if (activePromptTarget) { setRecipeTarget(activePromptTarget); setRecipeTab('next'); }
+    if (activePromptTarget && legacyView) { setRecipeTarget(activePromptTarget); setRecipeTab('next'); }
+    else setRecipeTarget(null);
     setPromptTarget(null);
     if (promptTarget === 'current') {
       const address = new URL(window.location.href);
@@ -876,12 +876,12 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
               ))}
             </select>
           </label>
-          {draft && activePromptTarget !== 'result' && <details className={styles.promptPreview}>
+          {draft && legacyView && activePromptTarget !== 'result' && <details className={styles.promptPreview}>
             <summary>查看本次规则预览</summary>
             <pre>{activePromptTarget === 'faces'
               ? faceLabPrompt(bootstrap.config, draft)
               : labViewPrompt(bootstrap.config, activePromptTarget, refinement?.operation === activePromptTarget ? refinement.text
-                : activePromptTarget === 'side' ? draft.sideDescription || '' : activePromptTarget.startsWith('body-') ? draft.bodyDescription || '' : '')}</pre>
+                : activePromptTarget === 'side' ? draft.sideDescription || '' : activePromptTarget.startsWith('body-') ? draft.bodyDescription || '' : '', { count: draft.count })}</pre>
           </details>}
           {activePromptFields.map(([field, title, placeholder]) => (
             <label className={styles.field} key={field}>
@@ -939,7 +939,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
         setRecipeTarget(null);
         requestAnimationFrame(() => { const button = recipeTrigger.current?.isConnected ? recipeTrigger.current : document.querySelector<HTMLElement>('[data-character-prompt]'); button?.focus({ preventScroll: true }); });
       }} isAdmin={isAdmin} disabled={locked}
-      previewPayload={{ action: 'preview-prompt', contextProtocol: 1, workspaceId: workspace.id, workspaceRevision: workspace.revision, kind, operation, draft, description }}
+      previewPayload={{ action: 'preview-prompt', contextProtocol: 1, layoutProtocol: 1, workspaceId: workspace.id, workspaceRevision: workspace.revision, kind, operation, draft, description }}
       previous={siblingIndex >= 0 ? siblings[siblingIndex + 1]?.id : undefined} next={siblingIndex > 0 ? siblings[siblingIndex - 1]?.id : undefined}
       onBrowse={id => {
         setCompositionSlot(null); setInspectionId(null);
@@ -1090,7 +1090,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
             onChange={event => setRefinement({ ...current, text: event.target.value })} />
         </label>
         <button type="button" className={`${styles.primary} ${styles.generateAfterInput}`} disabled={locked || !current.text.trim() || !inputCurrent || pendingBlocks('faces', current.operation)}
-          onClick={() => void generate('faces', current.operation, current)}>{busy ? busyCopy : '生成四个方案'}</button>
+          onClick={() => void generate('faces', current.operation, current)}>{busy ? busyCopy : `生成${draft?.count || 4}个方案`}</button>
         {error && <p role="alert">{error}</p>}
         {refinePlan && <p role="status" className={styles.hint}>{refineTask ? taskState[refineTask.status] || '状态待确认'
           : pendingPlanIds.includes(refinePlan.id) ? '原提交待确认' : '尚未提交'}{refineTask?.error && <> · {refineTask.error}</>}</p>}
