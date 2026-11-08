@@ -241,3 +241,11 @@ attempt02 的29组native通过，13/14 pricing组通过后，旧image-spec断言
 旧四笔快照/冻结/合同/账本已在v19上线后再次只读确认完全不变，6.9预留不重发；本轮5.5实扣和新GPT2 503的5点待核保持。首次发布短暂停服、恢复原18、最终19的记录均保留到私有资料release19-attempt01/02，不以新成功覆盖失败。
 
 最终v19实页核对：本人fixture从2.6最高max/4K切GPT2后，真实select为quality=high、文案最高、resolution=4K，质量/尺寸不支持提示均无，未点击生成。GPT2因最终恢复停用而按钮禁用是实际线路可用性保护，不冒此次已测通；截图中的2.6最高4K按钮可用与两真实原图证据独立保留。原证ui7-v19-after-gpt2-switch.json已归私有材料。
+
+### 两个2.6 API参考图文档核对（2026-11-07洛杉矶）
+
+用户要求确认API，不把站内maxReferences=0当API拒绝证据。供应商group12两个型号页均展示POST /v1/images/edits参考图示例：JSON用images[].image_url（公网URL或完整Data URI），本地文件multipart用image；同步/异步字段一致。但同页限定仅模型明确支持编辑时使用edits，且注明此线路未配置专属请求示例，没有给2.6专属支持确认和参考上限。通用说明中的8张属于Seedream5.0 Pro，不能移植到2.6。
+
+真实网页和同源公开GET核对：pricing/public两group12 offer无profile/参考能力字段，model-document两HTTP200均revision空/edits[]；后者是文档编辑覆盖列表，不是图片edits能力开关。只能确认平台有参考图传法，不能据通用模板确认当前2.6线路/Key能带图，也不能断言模型本身不支持。尚缺真实带图生成或供应商对当前分组明确确认。本次文档读取generationCalls0、配置写0、旧待核重发0，不改参考上限/私有策略/价格；Ego空间27正常finish关闭。
+
+来源：[Sunburst供应商文档](https://uselg.top/docs?model=gpt-image-2.6-sunburst&group_id=12)、[Flare供应商文档](https://uselg.top/docs?model=gpt-image-2.6-flare&group_id=12)。原网页/公开元数据/结论归正式私有材料image26-reference-doc-pages-confirm7.json、image26-reference-public-metadata7.json、image26-reference-confirmation-summary7.json，无凭据/媒体。
