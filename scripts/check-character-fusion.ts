@@ -5,8 +5,9 @@ const settings = defaults();
 settings.rules.source.find(t => t.label === '动物')!.status = 'exclude';
 settings.rules.source.find(t => t.label === '植物')!.status = 'must';
 settings.rules.mechanism[0].status = 'must';
+settings.bossDimensions.push('equipment');
 settings.rules.equipment[0].status = 'must';
-settings.bossLocks.concept = true;
+settings.bossLocks.concept = true; settings.bossLocks.equipment = true;
 for (let seed = 1; seed <= 32; seed++) {
   const rows = generateBatch(settings, seed);
   assert.equal(rows.length, 16);
@@ -20,7 +21,7 @@ for (let seed = 1; seed <= 32; seed++) {
 }
 const restored = parseSettings(JSON.parse(JSON.stringify(settings)));
 assert.equal(restored.bossLocks.concept, true);
-const singleton = defaults();
+const singleton = defaults(); singleton.bossDimensions = CONFIG.map(c => c.id);
 for (const c of CONFIG) singleton.rules[c.id] = [{ label: c.tags[0], status: 'must' }];
 const rows = generateBatch(singleton, 99);
 assert.equal(new Set(rows.map(r => r.name)).size, 16);
@@ -31,7 +32,7 @@ assert.deepEqual(changed.source, before[0].source); assert.deepEqual(changed.con
 const bossSettings = defaults(); bossSettings.bossLocks.source = true;
 assert.equal(refreshBoss(bossSettings, () => .5).boss.source, bossSettings.boss.source);
 assert.equal(bossRow(bossSettings, [], 88).category.source, bossSettings.boss.source);
-singleton.requirements = '全局要求测试';
+singleton.requirementsEnabled = true; singleton.requirements = '全局要求测试';
 assert(textFor(rows[0], singleton).includes('全局要求测试'));
 assert(csvFor([{ ...rows[0], name: '=1+1' }], singleton).includes('"\'=1+1"'));
 assert(rows.every(row => !/[\u3400-\u9fff]/.test(textFor(row, { requirements: defaults().requirements, lang: 'en' }))));
@@ -47,3 +48,25 @@ assert.throws(() => generateBatch(invalid), /全部排除/);
 const capacity = defaults(); capacity.count = 4; capacity.rules.source.slice(0, 5).forEach(t => { t.status = 'must'; });
 assert.throws(() => generateBatch(capacity), /超过/);
 console.log('PASS: 32 batches; exclusions, required coverage, locks, domain diversity, unique names, single-dimension preservation, recipe roundtrip and validation. No model/network/database calls.');
+
+const disabled = defaults(); disabled.requirements = '必须是紫色'; disabled.requirementsEn = 'Must be purple';
+const sample = generateBatch(disabled, 212)[0];
+assert(!textFor(sample, disabled).includes('必须是紫色'));
+assert(!textFor(sample, { ...disabled, lang: 'en' }).includes('Must be purple'));
+disabled.requirementsEnabled = true;
+assert(textFor(sample, disabled).includes('必须是紫色'));
+assert(textFor(sample, { ...disabled, lang: 'both' }).includes('Must be purple'));
+const legacy = { ...disabled } as Record<string, unknown>; delete legacy.requirementsEnabled; delete legacy.cards; delete legacy.role; delete legacy.requirementsEn;
+assert.equal(parseSettings(legacy).requirementsEnabled, false);
+const extended = defaults(); extended.role = '配角';
+extended.cards = [{ id: 'card-check', title: '叙事任务', titleEn: 'Narrative task', joined: true, locked: false, value: '守护', tags: [{ label: '守护', en: 'guardian', status: 'must' }, { label: '探索', en: 'explorer', status: 'default' }] }];
+const extendedRows = generateBatch(extended, 13);
+assert(extendedRows.some(r => r.cards?.some(c => c.label === '守护')));
+assert(textFor(extendedRows[0], extended).includes('叙事任务'));
+assert(textFor(extendedRows[0], { ...extended, lang: 'en' }).includes('supporting character'));
+assert(!/[\u3400-\u9fff]/.test(textFor(extendedRows[0], { ...extended, lang: 'en' })));
+assert.deepEqual(parseSettings(JSON.parse(JSON.stringify(extended))).cards, extended.cards);
+extended.cards[0].joined = false;
+assert(generateBatch(extended, 14).every(r => r.cards?.length === 0));
+assert(generateBatch(defaults(), 15).every(r => !r.category.equipment && !r.category.signature));
+console.log('PASS: requirement switch in both outputs; legacy recipes; custom bilingual cards participate only when joined; general character roles.');
