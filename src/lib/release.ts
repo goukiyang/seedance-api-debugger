@@ -1,10 +1,6 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '修复历史复现图片的置顶', outline: [
-  '历史复现图片按本次工作区置顶，原参考来源保持',
-  '作品广场铺满宽度，增减列数而不放大缩略图',
-  '作品详情按钮悬停显示，键盘和触摸仍可使用',
-] };
+const notice = { title: '模板服务相容保护版', outline: ['保留已有模板、参数副本和历史结果读取', '受保护的新写入保持关闭'] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
   summary: notice.title };
