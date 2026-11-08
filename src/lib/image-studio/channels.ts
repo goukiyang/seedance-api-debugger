@@ -149,7 +149,7 @@ export function imageStudioChannelUnitCredits(
 }
 
 export function imageStudioChannelModels(channelOrChannels: ImageStudioChannel | ImageStudioChannels, legacyModels: readonly string[]) {
-  const channels = 'items' in channelOrChannels ? channelOrChannels.items : [channelOrChannels];
+  const channels: ImageStudioChannel[] = 'items' in channelOrChannels ? channelOrChannels.items : [channelOrChannels];
   return legacyModels.filter(model => IMAGE_STUDIO_NEW_REQUEST_MODELS.some(item => item === model)
     && channels.some(channel => channel.enabled && channel.configured
     && channel.models[model]?.ready === true));

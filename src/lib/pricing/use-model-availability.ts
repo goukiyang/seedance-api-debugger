@@ -27,7 +27,7 @@ async function read(actor: string, force = false) {
       entry.snapshot = null; entry.error = error instanceof Error ? error.message : '模型状态读取失败，请重新读取';
     } finally {
       entry.pending = undefined;
-      for (const listener of entry.listeners) listener();
+      entry.listeners.forEach(listener => listener());
     }
   })();
   return entry.pending;
