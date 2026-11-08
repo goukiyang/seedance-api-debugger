@@ -53,7 +53,6 @@ function descriptionStore(owner: string, description: string): DescriptionStore 
     readCache: () => readAvatar<AvatarConstraints>(owner, 'parse', id),
     readAttempt: async () => (await prisma.platformSetting.findUnique({ where: { key }, select: { value_json: true } }))?.value_json || null,
     createAttempt: async value_json => {
-      await assertSupplementaryModelEnabled('text', (await getMuskApiSettings()).default_model);
       try { await prisma.platformSetting.create({ data: { key, value_json, updated_by: owner } }); return true; }
       catch (e) { if (await prisma.platformSetting.findUnique({ where: { key }, select: { id: true } })) return false; throw e; } },
     replaceAttempt: async (expected, value_json) => (await prisma.platformSetting.updateMany({ where: { key, value_json: expected }, data: { value_json, updated_by: owner } })).count === 1,
@@ -73,10 +72,13 @@ export async function avatarDescriptionStatus(owner: string, description: unknow
 }
 export async function parseAvatarDescription(owner: string, description: string, approved: boolean, retryToken?: string, recheck = false) {
   if (!description) return emptyConstraints();
+  let settings!: Awaited<ReturnType<typeof getMuskApiSettings>>;
   return resolveDescription(description, { approved, retryToken, recheck }, descriptionStore(owner, description), async () => {
-    const settings = await getMuskApiSettings();
     if (!isMuskApiReady(settings)) throw new MuskApiError('描述解析服务未配置', 503, 'musk_api_not_configured');
     return createMuskChatCompletion({ settings, temperature: 0, messages: [{ role: 'system', content: descriptionSystemPrompt }, { role: 'user', content: description }] });
+  }, async () => {
+    settings = await getMuskApiSettings();
+    await assertSupplementaryModelEnabled('text', settings.default_model);
   });
 }
 export async function prepareAvatarPlan(owner: string, body: Record<string, unknown>) {

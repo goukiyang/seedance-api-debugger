@@ -91,7 +91,7 @@ export async function inspectDescription(description: string, store: Description
   return receiptState(descriptionId(description), await store.readAttempt(), store, now);
 }
 
-export async function resolveDescription(description: string, options: { approved: boolean; retryToken?: string; recheck?: boolean }, store: DescriptionStore, call: () => Promise<{ content: string }>): Promise<AvatarConstraints> {
+export async function resolveDescription(description: string, options: { approved: boolean; retryToken?: string; recheck?: boolean }, store: DescriptionStore, call: () => Promise<{ content: string }>, beforeSubmit?: () => Promise<void>): Promise<AvatarConstraints> {
   const id = descriptionId(description), cached = await store.readCache();
   if (cached) return cachedConstraints(cached, description);
   let raw = await store.readAttempt();
@@ -103,6 +103,7 @@ export async function resolveDescription(description: string, options: { approve
   if (options.recheck && !state.canRecheck) throw new AvatarDescriptionError({ ...state, message: '没有已保存的模型回复可检查；本次未调用模型。' });
   if (!raw || options.retryToken) {
     if (!options.approved || options.recheck) throw new AvatarDescriptionError(state, 400);
+    await beforeSubmit?.();
     const time = new Date().toISOString();
     const attempt: Attempt = { version: 2, parserVersion: AVATAR_PARSER_VERSION, requestId: randomUUID(), state: 'pending', createdAt: time, updatedAt: time, cost: 'unknown' };
     const next = JSON.stringify(attempt);

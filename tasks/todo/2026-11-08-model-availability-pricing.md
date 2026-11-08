@@ -41,3 +41,11 @@ CodeGraph索引已匹配179f的1953源码，零差异/解析错误；context未�
 ## 最终候选准备
 
 已合入15号冻结融合候选4891252f509aa7ec38da078dd9bd62563c515561（预期135.8，尚待原持窗者健康交接）；自动三方合并保留其模块命名设置/personalStyleSelection、角色预览版本刷新及本单模型过滤。此处仅源码集成，不冒135.8已实发。本单版本0.135.9，下一步从精确主SHA生成同源只读guard、打包并在实际135.8健康交窗后做最终整对工程构建。原135.7失败记录保留，未以其作为线上基线。
+
+## 发布前受理边界补齐
+
+实际鲜核并接收135.8/4891252f509aa7ec38da078dd9bd62563c515561 / BUILD8o_Bv5c-9A1PPtJd2JRtZ，7服务同源与公网版本匹配，15号13:18:39Z健康交窗。本单已完整继承，包含命名设置/personalStyleSelection及角色预览刷新。
+
+最后复核发现头像描述显式新重试走replaceAttempt、原门仅createAttempt。将同一门移到resolveDescription新attempt边界（首次与显式新重试），在写pending前检查，并用同一次捕获的Musk型号调用；旧unknown和已保存回复重检不走门、不新调用。实际SQLite+真实parser补查通过：首次/新重试关闭均0意图写入、0模型调用；旧unknown0准入调用。原CAS/重放/撤权/价格保护仍通过，原证fixture-model-access02.log。
+
+56a3eb4a主/51c9915e guard仅归档与推送，未执行构建、未部署；attempt01准备证据保留，因上述真实受理遗漏重封同一0.135.9的新source pair于attempt02。第一次本机归档校验误拦合法.env.example，已只放行该已跟踪示例，真实.env继续排除；未触及生产配置。无任何生产服务停启、费用写入或模型生成。

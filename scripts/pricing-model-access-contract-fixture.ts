@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { prisma } from '../src/lib/prisma';
 import { MODEL_ACCESS_KEY, parseModelAccessSettings } from '../src/lib/pricing/model-availability-contract';
 import { assertSupplementaryModelEnabled, getModelAccessOperation, readModelAccessSettings, saveModelAccessSettings } from '../src/lib/pricing/model-access.server';
+import { inspectDescription, resolveDescription, type DescriptionStore } from '../src/lib/avatar-random/description-parser';
 
 export async function runPricingModelAccessFixture() {
   const id = `model-access-fixture-${randomUUID()}`, actor = { id };
@@ -25,6 +26,20 @@ export async function runPricingModelAccessFixture() {
     await assert.rejects(() => assertSupplementaryModelEnabled('text', 'gpt-6-sol'), /费率页关闭/);
     await assert.rejects(() => assertSupplementaryModelEnabled('cutout', 'sam2'), /费率页关闭/);
     await assertSupplementaryModelEnabled('text', 'gpt-6-astra');
+    for (const state of [null, 'failed', 'unknown'] as const) {
+      const raw = state && JSON.stringify({ version: 2, requestId: randomUUID(), state, createdAt: new Date().toISOString(), cost: 'unknown' });
+      let writes = 0, calls = 0, admissions = 0;
+      const store: DescriptionStore = { readCache: async () => null, readAttempt: async () => raw,
+        createAttempt: async () => { writes++; return true; }, replaceAttempt: async () => { writes++; return true; },
+        saveResponse: async () => { writes++; }, readResponse: async () => null, complete: async () => { writes++; return true; } };
+      const status = await inspectDescription('一位穿蓝色外套的人物', store);
+      const request = resolveDescription('一位穿蓝色外套的人物', { approved: true, retryToken: status.retryToken }, store,
+        async () => { calls++; throw new Error('Model must not be called'); },
+        async () => { admissions++; await assertSupplementaryModelEnabled('text', 'gpt-6-sol'); });
+      await assert.rejects(() => request, state === 'unknown' ? /./ : /费率页关闭/);
+      assert.equal(writes, 0); assert.equal(calls, 0);
+      assert.equal(admissions, state === 'unknown' ? 0 : 1, 'old unknown stays read-only; first and explicit new retry share admission');
+    }
     assert.deepEqual(await saveModelAccessSettings(actor, input), saved, 'same request must replay the durable operation');
     assert.deepEqual((await getModelAccessOperation(actor, requestId)).operation, saved.operation);
     assert.equal((await getModelAccessOperation(actor, `missing-${randomUUID()}`)).operation.state, 'unknown');
@@ -46,7 +61,8 @@ export async function runPricingModelAccessFixture() {
     assert.deepEqual(await prisma.platformSetting.findUnique({ where: { key: 'pricing_policy_v1' } }), pricingBefore,
       'supplementary switches must not change numeric prices or existing pricing rules');
     return { fixture: 'pricing-model-access', completed: true, modelCalls: 0, productionWrites: 0,
-      evidence: ['Actual isolated SQLite CAS/replay/original receipt/disabled admission/re-enable/revoked admin/price preservation'] };
+      evidence: ['Actual isolated SQLite CAS/replay/original receipt/disabled admission/re-enable/revoked admin/price preservation',
+        'Actual parser first/approved-retry admission rejects before intent or call; original unknown does not invoke admission'] };
   } finally {
     await prisma.operationLog.deleteMany({ where: { operator_id: id } });
     await prisma.platformSetting.deleteMany({ where: { key: MODEL_ACCESS_KEY } });
