@@ -126,6 +126,13 @@ fixtures.push({ file: 'scripts/multiview-settings-batch-engineering.mjs', schema
   marker: 'Multiview settings engineering receipt: ', checks: ['saved_settings_permissions_snapshots_and_timing',
     'frame_settings_keep_media_and_layout_private', 'preview_atlas_loop_exact_output_contract',
     'same_work_identity_baseline_and_explicit_original_save', 'authorized_multiview_original_transport'], sources: MULTIVIEW_SETTINGS_FIXTURE_SOURCES });
+fixtures.push({ file: 'scripts/sqlite-transaction-scheduling-engineering.ts', schema: 'sqlite-transaction-scheduling-engineering.v1',
+  marker: 'SQLite transaction scheduling engineering receipt: ', checks: [
+    'single_worker_callbacks_do_not_block_commit', 'batch_transactions_share_the_same_entry_queue',
+    'implicit_directory_write_keeps_atomic_markers', 'bare_sql_write_does_not_starve_transaction_commit',
+    'non_catalog_write_is_scheduled_without_new_markers', 'rollback_preserves_data_and_releases_queue',
+    'expired_wait_never_executes_late_callback'], sources: ['src/lib/catalog-directory-writes.ts',
+    'src/lib/image-studio/catalog-revision.ts', 'src/lib/performance/request-trace.ts', 'src/lib/performance/trace-contract.ts'] });
 fixtures.push({ file: 'scripts/hd-chain-engineering.mjs', schema: 'hd-chain-engineering.v1',
   marker: 'HD chain engineering receipt: ', checks: HD_CHAIN_CHECKS, sources: HD_CHAIN_FIXTURE_SOURCES });
 fixtures.push({ file: 'scripts/image-size-policy-engineering.ts', schema: 'image-size-policy-engineering.v1',

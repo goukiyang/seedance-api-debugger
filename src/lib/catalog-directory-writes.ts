@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'node:crypto';
-import type { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import { bumpCatalogRevision, catalogRevisionKey, type CatalogDomain } from './image-studio/catalog-revision';
 import { observeTransaction } from './performance/request-trace';
 
@@ -62,7 +62,7 @@ function domains(model: string | undefined, operation: string, args: unknown): C
   return modelDomains[model] || [];
 }
 
-/** Directory-only invalidation. Business mutations retain their result and original transaction. */
+/** Directory invalidation and SQLite transaction entry. Business bodies and atomic markers stay unchanged. */
 export function catalogDirectoryWrites<T extends PrismaClient>(base: T): T {
   const alreadyTracked: unknown = Reflect.get(base, marker);
   if (alreadyTracked === true) return base;
@@ -71,16 +71,40 @@ export function catalogDirectoryWrites<T extends PrismaClient>(base: T): T {
   const promises = new WeakMap<object, CatalogDomain[]>();
   const observedInputs = new WeakSet<object>();
   const transaction = base.$transaction.bind(base);
+  const sqlite = process.env.DATABASE_URL?.startsWith('file:');
+  let transactionTail: Promise<void> = Promise.resolve();
+  // SQLite BEGIN waits occupy engine threads. Under a one-CPU service quota,
+  // a second BEGIN can prevent the lock holder's COMMIT from ever running.
+  function schedule<R>(run: () => Promise<R>, maxWait?: number): Promise<R> {
+    if (!sqlite) return run();
+    let expired: Error | undefined, timer: ReturnType<typeof setTimeout> | undefined;
+    const pending = transactionTail.then(() => {
+      if (expired) throw expired;
+      if (timer) clearTimeout(timer);
+      return run();
+    });
+    transactionTail = pending.then(() => {}, () => {});
+    if (maxWait === undefined) return pending;
+    const waiting = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        expired = new Prisma.PrismaClientKnownRequestError('Transaction API error: Unable to start a transaction in the given time.',
+          { code: 'P2028', clientVersion: Prisma.prismaVersion.client });
+        reject(expired);
+      }, maxWait);
+    });
+    return Promise.race([pending, waiting]).finally(() => { if (timer) clearTimeout(timer); });
+  }
   base.$use(async (params, next) => {
     const affected = domains(params.model, params.action, params.args);
-    if (!affected.length) return next(params);
+    if (!affected.length) return !params.runInTransaction && (operations.has(params.action) || params.action === 'executeRaw')
+      ? schedule(() => next(params)) : next(params);
     const tx = context.getStore();
     if (!params.runInTransaction) {
-      return observeTransaction('implicit', enter => transaction(async current => context.run(current, () => enter(async () => {
+      return observeTransaction('implicit', enter => schedule(() => transaction(async current => context.run(current, () => enter(async () => {
         const name = params.model![0].toLowerCase() + params.model!.slice(1);
         const delegate = Reflect.get(current, name);
         return Reflect.apply(Reflect.get(delegate, params.action), delegate, [params.args]);
-      })), { maxWait: 5000, timeout: 15000 }));
+      })), { maxWait: 5000, timeout: 15000 }), 5000));
     }
     const result = await next(params);
     if (tx && !(result && typeof result === 'object' && 'count' in result && result.count === 0)) await bumpCatalogRevision(tx, affected);
@@ -96,7 +120,8 @@ export function catalogDirectoryWrites<T extends PrismaClient>(base: T): T {
           const call = async (enter: <R>(body: () => Promise<R>) => Promise<R>) => {
             const callback = (tx: Prisma.TransactionClient) => context.run(tx, () => enter(() => input(tx)));
             observedInputs.add(callback);
-            return Reflect.apply(targetTransaction, target, [callback, options]);
+            return schedule(() => Reflect.apply(targetTransaction, target, [callback, options]),
+              (options as { maxWait?: number } | undefined)?.maxWait ?? 2000);
           };
           return observedInputs.has(input) ? call(body => body()) : observeTransaction('callback', call);
         }
@@ -108,7 +133,7 @@ export function catalogDirectoryWrites<T extends PrismaClient>(base: T): T {
           return base.platformSetting.upsert({ where: { key }, create: { key, value_json }, update: { value_json } });
         });
         const batched = [...input, ...markers]; observedInputs.add(batched);
-        const call = () => Reflect.apply(targetTransaction, target, [batched, options]) as Promise<unknown[]>;
+        const call = () => schedule(() => Reflect.apply(targetTransaction, target, [batched, options]) as Promise<unknown[]>);
         const pending = observedInputs.has(input) ? call() : observeTransaction('batch', call);
         return pending.then(values => values.slice(0, input.length));
       };

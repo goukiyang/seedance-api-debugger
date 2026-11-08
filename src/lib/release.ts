@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '大图显示版本更清楚', outline: [
-  '大图常显当前是高清、完整原图还是轻量预览',
-  '切换与对比时，按实际画面显示各自版本',
+const notice = { title: '生图模块读取卡顿修复', outline: [
+  '修复后台数据库争用引起的长时间等待',
+  '保留图片处理并行与原有生成、恢复规则',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

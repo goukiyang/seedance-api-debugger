@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
-import { PrismaClient, type Prisma } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import ts from 'typescript';
 import * as trace from '../src/lib/performance/request-trace';
 import * as contract from '../src/lib/performance/trace-contract';
@@ -57,7 +57,7 @@ async function main() {
   }
   const revision = evaluate('src/lib/image-studio/catalog-revision.ts', { '@/lib/pricing/runtime': { assertPricingImageConsumerReady: () => forbidden('pricing-readiness') } });
   const loadWrapper = (baseline = false) => evaluate('src/lib/catalog-directory-writes.ts', {
-    './image-studio/catalog-revision': revision, './performance/request-trace': trace,
+    '@prisma/client': { Prisma }, './image-studio/catalog-revision': revision, './performance/request-trace': trace,
   }, baseline ? execFileSync('git', ['show', '7513df5ce:src/lib/catalog-directory-writes.ts'], { cwd: root, encoding: 'utf8' }) : undefined).catalogDirectoryWrites as (client: PrismaClient) => PrismaClient;
   const headers = (id: string = randomUUID()) => new Headers({ [contract.TRACE_ID_HEADER]: id, [contract.TRACE_START_HEADER]: String(Date.now()) });
   const secret = 'SYNTHETIC_PROMPT_COOKIE_TOKEN_URL_DO_NOT_LOG';
