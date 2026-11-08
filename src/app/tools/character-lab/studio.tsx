@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, ChevronDown, Copy, Download, Grid2X2, History, ImagePlus, Loader2, Maximize2, Plus, RefreshCw, Save, Settings2, SlidersHorizontal, UserRound, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, ChevronDown, Copy, Download, Grid2X2, History, ImagePlus, Loader2, Maximize2, Palette, Plus, RefreshCw, Save, Settings2, SlidersHorizontal, UserRound, X } from 'lucide-react';
 import { useMaterialArrival } from '@/components/useMaterialArrival';
 import { ResourceLibraryPicker } from '@/components/ResourceLibraryPicker';
 import { ImageGenerationChannelSelect } from '@/components/ImageGenerationChannelSelect';
@@ -25,7 +25,7 @@ import { handImageDownloadToBrowser } from '@/lib/media/native-download';
 import { imageUiQuoteFields, imageUiQuotePriceText, validImageUiQuote } from '@/app/image-studio/use-studio-batch';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, imageStudioNewQualityOptions, imageStudioQualityLabel } from '@/lib/image-studio/model-catalog';
 import { imageStudioChannelModel, imageStudioChannelModels, imageStudioEffectiveChannelId, imageStudioUsesLegacyRoute, normalizeImageStudioChannels } from '@/lib/image-studio/channels';
-import { faceLabPrompt, labDefaultStageStyles, labDefaultViewPrompts, labStyleField, labViewPrompt, labViewPromptFields } from '@/lib/character-lab/prompts';
+import { faceLabPrompt, labContentPrompt, labDefaultStageStyles, labDefaultViewPrompts, labViewPrompt, labViewPromptFields } from '@/lib/character-lab/prompts';
 import { characterLabIsGrid, characterLabMediaUrl, characterLabSlot, characterLabSlotsOverlap, characterLabReferenceSlot, characterLabStrength, sameLabReference, type CharacterLabRestoredSettings, type CharacterLabOperation, type CharacterLabReference, type CharacterLabView, type CharacterLabBootstrap, type CharacterLabConfig, type CharacterLabDraft, type CharacterLabFace, type CharacterLabPlan, type CharacterLabPromptFields, type CharacterLabQuote, type CharacterLabStage, type CharacterLabTask, type CharacterLabWorkspace, type CharacterLabWorkspacePayload } from '@/lib/character-lab/types';
 import { labPersonalFields } from '@/lib/character-lab/contexts';
 import styles from './studio.module.css';
@@ -47,17 +47,16 @@ function pendingLabPlans(payload: CharacterLabWorkspacePayload, pending: string[
   return Array.from(new Set([...pending, ...payload.plans.filter(plan => payload.submissionByRequestId[plan.id] === 'submitting').map(plan => plan.id)]))
     .filter(id => !payload.taskByRequestId[id] && payload.submissionByRequestId[id] !== 'rejected');
 }
-const faceStyleField = ['styleConstraints', '正脸风格约束', '仅用于正脸候选和正脸微调'] as const;
+const styleFields = [['styleConstraints', '统一风格提示词', '画面风格、背景颜色、光影、质感，以及需要避免的风格']] as const;
+const legacyStyleKeys = ['sideStyleConstraints', 'bodyStyleConstraints', 'resultStyleConstraints'] as const;
 const promptFields = {
   faces: [
     ['basePrompt', '明显变化 · 基础提示词', '明显变化档的候选生成规则'],
     ['characterContext', '角色上下文要求', '从原图理解角色时需要保留的身份与特征'],
     ['faceVariables', '明显变化 · 面部变量', '明显变化档的骨相和五官规则'],
-    faceStyleField,
   ],
   result: [
     ['resultPrompt', '成品生成规则', '面部一致性、服装与四格构图要求'],
-    ['resultStyleConstraints', '旧版整图风格约束', '仅用于旧版整图'],
   ],
 } as const;
 const sameFace = (a: CharacterLabFace | null, b: CharacterLabFace) => a?.planId === b.planId && a.cell === b.cell;
@@ -71,7 +70,11 @@ async function labApi<T>(body?: Record<string, unknown>, query = '') {
 }
 function fieldsOf(config: CharacterLabConfig): CharacterLabPromptFields {
   const { revision, updatedAt, ...fields } = config;
-  return { ...labDefaultStageStyles, ...labDefaultViewPrompts, ...fields };
+  const result = { ...labDefaultStageStyles, ...labDefaultViewPrompts, ...fields };
+  for (const field of ['basePrompt', 'characterContext', 'faceVariables', 'resultPrompt', ...Object.values(labViewPromptFields)] as const) {
+    result[field] = labContentPrompt(result[field] || '');
+  }
+  return result;
 }
 export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceId, initialPrompts, initialBody }: { ownerId: string; isAdmin: boolean; initialWorkspaceId?: string; initialPrompts?: boolean; initialBody?: boolean }) {
   const session = useAppSession();
@@ -107,7 +110,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
   const [exportMode, setExportMode] = useState<'sheet' | 'cells' | 'all'>('all');
   const [preferencesReady, setPreferencesReady] = useState(false);
   const [preview, setPreview] = useState<{ src: string; alt: string } | null>(null);
-  const [promptTarget, setPromptTarget] = useState<PromptTarget | 'current' | null>(initialPrompts && isAdmin ? 'current' : null);
+  const [promptTarget, setPromptTarget] = useState<PromptTarget | 'current' | 'style' | null>(initialPrompts && isAdmin ? 'current' : null);
   const [configDraft, setConfigDraft] = useState<CharacterLabPromptFields | null>(null);
   const [configError, setConfigError] = useState('');
   const promptDialog = useRef<HTMLDialogElement>(null);
@@ -124,11 +127,12 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
   const dirty = Boolean(workspace && draft && savedSignature.current !== JSON.stringify([workspace.name, draft]));
   const activePromptTarget = promptTarget === 'current' ? (draft?.stage === 'result' ? 'result' : 'faces') : promptTarget;
   const activePromptFields: readonly (readonly [keyof CharacterLabPromptFields, string, string])[] =
-    !activePromptTarget ? [] : activePromptTarget === 'faces' || activePromptTarget === 'result' ? promptFields[activePromptTarget]
-      : [[labViewPromptFields[activePromptTarget], '生成规则', '只用于当前设置'], [labStyleField(activePromptTarget), activePromptTarget.startsWith('body-') ? '前后身风格约束' : activePromptTarget === 'refine-face' ? '正脸风格约束' : '侧脸风格约束', '只用于对应部位的生成与微调']];
+    !activePromptTarget ? [] : activePromptTarget === 'style' ? styleFields : activePromptTarget === 'faces' || activePromptTarget === 'result' ? promptFields[activePromptTarget]
+      : [[labViewPromptFields[activePromptTarget], '生成内容规则', '人物身份、构图及需要保留或调整的内容']];
   const savedPromptFields = bootstrap ? fieldsOf(bootstrap.config) : null;
   const promptOpen = Boolean(isAdmin && sessionReady && !loading && activePromptTarget && bootstrap && configDraft);
-  const configDirty = Boolean(configDraft && bootstrap && JSON.stringify(configDraft) !== JSON.stringify(savedPromptFields));
+  const configDirty = Boolean(configDraft && savedPromptFields && (Object.keys(configDraft) as Array<keyof CharacterLabPromptFields>)
+    .some(field => !(legacyStyleKeys as readonly string[]).includes(field) && configDraft[field] !== savedPromptFields[field]));
   const scopedConfigDirty = activePromptFields.some(([field]) => configDraft?.[field] !== savedPromptFields?.[field]);
   usePageExitRisk({
     unsaved: [
@@ -539,7 +543,8 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
     });
   }
   function closePrompts() {
-    if (activePromptTarget && legacyView) { setRecipeTarget(activePromptTarget); setRecipeTab('next'); }
+    if (activePromptTarget === 'style') { setPromptTarget(null); return; }
+    if (activePromptTarget && activePromptTarget !== 'style' && legacyView) { setRecipeTarget(activePromptTarget); setRecipeTab('next'); }
     else setRecipeTarget(null);
     setPromptTarget(null);
     if (promptTarget === 'current') {
@@ -559,13 +564,14 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
   }
   async function saveConfig() {
     if (!bootstrap || !configDraft || !scopedConfigDirty) return;
-    const fields = fieldsOf(bootstrap.config);
+    const { revision, updatedAt, ...fields } = bootstrap.config;
     for (const [field] of activePromptFields) Object.assign(fields, { [field]: configDraft[field] });
+    if (activePromptTarget === 'style') for (const field of legacyStyleKeys) fields[field] = configDraft.styleConstraints;
     setConfigError('');
     await run('config', async () => {
       try {
         const result = await labApi<{ config: CharacterLabConfig; configVersions: CharacterLabConfig[] }>({
-          action: 'save-config', contextProtocol: 1, revision: bootstrap.config.revision, fields,
+          action: 'save-config', contextProtocol: 1, styleProtocol: 1, configScope: activePromptTarget === 'style' ? 'style' : 'content', revision: bootstrap.config.revision, fields,
         });
         if (!alive.current || !active.current) return;
         setBootstrap(current => current ? { ...current, ...result } : current);
@@ -761,6 +767,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
       <div className={styles.brand}><UserRound size={21} /><strong>CHARACTER LAB</strong><span>角色参考图工作台</span></div>
       {legacyView && <button type="button" onClick={() => { setLegacyView(false); setInspectionId(null); setRecipeTarget(null); }}>返回成品工作台</button>}{legacyView && <nav className={styles.steps} aria-label="角色制作阶段">{stages.map((stage, index) => <button type="button" key={stage.id} aria-current={currentStep === stage.id ? 'step' : undefined} disabled={!draft || locked} onClick={() => stage.id === 'body' ? showBodyGeneration() : stage.id === 'result' ? showIndependentViews() : updateDraft({ stage: stage.id })}><b>{draft && stages.findIndex(item => item.id === currentStep) > index ? <Check size={15} /> : index + 1}</b><span>{stage.label}</span></button>)}</nav>}
       <div className={styles.headerActions}>
+        {isAdmin && <button type="button" disabled={locked || !bootstrap} aria-haspopup="dialog" onClick={() => { setConfigError(''); setPromptTarget('style'); }}><Palette size={16} />风格提示词</button>}
         <label className={styles.workspaceLabel}><span className={styles.srOnly}>角色工作区</span><select value={workspace?.id || ''} disabled={locked || !bootstrap} onChange={event => void switchWorkspace(event.target.value)}><option value="" disabled>选择角色</option>{bootstrap?.workspaces.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         <button type="button" className={styles.iconButton} disabled={locked || !bootstrap} onClick={() => void createWorkspace()} title="新建角色" aria-label="新建角色"><Plus size={18} /></button>
         {!legacyView && workspace && <><button type="button" className={styles.primary} disabled={locked || !sheetReady} onClick={() => void saveComposition()}><Save size={15} />保存版本</button><button type="button" disabled={locked || !sheetReady} onClick={copyComposition}><Copy size={15} />复制整张</button><button type="button" disabled={locked || !sheetReady} onClick={() => void run('export', async () => { await saveDraft(); const current = workspaceRef.current!; await handImageDownloadToBrowser(compositionUrl(current.id) + '&download=1', resultName + '.png', () => active.current); })}><Download size={15} />下载</button></>}
@@ -859,10 +866,11 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
     {promptOpen && activePromptTarget && bootstrap && configDraft && (
       <dialog ref={promptDialog} className={styles.promptDialog} aria-labelledby="character-lab-prompt-title">
         <header className={styles.promptHeader}>
-          <h2 id="character-lab-prompt-title">{promptTitles[activePromptTarget]}</h2>
+          <h2 id="character-lab-prompt-title">{activePromptTarget === 'style' ? '风格提示词' : promptTitles[activePromptTarget]}</h2>
           <button type="button" className={styles.iconButton} aria-label="关闭提示词" disabled={Boolean(busy)} onClick={closePrompts}><X size={18} /></button>
         </header>
         <div className={styles.promptBody}>
+          <p className={styles.hint}>{activePromptTarget === 'style' ? '统一用于正脸、侧脸、前后身及旧版整图。保存后用于新生成，历史图片提示词保持原样。' : '这里只编辑生成内容。画面风格请在独立的“风格提示词”中调整。'}</p>
           <label className={styles.promptRevision}>
             <span>提示词版本</span>
             <select value="" disabled={Boolean(busy)} onChange={event => {
@@ -882,7 +890,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
               ))}
             </select>
           </label>
-          {draft && legacyView && activePromptTarget !== 'result' && <details className={styles.promptPreview}>
+          {draft && legacyView && activePromptTarget !== 'result' && activePromptTarget !== 'style' && <details className={styles.promptPreview}>
             <summary>查看本次规则预览</summary>
             <pre>{activePromptTarget === 'faces'
               ? faceLabPrompt(bootstrap.config, draft)
@@ -892,11 +900,10 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
           {activePromptFields.map(([field, title, placeholder]) => (
             <label className={styles.field} key={field}>
               <span>{title}</span>
-              <textarea rows={field === 'resultPrompt' ? 6 : 4} maxLength={3000} value={configDraft[field]} placeholder={placeholder} disabled={Boolean(busy)} onChange={event => {
+              <textarea rows={activePromptTarget === 'style' ? 9 : field === 'resultPrompt' ? 6 : 4} maxLength={3000} value={configDraft[field]} placeholder={placeholder} disabled={Boolean(busy)} onChange={event => {
                 const value = event.target.value;
                 setConfigDraft(previous => previous ? { ...previous, [field]: value } : previous);
               }} />
-              {field.endsWith('StyleConstraints') || field === 'styleConstraints' ? <small>仅影响对应部位的新生成与微调。</small> : null}
             </label>
           ))}
         </div>
@@ -905,7 +912,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
           <small>保存后用于新生成。</small>
           <button type="button" disabled={Boolean(busy)} onClick={closePrompts}>关闭</button>
           <button type="button" className={styles.primary} disabled={Boolean(busy) || !scopedConfigDirty} onClick={() => void saveConfig()}>
-            <Save size={16} />{busy === 'config' ? '正在保存…' : '保存新版本'}
+            <Save size={16} />{busy === 'config' ? '正在保存…' : activePromptTarget === 'style' ? '保存统一风格' : '保存内容规则'}
           </button>
         </footer>
       </dialog>

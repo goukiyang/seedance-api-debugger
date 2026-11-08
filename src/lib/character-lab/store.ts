@@ -94,12 +94,15 @@ export async function labConfigVersions() {
   const rows = await prisma.platformSetting.findMany({ where: { key: { startsWith: `${CONFIG_KEY}:version:` } }, orderBy: { created_at: 'desc' } });
   return rows.map(row => JSON.parse(row.value_json) as CharacterLabConfig);
 }
-export async function saveLabConfig(user: SessionUser, revision: unknown, input: unknown) {
+export async function saveLabConfig(user: SessionUser, revision: unknown, input: unknown, scope?: 'content' | 'style') {
   const fresh = await prisma.user.findUnique({ where: { id: user.id }, select: { role: true, status: true, account_type: true } });
   if (!fresh || fresh.role !== 'admin' || fresh.status !== 'active' || fresh.account_type !== 'internal') throw new StudioError('仅管理员可以修改生成规则', 403);
   if (!Number.isInteger(revision) || !input || typeof input !== 'object' || Array.isArray(input)) throw new StudioError('规则版本无效');
   const fields = input as Record<string, unknown>;
-  const checked = Object.fromEntries((['basePrompt', 'characterContext', 'faceVariables', 'styleConstraints', 'resultPrompt'] as const)
+  const keys = scope === 'style' ? ['styleConstraints'] : scope === 'content'
+    ? ['basePrompt', 'characterContext', 'faceVariables', 'resultPrompt']
+    : ['basePrompt', 'characterContext', 'faceVariables', 'styleConstraints', 'resultPrompt'];
+  const checked = Object.fromEntries(keys
     .map(key => [key, labText(fields[key], 3000, '生成规则')])) as CharacterLabPromptFields;
   if (Object.values(checked).some(item => !item)) throw new StudioError('生成规则不能为空');
   return prisma.$transaction(async tx => {
@@ -107,7 +110,11 @@ export async function saveLabConfig(user: SessionUser, revision: unknown, input:
     const current = row ? JSON.parse(row.value_json) as CharacterLabConfig : defaultLabConfig;
     if (current.revision !== revision) throw new StudioError('规则已在另一处更新，请重新读取；当前编辑保留', 409);
     const config = { ...current, ...checked, revision: current.revision + 1, updatedAt: new Date().toISOString() };
-    for (const field of [...Object.values(labViewPromptFields), ...Object.keys(labDefaultStageStyles) as Array<keyof typeof labDefaultStageStyles>]) {
+    // Mirror the existing stage fields so compatible older readers use the same saved style.
+    if (scope === 'style') Object.assign(config, { sideStyleConstraints: checked.styleConstraints,
+      bodyStyleConstraints: checked.styleConstraints, resultStyleConstraints: checked.styleConstraints });
+    for (const field of scope === 'style' ? [] : [...Object.values(labViewPromptFields),
+      ...(scope === 'content' ? [] : Object.keys(labDefaultStageStyles) as Array<keyof typeof labDefaultStageStyles>)]) {
       if (fields[field] !== undefined) {
         const value = labText(fields[field], 3000, '生成规则');
         if (!value) throw new StudioError('生成规则不能为空');
