@@ -10,6 +10,10 @@
 
 ## 待核线索
 
+<!-- D-20261107-PIN-MEDIA-SCOPE -->
+**D-20261107-PIN-MEDIA-SCOPE｜疑似扩展性问题 / P3，待测。** v27置顶链路复核发现，`resolveStudioPinnedAsset`对单个asset先查索引，再调用`readableStudioPins`核整组置顶（现有上限200），后者批量查任务/资产及私密参考URL。多个缩略图请求可能重复整组工作；尚未测真实规模增长或并发耗时，不能认定为当前延迟或本次403原因。本次只为来源不同的pin批量读可信复现证明，不逐卡查父任务，不向输出投影带出快照。后续最小取证：同环境固定1/50/200条合法置顶，比较单张媒体鉴权/DB耗时与同组多图请求，再判断是否沿现有asset索引定向核验；保root共享/撤权、私密文件和本人边界，不先建缓存或迁库。[源码](../src/lib/image-studio/result-pins.ts)，实际主源d0c1b31693125ddb9f37d70e323fdf01e3cc9040；来源[联合工单§16.8.1](todo/2026-11-05-template-sharing-cutout-open-preflight.md)。
+<!-- /D-20261107-PIN-MEDIA-SCOPE -->
+
 <!-- D-20261107-SHARED-CPU -->
 **D-20261107-SHARED-CPU｜同机资源待核 / P3。** 2026-11-07T17:05:03Z只读资源核对：服务器4逻辑核，PID830293（仅命令名python3）已运行2863727秒，ps报告CPU99.3%。未调查用途、所属项目或合法负载，不能据此判定异常、模板故障根因或用户延迟收益。可能压缩同机可用CPU预算，后续先核归属与时间窗口再判断；本轮不杀进程、不改资源分配。原证：[共享生成修复资料](../docs/materials/2026-11-07-template-sharing-generation/shared-cpu-clue.json)，仅含资源元数据，无进程参数或业务内容。
 <!-- /D-20261107-SHARED-CPU -->

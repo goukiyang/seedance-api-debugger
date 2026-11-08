@@ -470,12 +470,21 @@ v20是阶段交付，默认共享模板完整生成尚不能结案。继续从�
 待用户手验：图1具体原图置顶/取消和刷新后排序、同事可见性；图2鼠标hover/键盘焦点/触摸入口；图3大屏铺满且单图不放大，缩放窗口/折叠侧栏保焦点和工作位置。直接消费者已核WorkMedia只用于广场和相关推荐缩略图，不改详情主图/高清/原件。主源与guard及原记录均已提交推送，收口文档提交不冒运行源。旧fc68未知请求、VIDEO-SUBMIT01原页缺证及CPU待核保持；本轮未新增范围外缺陷。最终证据见docs/materials/2026-11-07-pin-wide-gallery/attempt03，原失败保留。
 
 
-#### 16.8.1 截图原号与历史复现来源纠正（2026-11-07，v27追补中）
+#### 16.8.1 截图原号与历史复现来源纠正（2026-11-07，v27已部署）
 
 已用截图可见边缘和1219个本人相关资产缩略图做有界只读匹配，并目视确认：图1为任务9ecf6e6bf2c78367a301573a6a464ca3181d3b508a5e053c092366d9d95c767e-0。实际执行工作区baaadf18-e6ae-4728-a136-8375b6e9a7b5，名称“9宫格剧照”，当前源34111a20-e8b9-41a4-a425-4ef086201bed；任务与冻结快照sourcePresetId=fbcbe5cd-663d-49f9-807c-d6d47626df5e（“表情”），快照另有reproducedFromTaskId=bd40228386ccb8727d124edd301e746ad5a64607cd54d57256f7ce0a214ac80d-0。快照moduleId/moduleName/moduleRevision与本次执行工作区相符；不是42个null模块的情况。原浏览器PUT正文未采到，不冒实际点击验收。
 
 共同原因：合法历史复现按tasks.ts保留旧配方source，同时记录新执行workspace；列表按执行工作区显示，pin读/写/资格却把任何source差异都当成跨模板，从而错拒。v26把原因说清且修了两类兼容分支，但尚未修到这张真实截图的复现分支。本次保持原source、快照、费用和原号不变，只在可信冻结version/moduleId/sourcePresetId相符且有合法非自身原复现taskId时承认本次工作区归属。任意来源冲突、他人/其他工作区、私密底层文件仍拒；沿现有共享root、事务CAS及原号重放。读出只为来源不同的既有pin批量读取复现证明，不把snapshot返回给同事，也不增加普通pin的快照读取或逐卡查父任务。
 
-工程：新增隔离SQLite组先在26真实源码重现“来自其他模板”错拒；Mac首次尝试停在本地Prisma schema engine错误，未到业务断言，不计有效红测试。Linux独立临时数据库重现成功，日志保留于pin-reproduction-20261107/red；未写生产库、未执行线上pin或生成。v27最终主/guard构建、发布及用户手验待本节后续原证更新。
+工程：Linux原26源码先在独立临时SQLite中重现同类“来自其他模板”错拒；Mac首次尝试停在本地Prisma schema engine，未到业务断言，不计有效红测试。最终主/guard各9组真实隔离SQLite、9组按钮工程、fresh原生及计价、完整Next构建内含types/lint全部通过；补与截图相同的旧命名工作区/无publisher绑定情况，验证原号重放、同事仅输出投影、原source/快照不改、私密撤权、任意跨工作区与伪复现拒绝。实际9ecf任务已捕获元数据的纯资格函数对照：26报来自其他模板，27为null（合法）；该对照未连接生产库、不是生产PUT或浏览器验收，未仪表计数的查询/网络数字已从材料中移除。
+
+最终发布：**已部署，待用户手动验收。** 实际主源d0c1b31693125ddb9f37d70e323fdf01e3cc9040 / v0.134.27 / BUILD cqHwJ1BrxECXfOkCNFins。2026-11-08T04:42:33Z启动，04:42:41.844300Z公网收口（洛杉矶11-07 20:42）；继承v26全部广场全宽/缩略图上限/hover成果，只补历史复现的共同资格判据。最终stage为pin-reproduction-20261107/attempt03，cutover-exit=0；6实际启动检查、7服务4timer、内外health200、2公网叶JS同SHA及3匿名401通过，追加置顶匿名PUT401。后台实际source为d0c1，44个加载文件全匹配，其中正式设置子集8个，租约有效；最初收尾探针把整个44项map误当只应有8项，属于计数断言错误，按代码定义子集核对后通过，未改应用。两费率行全字段SHA7d8ea02c291679e895b5c839d213afc0ac74b9bfdefcbc59888d4dbaaa541047、policy14260367/authoring9a82ad7b/capability f4a48550保持；首页限高CSS原SHA8a36cfd2a81fa3fc8fb05da12f24262c3fb1427c02e305558515e839d818614f保持。原writer自然停尽、一致SQLite备份，仅切程序，无DDL/历史回写/数据恢复/生产pin或收费生成。
+
+构建复用与原失败：attempt01新增命名工作区夹具用了非UUID，被真实API正确400，改夹具用randomUUID，未放宽保护；该次未native/Next/切版。attempt02主/guard完整构建分别完成于04:23:33.393592Z / 04:35:20.041683Z；首次切版缺少原helper的运行链接--prepare，断在停服前（无cutover-started），七服务仍26，不冒生产事故或应用失败。最终attempt03保留并复用这两份原构建、native与实际完成时刻，补原有链接准备并两次验证，不重编；source-pair和build-reuse.json明确复用来源，02失败原证保留。未修改发布核心、原配置/权限校验或旧成功包。
+
+相容回退：c5768159621d8bf23becbade3828b289dc13ed21 / 0.134.27+pin-reproduction-guard.1 / BUILD phBaNJOYNUJyPtNdI9bVE，保本次合法复现pin读者、默认归属及参数副本读者，关闭既有五写门，正常反馈提交保持。入口：bash /data/video-api-debugger/release-staging/pin-reproduction-20261107/attempt03/program-recovery.sh /data/video-api-debugger/release-staging/pin-reproduction-20261107/attempt03/release-input.json。仅回程序，不回DB/媒体/账本/回执；未线上演练。不能使用会过滤新复现pin的旧26 reader作相容回退。
+
+手验仍含：原9宫格结果置顶/取消/刷新及同事可见性；图2的hover、键盘焦点和触摸入口；图3超宽屏、侧栏伸缩时两侧铺满、单卡不超过370px且图像只缩小。应用主/guard已聚焦提交推送，收口文档HEAD不是运行源。新范围外线索仅D-20261107-PIN-MEDIA-SCOPE：单图媒体鉴权会读取整组置顶，增长开销待测，不当当前403根因，不顺手扩改；旧fc68未知、VIDEO-SUBMIT01原页缺证、CPU待核保持。
+
 
 证据沿同一材料目录match/screenshot-match-proof.json、image-match-scores.json、screenshot-match.webp；三份用户原附件按原文件名保留于attachments。匹配只读缩略图，不处理或替换原件；原截图已与资产缩略图目视对应，数字边缘分数仅用于找候选。此前误记受影响数量的两处正文及固定todo已纠正，原查询日志保留，不改历史失败。
