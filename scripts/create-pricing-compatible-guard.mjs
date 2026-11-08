@@ -30,6 +30,7 @@ try {
   for (const [file, names] of [
     ['src/lib/character-lab/service.ts', ['CHARACTER_LAB_BODY_PAIRS_ENABLED', 'CHARACTER_LAB_RECIPE_WRITES_ENABLED', 'CHARACTER_LAB_GRID_WRITES_ENABLED']],
     ['src/lib/cutout/access.ts', ['CUTOUT_MEMBERS_ENABLED']],
+    ['src/lib/assets/upload-purpose.ts', ['FEEDBACK_UPLOADS_ENABLED']],
   ]) {
     let bytes = read(file);
     for (const name of names) {
