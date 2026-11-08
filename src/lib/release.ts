@@ -1,10 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '模板内保存多套设置', outline: [
-  '另存为设置留在当前模板，命名后直接切换',
-  '个人方案不修改共享默认设置，主图保留',
-  '角色规则保存后，预览及时更新',
-  '断网后核对原保存，避免重复创建',
+const notice = { title: '模型开放统一由费率页控制', outline: [
+  '各生成入口统一读取模型开放设置，关闭型号不再出现在新选择中',
+  '文字和抠图模型可在同一费率页管理开放状态',
+  '现有草稿、历史结果和已受理任务继续保留',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
