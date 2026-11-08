@@ -217,8 +217,9 @@ export function normalizeSharedAuthorDraftForUse(actor: ImageStudioIdentity,
     || draft?.skillIds !== undefined || draft?.skillVersions !== undefined;
   if (!hasDefinition) return;
   const consumer = shared.binding.mode !== 'publisher' || shared.binding.ownerId !== actor.id || shared.definition.sourceOwnerId !== actor.id;
-  // A colleague may choose, swap or remove style groups for this use; the template context stays the author's.
-  if (consumer && input.reproduceFromTaskId === undefined && draft?.moduleContext === undefined && draft?.fixedReferences === undefined
+  // A pure per-use style selection is available to authors and colleagues alike.
+  // Only explicit named-settings application sends this for an author; template drafts still use saved definitions.
+  if (input.reproduceFromTaskId === undefined && draft?.moduleContext === undefined && draft?.fixedReferences === undefined
     && draft?.skillIds === undefined && draft?.skillVersions === undefined) return;
   if (consumer) {
     throw new StudioError('共享模板的历史定义不能直接用于生成；请重新读取当前模板，个人设置仍保留', 409);
