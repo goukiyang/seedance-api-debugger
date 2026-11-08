@@ -21,7 +21,7 @@ export function StudioResultPinButton({ userId, moduleId, taskId, assetId, state
   const [error, setError] = useState('');
   const uncertain = pending.has(identity);
   const active = Boolean(state?.assetIds.includes(assetId));
-  const reason = state?.disabledReason || (!state ? '正在读取置顶状态' : !active ? disabledReason : '');
+  const reason = state?.disabledReason || (!state ? '正在读取置顶状态' : !active && !uncertain ? disabledReason : '');
   const needsPublication = Boolean(onPublish && state && !state.presetId && !uncertain);
   const label = needsPublication ? '保存并共享模板后置顶' : uncertain ? '重试原置顶操作' : active ? '取消置顶' : '置顶给本模板用户';
   async function save() {
