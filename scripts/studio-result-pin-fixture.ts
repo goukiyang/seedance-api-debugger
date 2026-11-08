@@ -113,6 +113,59 @@ async function main() {
     assert.equal((await readableStudioPins(colleague, presetId))?.pins.length, 1);
     await assert.rejects(mutateStudioPin(author, { ...command, taskId: second.id, assetId: second.asset_id!, active: false,
       expectedRevision: 2, requestId: randomUUID() }), { status: 409 });
+    const origin = await output('original-reproduction-source', 'original-workspace', 'another-template');
+    const reproduced = await output('same-workspace-reproduction', moduleId, 'another-template');
+    const frozen = JSON.stringify({ version: 1, moduleId, sourcePresetId: 'another-template', reproducedFromTaskId: origin.id, moduleContext: 'private-reproduction-context' });
+    await prisma.imageStudioTask.update({ where: { id: reproduced.id }, data: { snapshot_json: frozen } });
+    assert.equal((await listStudioResultFeed(author, moduleId)).pinTaskReasons[reproduced.id], null);
+    const reproduceCommand = { ...command, taskId: reproduced.id, assetId: reproduced.asset_id!, expectedRevision: 3, requestId: randomUUID() };
+    await mutateStudioPin(author, reproduceCommand);
+    assert.equal((await mutateStudioPin(author, reproduceCommand)).replayed, true);
+    assert.ok((await readableStudioPins(colleague, presetId))?.pins.some(pin => pin.taskId === reproduced.id));
+    assert.equal((await resolveStudioPinnedAsset(colleague, reproduced.asset_id!))?.asset.id, reproduced.asset_id);
+    const projected = (await readableStudioPins(colleague, presetId))!.pins.find(pin => pin.taskId === reproduced.id)!;
+    assert.ok(!('snapshot_json' in projected.task));
+    assert.ok(!JSON.stringify(await listStudioResultFeed(colleague, live.id)).includes('private-reproduction-context'));
+    const retained = await prisma.imageStudioTask.findUniqueOrThrow({ where: { id: reproduced.id } });
+    assert.equal(retained.source_preset_id, 'another-template');
+    assert.equal(retained.snapshot_json, frozen);
+    checks.push('same-workspace historical reproduction can pin and replay; colleague reads output while original source and snapshot stay frozen');
+
+    // The reported task ran in an older named workspace with no publisher binding.
+    const legacyPresetId = randomUUID(), legacyWorkspaceId = randomUUID();
+    await prisma.imageStudioPreset.create({ data: { id: legacyPresetId, owner_id: author.id, scope: 'creator',
+      is_shared: true, name: 'Legacy nine grid', model: 'fixture' } });
+    await prisma.imageStudioModule.create({ data: { id: legacyWorkspaceId, owner_id: author.id, name: 'Legacy nine grid',
+      source_preset_id: legacyPresetId } });
+    const reported = await output('reported-reproduction-shape', legacyWorkspaceId, 'another-template');
+    await prisma.imageStudioTask.update({ where: { id: reported.id }, data: { snapshot_json: JSON.stringify({ version: 1,
+      moduleId: legacyWorkspaceId, sourcePresetId: 'another-template', reproducedFromTaskId: origin.id }) } });
+    assert.equal((await listStudioResultFeed(author, legacyWorkspaceId)).pinTaskReasons[reported.id], null);
+    await mutateStudioPin(author, { ...command, moduleId: legacyWorkspaceId, taskId: reported.id, assetId: reported.asset_id!,
+      expectedRevision: 0, requestId: randomUUID() });
+    assert.ok((await readableStudioPins(colleague, legacyPresetId))?.pins.some(pin => pin.taskId === reported.id));
+    checks.push('reported legacy named-workspace shape without a publisher binding pins under its execution template');
+
+    const invalidReproduction = await output('invalid-reproduction', moduleId, 'another-template');
+    for (const invalid of [{ version: 1, moduleId: 'unrelated-workspace', sourcePresetId: 'another-template', reproducedFromTaskId: origin.id },
+      { version: 1, moduleId, sourcePresetId: 'forged-source', reproducedFromTaskId: origin.id },
+      { version: 1, moduleId, sourcePresetId: 'another-template', reproducedFromTaskId: invalidReproduction.id },
+      { version: 1, moduleId, sourcePresetId: 'another-template' }]) {
+      await prisma.imageStudioTask.update({ where: { id: invalidReproduction.id }, data: { snapshot_json: JSON.stringify(invalid) } });
+      await assert.rejects(mutateStudioPin(author, { ...reproduceCommand, taskId: invalidReproduction.id,
+        assetId: invalidReproduction.asset_id!, expectedRevision: 4, requestId: randomUUID() }), { status: 403 });
+    }
+    const outside = await output('other-workspace-reproduction', 'unrelated-workspace', presetId);
+    await prisma.imageStudioTask.update({ where: { id: outside.id }, data: { snapshot_json: JSON.stringify({ version: 1,
+      moduleId: outside.module_id, sourcePresetId: presetId, reproducedFromTaskId: origin.id }) } });
+    await assert.rejects(mutateStudioPin(author, { ...reproduceCommand, taskId: outside.id, assetId: outside.asset_id!,
+      expectedRevision: 4, requestId: randomUUID() }), { status: 403 });
+    await prisma.platformSetting.create({ data: { key: 'studio_fixed_references_v1:reproduction-protected', value_json: JSON.stringify({
+      ownerId: author.id, references: [{ assetId: reproduced.asset_id }] }) } });
+    await assert.rejects(mutateStudioPin(author, { ...reproduceCommand, expectedRevision: 4, requestId: randomUUID() }),
+      (error: unknown) => error instanceof Error && /受保护参考素材/.test(error.message));
+    assert.ok(!(await readableStudioPins(colleague, presetId))?.pins.some(pin => pin.taskId === reproduced.id));
+    checks.push('unproven, inconsistent, self-referencing, other-workspace and protected reproductions stay blocked; private media revocation stays effective');
     assert.equal(networkCalls, 0);
     assert.equal(await prisma.creditLedger.count(), 0);
     checks.push('hidden own result can unpin; stale revision fails; no generation, network or billing writes');
