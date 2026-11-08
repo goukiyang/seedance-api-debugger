@@ -144,6 +144,13 @@ export async function updateLabWorkspace(owner: string, id: unknown, revision: u
     for (const field of ['faceDescription', 'sideDescription', 'bodyDescription'] as const) {
       if (checked[field] === undefined && workspace.draft[field] !== undefined) checked[field] = workspace.draft[field];
     }
+    const side = checked.views?.side;
+    if (side) {
+      const row = await tx.platformSetting.findUnique({ where: { key: planKey(owner, side.planId) } });
+      const plan = row ? JSON.parse(row.value_json) as CharacterLabPlan : null;
+      // Old clients may mistake a new side grid for a single image. Keep the saved view intact.
+      if (plan?.outputLayout === 'grid' && (side.cell === undefined || side.cell >= plan.count)) throw new StudioError('请刷新页面后选择侧脸的一个单格，当前采用图和输入保留', 409);
+    }
     const { views, ...storedDraft } = checked;
     const next = { ...workspace, name: title, draft: storedDraft, ...(views ? { views } : {}), revision: workspace.revision + 1, updatedAt: new Date().toISOString() };
     if (!(await tx.platformSetting.updateMany({ where: { key, value_json: row.value_json }, data: { value_json: JSON.stringify(next), updated_by: owner } })).count) throw new StudioError('工作现场已更新，请重新读取', 409);
