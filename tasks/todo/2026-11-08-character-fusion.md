@@ -46,3 +46,10 @@
 - 本机CodeGraph准备入口针对本工作区执行，索引命令240秒超时；未使用旧索引冒成功，沿实际源码定向复核导航、鉴权、UserPreference及出图两页URL白名单。
 - 源码复核：页面及API均有登录与有效账号门；API GET/POST全部用会话user.id限定UserPreference，客户端无owner请求参数，服务端不接收跨账号目标；rename/delete保revision，save原UUID重试不覆盖不同设置。CSV转义公式开头；无模型、生成提交、图片上传、点数或Provider写入。
 - 标签规则调整后保留已有清单原组合，并提示重新生成，这是原型行为。手动换卡会锁定，随机刷新保锁，移除后清该锁。
+
+
+### 正式30整合与类型修正
+
+2026-11-07 23:28（洛杉矶）正式更新至179f267043dc27580400f403c18f93213fdf74bd / v0.134.30 / h-oDly_LBDBj_eojlNFNQ，已核实际服务cwd和公网release。将此已发布增量合入本任务；仅package版本和更新标题发生冲突，保0.135.0角色融合标题，上传稳定性源码与其todo原记录完整保留，未改其实现。原attempt01在native阶段主动停止，尚未完整Next且无生产变动，原证保留，不冒失败后已通过。
+
+完整tsc发现配方接口局部变量settings缺少显式类型，已补FusionSettings | undefined；最终新基线候选完整构建将再次包含类型与lint检查，不沿旧未通过结果冒完成。

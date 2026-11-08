@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth/api-helpers';
 import { AuthError } from '@/lib/auth/session';
 import { prisma, retrySqliteBusy } from '@/lib/prisma';
-import { parseSettings } from '@/lib/character-fusion/engine';
+import { parseSettings, type FusionSettings } from '@/lib/character-fusion/engine';
 import type { FusionRecipe } from '@/lib/character-fusion/recipes';
 
 export const dynamic = 'force-dynamic';
@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
     if (!body || typeof body !== 'object' || !['save', 'rename', 'delete'].includes(body.action)
       || typeof body.id !== 'string' || !/^[a-f0-9-]{36}$/i.test(body.id)) throw new RecipeError('配方操作无效。');
     if (body.action !== 'delete' && (typeof body.name !== 'string' || !body.name.trim() || body.name.trim().length > 60)) throw new RecipeError('配方名称须为 1–60 字。');
-    let settings;
+    let settings: FusionSettings | undefined;
     if (body.action === 'save') {
       try { settings = parseSettings(body.settings); } catch (error) { throw new RecipeError(error instanceof Error ? error.message : '配方设置无效。'); }
     } else if (typeof body.revision !== 'string' || body.revision.length > 60) throw new RecipeError('请重新读取配方后操作。');

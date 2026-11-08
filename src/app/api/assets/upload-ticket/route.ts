@@ -98,6 +98,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(ticket);
   } catch (error) {
     if (error instanceof VerifiedUploadError) return NextResponse.json(verifiedUploadFailure(error), { status: error.status });
+    if ((error as { code?: string } | null)?.code === 'P1008') {
+      return NextResponse.json({ error: '服务器正忙，原上传编号已保留，请稍后核对上传', code: 'UPLOAD_PREPARE_BUSY' }, { status: 503 });
+    }
     const message = error instanceof Error ? error.message : '上传票据创建失败';
     if (userId) {
       await recordAssetUploadLog({
