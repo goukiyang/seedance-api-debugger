@@ -34,10 +34,11 @@ export function ContextVersionLabel({ code, state = 'loading', unsaved = false, 
   </span>;
 }
 
-export function useModuleContextVersion({ moduleId, raw, taskId, editable, enabled, composing }: {
-  moduleId: string; raw: string; taskId: string | null; editable: boolean; enabled: boolean; composing: boolean;
+export function useModuleContextVersion({ moduleId, raw, taskId, editable, enabled, composing, sourceRevision }: {
+  moduleId: string; raw: string; taskId: string | null; editable: boolean; enabled: boolean; composing: boolean; sourceRevision?: string;
 }) {
-  const identity = JSON.stringify({ moduleId, raw: editable && !taskId ? raw : undefined, taskId, editable });
+  const identity = JSON.stringify({ moduleId, raw: editable && !taskId ? raw : undefined, taskId, editable,
+    sourceRevision: !editable && !taskId ? sourceRevision : undefined });
   const latest = useRef(identity);
   latest.current = identity;
   const [retry, setRetry] = useState(0);

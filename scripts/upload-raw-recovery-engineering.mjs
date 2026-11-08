@@ -139,12 +139,25 @@ function environment({ rejectDirectory = false, rejectExisting = false, prefligh
 
 await check('transient_ticket_busy_retries_only_the_same_preparation_without_sending_bytes', async () => {
   const env = environment({ ticketBusy: 1 });
-  const result = await env.state.prepareRawUpload({ ...env.identity, purpose: 'feedback' });
+  const result = await env.state.prepareRawUpload(env.identity);
   assert.equal(result.rawUpload.phase, 'prepared');
-  assert.equal(result.rawUpload.purpose, 'feedback');
+  assert.equal(result.rawUpload.purpose, undefined);
   assert.equal(env.ticketCreates(), 2); assert.equal(env.rows.size, 1);
   assert.equal(env.ticketInputs[0].value_json, env.ticketInputs[1].value_json, 'request and nonce stay frozen across the busy retry');
   assert.equal(env.counters().writes, 0, 'preparation retry is not a file upload retry');
+});
+await check('feedback_preparation_respects_the_actual_build_capability_without_writing_when_paused', async () => {
+  const env = environment();
+  const { FEEDBACK_UPLOADS_ENABLED } = evaluate(declarations(read('src/lib/assets/upload-purpose.ts'), ['FEEDBACK_UPLOADS_ENABLED']));
+  if (FEEDBACK_UPLOADS_ENABLED) {
+    const result = await env.state.prepareRawUpload({ ...env.identity, purpose: 'feedback' });
+    assert.equal(result.rawUpload.purpose, 'feedback');
+    assert.equal(env.ticketCreates(), 1);
+  } else {
+    await assert.rejects(() => env.state.prepareRawUpload({ ...env.identity, purpose: 'feedback' }), { code: 'FEEDBACK_UPLOAD_UNAVAILABLE' });
+    assert.equal(env.ticketCreates(), 0); assert.equal(env.rows.size, 0);
+  }
+  assert.equal(env.counters().writes, 0);
 });
 await check('ambiguous_ticket_commit_recovers_the_original_nonce_instead_of_replacing_it', async () => {
   const env = environment({ busyAfterCommit: true });

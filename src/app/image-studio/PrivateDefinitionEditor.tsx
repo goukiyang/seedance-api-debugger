@@ -179,9 +179,10 @@ export function PrivateDefinitionEditor(props: Props) {
     } catch (error) { if (current(scope)) setNotice(`草稿保存待确认，请核对原保存。${(error as Error).message === 'stale-private-editor' ? '' : (error as Error).message}`); return false; }
     finally { if (current(scope)) { locked.current = false; setBusy(false); setWriting(false); } }
   }
-  function acceptSave(result: { state?: string; requestId?: string; revision?: number }, requestId: string) {
+  function acceptSave(result: { state?: string; requestId?: string; revision?: number; sourceRevision?: string }, requestId: string) {
     if (result.requestId !== requestId || !['saved', 'not-applied'].includes(result.state || '')) return false;
-    if (!Number.isSafeInteger(result.revision) || (result.revision as number) < 0) return false;
+    if (result.state === 'saved' && (!Number.isSafeInteger(result.revision) || (result.revision as number) < 0)) return false;
+    if (result.sourceRevision !== undefined && (typeof result.sourceRevision !== 'string' || !result.sourceRevision || result.sourceRevision.length > 256)) return false;
     retain('save', null);
     if (result.state === 'saved') {
       const sent = submitted.current.save?.requestId === requestId ? submitted.current.save : null;
@@ -189,16 +190,19 @@ export function PrivateDefinitionEditor(props: Props) {
       if (!changedAfterSave) { clear(); live.current.onSaved(result.revision as number); }
       else {
         const latest = state.current.loaded;
+        const legacyNeedsRead = result.sourceRevision === undefined && Boolean(latest && latest.sourceRevision !== String(latest.revision));
         if (latest && sent) {
-          const next = { ...latest, ...sent.values, revision: result.revision as number, sourceRevision: String(result.revision) };
+          const next = { ...latest, ...sent.values, revision: result.revision as number,
+            sourceRevision: result.sourceRevision ?? (legacyNeedsRead ? latest.sourceRevision : String(result.revision)) };
           state.current.loaded = next; setLoaded(next);
+          if (legacyNeedsRead) setConflict(true);
           if (state.current.draft && sameValues(state.current.draft.values, sent.values)) {
             const applied = { ...state.current.draft, appliedRequestId: requestId };
             state.current.draft = applied; setDraft(applied);
           }
         }
         if (!sent) setConflict(true);
-        setNotice(sent ? '原文已保存；之后输入的新修改仍保留，请继续编辑或保存'
+        setNotice(sent ? legacyNeedsRead ? '原文已保存；之后的新输入仍保留，请核对最新版本后继续保存' : '原文已保存；之后输入的新修改仍保留，请继续编辑或保存'
           : '原保存已确认；当前输入仍保留，请核对最新版本后继续保存');
         live.current.onSaved(result.revision as number, true);
       }

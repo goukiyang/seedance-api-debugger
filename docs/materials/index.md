@@ -526,3 +526,7 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 原单：`tasks/todo/2026-10-31-character-reference-replan.md` §18.6。已部署v0.134.29，功能待用户手验；最终29源码配对/fresh主构建/公网/健康及恢复元证见私有 `2026-11-07-character-unified-workbench/implementation/attempt03/`，guard-build-reuse记录F0原构建时刻和1469编译文件核对；attempt02保28实际发布和F0原完整工程证据，attempt01保设计、前置检查、目录权限故障及未发布替代源。原生完整日志、配置和一致DB备份仅留服务器，summary只存SHA与非敏感元证，不导出环境或价格原行。
 
 三栏可移动/右侧合并及UX复审原单§18.7–18.8：已部署v0.134.31，功能待用户手验。最终3654/BUILD iTiWbFUml0X1fllspLErl；源码/配对/主fresh19与原生构建/公网/恢复元证归私有 `2026-11-07-character-unified-workbench/movable-layout/attempt04/`。attempt03保最后提示词定位补齐前的离线替代源，attempt02保b897成功构建及停服前基线变化保护停住，attempt01保前置检查及Next保留文件名失败原证。safe summary不导出环境/价格原行/DB，F0原证原时及1469编译文件核对保留，原28/29证据不覆盖。
+
+### 2026-11-08 角色融合提示词
+
+[原工单](../../tasks/todo/2026-11-08-character-fusion.md)／[安全发布摘要](2026-11-08-character-fusion-prototype/release-summary.md)：v0.135.0 / 应用9b2eccae8 / BUILD u_Nz4s0rvT7Lzfs9T5Op8已保护部署，待用户手验。原型单文件保留正式根同名目录prototype.html；私有implementation/attempt03为同源规则、构建/类型、配对/guard复用、启动/公网/健康及一致备份元证，不含DB原件、环境或配置。前两次离线候选为主动让窗/继承新正式源而替代，未切生产，不冒已完整构建；最终attempt03完整构建及切版通过，服务器原日志和程序恢复入口保留。

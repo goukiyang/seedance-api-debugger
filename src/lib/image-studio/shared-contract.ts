@@ -864,7 +864,8 @@ export async function privateStudioEditorStatus(user: ImageStudioIdentity, modul
   if (!saved) return { state: 'unknown', requestId };
   const result = saved.result;
   if (result.action !== 'private-definition-saved' || result.moduleId !== moduleId || result.requestId !== requestId) throw new StudioSharingError('原请求与此模板不匹配', 409);
-  return { state: result.state, action: result.action, moduleId, requestId, revision: result.revision };
+  return { state: result.state, action: result.action, moduleId, requestId, revision: result.revision,
+    ...(typeof result.sourceRevision === 'string' ? { sourceRevision: result.sourceRevision } : {}) };
 }
 
 export async function savePrivateStudioEditor(user: ImageStudioIdentity, moduleId: string, input: {
@@ -910,7 +911,11 @@ export async function savePrivateStudioEditor(user: ImageStudioIdentity, moduleI
     if (changed.count !== 1) throw new StudioSharingError('工作区已有更新，当前原文草稿保留', 409);
     await markPrivatePromptDraftApplied(tx, actor.id, { kind: target.kind, id: target.row.id, origins: target.origins,
       fields: ['prompt', 'context'] }, input.sourceRevision, { prompt: input.prompt, context: input.context }, input.requestId);
-    const result = { state: 'saved', action: 'private-definition-saved', moduleId, requestId: input.requestId, revision: target.workspace.revision + 1 };
+    const sourceRevision = target.source
+      ? await sharedDefinitionToken(await tx.imageStudioPreset.findUniqueOrThrow({ where: { id: target.source.id } }), tx)
+      : String(target.workspace.revision + 1);
+    const result = { state: 'saved', action: 'private-definition-saved', moduleId, requestId: input.requestId,
+      revision: target.workspace.revision + 1, sourceRevision };
     await writeReceipt(tx, actor.id, input.requestId, fingerprint, result);
     return result;
   });

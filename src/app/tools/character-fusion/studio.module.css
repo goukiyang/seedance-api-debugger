@@ -147,3 +147,53 @@
 @media (prefers-reduced-motion: reduce) { .page button { transition: none; } }
 
 @media print { .page { --accent-color: oklch(.48 .11 163); --accent-hover: oklch(.53 .11 163); } .page .primary { color: oklch(.98 .004 160); } }
+
+.ruleGrid { align-items: start; }
+.ruleHead { padding: 12px; flex-wrap: nowrap; gap: 8px; }
+.ruleHead[draggable='true'] { cursor: grab; }
+.page .cardToggle { justify-content: flex-start; flex: 1; min-width: 0; padding: 4px 0; gap: 7px; text-align: left; color: var(--text-primary); }
+.cardToggle > span { flex: 1; overflow-wrap: anywhere; }
+.cardToggle > svg { flex-shrink: 0; }
+.rotated { transform: rotate(180deg); }
+.joinedCard { border-color: color-mix(in oklch, var(--accent-color) 48%, var(--border-color)); }
+.page .joinedState { color: var(--accent-color); background: color-mix(in oklch, var(--accent-color) 10%, var(--bg-panel)); white-space: nowrap; }
+.page .notJoinedState { color: var(--text-secondary); border: 1px solid var(--border-color); white-space: nowrap; }
+.cardTools { display: flex; gap: 5px; align-items: center; padding: 0 12px 10px; color: var(--text-secondary); font-size: 11px; }
+.cardTools > span { flex: 1; }
+.cardTools button { font-size: 11px; padding: 4px 6px; min-height: 30px; background: transparent; }
+.roleSelect { display: flex; align-items: center; gap: 10px; font-size: 12px; margin-bottom: 16px; color: var(--text-secondary); }
+.requirementsHead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+.page .switch { width: 38px; min-height: 23px; height: 23px; padding: 3px; border-radius: 20px; justify-content: flex-start; background: var(--bg-hover); flex-shrink: 0; }
+.switch > span:first-child { width: 15px; height: 15px; border-radius: 50%; background: var(--text-secondary); transition: transform 150ms ease-out; }
+.page .switch[aria-checked='true'] { background: var(--accent-color); border-color: var(--accent-color); }
+.switch[aria-checked='true'] > span:first-child { transform: translateX(14px); background: var(--bg-panel); }
+.englishEditor { margin-top: 12px; }
+.englishEditor summary { font-size: 12px; color: var(--text-secondary); padding: 7px 0; }
+.languageNote { color: var(--text-secondary); font-size: 12px; margin-top: 12px !important; max-width: 75ch; }
+.chat { border: 1px solid var(--border-color); background: var(--bg-panel); border-radius: 8px; padding: 18px; margin-bottom: 18px; }
+.chat h3 { display: flex; align-items: center; gap: 7px; }
+.chatMessages { max-height: 340px; overflow-y: auto; overscroll-behavior: contain; padding: 4px 4px 8px; }
+.chatMessages > p { color: var(--text-secondary); font-size: 13px; }
+.userMessage, .assistantMessage { padding: 10px 12px; margin-bottom: 10px; max-width: 75ch; white-space: pre-wrap; }
+.userMessage { background: var(--bg-input); border-radius: 6px; margin-left: auto; }
+.assistantMessage { padding-left: 0; }
+.chatMessages small { display: block; margin-bottom: 4px; }
+.cardPreview { margin: 12px 0; padding: 15px 0; border-top: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color); }
+.cardPreview h4 { margin: 0 0 10px; }
+.cardPreview ul { display: flex; gap: 8px 20px; flex-wrap: wrap; list-style: none; padding: 0; }
+.cardPreview li { font-size: 13px; }
+.cardPreview li small { display: block; }
+.cardPreview > small { display: block; margin-top: 8px; }
+.chatInput { display: flex; gap: 10px; align-items: end; }
+.chatInput button { flex-shrink: 0; }
+.page .error, .tags .excluded { color: var(--text-secondary); }
+.tags .excluded { border-color: var(--border-color); }
+@media (max-width: 760px) {
+  .page .switch { min-height: 30px; height: 30px; width: 44px; }
+  .switch > span:first-child { width: 20px; height: 20px; }
+  .switch[aria-checked='true'] > span:first-child { transform: translateX(16px); }
+  .chat { padding: 12px; }
+  .chatInput { flex-wrap: wrap; }
+  .chatInput button { margin-left: auto; }
+}
+@media (prefers-reduced-motion: reduce) { .switch > span:first-child { transition: none; } }
