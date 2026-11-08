@@ -15,7 +15,7 @@ type Position = { part: Part | 'overview'; batches: Partial<Record<Part, string>
 export type LabEditorIntent = { operation?: CharacterLabOperation; input?: CharacterLabReference; description: string };
 type Props = {
   ownerId: string; workspace: CharacterLabWorkspace; draft: CharacterLabDraft; plans: CharacterLabPlan[]; tasks: Record<string, CharacterLabTask | null>;
-  isAdmin: boolean; locked: boolean; pending: string[]; settings: ReactNode; allHistory: boolean;
+  initialPart: Part | 'overview'; isAdmin: boolean; locked: boolean; pending: string[]; settings: ReactNode; allHistory: boolean;
   onUpdate: (patch: Partial<CharacterLabDraft>) => void; onSource: () => void; onPreview: (src: string, alt: string) => void;
   onGenerate: (intent: LabEditorIntent) => Promise<string | undefined>; onQuery: () => void; onLegacy: (plan: CharacterLabPlan) => void;
   onManage: (target: 'faces' | CharacterLabOperation) => void;
@@ -32,7 +32,7 @@ const referenceKey = (part: Part, base?: CharacterLabReference) => `${part}:${ba
 export function CharacterLabWorkbench(p: Props) {
   const positionKey = `sd2:character-lab:editor:v1:${p.ownerId}:${p.workspace.id}:${p.draft.sourceAssetId || ''}`;
   const widthKey = `sd2:character-lab:editor-width:v1:${p.ownerId}`;
-  const [position, setPosition] = useState<Position>({ part: 'overview', batches: {}, bases: {}, texts: {} });
+  const [position, setPosition] = useState<Position>({ part: p.initialPart, batches: {}, bases: {}, texts: {} });
   const [ready, setReady] = useState(false), [width, setWidth] = useState(340);
   const [prompt, setPrompt] = useState<'current' | 'next' | null>(null);
   const [undo, setUndo] = useState<Pick<CharacterLabDraft, 'mainFace' | 'views'> | null>(null);
@@ -50,7 +50,7 @@ export function CharacterLabWorkbench(p: Props) {
           if (plan && (part === 'body' ? base.cell === undefined : characterLabIsGrid(plan) ? Number.isInteger(base.cell) && base.cell >= 0 && base.cell < plan.count : base.cell === undefined)) bases[part] = base;
         }
         const texts = Object.fromEntries(Object.entries(value.texts || {}).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].length <= 3000));
-        setPosition({ part: value.part, bases, batches, texts });
+        setPosition({ part: p.initialPart === 'body' ? 'body' : value.part, bases, batches, texts });
       }
       const savedWidth = Number(localStorage.getItem(widthKey));
       if (savedWidth >= 280 && savedWidth <= 560) setWidth(savedWidth);
