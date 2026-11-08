@@ -598,7 +598,7 @@ F0兼容guard source `f0fc87f9896daa685c1067bb341e85ee21933a9a`、BUILD `_JwQu0Z
 原证按白名单归档正式根私有 `docs/materials/2026-11-07-pin-wide-gallery/recovery-20261108/named-settings-1357/attempt03/`（目录名保留最初135.7计划，内含真实135.8证据），attempt01/02失败原证分别保留；未下载DB备份、价格正文或配置快照。已交2收角色文档、3从实发489继承135.9发布窗，本批后续仅文档收口，不再改运行源。本轮未新增范围外问题，原全局坏行/CAS/旧未知/CPU等残留按原单保留，不能据本次交付宣布全站无问题。
 
 
-### 16.10 SHARE-VERSION01 原文保存与共享版本断链（2026-11-08，135.11准备发布）
+### 16.10 SHARE-VERSION01 原文保存与共享版本断链（2026-11-08，135.11已保护部署）
 
 **范围与根因。** 用户截图显示尚未共享，保存并共享时反复提示“工作区版本已更新”。按实发135.9源码复现，并核135.10同链源码未变：私有原文保存事务已将workspace revision从0升为1，父层onSaved却只刷新共享目录、丢弃新revision；未发布工作区不在共享目录，下一次发布仍带0，服务器正确409并给确未应用证明。其次，外层只给definition冲突提供核对，不处理workspace冲突，且原核对入口要求已有sharedLive；私有编辑器又要求not-applied必须带revision，而服务器合法拒绝回执没有revision，因此已明确未保存仍滞留“待确认”。不是放宽CAS或同事权限能解决。
 
@@ -606,10 +606,19 @@ F0兼容guard source `f0fc87f9896daa685c1067bb341e85ee21933a9a`、BUILD `_JwQu0Z
 
 **架构判断。** 这是原文编辑器、工作区CAS、共享源token三个现有写读入口的版本契约断裂，修在确认回执和消费者之间；不新增存储层/表/队列，不移除并发检查。实际共享发布、作者身份、加密读写、素材权限、费用及未知请求合同沿现有实现。成功回执仅新增可选token字段，旧reader忽略，新reader兼容旧回执。读不到或发现其他更改时保留编辑并核对，不自动覆盖多人改动；不把metadata鲜读冒成生产共享成功。
 
-**工程证据。** 服务器独立合成SQLite、真实加密策略与真实后端事务；前端从实际源码提取回调/回执处理并使用实际React18 hook验证。最终engineering10同夹具对照：旧版退出1，断言确认为父revision0不等于已保存1；集成135.10+本修复退出0、17项通过，涵盖首次发布、已发布再保存、同号重放、明确未保存/未知回执、新输入保留、旧回执、未共享核对、他人源权限、迟到读、读取失败、当前/历史上下文码。productionWrites/paidRequests/browserRuns/networkCalls全部0。此前proof01已复现真实0→1/409；engineering02/03是夹具loader导出/TS文件类型问题，04–07是合成加密策略/全局设置/格式断言输入不完整，08/09是抽取回调夹具缺两个既有UI状态变量，均保原日志，未改业务保护或删断言。完整类型检查types01退出0为序列隔离补丁前检查点，最终包仍需完整Next内置types/lint；不重标旧检查为最终构建成功。
+**工程证据。** 服务器独立合成SQLite、真实加密策略与真实后端事务；前端从实际源码提取回调/回执处理并使用实际React18 hook验证。最终engineering10同夹具对照：旧版退出1，断言确认为父revision0不等于已保存1；集成135.10+本修复退出0、17项通过，涵盖首次发布、已发布再保存、同号重放、明确未保存/未知回执、新输入保留、旧回执、未共享核对、他人源权限、迟到读、读取失败、当前/历史上下文码。productionWrites/paidRequests/browserRuns/networkCalls全部0。此前proof01已复现真实0→1/409；engineering02/03是夹具loader导出/TS文件类型问题，04–07是合成加密策略/全局设置/格式断言输入不完整，08/09是抽取回调夹具缺两个既有UI状态变量，均保原日志，未改业务保护或删断言。完整类型检查types01退出0为序列隔离补丁前检查点，随后最终包完整Next内置types/lint通过，见实际发布段；未重标旧检查为最终构建成功。
 
-本轮尚未定位截图对应的真实账号/模板ID，不以通用复现冒已修复该条生产记录；未自动浏览器、真实共享写或生成。已完整继承实际135.10/00822695，135.11唯一发布窗由本批控制；沿bbeb854c/0.135.9+points-pricing-guard.2实际兼容guard，保最新model-access reader与反馈暂停标志，禁用旧F0恢复。待完整构建、保护切版及用户手动验收，不把隔离检查冒实页验收。
+本轮尚未定位截图对应的真实账号/模板ID，不以通用复现冒已修复该条生产记录；未自动浏览器、真实共享写或生成。已完整继承实际135.10/00822695，135.11唯一发布窗由本批控制；沿bbeb854c/0.135.9+points-pricing-guard.2实际兼容guard，保最新model-access reader与反馈暂停标志，禁用旧F0恢复。完整构建与保护切版已完成，实页继续待用户手动验收，不把隔离检查冒实页验收。
 
 **待手验。** 原模板打开上下文，保存原文后共享；已共享模板修改原文再保存默认；已有workspace冲突先核对新版并保留当前编辑；保存期间继续输入后再次保存；普通同事只能读/另存本人设置。共享目录与同事真实可用性仍待用户手验。
 
 本轮暂无新增范围外线索；原全局坏行、CAS职责及旧未知记录等已登记问题不据本次修复宣布消失。
+
+
+**实际发布与恢复。** v0.135.11 / application source `a50be1b6a131dd93351f68e66cd4981c87f4089d` / BUILD `ZZDh6VfwPFr1Wqr44VKk6`，独立分支codex/template-sharing-conflict-20261108已推送，完整合并实际135.10/008；10文件差量、归档2513文件。服务器stage `template-sharing-conflict-20261108/attempt01`，pair run `33253f2f-5f8b-4d51-9ee6-ebb1526c8779`；2026-11-08T17:41:28Z开始正常切版，17:41:54Z公网收口、17:42:43Z健康收口，cutover0无恢复。最终完整fresh native/pricing/model-access与Next（含types/lint）均通过；17项原隔离绿按五文件及夹具SHA绑定最终manifest复用，保17:20:39Z原执行时间，不重测或重标原时间。
+
+7服务实际cwd同源且active，4timer active、六实际启动检查通过，模板/图片两页真实chunk公网200同编译SHA，3匿名GET401及原文保存匿名PUT401，内外health200、无残留发布控制器；实际API route在Next manifest中。价格全字段SHA仍d03c539d74a31b5e2a6a0305724b1b9f193e0ade878370898c7632d1bdc96539，92ac/37404/f4修订不变；私有策略、环境和数据链接保持。旧writer自然排尽后一致SQLite备份仅留服务器0600，未新增schema/DDL、覆盖业务价格/模板/历史任务/冻结快照/媒体/账本/回执，无真实生成或已登录生产共享写。服务/HTTP与隔离检查不冒用户功能验收。
+
+兼容guard实际沿`bbeb854c82e47650ba3ea703f1918800af96881b` / `0.135.9+points-pricing-guard.2` / BUILD `bQTt2tX_GFRrdmNPmYcpf`，核原1491编译文件及全部源码，保2026-11-08T16:31:10.996871Z原完整构建时间、不重建。保持model-access reader、FEEDBACK_UPLOADS_ENABLED=false与反馈提交打开；新增可选原文sourceRevision由旧reader忽略，回退不承诺新UI功能等价。恢复入口 `bash /data/video-api-debugger/release-staging/template-sharing-conflict-20261108/attempt01/program-recovery.sh /data/video-api-debugger/release-staging/template-sharing-conflict-20261108/attempt01/release-input.json`，锚点本attempt01及原135.10/008；17:42:43Z只执行真实第一段Python读取准入成功，未执行停服、repoint或数据恢复，后继运行源变化后不得执行本脚本。只回程序，不回数据库/设置/媒体/账本/回执。
+
+原证按白名单归档正式根私有 `docs/materials/2026-11-07-pin-wide-gallery/recovery-20261108/sharing-conflict-13511/`；只含源码指纹、合成夹具日志、构建、健康和恢复元数据，没有下载DB备份、价格正文或环境/私有策略配置。17:42Z已向原后继任务交接实际a50/build/guard/发布窗，本批余下仅文档收口，不再修改运行产物。已部署，待用户手动验收；截图对应模板ID/账号尚无生产实页证据，不声称逐模板或普通同事实地通过。
