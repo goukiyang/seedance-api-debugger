@@ -20,7 +20,7 @@ type Props = {
   onUpdate: (patch: Partial<CharacterLabDraft>) => void; onSource: () => void; onPreview: (src: string, alt: string) => void;
   onGenerate: (intent: LabEditorIntent) => Promise<string | undefined>; onQuery: () => void; onLegacy: (plan: CharacterLabPlan) => void;
   onManage: (target: 'faces' | CharacterLabOperation) => void;
-  onRestore: (id: string) => Promise<boolean>; onReproduce: (id: string) => Promise<void>;
+  onRestore: (id: string) => Promise<boolean>; onReproduce: (id: string) => Promise<string | undefined>;
 };
 const titles = { faces: '正脸', side: '侧脸', body: '正背面' };
 const fields = { faces: 'faceDescription', side: 'sideDescription', body: 'bodyDescription' } as const;
@@ -182,7 +182,7 @@ export function CharacterLabWorkbench(p: Props) {
     {prompt && <CharacterLabPromptPanel ownerId={p.ownerId} workspaceId={p.workspace.id} title={titles[part]} reference={promptReference || (shown ? { planId: shown.id } : undefined)} tab={prompt} onTab={setPrompt} onClose={() => setPrompt(null)} isAdmin={p.isAdmin} disabled={p.locked}
       previewPayload={{ action: 'preview-prompt', contextProtocol: 1, layoutProtocol: 1, workspaceId: p.workspace.id, kind: operation === 'refine-face' || operation === 'refine-side' || !operation ? 'faces' : 'result', operation, input: validBase ? base : undefined, draft: p.draft, description: text }}
       escapeEnabled onBrowse={id => { const plan = p.plans.find(item => item.id === id); if (plan) browse(plan); }}
-      onRestore={p.onRestore} onReproduce={p.onReproduce} onRestorePersonal={(plan, value) => { const target = partOf(plan); if (target !== part) return false; p.onUpdate({ ...labPersonalFields(plan), [fields[part]]: value }); setPosition(old => ({ ...old, texts: { ...old.texts, [referenceKey(part, base)]: value } })); return true; }}
+      onRestore={p.onRestore} onReproduce={async id => { const captured = positionRef.current; const generated = await p.onReproduce(id); if (generated && positionRef.current === captured) setPosition(old => ({ ...old, batches: { ...old.batches, [part]: generated } })); }} onRestorePersonal={(plan, value) => { const target = partOf(plan); if (target !== part) return false; p.onUpdate({ ...labPersonalFields(plan), [fields[part]]: value }); setPosition(old => ({ ...old, texts: { ...old.texts, [referenceKey(part, base)]: value } })); return true; }}
       onPreview={ref => p.onPreview(media(ref), '本批生成图')} onPreviewAsset={id => p.onPreview(`/api/image-studio/template-assets/${encodeURIComponent(id)}`, '原参考')}
       onInspectSource={id => { const plan = p.plans.find(item => item.id === id); if (plan) { browse(plan); setPrompt('current'); } }}>
       <p className={styles.hint}>补充输入和实际生成按钮在右侧下方。本次选择只影响下一次请求，历史提示词保持冻结。</p>{p.isAdmin && <button type="button" onClick={() => { p.onManage(operation || 'faces'); setPrompt(null); }}>管理本部位规则</button>}

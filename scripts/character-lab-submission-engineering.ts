@@ -19,7 +19,7 @@ async function main() {
   const root = realpathSync(process.cwd());
   const previousUmask = process.umask(0o077);
   const sourcePaths = ['src/lib/image-studio/tasks.ts', 'src/lib/image-studio/billing-quote-service.ts',
-    'src/lib/character-lab/service.ts', 'src/lib/character-lab/recipe.ts'];
+    'src/lib/character-lab/service.ts', 'src/lib/character-lab/recipe.ts', 'src/lib/character-lab/store.ts'];
   const sourceHashes = Object.fromEntries(sourcePaths.map(file => [file, sha(readFileSync(path.join(root, file)))]));
   const scratch = path.join(root, '.role-tests');
   mkdirSync(scratch, { recursive: true, mode: 0o700 });
@@ -379,6 +379,12 @@ async function main() {
     await paint(storedGrid, '#00ff00');
     await media.readLabReference(user, gridWorkspace.id, sourceAssetId, { planId: storedGrid.id, cell: 8 }, 'side');
     assert.equal((await sharp(await media.labPng(user, storedGrid, 8)).metadata()).width, 30);
+    await assert.rejects(store.updateLabWorkspace(owner, gridWorkspace.id, gridWorkspace.revision, gridWorkspace.name,
+      { ...gridPicked, views: { side: { planId: storedGrid.id } } }), /选择侧脸的一个单格/);
+    assert.equal((await store.readLabWorkspace(owner, gridWorkspace.id)).revision, gridWorkspace.revision);
+    const restoredGridView = await store.updateLabWorkspace(owner, gridWorkspace.id, gridWorkspace.revision, gridWorkspace.name,
+      { ...gridPicked, views: { side: { planId: storedGrid.id, cell: 8 } } });
+    assert.equal(restoredGridView.views?.side?.cell, 8);
     if (service.CHARACTER_LAB_GRID_WRITES_ENABLED) {
       for (const count of [4, 9] as const) {
         const gridDraft = { ...gridPicked, count };

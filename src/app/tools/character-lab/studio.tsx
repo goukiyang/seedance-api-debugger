@@ -26,7 +26,7 @@ import { imageUiQuoteFields, imageUiQuotePriceText, validImageUiQuote } from '@/
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, imageStudioNewQualityOptions, imageStudioQualityLabel } from '@/lib/image-studio/model-catalog';
 import { imageStudioChannelModel, imageStudioChannelModels, imageStudioEffectiveChannelId, imageStudioUsesLegacyRoute, normalizeImageStudioChannels } from '@/lib/image-studio/channels';
 import { faceLabPrompt, labDefaultStageStyles, labDefaultViewPrompts, labStyleField, labViewPrompt, labViewPromptFields } from '@/lib/character-lab/prompts';
-import { characterLabMediaUrl, characterLabSlot, characterLabSlotsOverlap, characterLabReferenceSlot, characterLabStrength, sameLabReference, type CharacterLabRestoredSettings, type CharacterLabOperation, type CharacterLabReference, type CharacterLabView, type CharacterLabBootstrap, type CharacterLabConfig, type CharacterLabDraft, type CharacterLabFace, type CharacterLabPlan, type CharacterLabPromptFields, type CharacterLabQuote, type CharacterLabStage, type CharacterLabTask, type CharacterLabWorkspace, type CharacterLabWorkspacePayload } from '@/lib/character-lab/types';
+import { characterLabIsGrid, characterLabMediaUrl, characterLabSlot, characterLabSlotsOverlap, characterLabReferenceSlot, characterLabStrength, sameLabReference, type CharacterLabRestoredSettings, type CharacterLabOperation, type CharacterLabReference, type CharacterLabView, type CharacterLabBootstrap, type CharacterLabConfig, type CharacterLabDraft, type CharacterLabFace, type CharacterLabPlan, type CharacterLabPromptFields, type CharacterLabQuote, type CharacterLabStage, type CharacterLabTask, type CharacterLabWorkspace, type CharacterLabWorkspacePayload } from '@/lib/character-lab/types';
 import { labPersonalFields } from '@/lib/character-lab/contexts';
 import styles from './studio.module.css';
 
@@ -430,7 +430,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
       if (!operation && kind === 'result') setResultPreviewId(plan.id);
       if (operation === 'side' || operation === 'body-front' || operation === 'body-back') setViewPreviews(previous => ({ ...previous, [operation]: plan.id }));
       if (refine) setRefinement(previous => previous ? { ...previous, planId: plan.id } : previous);
-      if (reproducePlanId && (operation === 'refine-face' || operation === 'refine-side') && plan.input) {
+      if (!editor && reproducePlanId && (operation === 'refine-face' || operation === 'refine-side') && plan.input) {
         setRefinement({ operation, target: plan.input, text: plan.adjustment, planId: plan.id }); setRefineOpen(true);
       }
       setBusy('submit');
@@ -614,10 +614,10 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
   function shownView(slot: CharacterLabView): CharacterLabReference | undefined {
     const selected = viewSelection(slot), options = viewOptions(slot);
     const plan = options.find(item => item.id === viewPreviews[slot] && tasks[item.id]?.asset);
-    if (plan) return selected?.planId === plan.id ? selected : { planId: plan.id, ...(plan.operation === 'body-pair' ? { cell: slot === 'body-front' ? 0 : 1 } : plan.kind === 'faces' ? { cell: 0 } : {}) };
+    if (plan) return selected?.planId === plan.id ? selected : { planId: plan.id, ...(plan.operation === 'body-pair' ? { cell: slot === 'body-front' ? 0 : 1 } : characterLabIsGrid(plan) ? { cell: 0 } : {}) };
     if (viewReady(slot)) return selected;
     const first = options.find(item => tasks[item.id]?.asset);
-    return first ? { planId: first.id, ...(first.operation === 'body-pair' ? { cell: slot === 'body-front' ? 0 : 1 } : first.kind === 'faces' ? { cell: 0 } : {}) } : undefined;
+    return first ? { planId: first.id, ...(first.operation === 'body-pair' ? { cell: slot === 'body-front' ? 0 : 1 } : characterLabIsGrid(first) ? { cell: 0 } : {}) } : undefined;
   }
   const refinePlan = refinement ? (referencePlan(refinement.planId ? { planId: refinement.planId } : undefined)
     || plans.find(plan => plan.operation === refinement.operation && plan.sourceAssetId === draft?.sourceAssetId
@@ -762,7 +762,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
         onUpdate={updateDraft} onSource={() => setPickerOpen(true)} onPreview={(src, alt) => setPreview({ src, alt })} onQuery={() => void run('query', refreshTasks)}
         onGenerate={intent => generate(!intent.operation || intent.operation === 'refine-face' || intent.operation === 'refine-side' ? 'faces' : 'result', intent.operation, undefined, undefined, intent)}
         onLegacy={plan => { setLegacyView(true); browseHistoryPlan(plan); }} onManage={target => { setPromptTarget(target); setConfigError(''); }}
-        onRestore={id => restoreSettings(id, false)} onReproduce={repeatSettings} /> : <>
+        onRestore={id => restoreSettings(id, false)} onReproduce={id => { const plan = plans.find(item => item.id === id); if (!plan) return Promise.reject(new Error('原记录已不可用，请重新读取')); return generate(plan.kind, plan.operation, undefined, id, { description: plan.adjustment }); }} /> : <>
       <div className={styles.workbench}>
         <aside className={styles.materialRail}><section className={styles.materialSection}><h2>原始素材</h2>{sourceUrl ? <><button type="button" className={styles.sourceImage} data-material-arrived={draft.sourceAssetId && sourceArrival.arrived?.includes(draft.sourceAssetId) || undefined} onClick={() => setPreview({ src: sourceUrl, alt: '原始角色素材' })}><ReturnedImage src={sourceUrl} alt="原始角色素材" /></button></> : <button type="button" className={styles.uploadEmpty} disabled={locked} onClick={() => setPickerOpen(true)}><ImagePlus size={32} /><strong>添加原始素材</strong><span>上传或从素材库选择一张图片</span></button>}<button type="button" className={styles.outline} disabled={locked || unresolved} onClick={() => setPickerOpen(true)}><ImagePlus size={15} />{draft.sourceAssetId ? '更换原图' : '选择原图'}</button></section>
           {!bodyOpen && draft.stage === 'result' && shownMainFace && <section className={styles.materialSection}><div className={styles.sectionTitle}><h2>主面部 · {String(shownMainFace!.cell + 1).padStart(2, '0')}</h2><button type="button" disabled={locked} onClick={() => updateDraft({ stage: 'selection' })}>更换方案<ArrowRight size={13} /></button></div><button type="button" className={styles.faceReference} onClick={() => setPreview({ src: characterLabMediaUrl(shownMainFace!.planId, shownMainFace!.cell), alt: '选定主面部' })}><ReturnedImage src={characterLabMediaUrl(shownMainFace!.planId, shownMainFace!.cell)} alt="选定主面部" /></button></section>}
@@ -1082,7 +1082,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
       <div className={styles.promptBody}>
         <div className={styles.refineSource}>
           <ReturnedImage src={characterLabMediaUrl(current.target.planId, current.target.cell)} alt={side ? '微调前的侧脸' : '微调前的正脸'} />
-          <p>{side ? '以选定正脸锁定身份，只调整这张侧脸的局部细节。' : '保留这张脸的身份，给指定细节做四个微调方案。'}</p>
+          <p>{side ? '以选定正脸锁定身份，只调整这张侧脸的局部细节。' : '保留这张脸的身份，只微调指定的细节。'}</p>
         </div>
         <label className={styles.field}><span>修改要求</span>
           <textarea rows={3} value={current.text} maxLength={3000} disabled={locked}
@@ -1094,8 +1094,8 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
         {error && <p role="alert">{error}</p>}
         {refinePlan && <p role="status" className={styles.hint}>{refineTask ? taskState[refineTask.status] || '状态待确认'
           : pendingPlanIds.includes(refinePlan.id) ? '原提交待确认' : '尚未提交'}{refineTask?.error && <> · {refineTask.error}</>}</p>}
-        {refinePlan && resultReady && <div className={styles.refineChoices}>
-          {Array.from({ length: 4 }, (_, cell) => {
+        {refinePlan && resultReady && <div className={styles.refineChoices} style={{ gridTemplateColumns: `repeat(${refinePlan.count === 9 ? 3 : 2}, minmax(0, 1fr))` }}>
+          {Array.from({ length: refinePlan.count }, (_, cell) => {
             const choice = { planId: refinePlan.id, cell };
             return <button type="button" key={cell} disabled={locked} onClick={() => {
               if (side) chooseView('side', choice); else selectFace(choice);
