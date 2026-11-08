@@ -1,9 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '模板共享保存修复', outline: [
-  '保存模板原文后可以接续共享',
-  '版本冲突先核对新版，保留当前编辑',
-  '保存回执明确，未知结果沿原请求核对',
+const notice = { title: '工具菜单入口补齐', outline: [
+  '顶部“工具”菜单加入角色融合提示词',
+  '角色组合、双语与对话建卡集中访问',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
