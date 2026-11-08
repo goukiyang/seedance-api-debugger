@@ -1611,11 +1611,7 @@ export function GenerationComposer({
     if (videoSurface || !modeSwitchReady) return;
     if (studioHandoff && !studioSettingsReady && Object.hasOwn(studioHandoff.parameters, 'model')) return;
     const fallbackModel = modelOptions[0]?.id || '';
-    if (!fallbackModel) {
-      if (imageResultHandoff) return;
-      if (selectedModel) setSelectedModel('');
-      return;
-    }
+    if (!fallbackModel || selectedModel) return;
     if (!modelOptions.some((option) => option.id === selectedModel)) {
       if (reuseDraft?.model === selectedModel) return;
       if (imageResultHandoff) return;
@@ -2776,11 +2772,9 @@ export function GenerationComposer({
           }}
           providerStatus={providerStatus}
           modelLabel={modelLabel}
-          modelOptions={videoModelChoices ? [...videoModelChoices.map(option => ({ ...option,
+          modelOptions={videoModelChoices ? videoModelChoices.map(option => ({ ...option,
             disabled: option.disabled || option.surface !== videoSurface && Boolean(modeSwitchBlocker),
-            disabledReason: option.disabledReason || (option.surface !== videoSurface ? modeSwitchBlocker || undefined : undefined) })),
-            ...(!videoModelChoices.some(option => option.surface === videoSurface && option.model === selectedModel) ? [{ id: `${videoSurface}:${selectedModel}`, label: `${videoSurface === 'ip' ? 'IP ' : ''}${selectedModel || '未选择型号'}`, detail: '当前型号不可用，原参数已保留', disabled: true }] : [])] : reuseDraft?.model && selectedModel === reuseDraft.model && !modelOptions.some((option) => option.id === selectedModel)
-            ? [...modelOptions, { id: selectedModel, label: '原模型不可用', detail: selectedModel, disabled: true }]
+            disabledReason: option.disabledReason || (option.surface !== videoSurface ? modeSwitchBlocker || undefined : undefined) }))
             : modelOptions}
           selectedModel={videoModelChoices ? `${videoSurface}:${selectedModel}` : selectedModel}
           parameterModel={selectedModel}

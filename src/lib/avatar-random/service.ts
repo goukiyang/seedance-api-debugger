@@ -1,3 +1,4 @@
+import { assertSupplementaryModelEnabled } from '@/lib/pricing/model-access.server';
 import { createHash, randomUUID } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
 import { assertUsageProject, parseUsageProjectId } from '@/lib/admin/usage-attribution';
@@ -51,7 +52,9 @@ function descriptionStore(owner: string, description: string): DescriptionStore 
   return {
     readCache: () => readAvatar<AvatarConstraints>(owner, 'parse', id),
     readAttempt: async () => (await prisma.platformSetting.findUnique({ where: { key }, select: { value_json: true } }))?.value_json || null,
-    createAttempt: async value_json => { try { await prisma.platformSetting.create({ data: { key, value_json, updated_by: owner } }); return true; }
+    createAttempt: async value_json => {
+      await assertSupplementaryModelEnabled('text', (await getMuskApiSettings()).default_model);
+      try { await prisma.platformSetting.create({ data: { key, value_json, updated_by: owner } }); return true; }
       catch (e) { if (await prisma.platformSetting.findUnique({ where: { key }, select: { id: true } })) return false; throw e; } },
     replaceAttempt: async (expected, value_json) => (await prisma.platformSetting.updateMany({ where: { key, value_json: expected }, data: { value_json, updated_by: owner } })).count === 1,
     saveResponse: async (requestId, content) => { const responseKey = avatarKey(owner, 'parse-response', `${id}-${requestId}`); await prisma.platformSetting.upsert({ where: { key: responseKey }, create: { key: responseKey, value_json: JSON.stringify({ content }), updated_by: owner }, update: {} }); },

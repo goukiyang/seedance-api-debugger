@@ -1,3 +1,5 @@
+import { getPricingModelAvailability } from '@/lib/pricing/policy';
+import { pricingModelAvailable } from '@/lib/pricing/model-availability-contract';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   authenticateCodexVideoApi,
@@ -21,6 +23,7 @@ export async function GET(request: NextRequest) {
   try {
     const context = await authenticateCodexVideoApi(request);
     const status = await codexVideoApiStatus();
+    const availability = await getPricingModelAvailability();
     const editPilot = normalizeSeedanceEditPilot(context.settings.video_edit_pilot);
 
     return NextResponse.json({
@@ -53,7 +56,7 @@ export async function GET(request: NextRequest) {
         header: 'Authorization',
       },
       supported_settings: {
-        ip_video: { provider: 'volcengine_ark', models: volcengineIpCapabilities(), draft: false, edit: false, extend: false },
+        ip_video: { provider: 'volcengine_ark', models: volcengineIpCapabilities().filter(model => pricingModelAvailable(availability, 'video', model.id, {}, 'volcengine_ark')), draft: false, edit: false, extend: false },
         omni_reference_task_type: editPilot.enabled ? ['edit'] : [],
         request_cost_ceiling: { field: 'max_estimated_cost', unit: 'credits', enforced_before_freeze: true },
         video_pricing: {
@@ -88,7 +91,7 @@ export async function GET(request: NextRequest) {
         },
         seedance_draft: seedanceDraftCapability(),
         generation_mode: ['all_in_one_reference', 'first_last_frame', 'smart_multi_frame'],
-        model: SEEDANCE_VIDEO_MODEL_OPTIONS.map((option) => ({
+        model: SEEDANCE_VIDEO_MODEL_OPTIONS.filter(option => pricingModelAvailable(availability, 'video', option.id, {}, 'seedance')).map((option) => ({
           ...option,
           default: option.id === DEFAULT_SEEDANCE_VIDEO_MODEL_ID,
           internal_credit_multiplier: seedanceVideoModelInternalMultiplier(option.id),
@@ -96,7 +99,7 @@ export async function GET(request: NextRequest) {
         })),
         ratio: ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'],
         duration: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
-        duration_by_model: seedanceVideoDurationCapabilities(),
+        duration_by_model: Object.fromEntries(Object.entries(seedanceVideoDurationCapabilities()).filter(([model]) => pricingModelAvailable(availability, 'video', model))),
         resolution: ['480p', '720p', '1080p'],
         reference_fields: [
           'reference_image_ids',

@@ -1,3 +1,4 @@
+import { assertSupplementaryModelEnabled } from '@/lib/pricing/model-access.server';
 import { randomUUID } from 'crypto';
 import type { CanvasRoleTaskRun, CanvasRoleWork } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -201,6 +202,7 @@ export async function executeWork(user: SessionUser, workId: string, body: JsonR
     await assertCurrentMaterials(db, user, document.document_json, req);
     await assertEffectiveInputs(db, work, req, document.document_json, user);
     const q = await quoteFor(db, work, purpose, req);
+    await assertSupplementaryModelEnabled('text', q.contract.model, db);
     await assertRoleAdmission(db, user, run.id, q.contract.scope, q.contract.model);
     assertLiveNode(q.executorWork, document.document_json);
     if (body.quote_id !== q.quoteId || body.max_output_tokens !== q.contract.maxOutputTokens) throw new RoleError('报价已变，请重新核对', 409, 'quote_changed');

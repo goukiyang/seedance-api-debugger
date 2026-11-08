@@ -1,4 +1,6 @@
 'use client';
+import { imageStudioPricingChannelId } from '@/lib/image-studio/channels';
+import { usePricingModelAvailability } from '@/lib/pricing/use-model-availability';
 import SafeRetryStatus from '@/components/generation-retry/SafeRetryStatus';
 import { parseStudioTaskSettings, studioTaskSettings, sameStudioTaskSettings, type StudioTaskSettings } from '@/lib/image-studio/task-settings';
 import { STUDIO_TASK_SUMMARY, type StudioTaskSummary } from '@/lib/image-studio/task-summary';
@@ -1655,6 +1657,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   onReloadSettings: (discardDraft?: boolean) => Promise<SettingsValue | null>;
   ratios: RatioPreferences;
 }) {
+  const { isAvailable: modelAvailable, reason: modelAvailabilityReason } = usePricingModelAvailability();
   const { confirm, prompt: askName, productDialog } = useProductDialog();
   const styleSkillSelector = useRef<StudioStyleSkillSelectorHandle>(null);
   const { user: sessionUser, sessionChanged } = useAppSession();
@@ -2002,7 +2005,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const resolutionSupportUnconfirmed = allowsUnconfirmedParameters && selectedChannelModel?.resolutions == null;
   const legacyImageRoute = imageStudioUsesLegacyRoute(imageChannels, moduleModel, imageChannelId);
   const channelModels = imageStudioChannelModels(imageChannels, IMAGE_STUDIO_NEW_REQUEST_MODELS);
-  const modelChoices = channelModels.includes(moduleModel) ? channelModels : [moduleModel, ...channelModels];
+  const modelChoices = channelModels.filter(model => modelAvailable('image', model));
   function selectModuleModel(value: string, resetParameters = false) {
     if (!draftLoaded || draftRestoring || submissionRecoveryScope !== pendingKey || !batch.recoveryKnown || submitting || pendingSubmission || batch.pending) return;
     const next = imageStudioModelForNewSelection(value);
@@ -2014,10 +2017,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       setQuality('high');
     }
   }
-  const qualityChoices = qualityRouted || isGptImageStudioModel(moduleModel) ? imageStudioNewQualityOptions(moduleModel) : selectedChannelModel?.qualities ?? (legacyImageRoute || qualitySupportUnconfirmed
-    ? IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [] : []);
-  const resolutionChoices = isGptImageStudioModel(moduleModel) ? IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS] : selectedChannelModel?.resolutions ?? (legacyImageRoute || resolutionSupportUnconfirmed
-    ? IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS] || [] : []);
+  const qualityChoices = (qualityRouted || isGptImageStudioModel(moduleModel) ? imageStudioNewQualityOptions(moduleModel) : selectedChannelModel?.qualities ?? (legacyImageRoute || qualitySupportUnconfirmed
+    ? IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [] : [])).filter(value => modelAvailable('image', moduleModel, { quality: value }, imageStudioPricingChannelId(imageChannels, moduleModel, imageChannelId, value)));
+  const resolutionChoices = (isGptImageStudioModel(moduleModel) ? IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS] : selectedChannelModel?.resolutions ?? (legacyImageRoute || resolutionSupportUnconfirmed
+    ? IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS] || [] : [])).filter(value => modelAvailable('image', moduleModel, { quality, resolution: value }, imageStudioPricingChannelId(imageChannels, moduleModel, imageChannelId, quality)));
   const generationInputs = { sharedLive: sharedLive?.intent, personalOverrides: sharedLive ? personalOverrides : undefined, evolution: evolution ? evolutionInput : undefined, prompt, count, referenceLimit, aspectRatio, resolution: legacyImageRoute && !preserveSelectedBananaParameters ? normalizeImageResolution(moduleModel, resolution) : resolution, referenceIds: moduleDraft.referenceIds, model: moduleModel, quality: legacyImageRoute && !preserveSelectedBananaParameters ? normalizeImageStudioQuality(moduleModel, quality) : quality, channelId: imageChannelId, referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), skillIds: moduleDraft.skillIds, skillVersions: Object.fromEntries(skills.filter(group => group.promptVersion).map(group => [group.id, group.promptVersion!])), styleGroupIds: moduleDraft.styleGroupIds };
   const generationDraft = JSON.stringify({ ...generationInputs, taskSettings: studioTaskSettings(globalContextMode, globalSettingsSourceTaskId) });
   // Ordinary edits still use the saved definition. Explicit task restoration is
@@ -4488,7 +4491,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         <RatioPicker value={aspectRatio} onChange={setAspectRatio} reference={generationReferences.find(image => Number(image.width) > 0 && Number(image.height) > 0) || null} model={moduleModel} resolution={resolution} onEditing={setRatioEditing} disabled={submitting || Boolean(pendingSubmission)} {...ratios} />
         <div className={`${styles.modelQualityRow} ${templateWorkbench ? styles.templateModelQualityRow : ''}`}>
           <label className={styles.compactField} htmlFor={`studio-model-${module.id}`}><strong>生成模型</strong>
-            <select id={`studio-model-${module.id}`} title={templateWorkbench ? `${IMAGE_STUDIO_MODEL_LABELS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || moduleModel}${imageChannelReady && !imageStudioChannelReadyForModel(selectedChannel, moduleModel, settings?.modelReady?.[moduleModel] ?? settings?.providerReady) ? '（未就绪）' : ''}` : undefined} disabled={!draftLoaded || draftRestoring || submissionRecoveryScope !== pendingKey || !batch.recoveryKnown || submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} value={moduleModel} onChange={event => selectModuleModel(event.target.value)}>
+            <select id={`studio-model-${module.id}`} title={templateWorkbench ? `${IMAGE_STUDIO_MODEL_LABELS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || moduleModel}${imageChannelReady && !imageStudioChannelReadyForModel(selectedChannel, moduleModel, settings?.modelReady?.[moduleModel] ?? settings?.providerReady) ? '（未就绪）' : ''}` : undefined} disabled={!draftLoaded || draftRestoring || submissionRecoveryScope !== pendingKey || !batch.recoveryKnown || submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} value={modelChoices.includes(moduleModel) ? moduleModel : ''} onChange={event => selectModuleModel(event.target.value)}><option value="" disabled>{modelAvailabilityReason || "请选择已开放模型"}</option>
               {modelChoices.map(model => {
                 const modelChannelId = imageStudioEffectiveChannelId(imageChannels, model, imageChannelId,
                   model === moduleModel ? quality : defaultImageStudioQuality(model));
@@ -4869,9 +4872,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       {error && <p role="status" className={styles.error}>{error}</p>}
       <div className={styles.modelQualityRow}>
         <label className={styles.compactField} htmlFor={`studio-module-model-${module.id}`}><strong>模块模型</strong>
-          <select id={`studio-module-model-${module.id}`} value={moduleModel} disabled={!draftLoaded || draftRestoring || submissionRecoveryScope !== pendingKey || !batch.recoveryKnown || submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} onChange={event => selectModuleModel(event.target.value, true)}>
-            {moduleModel === 'gemini-3.1-flash-image-preview' && <option value={moduleModel} disabled>{IMAGE_STUDIO_MODEL_LABELS[moduleModel]}</option>}
-            {IMAGE_STUDIO_NEW_REQUEST_MODELS.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model]}</option>)}
+          <select id={`studio-module-model-${module.id}`} value={modelChoices.includes(moduleModel) ? moduleModel : ''} disabled={!draftLoaded || draftRestoring || submissionRecoveryScope !== pendingKey || !batch.recoveryKnown || submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} onChange={event => selectModuleModel(event.target.value, true)}>
+            <option value="" disabled>{modelAvailabilityReason || "请选择已开放模型"}</option>
+            {modelChoices.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model]}</option>)}
           </select>
         </label>
         <label className={styles.compactField} htmlFor={`studio-module-resolution-${module.id}`}><strong>模块分辨率</strong>

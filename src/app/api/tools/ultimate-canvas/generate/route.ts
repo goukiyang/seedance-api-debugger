@@ -1,3 +1,4 @@
+import { assertSupplementaryModelEnabled } from '@/lib/pricing/model-access.server';
 import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
@@ -272,6 +273,7 @@ export async function POST(request: NextRequest) {
   const selectedSettings = { ...settings, default_model: requestedModel || settings.default_model };
   const sourceRequestId = typeof body.source_request_id === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(body.source_request_id) ? body.source_request_id : null;
   try {
+    await assertSupplementaryModelEnabled('text', selectedSettings.default_model);
     const globalRules = await getCanvasTextSettings();
     const compiled = compileCanvasTextRules(globalRules, canvasRulePurpose(kind, mode, body.textPurpose), contextRules);
     ruleTrace = compiled.trace;

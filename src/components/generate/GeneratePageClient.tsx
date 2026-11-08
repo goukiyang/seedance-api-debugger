@@ -44,6 +44,7 @@ import {
 } from '@/lib/preferences/generation';
 import { VOLCENGINE_IP_MODEL_OPTIONS, volcengineIpModelLabel, volcengineIpModelResolutions } from '@/lib/integrations/volcengine-ip-models';
 import { SEEDANCE_2_5_MODEL_ID, SEEDANCE_VIDEO_MODEL_OPTIONS, isSeedanceVideoDuration, seedanceVideoMaxDuration } from '@/lib/provider/seedance-models';
+import { usePricingModelAvailability } from '@/lib/pricing/use-model-availability';
 import { orderRecentTaskCards, recentTaskHasVisualPreview } from '@/lib/video/recent-task-card-order';
 import type { StudioGenerationHandoff } from '@/lib/template-studio/types';
 import { stableGenerationPayloadJson } from '@/lib/template-studio-video-handoff';
@@ -533,6 +534,7 @@ function asVideoResolution(value?: string | null): VideoResolution | null {
 // ============================================================================
 
 export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientProps) {
+  const { isAvailable: modelAvailable, reason: modelAvailabilityReason } = usePricingModelAvailability();
   const { confirm, productDialog } = useProductDialog();
   const {
     user: currentUser,
@@ -1163,11 +1165,13 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           : `${h3DisabledReason(h3VideoConfig)} · 选择后点检查状态`,
       });
     }
-    return options;
-  }, [currentUser?.role, h3Ready, h3VideoConfig, seedanceDraftCapability.create_enabled, selectedH3Lora?.label, selectedH3Preset?.label]);
+    return options.filter(option => option.id === H3_INLINE_MODEL_ID
+      ? modelAvailable('h3', selectedH3Preset?.id || h3VideoConfig?.default_preset_id || '')
+      : modelAvailable('video', option.id, {}, 'seedance'));
+  }, [currentUser?.role, h3Ready, h3VideoConfig, seedanceDraftCapability.create_enabled, selectedH3Lora?.label, selectedH3Preset?.label, selectedH3Preset?.id, modelAvailable]);
   const ipDisabledReason = ipVideoStatus === 'ready' ? null : ipVideoStatus === 'loading' ? '正在确认IP线路'
     : ipVideoStatus === 'unknown' ? '暂时无法确认IP线路' : ipVideoStatus === 'disabled' ? 'IP线路已停用' : 'IP线路暂不可用';
-  const ipModelOptions = VOLCENGINE_IP_MODEL_OPTIONS.map(option => ({ ...option,
+  const ipModelOptions = VOLCENGINE_IP_MODEL_OPTIONS.filter(option => modelAvailable('video', option.id, {}, 'volcengine_ark')).map(option => ({ ...option,
     detail: `4–${seedanceVideoMaxDuration(option.id)} 秒 · ${volcengineIpModelResolutions(option.id).join(' / ')}` }));
   const activeModelOptions = isIpSurface ? ipModelOptions : normalModelOptions;
   const videoModelChoices: VideoModelChoice[] = [
@@ -3708,7 +3712,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           pricingModelId={selectedProvider === 'h3' ? selectedH3Preset?.id || h3VideoConfig?.default_preset_id : undefined}
           h3CapabilitiesReady={h3CapabilitiesReady}
           providerStatus={h3MachineStatus}
-          modelLabel={activeModelLabel}
+          modelLabel={modelAvailabilityReason || (activeModelOptions.length ? "请选择已开放模型" : "暂无已开放模型")}
           modelOptions={activeModelOptions}
           allowExtendedSeedanceDuration
           onModelChange={handleGenerationModelChange}

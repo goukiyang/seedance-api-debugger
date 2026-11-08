@@ -21,6 +21,11 @@ async function main() {
   mock.method(https, 'request', blocked); mock.method(https, 'get', blocked);
   process.on('beforeExit', () => { if (forbiddenCalls) { console.error('Forbidden fixture calls:', forbiddenCalls); process.exitCode = 1; } });
   if (kind === 'admin') { await import('./pricing-admin-contract-fixture'); return; }
+  if (kind === 'model-access') {
+    const { runPricingModelAccessFixture } = await import('./pricing-model-access-contract-fixture');
+    console.log(JSON.stringify(await runPricingModelAccessFixture()));
+    assert.equal(forbiddenCalls, 0); return;
+  }
   if (kind === 'video') { await import('./pricing-video-contract-fixture'); return; }
   if (kind === 'video-scope-client') {
     const { runPricingVideoScopeClientFixture } = await import('./pricing-video-scope-client-fixture');

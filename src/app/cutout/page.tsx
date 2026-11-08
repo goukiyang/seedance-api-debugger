@@ -1,4 +1,5 @@
 'use client';
+import { usePricingModelAvailability } from '@/lib/pricing/use-model-availability';
 import { canUseCutout } from '@/lib/cutout/access';
 import type { AccountScopedUser } from '@/lib/access/external-role';
 
@@ -222,6 +223,7 @@ function isTerminalJob(job: CutoutJob | null | undefined) {
 }
 
 export default function CutoutPage() {
+  const { isAvailable: modelAvailable, reason: modelAvailabilityReason } = usePricingModelAvailability();
   const { confirm, productDialog } = useProductDialog();
   const actionLock = useRef(false);
   const mounted = useRef(true);
@@ -997,18 +999,18 @@ export default function CutoutPage() {
   }, [loadHistory, preferencesReady, queryRefreshToken, readSelectedJob, selectedJobId]);
 
   const modelOptions = useMemo<ModelOption[]>(() => {
-    const options: ModelOption[] = [{ id: 'auto', label: '自动选择', available: true }];
+    const options: ModelOption[] = modelAvailable('cutout', 'all') ? [{ id: 'auto', label: '自动选择', available: true }] : [];
     const seen = new Set(['auto']);
     for (const model of capabilities?.models || []) {
-      if (!model?.id || seen.has(model.id) || isSamModelId(model.id)) continue;
+      if (!model?.id || seen.has(model.id) || isSamModelId(model.id) || !modelAvailable('cutout', model.id)) continue;
       seen.add(model.id);
       options.push(model);
     }
-    if (!seen.has(settings.model_preference) && !isSamModelId(settings.model_preference)) {
+    if (!seen.has(settings.model_preference) && !isSamModelId(settings.model_preference) && modelAvailable('cutout', settings.model_preference)) {
       options.push({ id: settings.model_preference, label: settings.model_preference, available: false, reason: '当前未提供' });
     }
-    return options;
-  }, [capabilities?.models, settings.model_preference]);
+    return options.length ? options : [{ id: "", label: modelAvailabilityReason || "暂无已开放模型", available: false }];
+  }, [capabilities?.models, settings.model_preference, modelAvailable, modelAvailabilityReason]);
 
   const recheckWorkspaceDraft = async () => {
     if (replacementBusy.current || actionLock.current || pendingSubmissionRef.current || getPageExitRisk().busy.length || !draftReady) return;
@@ -1612,7 +1614,7 @@ export default function CutoutPage() {
     && localRepair.sourceVersion === `${outputJob.job_id}:${outputJob.updated_at}:${activeOutput?.filename || ''}`);
   const mainResultUrl = localRepairVisible ? repairObjectUrl : activeOutput?.url || '';
   const settingsChanged = Boolean(outputJob?.parameters?.settings && JSON.stringify(outputJob.parameters.settings) !== JSON.stringify(settings));
-  const samAvailable = Boolean(capabilities?.models?.some(model => model.available === true && isSamModelId(model.id) && model.id === characterSettings.sam_model_id));
+  const samAvailable = Boolean(capabilities?.models?.some(model => modelAvailable('cutout', model.id) && model.available === true && isSamModelId(model.id) && model.id === characterSettings.sam_model_id));
   const handoffBlocked = Boolean(handoffSelection.current && handoff && ['preparing', 'submitting', 'unknown'].includes(handoff.stage));
   const returnHref = handoff?.returnPath && handoff.returnPath.startsWith('/') && !handoff.returnPath.startsWith('//') && !/[\\\r\n]/.test(handoff.returnPath) ? handoff.returnPath : '/';
   const selectedCharacters = outputJob?.kind === 'characters' ? cutoutOutputs.filter(output => !output.main && selectedEntryKeys.includes(output.id)) : [];

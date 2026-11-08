@@ -1,3 +1,5 @@
+import { getPricingModelAvailability } from '@/lib/pricing/policy';
+import { pricingModelAvailable } from '@/lib/pricing/model-availability-contract';
 import { videoCreationSchemaReady } from '@/lib/creation/context';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
@@ -376,7 +378,8 @@ export async function GET(request: NextRequest) {
     || restoredVideoCard
     || null;
 
-  const textReady = isMuskApiReady(muskSettings);
+  const availability = await getPricingModelAvailability();
+  const textReady = isMuskApiReady(muskSettings) && STUDIO_TEXT_MODELS.some(model => pricingModelAvailable(availability, 'text', model.id));
   const imageModels = imageChannels.shared.provider === 'seedream'
     ? [imageChannels.shared.default_model, 'gemini-nano-banana-2.1', 'gemini-3-pro-image-preview']
     : Array.from(new Set([...IMAGE_STUDIO_NEW_REQUEST_MODELS,
@@ -392,7 +395,8 @@ export async function GET(request: NextRequest) {
     ...volcengineIpCapabilities().map(item => ({ ...item, value: item.id, provider: 'volcengine_ip', ready: ipReady,
       label: item.id.includes('2-5') ? 'IP 视频 2.5' : item.id.includes('fast') ? 'IP 视频 2.0 · 快速版' : item.id.includes('mini') ? 'IP 视频 2.0 · 轻量版' : 'IP 视频 2.0' })),
   ];
-  const videoReady = seedanceVideoReady || ipReady || h3VideoConfig.ready;
+  const availableVideoModels = videoModels.filter(model => pricingModelAvailable(availability, 'video', model.id, {}, model.provider === 'seedance' ? 'seedance' : 'volcengine_ark'));
+  const videoReady = availableVideoModels.some(model => model.ready) || h3VideoConfig.preset_options.some(model => pricingModelAvailable(availability, 'h3', model.id));
 
   const imageChannelMenu = await getPricingImageChannelOptions();
   const canvasImageChannels = { ...imageChannelMenu, items: imageChannelMenu.items.map(channel => ({ ...channel,
@@ -400,6 +404,7 @@ export async function GET(request: NextRequest) {
       { ...capability, canvas: canvasImageChannelProjection(channel, model) }])) })) };
   return NextResponse.json({
     backend: { mode: 'sd2', transport: 'same-origin', mock: false },
+    modelAvailabilityRevision: availability.menuRevision,
     money_display: { usd_to_cny_rate: USD_TO_CNY_RATE, rate_text: usdToCnyRateText() },
     tool: {
       id: 'ultimate-canvas',
@@ -461,7 +466,7 @@ export async function GET(request: NextRequest) {
         enabled: textReady,
         label: 'GPT-5.5 文本能力',
         model: isStudioTextModel(muskSettings.default_model) ? muskSettings.default_model : 'gpt-5.5',
-        model_options: STUDIO_TEXT_MODELS.map(model => ({ value: model.id, label: model.label })),
+        model_options: STUDIO_TEXT_MODELS.filter(model => pricingModelAvailable(availability, 'text', model.id)).map(model => ({ value: model.id, label: model.label })),
         endpoint: '/api/tools/ultimate-canvas/generate',
         billing: 'operation_log',
         message: textReady ? '可用' : '文本生成能力暂不可用，请稍后联系管理员',
@@ -472,7 +477,7 @@ export async function GET(request: NextRequest) {
         label: imageLabel,
         provider: imageSettings.provider,
         model: imageSettings.default_model,
-        model_options: imageModels.map(model => ({
+        model_options: imageModels.filter(model => pricingModelAvailable(availability, 'image', model)).map(model => ({
           value: model,
           label: IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || imageModelLabel(imageSettings.provider, model),
           capabilities: imageModelCapabilities(imageSettingsByModel.get(model)!.provider, model, imageSettingsByModel.get(model)!.deleted === true),
@@ -504,11 +509,11 @@ export async function GET(request: NextRequest) {
             label: 'Seedance 视频',
             enabled: seedanceVideoReady,
             ready: seedanceVideoReady,
-            model_options: videoConfig.model_options,
+            model_options: videoConfig.model_options.filter(model => pricingModelAvailable(availability, 'video', model.id, {}, 'seedance')),
           },
           {
             id: 'volcengine_ip', label: 'IP 视频', enabled: ipReady, ready: ipReady,
-            model_options: videoModels.filter(item => item.provider === 'volcengine_ip'),
+            model_options: availableVideoModels.filter(item => item.provider === 'volcengine_ip'),
           },
           {
             id: 'h3',
@@ -516,7 +521,7 @@ export async function GET(request: NextRequest) {
             enabled: h3VideoConfig.enabled,
             ready: h3VideoConfig.ready,
             configured: h3VideoConfig.configured,
-            model_options: h3VideoConfig.preset_options,
+            model_options: h3VideoConfig.preset_options.filter(model => pricingModelAvailable(availability, 'h3', model.id)),
             default_model: h3VideoConfig.default_preset_id,
             lora_options: h3VideoConfig.lora_options,
             default_lora_id: h3VideoConfig.default_lora_id,
@@ -542,7 +547,7 @@ export async function GET(request: NextRequest) {
             : null,
         },
         model: videoConfig.model,
-        model_options: videoModels,
+        model_options: availableVideoModels,
         interaction: {
           modes: [
             'text-to-video',
@@ -561,7 +566,7 @@ export async function GET(request: NextRequest) {
           supports_audio: true,
           supports_last_frame: true,
           supports_watermark: true,
-          model_options: videoModels,
+          model_options: availableVideoModels,
           provider_options: ['seedance', 'volcengine_ip', ...(h3VideoConfig.ready ? ['h3'] : [])],
           h3_notes: [
             '首帧和尾帧会由后端转交给 H3',

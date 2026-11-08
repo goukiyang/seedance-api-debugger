@@ -1,3 +1,5 @@
+import { getPricingModelAvailability } from '@/lib/pricing/policy';
+import { pricingModelAvailable } from '@/lib/pricing/model-availability-contract';
 import { NextResponse } from 'next/server';
 import { getProviderConfig, isApiKeyConfigured } from '@/lib/provider/jimeng';
 import { getAiMediaKitApiSettings, safeAiMediaKitConfigDto } from '@/lib/integrations/aimediakit';
@@ -11,6 +13,8 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   const config = getProviderConfig();
+  const availability = await getPricingModelAvailability();
+  const modelOptions = config.model_options.filter(model => pricingModelAvailable(availability, 'video', model.id, {}, 'seedance'));
   const aiMediaKitConfig = safeAiMediaKitConfigDto(await getAiMediaKitApiSettings());
   const h3Config = safeH3ConfigDto(await getH3ApiSettings());
   const ipStatus = await getVolcengineIpApiSettings().then(settings => ({ enabled: settings.enabled, ready: isVolcengineIpApiReady(settings), status: 'known' as const }))
@@ -19,27 +23,27 @@ export async function GET() {
   return NextResponse.json({
     provider: 'seedance',
     base_url: config.baseUrl,
-    model: config.model,
-    model_options: config.model_options,
-    duration_by_model: seedanceVideoDurationCapabilities(),
-    ip_video: { provider: 'volcengine_ark', models: volcengineIpCapabilities(), draft: false, edit: false, extend: false, ...ipStatus },
+    model: modelOptions.some(model => model.id === config.model) ? config.model : '',
+    model_options: modelOptions,
+    duration_by_model: Object.fromEntries(Object.entries(seedanceVideoDurationCapabilities()).filter(([model]) => pricingModelAvailable(availability, 'video', model))),
+    ip_video: { provider: 'volcengine_ark', models: volcengineIpCapabilities().filter(model => pricingModelAvailable(availability, 'video', model.id, {}, 'volcengine_ark')), draft: false, edit: false, extend: false, ...ipStatus },
     api_key_configured: isApiKeyConfigured(),
     seedance_draft: seedanceDraftCapability(),
     aimediakit_enhance_video: {
-      enabled: aiMediaKitConfig.enabled,
-      ready: aiMediaKitConfig.ready,
+      enabled: aiMediaKitConfig.enabled && pricingModelAvailable(availability, 'enhance', 'enhance-video'),
+      ready: aiMediaKitConfig.ready && pricingModelAvailable(availability, 'enhance', 'enhance-video'),
       base_url: aiMediaKitConfig.base_url,
       api_key_configured: aiMediaKitConfig.api_key_configured,
     },
     h3_video: {
       provider: h3Config.provider,
-      enabled: h3Config.enabled,
-      ready: h3Config.ready,
+      enabled: h3Config.enabled && h3Config.preset_options.some(model => pricingModelAvailable(availability, 'h3', model.id)),
+      ready: h3Config.ready && h3Config.preset_options.some(model => pricingModelAvailable(availability, 'h3', model.id)),
       configured: h3Config.configured,
       base_url_configured: Boolean(h3Config.base_url),
       default_preset_id: h3Config.default_preset_id,
       default_lora_id: h3Config.default_lora_id,
-      preset_options: h3Config.preset_options,
+      preset_options: h3Config.preset_options.filter(model => pricingModelAvailable(availability, 'h3', model.id)),
       lora_options: h3Config.lora_options,
       api_token_configured: h3Config.api_token_configured,
       admin_queue_ready: h3Config.admin_queue_ready,

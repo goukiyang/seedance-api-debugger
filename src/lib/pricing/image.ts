@@ -95,12 +95,13 @@ export async function readPricingImageScopes(client: Client = prisma, raw?: stri
 
 /** Menu projections consume only typed, identity-matched unavailability, never general failures. */
 // Display menus share one short-lived snapshot projection. Charging paths retain their own fresh reads.
-let displayOptions: { at: number; value: Promise<PricingImageChannelOptions> } | null = null;
+let displayOptions: { at: number; policy: string | null; value: Promise<PricingImageChannelOptions> } | null = null;
 export async function getPricingImageChannelOptions(client: Client = prisma): Promise<PricingImageChannelOptions> {
   if (client === prisma) {
-    if (displayOptions && Date.now() - displayOptions.at < 15000) return displayOptions.value;
+    const policy = await client.platformSetting.findUnique({ where: { key: PRICING_POLICY_KEY }, select: { value_json: true } });
+    if (displayOptions && displayOptions.policy === (policy?.value_json ?? null) && Date.now() - displayOptions.at < 15000) return displayOptions.value;
     const value = capturePricingImageMenu().then(menu => tracePhase('resolve', () => projectPricingImageChannelOptions(client, menu)));
-    displayOptions = { at: Date.now(), value };
+    displayOptions = { at: Date.now(), policy: policy?.value_json ?? null, value };
     value.catch(() => { if (displayOptions?.value === value) displayOptions = null; });
     return value;
   }

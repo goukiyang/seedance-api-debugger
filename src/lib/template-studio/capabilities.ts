@@ -3,10 +3,13 @@ import { getMuskApiSettings, isMuskApiReady } from '@/lib/integrations/musk';
 import type { SessionUser } from '@/lib/auth/session';
 import type { StudioCapabilitiesResponse } from './types';
 import { isStudioTextModel, STUDIO_TEXT_MODELS } from './text-models';
+import { readModelAccessSettings } from '@/lib/pricing/model-access.server';
+import { supplementaryModelEnabled } from '@/lib/pricing/model-availability-contract';
 
 export const TEMPLATE_STUDIO_TEXT_ENABLED_KEY = 'TEMPLATE_STUDIO_TEXT_ENABLED';
 
 export async function getStudioCapabilities(user: SessionUser): Promise<StudioCapabilitiesResponse> {
+  const modelAccess = await readModelAccessSettings();
   const [setting, musk] = await Promise.all([
     prisma.platformSetting.findUnique({ where: { key: TEMPLATE_STUDIO_TEXT_ENABLED_KEY }, select: { value_json: true } }),
     getMuskApiSettings(),
@@ -29,7 +32,7 @@ export async function getStudioCapabilities(user: SessionUser): Promise<StudioCa
 
   return {
     defaultLlmModel: isStudioTextModel(musk.default_model) ? musk.default_model : 'gpt-5.5',
-    llmModels: STUDIO_TEXT_MODELS,
+    llmModels: STUDIO_TEXT_MODELS.filter(model => supplementaryModelEnabled(modelAccess, 'text', model.id)),
     billingLabel: '文案不扣本站点数；上游文字费用由平台承担。视频生成另行计费。',
     llmEnabled,
     llmReason,

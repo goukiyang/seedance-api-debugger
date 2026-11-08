@@ -1,4 +1,5 @@
 'use client';
+import { usePricingModelAvailability } from '@/lib/pricing/use-model-availability';
 
 import { useProductDialog } from '@/components/useProductDialog';
 import { ContextClipboardActions } from '@/components/ContextClipboardActions';
@@ -27,6 +28,7 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
   ratios: Pick<ComponentProps<typeof RatioPicker>, 'custom' | 'busy' | 'error' | 'onRetry' | 'onCustom'>;
   getExcluded: () => string[]; onDeltas: (deltas: ResolutionDelta[]) => void;
 }) {
+  const { isAvailable: modelAvailable, reason: modelAvailabilityReason } = usePricingModelAvailability();
   const { confirm, productDialog } = useProductDialog();
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -131,14 +133,14 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
         </div>
         <div className={styles.modelQualityRow}>
           <label className={styles.compactField}><strong>生成模型</strong>
-            <select value={defaults.model} disabled={!canEdit || editor.loading} onChange={event => {
+            <select value={modelAvailable('image', defaults.model) ? defaults.model : ''} disabled={!canEdit || editor.loading} onChange={event => {
               const model = event.target.value as ImageStudioModel;
               const replacesLegacyBanana = defaults.model === 'gemini-3.1-flash-image-preview' && model === 'gemini-nano-banana-2.1';
               editor.controller.editTemplateDefaults(replacesLegacyBanana ? { model }
                 : { model, quality: defaultImageStudioQuality(model), resolution: defaultImageResolution(model) });
             }}>
-              {defaults.model === 'gemini-3.1-flash-image-preview' && <option value={defaults.model} disabled>{IMAGE_STUDIO_MODEL_LABELS[defaults.model]}</option>}
-              {IMAGE_STUDIO_NEW_REQUEST_MODELS.map(model => {
+              <option value="" disabled>{modelAvailabilityReason || "请选择已开放模型"}</option>
+              {IMAGE_STUDIO_NEW_REQUEST_MODELS.filter(model => modelAvailable('image', model)).map(model => {
                 const ready = editor.settings?.modelReady?.[model] ?? editor.settings?.providerReady;
                 return <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model]}{ready === false ? '（服务未就绪）' : ''}</option>;
               })}

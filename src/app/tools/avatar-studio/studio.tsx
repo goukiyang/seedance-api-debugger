@@ -1,4 +1,6 @@
 'use client';
+import { imageStudioPricingChannelId } from '@/lib/image-studio/channels';
+import { usePricingModelAvailability } from '@/lib/pricing/use-model-availability';
 import { validVideoPricingAmount } from '@/lib/pricing-client';
 import { formatImageUiCredits, imageUiQuotePriceText, validImageUiQuote, imageUiQuoteFields, type ImageUiQuote } from '@/app/image-studio/use-studio-batch';
 import { studioOutputMismatchDisposition } from '@/lib/image-studio/dimension-mismatch';
@@ -67,6 +69,7 @@ export function avatarPlanChannelMatches(plan: Pick<AvatarPlan, 'model' | 'chann
   return plan.imageChannel ? plan.imageChannel.channelId === effective : effective === 'original';
 }
 export default function AvatarStudio({ ownerId, management, ticketId }: { ownerId: string; management?: boolean; ticketId?: string }) {
+  const { isAvailable: modelAvailable, reason: modelAvailabilityReason } = usePricingModelAvailability();
   const usageProject = useImageUsageProject(ownerId, 'avatar-studio');
   function api<T>(body?: unknown, query = '') {
     const value = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : null;
@@ -89,9 +92,9 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
   const legacyImageRoute = imageStudioUsesLegacyRoute(imageChannel.channels, model, imageChannel.channelId);
   const effectiveImageChannelId = imageStudioEffectiveChannelId(imageChannel.channels, model, imageChannel.channelId, quality);
   const channelModels = imageStudioChannelModels(imageChannel.channels, IMAGE_STUDIO_MODELS);
-  const modelChoices = channelModels.includes(model) ? channelModels : [model, ...channelModels];
-  const qualityChoices = model === 'gpt-image-2.5-sunburst' ? imageStudioNewQualityOptions(model) : selectedChannelModel?.qualities ?? (legacyImageRoute ? IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[model as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [] : []);
-  const resolutionChoices = selectedChannelModel?.resolutions ?? (legacyImageRoute ? IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[model as keyof typeof IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS] || [] : []);
+  const modelChoices = channelModels.filter(item => modelAvailable('image', item));
+  const qualityChoices = (model === 'gpt-image-2.5-sunburst' ? imageStudioNewQualityOptions(model) : selectedChannelModel?.qualities ?? (legacyImageRoute ? IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[model as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [] : [])).filter(value => modelAvailable('image', model, { quality: value }, imageStudioPricingChannelId(imageChannel.channels, model, imageChannel.channelId, value)));
+  const resolutionChoices = (selectedChannelModel?.resolutions ?? (legacyImageRoute ? IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[model as keyof typeof IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS] || [] : [])).filter(value => modelAvailable('image', model, { quality, resolution: value }, imageStudioPricingChannelId(imageChannel.channels, model, imageChannel.channelId, quality)));
   const requestedRatio = isAvatarSheet(rules) || rules.people <= 1 ? '1:1' : '3:2';
   const channelIssue = !imageChannel.ready ? '正在读取生图通道，请稍候。' : imageStudioChannelIssue(imageChannel.channel, model, { quality, resolution, ratio: requestedRatio, referenceCount: rules.referenceIds?.length || 0, legacyRoute: legacyImageRoute });
   const [draftBillingEstimate, setDraftBillingEstimate] = useState<{ parameters: string; billingMode: 'fixed' | 'actual'; estimatedCredits: number; expiresAt: string } | null>(null);
@@ -695,7 +698,7 @@ export default function AvatarStudio({ ownerId, management, ticketId }: { ownerI
         </details>
         <div className={styles.controls} aria-label="图片排版"><button type="button" aria-pressed={rules.layout==='contact-sheet'} onClick={()=>setRules(r=>({...r,layout:'contact-sheet',people:1,candidates:4}))}>四宫格（1张）</button><button type="button" aria-pressed={rules.layout==='contact-sheet-9'} onClick={()=>setRules(r=>({...r,layout:'contact-sheet-9',people:1,candidates:9}))}>九宫格（1张）</button><button type="button" aria-pressed={!draftSheet} onClick={()=>setRules(r=>({...r,layout:'independent',candidates:r.candidates===9?4:r.candidates}))}>独立头像</button></div>
         {!draftSheet&&<div className={styles.controls}><button type="button" aria-pressed={rules.people === 1} onClick={() => setRules(r => ({...r,people:1}))}>单人头像</button><button type="button" aria-pressed={rules.people > 1} onClick={() => setRules(r => ({...r,people:2}))}>多人</button>{rules.people > 1 && <select aria-label="每张图片人数" value={rules.people} onChange={e=>setRules(r=>({...r,people:Number(e.target.value) as 2|3|4}))}>{[2,3,4].map(n=><option key={n} value={n}>{n}人</option>)}</select>}</div>}
-        <label>图片模型<select value={model} disabled={busy||pending} onChange={e=>setModel(e.target.value)}>{!modelChoices.includes(model)&&<option value={model}>原模型已不可用</option>}{modelChoices.map(m=><option key={m} value={m}>{IMAGE_STUDIO_MODEL_LABELS[m as keyof typeof IMAGE_STUDIO_MODEL_LABELS]||m}</option>)}</select></label>
+        <label>图片模型<select value={modelChoices.includes(model) ? model : ''} disabled={busy||pending} onChange={e=>setModel(e.target.value)}><option value="" disabled>{modelAvailabilityReason || "请选择已开放模型"}</option>{modelChoices.map(m=><option key={m} value={m}>{IMAGE_STUDIO_MODEL_LABELS[m as keyof typeof IMAGE_STUDIO_MODEL_LABELS]||m}</option>)}</select></label>
         {model !== 'gpt-image-2.5-sunburst' && <label>供应商<ImageGenerationChannelSelect channels={imageChannel.channels} value={imageChannel.channelId} disabled={busy||pending} onChange={imageChannel.select} model={model} legacyReady={billingReadiness?.models?.[model]?.ready}/></label>}
         <div className={styles.quick}><label>质量<select value={quality} disabled={busy||pending} onChange={e=>setQuality(e.target.value)}>{!qualityChoices.includes(quality)&&<option value={quality} disabled>{model === 'gpt-image-2.5-sunburst' ? '原质量待选择' : `${quality}（当前通道不支持）`}</option>}{qualityChoices.map(q=><option key={q} value={q}>{imageStudioQualityLabel(model,q)}</option>)}</select></label><label>分辨率<select value={resolution} disabled={busy||pending} onChange={e=>setResolution(e.target.value)}>{!resolutionChoices.includes(resolution)&&<option value={resolution} disabled>{resolution}（当前通道不支持）</option>}{resolutionChoices.map(q=><option key={q}>{q}</option>)}</select></label></div>
         <ImageUsageProjectSelect ownerId={ownerId} value={usageProject.projectId} onChange={usageProject.setProjectId} storageIssue={usageProject.storageIssue} disabled={!usageProject.ready || busy || draftEditBlocked} />

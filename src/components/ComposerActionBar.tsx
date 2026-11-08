@@ -232,7 +232,7 @@ export function ComposerActionBar({
   const effectiveProviderLabel = selectedProviderOption?.label || providerLabel;
   const hasModelOptions = modelOptions.length > 0;
   const selectedModelOption = modelOptions.find((option) => option.id === selectedModel) || (!selectedModel ? modelOptions[0] : null) || null;
-  const effectiveModelLabel = selectedModelOption?.label || (selectedModel ? '当前型号不可用' : modelLabel);
+  const effectiveModelLabel = selectedModelOption?.label || modelLabel || '请选择已开放模型';
   const hasAuxiliaryOptions = auxiliaryOptions.length > 0;
   const selectedAuxiliaryOption = auxiliaryOptions.find((option) => option.id === selectedAuxiliary)
     || auxiliaryOptions.find((option) => !option.disabled)
