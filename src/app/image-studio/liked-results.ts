@@ -77,7 +77,7 @@ export function useLikedStudioResults<T extends { id: string; asset?: { id?: str
         const combinedPins = cursor || pageReads.current > 1 ? [...(previous.feed?.sharedPins || []), ...sharedPins] : sharedPins;
         const combinedOrder = cursor ? [...(previous.feed?.resultOrder || []), ...resultOrder] : [...resultOrder, ...(previous.feed?.resultOrder || [])];
         return { scope, tasks: Array.from(new Map(combined.filter(task => !removed.current.has(task.asset?.id || '')).map(task => [task.id, task])).values()),
-          feed: feed && { ...feed, sharedPins: Array.from(new Map(combinedPins.filter(pin => !removed.current.has(pin.assetId)
+          feed: feed && { ...feed, pinTaskReasons: { ...previous.feed?.pinTaskReasons, ...feed.pinTaskReasons }, sharedPins: Array.from(new Map(combinedPins.filter(pin => !removed.current.has(pin.assetId)
             && (feed!.eligiblePinAssetIds || feed!.pinState.assetIds).includes(pin.assetId)).map(pin => [pin.id, pin])).values()), resultOrder: Array.from(new Set(combinedOrder)) },
           nextCursor: !cursor && pageReads.current > 1 ? previous.nextCursor : next, total, error: '', loading: false };
       });

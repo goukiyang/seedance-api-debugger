@@ -10,9 +10,9 @@ const pending = new Map<string, StudioPinMutation>();
 export function StudioResultPinnedIndicator({ showLabel = false }: { showLabel?: boolean }) {
   return <span className={showLabel ? pinStyles.menuReadonly : pinStyles.readonly} data-studio-pin-readonly role="img" aria-label="已置顶" title="同一模板的用户可查看和点赞；只有生成者可取消置顶"><Pin size={16} className={pinStyles.pinIcon} aria-hidden="true" />{showLabel && '已置顶'}</span>;
 }
-export function StudioResultPinButton({ userId, moduleId, taskId, assetId, state, onSaved, onPublish, showLabel = false }: {
+export function StudioResultPinButton({ userId, moduleId, taskId, assetId, state, onSaved, onPublish, showLabel = false, disabledReason }: {
   userId: string; moduleId: string; taskId: string; assetId: string; state: StudioPinState | null;
-  onSaved: () => void; onPublish?: () => void; showLabel?: boolean;
+  onSaved: () => void; onPublish?: () => void; showLabel?: boolean; disabledReason?: string | null;
 }) {
   const identity = `${userId}:${moduleId}:${assetId}`;
   const current = useRef(identity); current.current = identity;
@@ -21,7 +21,7 @@ export function StudioResultPinButton({ userId, moduleId, taskId, assetId, state
   const [error, setError] = useState('');
   const uncertain = pending.has(identity);
   const active = Boolean(state?.assetIds.includes(assetId));
-  const reason = state?.disabledReason || (!state ? '正在读取置顶状态' : '');
+  const reason = state?.disabledReason || (!state ? '正在读取置顶状态' : !active ? disabledReason : '');
   const needsPublication = Boolean(onPublish && state && !state.presetId && !uncertain);
   const label = needsPublication ? '保存并共享模板后置顶' : uncertain ? '重试原置顶操作' : active ? '取消置顶' : '置顶给本模板用户';
   async function save() {
@@ -59,6 +59,6 @@ export function StudioResultPinButton({ userId, moduleId, taskId, assetId, state
       {busy ? <RefreshCw size={16} className={styles.busyIcon} aria-hidden="true" /> : <Pin size={16} className={pinStyles.pinIcon} aria-hidden="true" />}
       {showLabel && (busy ? '正在保存' : uncertain ? '核对原置顶操作' : active ? '取消置顶' : '置顶')}
     </button>
-    {(error || uncertain && !busy) && <span className={`${styles.error} ${pinStyles.feedback}`} role="status">{error || '上次置顶尚未确认，请点置顶重试'}</span>}
+    {(error || uncertain && !busy || showLabel && reason && !needsPublication) && <span className={`${styles.error} ${pinStyles.feedback}`} role="status">{error || (uncertain ? '上次置顶尚未确认，请点置顶重试' : reason)}</span>}
   </span>;
 }

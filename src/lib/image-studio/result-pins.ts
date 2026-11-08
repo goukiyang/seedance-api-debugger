@@ -5,7 +5,9 @@ import type { Prisma } from '@prisma/client';
 import type { SessionUser } from '@/lib/auth/session';
 import { canUseCompanyTemplates, canViewStudioPreset } from './access';
 import { studioPresetArchived } from './preset-lifecycle';
-import { studioSharedBinding, type SharedStudioClient } from './shared-contract';
+import { studioSharedBinding, studioPublisherModule, studioMethodHistoryModuleId, type SharedStudioClient } from './shared-contract';
+import { defaultStudioModuleId } from './modules';
+import { studioTemplateTaskWhere } from './task-visibility';
 import { studioHiddenAssetUrls } from './protected-assets';
 import type { StudioPinMutation, StudioPinState } from './result-pin-types';
 import { studioOutputTaskWhere, studioTaskHasViewableOutput } from './dimension-mismatch';
@@ -43,7 +45,21 @@ export async function studioPinScope(user: SessionUser, moduleId: string, db: Sh
   if (!presetId || studioModule.source_preset_id !== presetId) return null;
   const preset = await db.imageStudioPreset.findUnique({ where: { id: presetId } });
   if (!preset || !preset.is_shared || !canViewStudioPreset(user, preset) || await studioPresetArchived(presetId, db)) return null;
-  return { presetId, moduleId, binding };
+  const publisherModuleId = binding?.mode === 'publisher' ? moduleId
+    : preset.owner_id === user.id ? await studioPublisherModule(user.id, presetId, db) : null;
+  return { presetId, moduleId, binding, publisherModuleId };
+}
+// Older default-template tasks legitimately predate a physical workspace row.
+const pinTaskModuleId = (task: { module_id: string | null; owner_id: string }) => task.module_id ?? defaultStudioModuleId(task.owner_id);
+export function studioPinTaskReason(task: { module_id: string | null; owner_id: string; source_preset_id: string | null;
+  status: string; asset_id: string | null; usage_json: string | null },
+scope: NonNullable<Awaited<ReturnType<typeof studioPinScope>>>, historyModuleId?: string): string | null {
+  const taskModule = pinTaskModuleId(task);
+  if (taskModule !== scope.moduleId && taskModule !== historyModuleId) return '这张结果不属于当前模板';
+  if (!studioTaskHasViewableOutput(task)) return '图片尚未完整保存，暂不能置顶';
+  if (task.source_preset_id && task.source_preset_id !== scope.presetId) return '这张结果来自其他模板，不能在当前模板置顶';
+  if (!task.source_preset_id && taskModule !== scope.publisherModuleId) return '这张旧结果的模板来源无法确认，不能共享置顶';
+  return null;
 }
 export async function readStudioPinDocument(presetId: string, db: Pick<Prisma.TransactionClient, 'platformSetting'> = prisma) {
   const row = await db.platformSetting.findUnique({ where: { key: resultPinsKey(presetId) }, select: { value_json: true } });
@@ -70,7 +86,7 @@ export async function readableStudioPins(user: SessionUser, presetId: string, db
   const pins = document.pins.flatMap(pin => {
     const task = byTask.get(pin.taskId), asset = byAsset.get(pin.assetId);
     if (!task || !studioTaskHasViewableOutput(task) || !asset || task.asset_id !== pin.assetId || task.owner_id !== pin.ownerId || asset.owner_id !== pin.ownerId
-      || task.module_id !== pin.moduleId || task.source_preset_id && task.source_preset_id !== presetId
+      || pinTaskModuleId(task) !== pin.moduleId || task.source_preset_id && task.source_preset_id !== presetId
       || hidden.has(asset.original_url) || asset.thumbnail_url && hidden.has(asset.thumbnail_url)) return [];
     return [{ ...pin, task, asset }];
   });
@@ -108,22 +124,31 @@ export async function mutateStudioPin(user: SessionUser, input: StudioPinMutatio
     const existing = document.pins.find(p => p.assetId === input.assetId);
     // Unpin remains possible after this owner's result is hidden; never remove a public album entry.
     if (!input.active && (!existing || existing.ownerId !== user.id || existing.taskId !== input.taskId)) throw new StudioPinError('只能取消本人结果的置顶', 403);
+    let resultModuleId = input.moduleId;
     if (input.active) {
+      const [excludedToolBatches, historyModuleId] = await Promise.all([
+        characterLabTaskBatchIds(user.id, tx), studioMethodHistoryModuleId(user, input.moduleId, tx),
+      ]);
       const task = await tx.imageStudioTask.findFirst({ where: { id: input.taskId, owner_id: user.id,
-        module_id: input.moduleId, asset_id: input.assetId, AND: [studioOutputTaskWhere], deleted_at: null } });
+        asset_id: input.assetId, AND: [studioTemplateTaskWhere(user.id, input.moduleId, false, excludedToolBatches, historyModuleId)] } });
+      if (!task) throw new StudioPinError('找不到本人在当前模板下的结果，请刷新结果列表', 403);
+      const reason = studioPinTaskReason(task, scope, historyModuleId);
+      if (reason) throw new StudioPinError(reason, 403);
       const asset = await tx.asset.findFirst({ where: { id: input.assetId, owner_id: user.id, type: 'image', status: 'active' } });
+      if (!asset) throw new StudioPinError('这张图片已不可用，或不属于本人', 403);
       // Publication must not inherit an administrator's private reference access.
       const protectedUrls = new Set(await studioHiddenAssetUrls(null, tx));
-      if (!task || !studioTaskHasViewableOutput(task) || !asset || task.source_preset_id && task.source_preset_id !== scope.presetId
-        || !task.source_preset_id && scope.binding?.mode !== 'publisher'
-        || protectedUrls.has(asset.original_url) || asset.thumbnail_url && protectedUrls.has(asset.thumbnail_url)) throw new StudioPinError('只能置顶本人在这个模板下可分享的结果图', 403);
+      if (protectedUrls.has(asset.original_url) || asset.thumbnail_url && protectedUrls.has(asset.thumbnail_url)) {
+        throw new StudioPinError('这张图片属于受保护参考素材，不能共享置顶', 403);
+      }
+      resultModuleId = pinTaskModuleId(task);
       if (existing && (existing.ownerId !== user.id || existing.taskId !== input.taskId)) throw new StudioPinError('结果归属不匹配', 409);
       if (!existing && document.pins.length >= MAX_PINS) throw new StudioPinError(`本模板最多置顶 ${MAX_PINS} 张，请先取消部分置顶`, 409);
       const indexed = await tx.platformSetting.findUnique({ where: { key: indexKey(input.assetId) }, select: { value_json: true } });
       if (indexed && JSON.parse(indexed.value_json).presetId !== scope.presetId) throw new StudioPinError('这张结果已有其他模板的置顶记录', 409);
     }
     const pins = input.active ? existing ? document.pins : [{ taskId: input.taskId, assetId: input.assetId,
-      ownerId: user.id, moduleId: input.moduleId, pinnedAt: new Date().toISOString() }, ...document.pins]
+      ownerId: user.id, moduleId: resultModuleId, pinnedAt: new Date().toISOString() }, ...document.pins]
       : document.pins.filter(p => p.assetId !== input.assetId);
     const next: Document = { ...document, revision: document.revision + 1, pins,
       receipts: [...document.receipts, { id: input.requestId, fingerprint }].slice(-128) };

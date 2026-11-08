@@ -6,7 +6,7 @@ import type { SessionUser } from '@/lib/auth/session';
 import { validStudioModuleId } from './modules';
 import { studioTemplateTaskWhere } from './task-visibility';
 import { studioTaskDTOs } from './tasks';
-import { readableStudioPins, studioPinScope, studioPinState, StudioPinError } from './result-pins';
+import { readableStudioPins, studioPinScope, studioPinState, studioPinTaskReason, StudioPinError } from './result-pins';
 import { STUDIO_RESULT_FEED, type SharedStudioPinnedImage } from './result-pin-types';
 import { studioOutputTaskWhere, studioTaskHasViewableOutput } from './dimension-mismatch';
 import { likedStudioTaskPage } from './liked-task-page';
@@ -83,6 +83,7 @@ export async function listStudioResultFeed(user: SessionUser, moduleId: string, 
       !== fingerprint(pins.map(p => [p.assetId, p.taskId, p.pinnedAt])))) throw new StudioPinError('置顶顺序已变化，请刷新目录', 409);
   return { protocol: STUDIO_RESULT_FEED, viewerId: user.id, tasks, sharedPins, resultOrder,
     eligiblePinAssetIds: pins.map(pin => pin.assetId),
+    pinTaskReasons: scope ? Object.fromEntries(pageTasks.map(task => [task.id, studioPinTaskReason(task, scope, historyModuleId)])) : {},
     total: ownTotal + pins.length, nextCursor: more ? Buffer.from(JSON.stringify(next)).toString('base64url') : null,
     pinState: studioPinState(scope?.presetId || null, readable?.document.revision, allPins.map(p => p.assetId)) };
 }

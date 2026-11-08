@@ -10,6 +10,7 @@ export type StudioResultFeedExtras = {
   protocol: typeof STUDIO_RESULT_FEED; viewerId: string; sharedPins: SharedStudioPinnedImage[];
   resultOrder: string[]; pinState: StudioPinState;
   eligiblePinAssetIds?: string[];
+  pinTaskReasons?: Record<string, string | null>;
 };
 export type StudioPinMutation = {
   viewerId: string; moduleId: string; taskId: string; assetId: string; active: boolean;

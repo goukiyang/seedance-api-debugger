@@ -285,7 +285,7 @@ function AccountWorks({ viewerId, account, embedded, layoutReady, layoutKey }: {
     if (id && label) setFilterNames(old => Object.fromEntries([...Object.entries(old), [`${key}:${id}`, label]].slice(-100)));
     updateQuery({ [key]: id });
   }
-  return <div ref={pageElement} className={`${styles.page} ${embedded ? styles.embedded : ''} exp-browse`}>
+  return <div ref={pageElement} className={`${styles.page} ${embedded ? styles.embedded : ''} ${!workId ? styles.fullWidth : ''} exp-browse`}>
     {!workId && <>
     <header className={styles.toolbar} aria-label="作品浏览工具栏">
       <h1 className={styles.visuallyHidden}>作品广场</h1>

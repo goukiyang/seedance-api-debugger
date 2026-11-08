@@ -3360,6 +3360,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         setTaskTotal(result.total);
         setResultFeed(previous => ({ protocol: STUDIO_RESULT_FEED, viewerId: userId, pinState: result.pinState!,
           eligiblePinAssetIds: result.eligiblePinAssetIds,
+          pinTaskReasons: { ...(cursor || action === 'silent' ? previous?.pinTaskReasons : {}), ...result.pinTaskReasons },
           sharedPins: Array.from(new Map([...(cursor || action === 'silent' ? previous?.sharedPins || [] : []), ...result.sharedPins]
             .filter(pin => (result.eligiblePinAssetIds || result.pinState?.assetIds || []).includes(pin.assetId)).map(pin => [pin.id, pin])).values()),
           resultOrder: Array.from(new Set(cursor ? [...(previous?.resultOrder || []), ...result.resultOrder]
@@ -4576,6 +4577,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           onQuickUse={item => { if (item.task) void replaceMainFromResult(item.task.id); }}
           renderReactionAction={templateWorkbench ? item => item.task?.asset?.id
             ? <StudioResultPinButton showLabel userId={userId} moduleId={module.id} taskId={item.task.id} assetId={item.task.asset.id} state={visibleFeed?.pinState || null} onSaved={refreshResults}
+              disabledReason={visibleFeed?.pinTaskReasons?.[item.task.id]}
               onPublish={unpublishedSharing && module.canChooseSharing ? () => openModuleDialog() : undefined} />
             : item.sharedPin ? <StudioResultPinnedIndicator showLabel /> : null : undefined}
           paginationSlot={templateWorkbench ? resultPaginationSlot : undefined}
