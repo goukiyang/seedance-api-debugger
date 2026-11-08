@@ -140,13 +140,13 @@ export default function CharacterFusionStudio({ ownerId }: { ownerId: string }) 
   const translate = async () => {
     if (translating) return;
     setTranslating(true); setError('');
-    const snapshot = JSON.stringify({ rules: settings.rules, requirements: settings.requirements });
+    const snapshot = JSON.stringify({ rules: settings.rules, requirements: settings.requirements, requirementsEn: settings.requirementsEn });
     const controller = new AbortController(); translationController.current = controller;
     try {
       const input = { requirements: settings.requirements, tags: untranslated(settings) };
       const raw = await fusionAssistant('Translate the supplied art direction and tags into accurate English, preserving all meaning without adding constraints. Return JSON only: {"requirementsEn":"...","tags":[{"dimension":"original dimension","label":"original label","en":"English equivalent"}]}. All English fields must contain no Chinese.', [{ role: 'user', content: JSON.stringify(input) }], controller.signal) as { requirementsEn?: unknown; tags?: unknown };
       if (!activeRef.current || controller.signal.aborted) return;
-      if (snapshot !== JSON.stringify({ rules: settingsRef.current.rules, requirements: settingsRef.current.requirements })) { setNotice('内容已变化，未套用旧翻译，请按当前内容重新补齐。'); return; }
+      if (snapshot !== JSON.stringify({ rules: settingsRef.current.rules, requirements: settingsRef.current.requirements, requirementsEn: settingsRef.current.requirementsEn })) { setNotice('内容已变化，未套用旧翻译，请按当前内容重新补齐。'); return; }
       if (!raw || typeof raw.requirementsEn !== 'string' || !Array.isArray(raw.tags)) throw new Error('英文回复不完整，请重新补齐。');
       const translated = raw.tags as Array<{ dimension: string; label: string; en: string }>;
       const next = parseSettings({ ...settingsRef.current, requirementsEn: raw.requirementsEn, rules: Object.fromEntries(CONFIG.map(c => [c.id, settingsRef.current.rules[c.id].map(t => { const found = translated.find(v => v.dimension === c.id && v.label === t.label); return found ? { ...t, en: found.en } : t; })])) });
