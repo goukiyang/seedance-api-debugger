@@ -9,7 +9,7 @@ import { characterLabIsGrid, characterLabMediaUrl, characterLabStrength, sameLab
 import { labPersonalFields } from '@/lib/character-lab/contexts';
 import { CharacterLabImage } from './images';
 import { CharacterLabPromptPanel } from './prompt-panel';
-import { CharacterLabLayout } from './layout';
+import { CharacterLabLayout } from './workbench-layout';
 import styles from './studio.module.css';
 
 type Part = 'faces' | 'side' | 'body';

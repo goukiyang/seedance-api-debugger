@@ -787,3 +787,5 @@ CodeGraph准备覆盖准确29源1953文件，无missing/extra/hashMismatch/parse
 前置结果：服务器独立preflight目录复用29完整源加精确5UI差量，node_modules仅读，未挂.env/storage、无生产DB。全仓tsc及四TSX定向lint退出0，新layout/workbench/prompt-panel无新增warning；studio仍原四条hook warning。原机同两读检查因本机IO长期无结果，仅核精确PID+cwd停止，未记通过；采用隔离前置原时间/日志，不复用不存在结果。本批准备最终30源，未触发线上切换、浏览器或生成。
 
 同范围复核发现已存版本若直接嵌旧RecipePanel，会同时保留另一份旧生成表单。已改为版本来源回调进入同一现代部位/底图/提示词链，不产生第二个补充或生成入口；旧独立视图保原默认路径。最终两TSX差量补类型/lint，不为布局新增功能测试或重做未变后台检查。
+
+18.7构建修正：首轮30源0ae8c8b27完整Next在框架类型门失败，因为新UI组件误命名为保留文件layout.tsx，Next把它当路由Layout并拒绝CharacterLabLayout具名导出；普通tsc/lint未检查此框架约定。我已纠正为workbench-layout.tsx及其唯一import，布局逻辑不变。源01的19角色/原生计价曾过，但失败Next不冒成功、不复用于变更源；原全部日志/退出1保留，无停服或切版，线上29正常。改名后新源仍30，不抬版本，attempt02从真实29重新组合并执行fresh主工程/完整Next；F0 guard原文件/原时刻继续复用。此轮实际构建失败累计1次，若同类再失败须按规则升级，不换目录清零。
