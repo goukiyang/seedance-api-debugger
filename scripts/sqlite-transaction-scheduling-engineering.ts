@@ -52,7 +52,7 @@ async function main() {
     await raw.$executeRawUnsafe('INSERT INTO Probe VALUES (1,0)');
     await raw.$executeRawUnsafe('CREATE TABLE PlatformSetting (id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE, value_json TEXT NOT NULL, updated_by TEXT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)');
     const value = async () => Number((await raw.$queryRawUnsafe<Array<{ value: number }>>('SELECT value FROM Probe WHERE id=1'))[0].value);
-    async function overlap(name: string, next: () => Promise<unknown>) {
+    const overlap = async (name: string, next: () => Promise<unknown>) => {
       let entered!: () => void, release!: () => void;
       const ready = new Promise<void>(resolve => { entered = resolve; });
       const barrier = new Promise<void>(resolve => { release = resolve; });
@@ -69,7 +69,7 @@ async function main() {
       metrics[name] = performance.now() - started;
       assert.ok(results.every(result => result.status === 'fulfilled'), `${name}: a competing transaction blocked the lock holder: ${JSON.stringify(results)}`);
       assert.ok(metrics[name] < 1500, `${name}: synchronous engine lock wait remains (${metrics[name]}ms)`);
-    }
+    };
     await overlap('callbackMs', () => db.$transaction(tx => tx.$executeRawUnsafe('UPDATE Probe SET value=value+1 WHERE id=1')));
     assert.equal(await value(), 2); checks.push('single_worker_callbacks_do_not_block_commit');
     await overlap('batchMs', () => db.$transaction([db.$executeRawUnsafe('UPDATE Probe SET value=value+1 WHERE id=1')]));
