@@ -92,6 +92,7 @@ export function CharacterLabWorkbench(p: Props) {
   const relatedPending = p.pending.some(id => !p.plans.find(plan => plan.id === id)?.slotScoped || p.plans.some(plan => plan.id === id && partOf(plan) === part));
   const canGenerate = Boolean(p.draft.sourceAssetId && (part !== 'side' || p.draft.mainFace) && !relatedPending && (!base || validBase || part === 'side' && stale(basePlan)) && (!validBase || text.trim()));
   const frozenText = (plan?: CharacterLabPlan) => plan ? plan.operation ? plan.adjustment : plan.context : '';
+  const hasNewText = Boolean(text.trim() && text !== frozenText(basePlan || shown));
   function change(target: Part | 'overview', nextBase?: CharacterLabReference, nextBatch?: string, restore = false) {
     if (p.locked) return;
     const old = positionRef.current, oldPart = old.part === 'overview' ? 'faces' : old.part;
@@ -166,12 +167,12 @@ export function CharacterLabWorkbench(p: Props) {
         </section>
         <section className={styles.inlineEditor}>
           <div className={styles.editingBase}><div><strong>{validBase && base ? `基于第${numbers.get(base.planId)}组${base.cell === undefined ? '整组' : ` · 候选${base.cell + 1}`}` : part === 'side' ? '基于当前采用的正脸' : '基于原始角色'}</strong><small>{base && stale(basePlan) ? '属于旧正脸，改用当前正脸重新生成' : selectedIsAdopted ? '已用于当前成品' : validBase ? '选中作为编辑底图，尚未采用' : '生成新的候选'}</small></div>{base && <button type="button" disabled={p.locked} onClick={() => change(part, undefined, undefined, true)}>从参考重新生成</button>}</div>
-          <button type="button" className={!text.trim() && validBase && !selectedIsAdopted ? styles.primary : styles.outline} disabled={p.locked || !validBase || selectedIsAdopted} onClick={adopt}>{selectedIsAdopted ? <><Check size={14} />已采用</> : part === 'body' ? '采用这组正背面' : '采用选中候选'}</button>
+          <button type="button" className={!hasNewText && validBase && !selectedIsAdopted ? styles.primary : styles.outline} disabled={p.locked || !validBase || selectedIsAdopted} onClick={adopt}>{selectedIsAdopted ? <><Check size={14} />已采用</> : part === 'body' ? '采用这组正背面' : '采用选中候选'}</button>
           <div className={styles.nextSettings}>{part !== 'body' ? <fieldset disabled={p.locked}><legend>下次生成</legend>{([4, 9] as const).map(count => <button key={count} type="button" aria-pressed={p.draft.count === count} onClick={() => p.onUpdate({ count })}>{count}宫格</button>)}</fieldset> : <span>下次生成：正背面同组</span>}<button type="button" onClick={() => setPrompt('next')}>提示词设置</button></div>
           {part === 'faces' && !validBase && <label className={styles.sliderLabel}><span>面部变化 <b>{characterLabStrength(p.draft.diversity)}</b></span><input type="range" min={0} max={100} value={p.draft.diversity} disabled={p.locked} onChange={event => p.onUpdate({ diversity: Number(event.target.value) })} /></label>}
           {p.settings}
           <label className={styles.field}><span>{titles[part]}{validBase ? '微调要求' : '补充要求'}</span><textarea id="character-supplement" rows={3} maxLength={3000} disabled={p.locked} value={text} placeholder={part === 'body' ? '例如：保留原图比例，调整肩甲和背部服装细节' : part === 'side' ? '例如：略收下颌，保留正脸的鼻唇轮廓与发型' : '例如：眼距略窄一点，保留骨相和年龄感'} onChange={event => { const value = event.target.value; p.onUpdate({ [fields[part]]: value }); setPosition(old => ({ ...old, texts: { ...old.texts, [referenceKey(part, old.bases[part])]: value } })); }} /></label>
-          <button type="button" className={`${text.trim() || !shown ? styles.primary : styles.outline} ${styles.generateAfterInput}`} disabled={p.locked || !canGenerate} onClick={() => void generate()}><RefreshCw size={15} />{part === 'side' && stale(basePlan) ? '按新正脸生成' : validBase ? '微调' : '生成'}{part === 'body' ? '正背面整组' : `${p.draft.count}个${titles[part]}候选`}</button>
+          <button type="button" className={`${hasNewText || !shown ? styles.primary : styles.outline} ${styles.generateAfterInput}`} disabled={p.locked || !canGenerate} onClick={() => void generate()}><RefreshCw size={15} />{part === 'side' && stale(basePlan) ? '按新正脸生成' : validBase ? '微调' : '生成'}{part === 'body' ? '正背面整组' : `${p.draft.count}个${titles[part]}候选`}</button>
           {part === 'side' && !p.draft.mainFace && <p className={styles.inlineStatus}>先在正脸候选中采用一张，便可直接生成侧脸。</p>}
           {part === 'body' && <span className={styles.editHint}>以原图决定身体比例和服装，正背面一起生成、一起采用。</span>}
           {relatedPending && <p className={styles.inlineStatus}>原提交待核对，请先查询生成状态。</p>}
