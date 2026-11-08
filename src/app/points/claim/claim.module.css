@@ -1,0 +1,22 @@
+.page { max-width: 1000px; margin: 0 auto; padding: 32px 24px; color: var(--text-primary); }
+.header,.row,.footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.header { margin-bottom: 28px; }
+.header h1 { font-size: 26px; margin: 0 0 10px; }
+.header p { color: var(--text-secondary); margin: 0; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,300px),1fr)); gap: 16px; margin: 20px 0; }
+.campaign { border: 1px solid var(--border-color); border-radius: 8px; padding: 24px; background: var(--bg-panel); min-width: 0; }
+.row { align-items: flex-start; flex-wrap: wrap; gap: 8px; }
+.row h2 { font-size: 18px; margin: 0; overflow-wrap: anywhere; }
+.state { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+.amount { font-size: 40px; line-height: 1.2; font-weight: 650; margin: 26px 0 20px; overflow-wrap: anywhere; }
+.amount span { margin-left: 8px; font-size: 14px; color: var(--text-secondary); font-weight: 400; }
+.window { font-size: 13px; line-height: 1.9; color: var(--text-secondary); }
+.muted { font-size: 13px; color: var(--text-secondary); min-height: 38px; line-height: 1.5; }
+.campaign button { display: flex; width: 100%; justify-content: center; align-items: center; gap: 8px; min-height: 42px; }
+.empty { text-align: center; padding: 64px 16px; color: var(--text-secondary); }
+.empty h2 { font-size: 18px; color: var(--text-primary); }
+.error { color: var(--tone-danger-text); padding: 12px 0; overflow-wrap: anywhere; }
+.success { color: var(--tone-success-text); padding: 12px 0; }
+.footer { justify-content: flex-start; flex-wrap: wrap; font-size: 14px; margin-top: 28px; }
+.footer a { color: var(--tone-info-text); }
+@media(max-width:600px) { .page { padding: 24px 16px; } .campaign { padding: 20px; } }
