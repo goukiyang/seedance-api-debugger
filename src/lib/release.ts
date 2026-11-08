@@ -1,9 +1,10 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '作品推荐自动更新', outline: [
-  '真实使用行为自动判断作品是否进入推荐',
-  '推荐结果后台提前准备，打开即可浏览',
-  '内部飞书同事沿原权限查看图片和视频',
+const notice = { title: '模板共享与保存恢复优化', outline: [
+  '共享状态及时同步，旧读取不再覆盖新版本',
+  '保存结果待确认时，刷新仍可核对原保存',
+  '改名与封面调整保留有效生成设置',
+  '单个异常模板不再拖住整个目录',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
