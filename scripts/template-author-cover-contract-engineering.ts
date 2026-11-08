@@ -21,7 +21,7 @@ type Row = Record<string, any>;
 type Exports = Record<string, any>;
 const fixtureFile = 'scripts/template-author-cover-contract-engineering.ts';
 const sourceFiles = [fixtureFile, 'src/lib/performance/request-trace.ts', 'src/lib/performance/trace-contract.ts', 'src/lib/image-studio/template-author.ts', 'src/lib/image-studio/definition-read.ts',
-  'src/lib/image-studio/module-cover.ts', 'src/lib/image-studio/module-cover-types.ts',
+  'src/lib/image-studio/private-storage.server.ts', 'src/lib/image-studio/module-cover.ts', 'src/lib/image-studio/module-cover-types.ts',
   'src/lib/media/hd-derivatives.ts', 'src/lib/media/image-comparison-version.ts',
   'src/lib/image-studio/shared-contract.ts', 'src/lib/image-studio/shared-command-storage.ts',
   'src/lib/image-studio/workspace-deletion.ts', 'src/lib/image-studio/preset-lifecycle.ts',
@@ -163,10 +163,16 @@ async function main() {
   const contextVersion = evaluate('src/lib/image-studio/context-version.ts', { 'node:crypto': { ...crypto, randomInt: () => forbidden('context-version-allocation') },
     '@/lib/security/private-prompts.server': privatePrompts, '@/lib/security/private-prompt-fields.server': privateFields,
     '@/lib/prisma': { prisma } });
+  const legacyPrivateRequest = { requirePrivatePromptRequest: async () => forbidden('private-identity-for-legacy') };
+  const privateStorage = evaluate('src/lib/image-studio/private-storage.server.ts', { 'server-only': {},
+    '@/lib/security/private-prompts.server': privatePrompts, '@/lib/security/private-prompt-fields.server': privateFields,
+    '@/lib/security/private-prompt-request.server': legacyPrivateRequest });
   let definitionResolution = 'dependency-invalid', definitionCalls = 0, noteReads = 0;
   const definition = evaluate('src/lib/image-studio/definition-read.ts', { 'server-only': {}, 'node:crypto': crypto,
     '@prisma/client': { Prisma: new Proxy({}, { get: () => forbidden('SQL') }) }, '@/lib/prisma': { prisma },
     './context-version': contextVersion, './preset-lifecycle': lifecycle, './template-author': author,
+    './private-storage.server': privateStorage, '@/lib/security/private-prompt-fields.server': privateFields,
+    '@/lib/security/private-prompt-request.server': legacyPrivateRequest,
     './fixed-references': { getStudioPresetFixedReferences: async () => { noteReads++; return [{ assetId: 'fixed-source-do-not-project', note: '固定参考说明' }]; } },
     './shared-contract': { ...shared, StudioSharingError: storage.StudioSharingError,
       resolveSharedStudioDefinition: async () => {

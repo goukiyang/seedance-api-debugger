@@ -143,3 +143,5 @@ R1接收端覆盖补齐：另核首发共享选择回执、重复打开已有工
 本地合并曾因提交与merge重叠触发HEAD CAS拒绝；保留当前提交和MERGE_HEAD完成双父合并、核对原修改完整，未丢改动、未影响生产；后续Git操作串行。
 
 最终源码阶段补证：fix13（19:25:20Z）新增12组正向检查通过，prior17-after-fix03原17项通过，均无生产写入/费用/浏览器；fixture已使用项目内声明的renderer，无外部runtime依赖。最终构建/部署以本节后续真实发布回执为准。
+
+候选attempt01在native阶段被两项夹具拒绝，未进入Next/生产切版：新加密夹具的TMPDIR在应用目录内，被真实私有策略正确拒绝；旧template-author-cover白名单未接新增private-storage导入。保留原31组完成与两失败日志；仅修测试临时根及真实codec接线，生产保护/应用逻辑不改。候选同类环境下fix14（19:42:01Z）与legacy-contract-fix01已各通过；因工程入口改变，后继attempt02沿既有机制重跑发布必需的fresh native，保原成功证据及时间，不改写旧失败。

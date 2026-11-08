@@ -175,7 +175,13 @@ async function backend() {
    unrelatedMalformedReproduction: { catalog: catalogFailure, legacyRevision: revisionLegacy, targetedHealthyModule: targeted, healthyCatalogAndRevisionStayAvailable: true }, productionWrites: 0, paidRequests: 0, networkCalls: calls };
  `;
  const program = prelude + '\nreturn (async()=>{try{\n' + setup + probe + '\n}finally{globalThis.fetch=originalFetch;if(db)await db.$disconnect();fs.rmSync(fixture,{recursive:true,force:true});}})();';
- return new Function('require', 'process', 'console', program)(require, process, console);
+ const previousTmp = process.env.TMPDIR;
+ const actualTmp = fs.realpathSync(require('node:os').tmpdir());
+ // Real private-policy validation forbids test key material inside app source.
+ if (actualTmp === root || actualTmp.startsWith(root + path.sep)) process.env.TMPDIR = fs.realpathSync('/tmp');
+ else process.env.TMPDIR = actualTmp;
+ try { return await new Function('require', 'process', 'console', program)(require, process, console); }
+ finally { if (previousTmp === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = previousTmp; }
 }
 (async()=>{
  report.observations.durableSave=await durableSave();report.observations.realReact=await clientInterleaving();report.observations.backend=await backend();
