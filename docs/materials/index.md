@@ -526,3 +526,10 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 ### 2026-11-08 角色融合提示词
 
 [原工单](../../tasks/todo/2026-11-08-character-fusion.md)／[安全发布摘要](2026-11-08-character-fusion-prototype/release-summary.md)：v0.135.0 / 应用9b2eccae8 / BUILD u_Nz4s0rvT7Lzfs9T5Op8已保护部署，待用户手验。原型单文件保留正式根同名目录prototype.html；私有implementation/attempt03为同源规则、构建/类型、配对/guard复用、启动/公网/健康及一致备份元证，不含DB原件、环境或配置。前两次离线候选为主动让窗/继承新正式源而替代，未切生产，不冒已完整构建；最终attempt03完整构建及切版通过，服务器原日志和程序恢复入口保留。
+
+
+<!-- FUSION-UX02-MATERIALS-20261108 -->
+### 2026-11-08 角色融合UX02
+
+[原单最终交付](../../tasks/todo/2026-11-08-character-fusion.md#ux02-最终交付2026-11-08)：v0.135.10 /00822695f /l_1OOjoFNU5HSjv7z2bsf已保护部署，待用户手验。原型沿既有同名目录；私有implementation/ux02-attempt01保同源构建/规则、bbeb复用、配对、恢复eligibility、公网页面/layout/CSS与服务健康元证，保原57ff/008封装及纠正前输入。服务器staging保完整原证和一致DB备份；DB/env/价格原行/buildEnv未导出，不因资料收尾重建或切版。
+<!-- /FUSION-UX02-MATERIALS-20261108 -->
