@@ -30,7 +30,8 @@ async function main() {
   const author: SessionUser = { id: 'pin-author', name: 'Author', username: 'pin-author', email: 'pin-author@fixture.invalid',
     role: 'admin', account_type: 'internal', user_profile: '', feature_profile_id: null, status: 'active', expires_at: null };
   const colleague: SessionUser = { ...author, id: 'pin-colleague', name: 'Colleague', username: 'pin-colleague',
-    email: 'pin-colleague@fixture.invalid', role: 'user' };
+    email: 'pin-colleague@fixture.invalid', role: 'user', feishu: { user_id: null, open_id: 'fixture-pin-colleague', union_id: null,
+      tenant_key: 'fixture', employee_no: null, department_ids: [], last_sync_at: null } };
   const moduleId = `default-${author.id}`;
   try {
     for (const user of [author, colleague]) await prisma.user.create({ data: { id: user.id, name: user.name, username: user.username,
@@ -60,6 +61,7 @@ async function main() {
     assert.equal((await mutateStudioPin(author, command)).replayed, true);
     assert.equal((await prisma.imageStudioTask.findUniqueOrThrow({ where: { id: legacy.id } })).module_id, null);
     for (const user of [author, colleague]) assert.deepEqual((await readableStudioPins(user, presetId))?.pins.map(pin => pin.taskId), [legacy.id]);
+    assert.equal(await readableStudioPins({ ...colleague, feishu: undefined }, presetId), null);
     assert.equal((await resolveStudioPinnedAsset(colleague, legacy.asset_id!))?.asset.id, legacy.asset_id);
     checks.push('null-module default result pins, replays original receipt and stays readable without rewriting the task');
 
