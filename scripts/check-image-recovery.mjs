@@ -171,7 +171,7 @@ const publicUsageFixtures = [
     'src/lib/image-studio/definition-read.ts', 'src/components/TemplateDefinitionRead.tsx', 'src/lib/image-studio/module-projection.ts',
     'src/app/image-studio/fixed-reference-save-state.ts', 'src/lib/image-studio/shared-types.ts', 'src/lib/image-studio/tasks.ts',
     'src/lib/image-studio/protected-assets.ts', 'scripts/template-sharing-version-engineering.cjs',
-    'src/app/api/image-studio/presets/route.ts', 'src/lib/performance/trace-contract.ts'
+    'src/app/api/image-studio/presets/route.ts', 'src/lib/performance/trace-contract.ts', 'src/lib/image-studio/feishu-navigation.ts'
   ] },
   { file: 'scripts/cover-pool-engineering.ts', schema: 'cover-pool-engineering.v1', databaseFlag: 'applicationDatabaseOpened', sources: [
     'scripts/cover-pool-engineering.ts', 'src/lib/content-reactions/independent.ts', 'src/lib/content-reactions/template-mark.ts', 'src/lib/image-studio/gallery.ts',

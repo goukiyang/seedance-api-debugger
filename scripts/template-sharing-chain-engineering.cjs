@@ -52,7 +52,7 @@ async function durableSave() {
  assert.ok(claims.some(n=>n.thenStatement.getText(source).includes('claimFixedReferenceSave')));
  return { originalCommandSurvivesRemount:true, actorAndTargetIsolated:true, noTemplateBodyStored:true };
 }
-const inputs = ['src/app/image-studio/studio.tsx', 'src/app/image-studio/use-shared-studio.ts', 'src/app/image-studio/use-sharing-command.ts', 'src/lib/image-studio/shared-contract.ts', 'src/lib/image-studio/modules.ts', 'src/lib/image-studio/presets.ts', 'src/lib/image-studio/definition-read.ts', 'src/components/TemplateDefinitionRead.tsx', 'src/lib/image-studio/module-projection.ts', 'src/app/image-studio/fixed-reference-save-state.ts', 'src/lib/image-studio/shared-types.ts', 'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/protected-assets.ts', 'scripts/template-sharing-version-engineering.cjs', 'src/app/api/image-studio/presets/route.ts', 'src/lib/performance/trace-contract.ts'];
+const inputs = ['src/app/image-studio/studio.tsx', 'src/app/image-studio/use-shared-studio.ts', 'src/app/image-studio/use-sharing-command.ts', 'src/lib/image-studio/shared-contract.ts', 'src/lib/image-studio/modules.ts', 'src/lib/image-studio/presets.ts', 'src/lib/image-studio/definition-read.ts', 'src/components/TemplateDefinitionRead.tsx', 'src/lib/image-studio/module-projection.ts', 'src/app/image-studio/fixed-reference-save-state.ts', 'src/lib/image-studio/shared-types.ts', 'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/protected-assets.ts', 'scripts/template-sharing-version-engineering.cjs', 'src/app/api/image-studio/presets/route.ts', 'src/lib/performance/trace-contract.ts', 'src/lib/image-studio/feishu-navigation.ts'];
 report.sourceSha256 = Object.fromEntries(inputs.map(n => [n, sha(fs.readFileSync(path.join(root, n)))]));
 report.fixtureSha256 = sha(fs.readFileSync(__filename));
 async function clientInterleaving() {
@@ -131,6 +131,7 @@ async function backend() {
  assert.deepEqual(generationFields(definitionAfterRename), generationFields(definitionBeforeRename));
  assert.notEqual(definitionAfterRename.intent.definitionToken, definitionBeforeRename.intent.definitionToken);
  assert.equal(definitionAfterRename.generationIntent.definitionToken,definitionBeforeRename.generationIntent.definitionToken);
+ const nav=load('src/lib/image-studio/feishu-navigation.ts');const navInput={owner_id:actor.id,module_id:data.id,batch_id:'synthetic-navigation',snapshot_json:JSON.stringify({moduleName:definitionAfterRename.name})};const resolvedNav=await nav.resolveImageFeishuNavigation(db,navInput,'synthetic-output');assert.equal(resolvedNav.label,definitionAfterRename.name);assert.equal(resolvedNav.kind,'module');assert.equal((await nav.resolveImageFeishuNavigation(db,{...navInput,snapshot_json:null},'synthetic-output')).label,(await db.imageStudioModule.findUniqueOrThrow({where:{id:data.id}})).name);
  const tasks=load('src/lib/image-studio/tasks.ts');const used=await tasks.resolveStudioTaskSharedUse(actor,data.id,definitionBeforeRename.generationIntent,db);assert.deepEqual(used.definition.intent,definitionBeforeRename.generationIntent);
  await assert.rejects(()=>tasks.resolveStudioTaskSharedUse(actor,data.id,definitionBeforeRename.intent,db));
  const method=await contract.prepareSharedStudioMethodWorkspace(actor,sourceRow.id,definitionBeforeRename.sourceRevision,definitionBeforeRename.generationIntent.definitionToken,db,{});assert.ok(await contract.resolveSharedStudioModule(actor,method,db));
@@ -175,7 +176,7 @@ async function backend() {
 }
 (async()=>{
  report.observations.durableSave=await durableSave();report.observations.realReact=await clientInterleaving();report.observations.backend=await backend();
- report.checks.push('original_definition_command_survives_remount_and_isolated_by_actor_target','actual_hook_drops_old_read_and_accepts_current_read','authorized_plaintext_and_unsigned_admin_colleague_denied','original_definition_receipt_and_withdrawal_reshare_boundaries','metadata_generation_identity_and_edit_cas_separated','changed_generation_content_and_method_pin_reject_stale_identity','unrelated_corruption_isolated_from_catalog_and_healthy_target','legacy_workspace_read_does_not_migrate_binding');
+ report.checks.push('original_definition_command_survives_remount_and_isolated_by_actor_target','actual_hook_drops_old_read_and_accepts_current_read','authorized_plaintext_and_unsigned_admin_colleague_denied','original_definition_receipt_and_withdrawal_reshare_boundaries','metadata_generation_identity_and_edit_cas_separated','changed_generation_content_and_method_pin_reject_stale_identity','unrelated_corruption_isolated_from_catalog_and_healthy_target','legacy_workspace_read_does_not_migrate_binding','feishu_navigation_uses_accepted_source_name_and_keeps_legacy_fallback');
  report.completedAt=new Date().toISOString();report.completed=true;
  const output=process.argv[2];if(output&&!output.startsWith('--'))fs.writeFileSync(output,JSON.stringify(report,null,2),{mode:0o600,flag:'wx'});
  console.log(JSON.stringify(report,null,2));

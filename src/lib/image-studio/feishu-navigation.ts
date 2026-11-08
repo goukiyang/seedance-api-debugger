@@ -16,14 +16,19 @@ export function validImageFeishuNavigation(value: unknown, assetId: string): val
       : nav.kind === 'module' && videoFeishuId(nav.moduleId) && nav.path === modulePath(nav.moduleId);
 }
 /** Resolve only this accepted task's owner and batch, never the browser's currently selected module. */
-export async function resolveImageFeishuNavigation(db: Prisma.TransactionClient, task: { owner_id: string; module_id: string | null; batch_id: string }, assetId: string): Promise<ImageFeishuNavigation> {
+export async function resolveImageFeishuNavigation(db: Prisma.TransactionClient, task: { owner_id: string; module_id: string | null; batch_id: string; snapshot_json?: string | null }, assetId: string): Promise<ImageFeishuNavigation> {
   const { characterLabTaskBatchIds } = await import('@/lib/character-lab/task-source');
   if ((await characterLabTaskBatchIds(task.owner_id, db)).includes(task.batch_id)) return { kind: 'character-lab', label: '角色参考图工作台', path: '/tools/character-lab', moduleId: null };
   if (task.module_id) {
     const { defaultStudioModuleId, validStudioModuleId } = await import('./modules');
     if (!validStudioModuleId(task.module_id, task.owner_id)) return { kind: 'result', label: '生成结果', path: resultPath(assetId), moduleId: null };
     const row = await db.imageStudioModule.findFirst({ where: { id: task.module_id, owner_id: task.owner_id }, select: { id: true, name: true } });
-    if (row && label(row.name)) return { kind: 'module', label: label(row.name), path: modulePath(row.id), moduleId: row.id };
+    let acceptedName = '';
+    if (row && task.snapshot_json) {
+      try { const snapshot = JSON.parse(task.snapshot_json); if (typeof snapshot?.moduleName === 'string') acceptedName = label(snapshot.moduleName); }
+      catch { /* Legacy/unreadable metadata keeps the existing owned-workspace fallback. */ }
+    }
+    if (row && (acceptedName || label(row.name))) return { kind: 'module', label: acceptedName || label(row.name), path: modulePath(row.id), moduleId: row.id };
     if (!row && task.module_id === defaultStudioModuleId(task.owner_id)) {
       const { readStudioWorkspaceDeletion } = await import('./workspace-deletion');
       if (!await readStudioWorkspaceDeletion(task.owner_id, task.module_id, db)) return { kind: 'module', label: '模块 1', path: modulePath(task.module_id), moduleId: task.module_id };

@@ -136,3 +136,5 @@ React与renderer版本必须等于项目React（本次18.3.1）。backend模式�
 正向入口为 `node scripts/template-sharing-chain-engineering.cjs /absolute/private/receipt.json`，不再依赖外置React runtime（开发依赖react-test-renderer18.3.1）。会创建并销毁临时合成SQLite及私有策略；无生产库、网络、收费生成或浏览器。旧诊断脚本仅保历史问题复现，**不作为绿灯检查**。原17项在改动后再跑通过；新增检查含真实hook旧读/当前读、确认回执、跨重挂原号、身份隔离、作者明文/同事与未验证管理员拒绝、撤回/重新共享、改名稳定/正文失效、参数副本/作品方法、新旧读取及坏行隔离。测试夹具的相对临时目录、初始化漏字段等失败保留原日志，未放宽业务保护。
 
 隔离证据目录：服务器 `/data/video-api-debugger-engineering/template-sharing-chain-fix-20261108/`。fix10为本批正向通过记录（19:10:49Z），prior17-after-fix01为旧17项通过；其后必要差量及最终构建以实际追加证据为准。部署记录待补，不写预定版本当上线事实。
+
+飞书命名交集补证：任务已冻结实际共享源moduleName，但旧导航只读raw workspace.name，源改名后的新任务可能显示旧名。已优先使用该次已授权任务的冻结名称，旧任务缺字段回原本人工作区名；导航、工具/归属和发送原回执不变，不追改旧消息或重发。真实飞书卡片仍待手验。
