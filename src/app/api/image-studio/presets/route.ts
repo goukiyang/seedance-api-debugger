@@ -52,7 +52,8 @@ export async function GET(request: NextRequest) {
     if (mode) return NextResponse.json({ error: '模板读取方式无效' }, { status: 400, headers: privateHeaders });
     return NextResponse.json({ presets: await listStudioPresets(user, moduleId, presetId) }, { headers: privateHeaders });
   } catch (error) {
-    if (error instanceof PrivatePromptAccessError || error instanceof PrivatePromptError) return NextResponse.json({ error: error.message, reasonCode: 'access-revoked' }, { status: error.status, headers: privateHeaders });
+    if (error instanceof PrivatePromptAccessError) return NextResponse.json({ error: error.message, reasonCode: 'access-revoked' }, { status: error.status, headers: privateHeaders });
+    if (error instanceof PrivatePromptError) return NextResponse.json({ error: error.message, reasonCode: 'read-unavailable' }, { status: error.status, headers: privateHeaders });
     if (error instanceof StudioTaskSettingsError) return NextResponse.json({ error: error.message, reasonCode: 'state-conflict' }, { status: error.status, headers: privateHeaders });
     if (error instanceof StudioModuleError || error instanceof StudioStyleError || error instanceof StudioSharingError || error instanceof StudioFixedReferenceError || error instanceof StudioReferencePolicyError || error instanceof ModuleCoverError || error instanceof StudioDefinitionReadError) return NextResponse.json({ error: error.message, reasonCode: error instanceof StudioSharingError || error instanceof StudioDefinitionReadError ? error.reasonCode : 'state-conflict',
       ...(error instanceof StudioModuleError && error.commandOutcome ? { commandOutcome: error.commandOutcome } : {}) }, { status: error.status, headers: privateHeaders });

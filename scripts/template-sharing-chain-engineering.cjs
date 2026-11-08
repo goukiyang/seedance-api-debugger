@@ -169,6 +169,9 @@ async function backend() {
  assert.ok((await contract.resolveSharedStudioDefinition(colleague,legacySource)).definition.intent);assert.equal(await db.platformSetting.count({where:{key:contract.studioPublisherKey(legacySource)}}),0);
  const route=load('src/app/api/image-studio/presets/route.ts'), savedActor=actor;actor=null;
  const {NextRequest}=requireAt('next/server');for(const verb of ['GET','POST']){const response=await route[verb](new NextRequest('https://invalid.test/api/image-studio/presets',{method:verb}));assert.equal(response.status,401);}actor=savedActor;
+ const actualPolicyFile=process.env.PRIVATE_PROMPTS_POLICY_FILE;process.env.PRIVATE_PROMPTS_POLICY_FILE=path.join(fixture,'temporarily-unavailable-policy.json');
+ try { const unavailable=await route.GET(new NextRequest('https://invalid.test/api/image-studio/presets?mode=definition&presetId='+encodeURIComponent(published.sourcePresetId)));assert.equal(unavailable.status,503);assert.equal((await unavailable.json()).reasonCode,'read-unavailable'); }
+ finally {process.env.PRIVATE_PROMPTS_POLICY_FILE=actualPolicyFile;}
  assert.equal(await db.imageStudioTask.count(), 0); assert.equal(await db.creditLedger.count(), 0); assert.equal(calls, 0);
  return { isolatedSqlite: true, rawPrivateContextHiddenFromColleague: true, colleagueCannotSaveDefinition: true, withdrawalDeniesNewUseAndKeepsWorkspace: true, reshareRestoresUse: true,
    sharingActuallyAdvancesPublisherRevision: { before: before.revision, after: withdrawn.current.moduleRevision }, metadataOnlyRenamePreservesGenerationToken: true, changedContextRejectsOldGeneration: true, oldEditIntentStaysStrict: true, methodContentPinWorks: true, originalDefinitionReceiptAvailable: true, legacyReadDoesNotCreateBinding: true,
