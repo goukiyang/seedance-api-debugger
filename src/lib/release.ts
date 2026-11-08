@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '角色融合卡片与对话新增', outline: [
-  '卡片默认收起，展开后拖动与调整规则',
-  '对话打磨新卡片，确认后加入组合',
-  '固定要求按开关启用，中英共用同一角色',
+const notice = { title: '模板共享保存修复', outline: [
+  '保存模板原文后可以接续共享',
+  '版本冲突先核对新版，保留当前编辑',
+  '保存回执明确，未知结果沿原请求核对',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

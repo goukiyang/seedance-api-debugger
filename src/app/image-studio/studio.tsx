@@ -1834,6 +1834,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const [definitionConflict, setDefinitionConflict] = useState(false);
   const [definitionReview, setDefinitionReview] = useState<StudioModule | null>(null);
   const [definitionReviewBusy, setDefinitionReviewBusy] = useState(false);
+  const definitionReadSequence = useRef(0);
   const [unifiedDefaultsError, setUnifiedDefaultsError] = useState('');
   const [moduleSaved, setModuleSaved] = useState(JSON.stringify({ name: module.name, prompt, context: module.context || '', count: module.count, referenceLimit: moduleReferencePolicy(module).primaryMax, aspectRatio: module.aspectRatio || 'auto', model: module.model, quality: normalizeImageStudioQuality(module.model, module.quality), resolution: normalizeImageResolution(module.model, module.resolution || defaultImageResolution(module.model)), groupName: module.groupName || '未分组', bannerAssetId: module.banner?.id || null, referenceIds: [...module.images.filter(image => moduleReferencePolicy(module).primaryIds.includes(image.id || '')), ...module.images.filter(image => !moduleReferencePolicy(module).primaryIds.includes(image.id || ''))].map(image => image.id), reproduceFromTaskId: module.reproduceFromTaskId || null, sourcePresetId: module.sourcePresetId || null, skillIds: module.skillIds || [], styleGroupIds: module.styleGroupIds || [], referencePolicy: moduleReferencePolicy(module), taskSettings: module.taskSettings ?? studioTaskSettings(module.reproduceFromTaskId || module.reproductionState ? 'historical' : 'current') }));
   const moduleSaveLock = useRef(false);
@@ -2120,7 +2121,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const batch = useStudioBatch({ userId, moduleId: module.id, actualQuoteRequired, pricingBySpecification, sharedLive: sharedLive?.intent, sourceAvailable: sharedReady && !restoredSettingsError, onSourceChanged: onSharedRefresh, quotePayload: settings && !restoredSettingsError ? generationPayload(undefined, '') : null, unitCredits: moduleUnitCredits, effectiveChannelId: effectiveImageChannelId,
     draftSignature: effectiveGenerationSignature, readSettings: onReloadSettings });
   const contextVersion = useModuleContextVersion({ moduleId: module.id, raw: effectiveGenerationDefinition.context || '', taskId: restoredTaskSettings?.sourceTaskId || reproduceSourceTaskId,
-    editable: contextEditable, enabled: !hidden && draftLoaded && !draftRestoring, composing: contextComposing });
+    editable: contextEditable, enabled: !hidden && draftLoaded && !draftRestoring, composing: contextComposing,
+    sourceRevision: `${moduleRevision}:${sharedLive?.intent.definitionToken || ''}` });
   function currentPresetDraft(): Record<string, unknown> {
     return {
       scope: isAdmin ? 'admin' : 'creator', groupName, prompt: sharedLive ? templatePrompt : prompt, context: moduleContext, model: moduleModel, quality, resolution,
@@ -2200,6 +2202,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const latestSettingsDraft = useRef('');
   latestSettingsDraft.current = JSON.stringify({ moduleDraft, contextDialogSnapshot, personalOverrides, name, groupName, bannerAssetId: banner?.id || null });
   async function saveModuleSettings() {
+    if (definitionReviewBusy) return;
     if (privateEditorBeforeClose.current && !await privateEditorBeforeClose.current()) return;
     const submitted = latestSettingsDraft.current;
     const result = await saveModule(reproduceSourceTaskId, revisionRef.current, true, undefined, personalSettingsOpen);
@@ -2250,7 +2253,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     const changed = Boolean(appliedSharedToken.current && previous.sharedLive?.intent.definitionToken !== sharedLive.intent.definitionToken);
     // A workspace-only update does not invalidate the source definition token.
     // Keep its fresh CAS revision even when local definition edits are retained.
-    revisionRef.current = module.revision; setModuleRevision(module.revision);
+    revisionRef.current = Math.max(revisionRef.current, module.revision); setModuleRevision(revisionRef.current);
     appliedSharedToken.current = token;
     setBillingQuote(null);
     if (!previous.sharedLive && sharedLive.mode === 'publisher' && sharedLive.available) {
@@ -2313,7 +2316,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     definitionBaseline.current = module;
     definitionBaselineFields.current = studioDefinitionFields(module);
     setDefinitionConflict(false);
-    revisionRef.current = module.revision; setModuleRevision(module.revision);
+    revisionRef.current = Math.max(revisionRef.current, module.revision); setModuleRevision(revisionRef.current);
     setName(module.name); setGroupName(module.groupName || '未分组'); setBanner(module.banner || null);
     const nextPrompt = module.templatePrompt || '';
     setTemplatePrompt(nextPrompt); savedTemplatePrompt.current = nextPrompt;
@@ -2401,6 +2404,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
 
   async function saveModule(reproduceTaskId = reproduceSourceTaskId, revisionOverride = revisionRef.current, manualSettings = true, fixedOverride?: FixedStudioReference[], personalOnly = false) {
     if (isClientSessionBlocked()) return false;
+    if (definitionReviewBusy) return false;
     if (!definitionEditable) { setModuleSaveError('只有原模板作者可以保存默认设置；请另存为自己的参数模板。'); return false; }
     if (manualSettings && !personalOnly && definitionConflict) { setModuleSaveError('共享模板内容已更新，请先核对差异；当前草稿保留。'); return false; }
     // Re-read the original object's persistent lock even if repair instructions
@@ -2528,26 +2532,69 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           pendingFixedSaveRef.current = null; setPendingFixedSave(null); moduleSaveRequest.current = null; }
         catch { if (!validSaveScope()) return false; setFixedSaveStorageError('保存结果已确认，但本机记录未清理，请核对原保存'); }
       }
-      const message = e instanceof Error ? e.message : '保存失败'; setError(message); setModuleSaveError(message);
-      if (saveDefinition && (e as { conflictScope?: string })?.conflictScope === 'definition') setDefinitionConflict(true);
+      const message = e instanceof Error ? e.message : '保存失败';
+      if (!moduleDialog.current?.open) setError(message);
+      setModuleSaveError(message);
+      if (saveDefinition && !request.unknown && ['definition', 'workspace'].includes((e as { conflictScope?: string })?.conflictScope || '')) setDefinitionConflict(true);
       if (sharedLive && [401, 403, 404, 409].includes(Number((e as { status?: number })?.status))) onSharedRefresh();
       return false;
     }
     finally { if (validSaveScope()) { moduleSaveLock.current = false; setModuleSaving(false); } }
   }
 
+  async function readLatestEditableModule() {
+    const value = await readResponse(await fetch(`/api/image-studio/modules?ids=${encodeURIComponent(module.id)}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
+    const latest: StudioModule | undefined = value.modules?.find((item: StudioModule) => item.id === module.id);
+    if (!latest?.saved || latest.sourcePresetId && latest.sourcePresetOwnedByViewer !== true
+      || sharedLive && latest.sharedLive?.intent.presetId !== sharedLive.intent.presetId
+      || latest.sharedLive && (!latest.sharedLive.available || !latest.sharedLive.capabilities?.saveDefinition.allowed)) {
+      throw new Error('最新模板暂时无法核对，当前编辑保留。');
+    }
+    return studioRepairModule(latest);
+  }
+  async function onPrivateDefinitionSaved(revision: number) {
+    // A confirmed private save advances this workspace independently of the
+    // shared catalog. Pass its revision to the editor before the next save.
+    revisionRef.current = Math.max(revisionRef.current, revision);
+    setModuleRevision(revisionRef.current);
+    onSharedRefresh();
+    if (fixedSaveUnknown || moduleSaveRequest.current?.unknown) return;
+    const scope = fixedSaveScope.current;
+    const sequence = ++definitionReadSequence.current;
+    const current = () => scope === fixedSaveScope.current && scope.active && sequence === definitionReadSequence.current && !isClientSessionBlocked();
+    setDefinitionReviewBusy(true);
+    try {
+      const latest = await readLatestEditableModule();
+      if (!current()) return;
+      if (latest.revision < revisionRef.current) throw new Error('原文已保存，最新工作区版本尚未读到；当前编辑保留，请核对最新版本。');
+      const before = definitionBaselineFields.current;
+      const fields = studioDefinitionFields(latest);
+      const otherChanges = !before || Object.keys(definitionFieldLabels).some(key => key !== 'context' && key !== 'templatePrompt'
+        && JSON.stringify(before[key as keyof typeof before]) !== JSON.stringify(fields[key as keyof typeof fields]));
+      if (otherChanges || latest.sharedLive?.intent.presetId !== definitionBaseline.current.sharedLive?.intent.presetId) {
+        setDefinitionConflict(true); setDefinitionReview(latest);
+        setModuleSaveError('原文已保存，模板还有其他更新；当前编辑保留，请核对差异。');
+      } else {
+        definitionBaseline.current = latest; definitionBaselineFields.current = fields;
+        savedTemplatePrompt.current = latest.templatePrompt || '';
+        setSavedModuleContext(latest.context || '');
+        setDefinitionConflict(false); setDefinitionReview(null); setModuleSaveError('');
+      }
+      onModuleChange(latest);
+    } catch (cause) {
+      if (current()) { setDefinitionConflict(true); setModuleSaveError(cause instanceof Error ? cause.message : '原文已保存，模板版本暂未读取；当前编辑保留。'); }
+    } finally { if (current()) setDefinitionReviewBusy(false); }
+  }
   async function reviewLatestDefinition() {
     if (definitionReviewBusy || moduleSaving || fixedSaveUnknown || moduleSaveRequest.current?.unknown) return;
     const scope = fixedSaveScope.current;
-    const current = () => scope === fixedSaveScope.current && scope.active && !isClientSessionBlocked();
+    const sequence = ++definitionReadSequence.current;
+    const current = () => scope === fixedSaveScope.current && scope.active && sequence === definitionReadSequence.current && !isClientSessionBlocked();
     setDefinitionReviewBusy(true);
     try {
-      const value = await readResponse(await fetch(`/api/image-studio/modules?ids=${encodeURIComponent(module.id)}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) }));
+      const latest = await readLatestEditableModule();
       if (!current()) return;
-      const latest: StudioModule | undefined = value.modules?.find((item: StudioModule) => item.id === module.id);
-      if (isClientSessionBlocked() || latest?.sharedLive?.intent.presetId !== sharedLive?.intent.presetId
-        || !latest?.sharedLive?.available || !latest.sharedLive.capabilities?.saveDefinition.allowed) throw new Error('最新模板暂时无法核对，当前编辑保留。');
-      setDefinitionReview(studioRepairModule(latest)); onModuleChange(latest);
+      setDefinitionReview(latest); onModuleChange(latest);
     } catch (cause) { if (current()) setModuleSaveError(cause instanceof Error ? cause.message : '最新模板读取失败，当前编辑保留。'); }
     finally { if (current()) setDefinitionReviewBusy(false); }
   }
@@ -4366,7 +4413,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const sharingControls = <>
     {canManageTemplateSharing && <TemplateSharingSwitch shared={module.sourcePresetShared === true} selected={unpublishedSharing}
       pending={sharingPending || preferenceSharingPending} className={styles.moduleShareSwitch}
-      disabled={sharingLocked || sharingPending || !draftLoaded || draftRestoring || moduleSaving || sharingPreferenceSaving || Boolean(preferenceSharingId) || Boolean(module.sourcePresetId && sharingId === module.sourcePresetId) || uploading || bannerUploading || submitting || Boolean(pendingSubmission)}
+      disabled={sharingLocked || sharingPending || definitionReviewBusy || !draftLoaded || draftRestoring || moduleSaving || sharingPreferenceSaving || Boolean(preferenceSharingId) || Boolean(module.sourcePresetId && sharingId === module.sourcePresetId) || uploading || bannerUploading || submitting || Boolean(pendingSubmission)}
       onChange={anchor => void changeModuleSharing(anchor)} />}
     {sharingPending && <button type="button" disabled={Boolean(sharingId)} onClick={() => void onQuerySharing()}>查询共享结果</button>}
   </>;
@@ -4578,7 +4625,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
                 onClick={() => void applyQuickPreset(preset)}>{preset.name}</button>)}
             </div>
           </div>
-          {definitionEditable && <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} title={definitionSaveReason || undefined} disabled={!personalSettingsOpen && definitionSaveBlocked || !sharedReady && !definitionReady || moduleSaving || sharingPreferenceSaving || presetSaving || Boolean(quickPresetApplying) || uploading || bannerUploading || !settingsDirty && !unpublishedSharing} onClick={() => void saveModule()}><Save size={16} />{globalContextMode === 'historical' ? '保存历史复现设置' : sharedLive ? definitionEditable ? '保存共享模板' : '保存本次设置' : unpublishedSharing ? '保存并共享模板' : templateWorkbench ? '保存设置' : '保存上下文'}</button>}
+          {definitionEditable && <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} title={definitionSaveReason || undefined} disabled={!personalSettingsOpen && definitionSaveBlocked || !sharedReady && !definitionReady || moduleSaving || definitionReviewBusy || sharingPreferenceSaving || presetSaving || Boolean(quickPresetApplying) || uploading || bannerUploading || !settingsDirty && !unpublishedSharing} onClick={() => void saveModule()}><Save size={16} />{globalContextMode === 'historical' ? '保存历史复现设置' : sharedLive ? definitionEditable ? '保存共享模板' : '保存本次设置' : unpublishedSharing ? '保存并共享模板' : templateWorkbench ? '保存设置' : '保存上下文'}</button>}
           <button type="button" disabled={presetSaving || Boolean(quickPresetApplying) || draftRestoring || moduleSaving || uploading || bannerUploading || submitting || Boolean(pendingSubmission) || !sharedReady || !module.saved} onClick={() => void saveAsPreset()}><Save size={16} />{namedSavePending ? '核对上次保存' : '另存为设置'}</button>
           {recoverableDraft && <button type="button" disabled={presetSaving || moduleSaving || submitting || Boolean(pendingSubmission)} onClick={() => void restoreTemporaryDraft()}>恢复上一次</button>}
         </div>
@@ -4860,7 +4907,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       {/* 隐藏旧模板说明和共享参考编辑区，历史值及已保存生成合同继续保留。 */}
       {!personalSettingsOpen && definitionEditable && module.privateDefinition && <PrivateDefinitionEditor userId={userId} moduleId={module.id} dialog={moduleDialog}
         blocked={sessionChanged || hidden || !active} canRead={module.canReadPrivatePrompt === true}
-        needsIdentity={module.requiresIdentityVerification === true} onSaved={onSharedRefresh} beforeClose={privateEditorBeforeClose}
+        needsIdentity={module.requiresIdentityVerification === true} onSaved={onPrivateDefinitionSaved} beforeClose={privateEditorBeforeClose}
         legacyDraftKey={draftKey} legacyDraftKeys={[defaultsRecoveryKey]} />}
       {!personalSettingsOpen && !module.privateDefinition && (contextEditable ? <>
         <textarea ref={moduleContextInput} aria-label="模块上下文" rows={12} maxLength={20000} value={moduleContext} onCompositionStart={() => setContextComposing(true)} onCompositionEnd={event => { setContextComposing(false); changeModuleContext(event.currentTarget.value); }} onChange={event => changeModuleContext(event.target.value)} />
@@ -4885,7 +4932,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       </fieldset>}
       {templateWorkbench && <button type="button" title="替换主图提醒设置" onClick={() => void confirm('此设置仅影响替换主图提醒，不影响生成费用、变价或权限确认。', { title: '主图提醒', confirmLabel: '保存设置', checkbox: { label: '每次替换主图前提醒', checked: !skipMainImageReminder(userId) }, onSubmit: async (_value, checked) => saveMainImageReminder(userId, !checked) })}><Settings size={16} />主图提醒</button>}
       <div className={styles.moduleSettingsActions}>
-        {definitionEditable ? <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} title={definitionSaveReason || undefined} disabled={definitionSaveBlocked || !sharedReady && !definitionReady || moduleSaving || sharingPreferenceSaving || uploading || bannerUploading || !settingsDirty && !unpublishedSharing} onClick={() => void saveModuleSettings()}><Save size={16} />{moduleSaving ? '正在保存' : personalSettingsOpen ? '保存本次设置' : sharedLive ? definitionEditable ? '保存共享模板' : '保存本次设置' : unpublishedSharing ? '保存并共享模板' : templateWorkbench ? '保存模块设置' : '保存模板设置'}</button> : <button type="button" className={styles.primary} disabled={presetSaving || moduleSaving || uploading || bannerUploading || submitting || Boolean(pendingSubmission) || !sharedReady || !module.saved} onClick={() => void saveAsPreset()}><Save size={16} />{namedSavePending ? '核对上次保存' : '另存为设置'}</button>}
+        {definitionEditable ? <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} title={definitionSaveReason || undefined} disabled={definitionSaveBlocked || !sharedReady && !definitionReady || moduleSaving || definitionReviewBusy || sharingPreferenceSaving || uploading || bannerUploading || !settingsDirty && !unpublishedSharing} onClick={() => void saveModuleSettings()}><Save size={16} />{moduleSaving ? '正在保存' : personalSettingsOpen ? '保存本次设置' : sharedLive ? definitionEditable ? '保存共享模板' : '保存本次设置' : unpublishedSharing ? '保存并共享模板' : templateWorkbench ? '保存模块设置' : '保存模板设置'}</button> : <button type="button" className={styles.primary} disabled={presetSaving || moduleSaving || uploading || bannerUploading || submitting || Boolean(pendingSubmission) || !sharedReady || !module.saved} onClick={() => void saveAsPreset()}><Save size={16} />{namedSavePending ? '核对上次保存' : '另存为设置'}</button>}
       </div>
       {definitionSaveReason && <p role="status" className={styles.muted}>{definitionSaveReason}</p>}
       {fixedSaveUnknown && <p role="status" className={styles.muted}><button type="button" disabled={checkingFixedSave || moduleSaving || sessionChanged}
