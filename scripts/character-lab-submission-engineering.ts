@@ -451,10 +451,25 @@ async function main() {
     assert.deepEqual(await sample(1200, 500), [0, 255, 0]);
     assert.deepEqual(await sample(400, 1700), [0, 0, 255]);
     assert.deepEqual(await sample(1200, 1700), [255, 255, 0]);
+    assert.deepEqual(await sample(1, 1), [255, 0, 0]);
+    assert.deepEqual(await sample(400, 799), [255, 0, 0]);
+    assert.deepEqual(await sample(400, 800), [0, 0, 255]);
+    assert.deepEqual(await sample(1598, 2398), [255, 255, 0]);
     await assert.rejects(compositions.composeLabSheet(user, { ...selected, draft: { ...selected.draft, mainFace: { ...face, cell: 5 } } }), /侧脸对应旧正脸/);
+    // A prior rendering of these same choices stays readable and must not satisfy a new save.
+    const oldSources = { sourceAssetId, mainFace: face, side: views.side, front: views['body-front'], back: views['body-back'] };
+    const oldId = sha(JSON.stringify([owner, workspaceId, 'sheet-2x2-v1', oldSources, '四格']));
+    const oldPng = await sharp({ create: { width: 16, height: 24, channels: 3, background: '#888888' } }).png().toBuffer();
+    mkdirSync(path.join(directory, 'storage/character-lab-compositions'), { recursive: true });
+    writeFileSync(path.join(directory, 'storage/character-lab-compositions', oldId + '.png'), oldPng);
+    await db.platformSetting.update({ where: { key: store.workspaceKey(owner, workspaceId) }, data: { value_json: JSON.stringify({
+      ...selected, compositions: [{ id: oldId, name: '四格', savedAt: selected.updatedAt, layout: 'sheet-2x2-v1', sources: oldSources }],
+    }) } });
     const saved = await compositions.saveLabComposition(user, { workspaceId, revision: selected.revision, name: '四格' });
     const repeated = await compositions.saveLabComposition(user, { workspaceId, revision: saved.revision, name: '四格' });
-    assert.equal(repeated.compositions?.length, 1);
+    assert.equal(repeated.compositions?.length, 2);
+    assert.notEqual(saved.compositions![0].id, oldId);
+    assert.ok((await compositions.readLabComposition(user, workspaceId, oldId)).png.equals(oldPng));
     const savedPng = await compositions.readLabComposition(user, workspaceId, saved.compositions![0].id);
     assert.ok(savedPng.png.equals(png));
     const savedByLegacy = await store.updateLabWorkspace(owner, workspaceId, saved.revision, saved.name, saved.draft);
