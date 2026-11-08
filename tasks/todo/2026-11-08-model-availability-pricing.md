@@ -35,3 +35,5 @@ CodeGraph索引已匹配179f的1953源码，零差异/解析错误；context未�
 - 独立Linux `/data/video-api-debugger-engineering/model-availability-20261108/verify01` 的真实SQLite契约已通过：关闭/重新开启、新受理拒绝、CAS冲突、同号同内容回放、同号变内容拒绝、原回执不被后续保存改写、撤权管理员拒绝、原数字价格不变。runner隔离test环境/HD输出且禁止外呼，原证`fixture-model-access01.log`，未触及生产DB。
 - 初次独立tsc发现harness未复制ops的依赖缺口，及本次2处string目录索引/Set旧目标迭代错误；补齐真实源ops并修正源码后typecheck02已退出0，日志0错误；第一轮未通过。最终主/guard完整Next类型和lint仍必须通过。
 - 新相容guard沿现有生成器保留全部新reader，关闭管理员费率写入及原角色/抠图恢复能力；补齐既有grid写入关闭位。回退仅回程序，数据库、媒体、价格、账本、回执与旧待核均不回滚。
+
+最终消费端复核覆盖全部createMuskChatCompletion调用：已受理worker保原合同，其余新入口均先门控。另补齐通用模块/模板生成器的默认文字模型就绪显示与按钮：费率关闭后不再显示“LLM已就绪”的旧型号；后端门已在原实现中。此为同一范围遗漏补齐，不扩大功能或收费测试。

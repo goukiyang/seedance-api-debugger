@@ -1,5 +1,6 @@
 'use client';
 
+import { usePricingModelAvailability } from '@/lib/pricing/use-model-availability';
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import type {
   GenerationMode,
@@ -599,6 +600,7 @@ export function GenerationComposer({
     message: '暂未读取到样片能力配置，请刷新页面后重试。',
   },
 }: Props) {
+  const { isAvailable: modelAvailable, reason: modelAvailabilityReason } = usePricingModelAvailability();
   const workspace = useWorkspace();
   const generationComposerRef = React.useRef<HTMLDivElement | null>(null);
   const workspaceOperationCountRef = React.useRef(0);
@@ -1342,13 +1344,14 @@ export function GenerationComposer({
     });
   }, [imageReferenceAssets]);
 
-  const muskReady = muskConfig?.ready === true;
+  const muskReady = muskConfig?.ready === true && modelAvailable('text', muskConfig.default_model || '');
   const moduleBuilderDisabled = moduleBuilderBusy || muskConfigLoading || !muskReady;
   const muskStatusText = muskConfigLoading
     ? '正在检查 LLM 配置...'
     : muskReady
       ? `LLM 已就绪：${muskConfig?.default_model || 'gpt-5.5'}`
-      : muskConfigError || 'LLM 未配置，无法生成模块或模板。';
+      : muskConfig?.ready === true ? modelAvailabilityReason || '当前文字模型已在费率页关闭。'
+        : muskConfigError || 'LLM 未配置，无法生成模块或模板。';
 
   const mentionCandidates = useMemo<PromptMentionCandidate[]>(() => {
     return [
