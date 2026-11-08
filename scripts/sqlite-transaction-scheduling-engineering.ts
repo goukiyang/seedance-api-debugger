@@ -96,6 +96,33 @@ async function main() {
     assert.equal(await value(), before); assert.deepEqual(await db.platformSetting.findMany({ orderBy: { key: 'asc' } }), beforeMarkers);
     await db.$transaction(tx => tx.$executeRawUnsafe('UPDATE Probe SET value=value+1 WHERE id=1'));
     assert.equal(await value(), before + 1); checks.push('rollback_preserves_data_and_releases_queue');
+    let extensionReads = 0;
+    const extended = db.$extends({ query: { async $allOperations({ args, query }) { extensionReads++; return query(args); } } });
+    const beforeExtension = await value();
+    await extended.$transaction(tx => tx.$executeRawUnsafe('UPDATE Probe SET value=value+1 WHERE id=1'));
+    assert.ok(extensionReads > 0, 'Callback keeps its query extension');
+    const callbackReads = extensionReads;
+    await extended.$transaction([extended.$executeRawUnsafe('UPDATE Probe SET value=value+1 WHERE id=1')]);
+    assert.ok(extensionReads > callbackReads, 'Batch keeps its query extension');
+    await extended.platformSetting.upsert({ where: { key: 'ordinary-extension-fixture' },
+      create: { key: 'ordinary-extension-fixture', value_json: '{}' }, update: { value_json: '{}' } });
+    assert.equal(await value(), beforeExtension + 2); assert.ok(extensionReads > 0);
+    const capturedTransaction = db.$transaction.bind(db); let instrumentedCalls = 0;
+    Reflect.set(db, '$transaction', async (...args: unknown[]) => {
+      instrumentedCalls++;
+      await db.platformSetting.update({ where: { key: 'studio_style_group_v1:fixture' }, data: { value_json: '{"beforeTransaction":true}' } });
+      return Reflect.apply(capturedTransaction, db, args);
+    });
+    try { await db.$transaction(async tx => {
+      assert.equal((await tx.platformSetting.findUniqueOrThrow({ where: { key: 'studio_style_group_v1:fixture' } })).value_json, '{"beforeTransaction":true}');
+      await tx.$executeRawUnsafe('UPDATE Probe SET value=value+1 WHERE id=1');
+    }); }
+    finally { Reflect.set(db, '$transaction', capturedTransaction); }
+    assert.equal(instrumentedCalls, 1);
+    await db.$transaction(tx => tx.$executeRawUnsafe('UPDATE Probe SET value=value+1 WHERE id=1'));
+    await db.$transaction([db.$executeRawUnsafe('UPDATE Probe SET value=value+1 WHERE id=1')]);
+    assert.equal(await value(), beforeExtension + 5);
+    checks.push('extended_and_instrumented_clients_enter_transaction_queue_only_once');
     let entered!: () => void, release!: () => void, lateCallback = false;
     const ready = new Promise<void>(resolve => { entered = resolve; }), barrier = new Promise<void>(resolve => { release = resolve; });
     const holding = db.$transaction(async tx => { await tx.$queryRawUnsafe('SELECT 1'); entered(); await barrier; });

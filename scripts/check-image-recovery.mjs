@@ -131,7 +131,7 @@ fixtures.push({ file: 'scripts/sqlite-transaction-scheduling-engineering.ts', sc
     'single_worker_callbacks_do_not_block_commit', 'batch_transactions_share_the_same_entry_queue',
     'implicit_directory_write_keeps_atomic_markers', 'bare_sql_write_does_not_starve_transaction_commit',
     'non_catalog_write_is_scheduled_without_new_markers', 'rollback_preserves_data_and_releases_queue',
-    'expired_wait_never_executes_late_callback'], sources: ['src/lib/catalog-directory-writes.ts',
+    'extended_and_instrumented_clients_enter_transaction_queue_only_once', 'expired_wait_never_executes_late_callback'], sources: ['src/lib/catalog-directory-writes.ts',
     'src/lib/image-studio/catalog-revision.ts', 'src/lib/performance/request-trace.ts', 'src/lib/performance/trace-contract.ts'] });
 fixtures.push({ file: 'scripts/hd-chain-engineering.mjs', schema: 'hd-chain-engineering.v1',
   marker: 'HD chain engineering receipt: ', checks: HD_CHAIN_CHECKS, sources: HD_CHAIN_FIXTURE_SOURCES });

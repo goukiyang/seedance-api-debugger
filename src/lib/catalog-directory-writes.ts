@@ -70,7 +70,7 @@ export function catalogDirectoryWrites<T extends PrismaClient>(base: T): T {
   const context = new AsyncLocalStorage<Prisma.TransactionClient>();
   const promises = new WeakMap<object, CatalogDomain[]>();
   const observedInputs = new WeakSet<object>();
-  const transaction = base.$transaction.bind(base);
+  const nativeTransaction = base.$transaction;
   const sqlite = process.env.DATABASE_URL?.startsWith('file:');
   let transactionTail: Promise<void> = Promise.resolve();
   // SQLite BEGIN waits occupy engine threads. Under a one-CPU service quota,
@@ -94,17 +94,25 @@ export function catalogDirectoryWrites<T extends PrismaClient>(base: T): T {
     });
     return Promise.race([pending, waiting]).finally(() => { if (timer) clearTimeout(timer); });
   }
+  // Queue at the original engine boundary. Observation/admission wrappers may
+  // legitimately perform another database action before invoking a captured transaction.
+  const serializedTransaction = function (this: object, input: unknown, options?: unknown) {
+    return schedule(() => Reflect.apply(nativeTransaction, this, [input, options]),
+      typeof input === 'function' ? (options as { maxWait?: number } | undefined)?.maxWait ?? 2000 : undefined);
+  };
+  Reflect.set(base, '$transaction', serializedTransaction);
+  const transaction = serializedTransaction.bind(base);
   base.$use(async (params, next) => {
     const affected = domains(params.model, params.action, params.args);
     if (!affected.length) return !params.runInTransaction && (operations.has(params.action) || params.action === 'executeRaw')
       ? schedule(() => next(params)) : next(params);
     const tx = context.getStore();
     if (!params.runInTransaction) {
-      return observeTransaction('implicit', enter => schedule(() => transaction(async current => context.run(current, () => enter(async () => {
+      return observeTransaction('implicit', enter => transaction(async (current: Prisma.TransactionClient) => context.run(current, () => enter(async () => {
         const name = params.model![0].toLowerCase() + params.model!.slice(1);
         const delegate = Reflect.get(current, name);
         return Reflect.apply(Reflect.get(delegate, params.action), delegate, [params.args]);
-      })), { maxWait: 5000, timeout: 15000 }), 5000));
+      })), { maxWait: 5000, timeout: 15000 }));
     }
     const result = await next(params);
     if (tx && !(result && typeof result === 'object' && 'count' in result && result.count === 0)) await bumpCatalogRevision(tx, affected);
@@ -120,8 +128,7 @@ export function catalogDirectoryWrites<T extends PrismaClient>(base: T): T {
           const call = async (enter: <R>(body: () => Promise<R>) => Promise<R>) => {
             const callback = (tx: Prisma.TransactionClient) => context.run(tx, () => enter(() => input(tx)));
             observedInputs.add(callback);
-            return schedule(() => Reflect.apply(targetTransaction, target, [callback, options]),
-              (options as { maxWait?: number } | undefined)?.maxWait ?? 2000);
+            return Reflect.apply(targetTransaction, target, [callback, options]);
           };
           return observedInputs.has(input) ? call(body => body()) : observeTransaction('callback', call);
         }
@@ -133,7 +140,7 @@ export function catalogDirectoryWrites<T extends PrismaClient>(base: T): T {
           return base.platformSetting.upsert({ where: { key }, create: { key, value_json }, update: { value_json } });
         });
         const batched = [...input, ...markers]; observedInputs.add(batched);
-        const call = () => schedule(() => Reflect.apply(targetTransaction, target, [batched, options]) as Promise<unknown[]>);
+        const call = () => Reflect.apply(targetTransaction, target, [batched, options]) as Promise<unknown[]>;
         const pending = observedInputs.has(input) ? call() : observeTransaction('batch', call);
         return pending.then(values => values.slice(0, input.length));
       };
