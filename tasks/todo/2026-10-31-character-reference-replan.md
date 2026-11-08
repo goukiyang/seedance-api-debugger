@@ -828,3 +828,16 @@ CodeGraph准备覆盖准确29源1953文件，无missing/extra/hashMismatch/parse
 发布配套缺陷补正：15/4提示上一批31恢复脚本残留pin-wide/3516两旧锚点。已仅修本任务旧attempt04两常量至真实role31 stage/179f，保原脚本、前后SHA。bash语法及首段只读preflight检查通过guard后，正确拒绝当前后继135；未调用脚本后续stop/repoint/restart，服务/配置/业务数据写均0。原18.8所述可执行恢复入口结论不充分，此处更正；新候选恢复脚本须匹配自身实际stage/baseline。证据在原attempt04/anchor-fix-proof.json，本批沿已修模板逐条核对；没有线上恢复演练。
 
 当前：4文件修复已完成，待继承实际135、完整工程检查与保护部署。截图和安全元证：[资料](../../docs/materials/2026-11-08-character-image-fit/)，功能待用户手动验收。
+
+
+**135.3已部署，待用户手动验收。** 正式入口：[角色工作台](https://sd2.youdooart.com/tools/character-lab)。实际源cbaf2390e5ae65f4f62defbf3e2b7b750f05ff4c，BUILD VFqcM3XS-0vUU6QIqpZ0a；完整继承实际135/9b2及角色融合，实现对该基线恰10文件（4角色实现/工程、3版本、3记录），主对F0共34文件。公网收口2026-11-08T11:16:04.887852Z，健康收口11:16:20.580258Z；cutover0，无恢复。发布窗已交还并向离线15/3留精确实发源，后续仅文档提交推送，不因文档再构建/切版。
+
+- 新主fresh19组隔离SQLite工程通过，新增边界像素覆盖方头像铺满、800像素行交界、身体末边；旧同来源/同名PNG仍原字节可读，新渲染指纹生成独立版本，重复保存不重复增加，任务/账本数量不变。fresh原生/计价及完整Next/types/lint通过，最终构建2026-11-08T11:14:24.703188Z。生产写、收费、浏览器和禁止外部调用均0，未做真实生图或自动功能验收。
+- 原F0 guard的完整构建/19组/原生/读者证据按原源、原BUILD _JwQu0Zzx5P5dk89dyQd9、原时2026-11-08T05:29:46.672838Z复用，1469原编译文件逐一核对，未重建或改时间。新旧composition读取函数、旧media裁切、images/front-version-picker逐字一致；schema/migrations及其他角色后端保持，保存记录layout仍sheet-2x2-v1，只有新渲染指纹及像素排版变化。
+- 6次真实main/guard启动检查、7服务实际cwd、4timer、首页及角色页8个唯一JS/CSS资源SHA、3匿名接口401、内外health200通过，控制器0。旧writer自然退出，配置/一致SQLite备份留服务器；未回灌数据库、账本、素材、历史、原请求或用户配置。实际页面铺满/选择标记及手机布局仍用户手动验收，不能以这些部署检查冒功能验收。
+- 切版前后2价格行全字段SHA d03c539d74a31b5e2a6a0305724b1b9f193e0ade878370898c7632d1bdc96539，policy92ac99c7/authoring37404d45/capability f4a48550保持；private策略SHA35fc8b70fc57df1f64e164b5439f1ba8f99d76cf12ab3ad3d8dea588edad2ff0保持。既有数据/原图/上传链接和独立sd2b接线保留。
+- 新恢复入口program-recovery.sh匹配自身image-fit attempt01及actual135/9b2，只读首段验证guard/配对/价格reader及当前允许源；仅在内存将“切版已开始/备份已存在”的时序前置改为“尚未开始/备份尚未建立”用于发布前只读核对，原shell未执行。记录scriptSHA 0fe4e37e33ae3b0149090a58c7cff7ee2c161156598a67277cddbd26a63636b6；未演练恢复。上一批31两锚点补正原件仍保留，不掩盖此前入口验证不足。
+
+最终证据：私有`docs/materials/2026-11-08-character-image-fit/attempt01/`，对应服务器`/data/video-api-debugger/release-staging/character-image-fit-20261108/attempt01`；final-evidence-summary.json只留原run/receipt/日志SHA与非敏感元证，未下载buildEnv、生产DB/配置备份或原始价格行。启动SSH因整体后台链残留标准输出在35秒超时，实际controller已继续；核对运行后未重复启动，源不变，构建最终0。应用源码已推正确origin，文档HEAD不冒运行源。
+
+CodeGraph准备已成功核对本工作区cbaf、1962文件及0待同步/0缺失/0解析错误；context调用长时间未返回，停止等待并用源码/不可变差量核对影响，未冒查询成功。本轮新增范围外已确认问题仅本单恢复脚本旧锚点，已修正并记D-20261108-ROLE-RECOVERY；未扩改其它发布或搭建治理。除该配套修正外未新增范围外应用问题。

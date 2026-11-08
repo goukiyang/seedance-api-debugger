@@ -51,3 +51,6 @@
 - 小修沿既有授权及项目工程检查执行；结构性、大范围及影响不明事项先出方案等用户确认。功能验收仍由用户手动完成，不以构建、推送或健康检查冒充通过。
 
 - **D-20261104-TEMPLATE-MARK-LIST-SCALE｜个人收藏列表先全量解析再分页｜待核线索 / P3**：`/api/content-reactions` 的模板组织列表沿 `listReactions` 先读取本账号全部有效标记，逐条 `resolveReactionContent` 后再截取页；分组统计也读本账号模板标记。实现事实已核，当前收藏数量、请求耗时和瓶颈未测，不能判成已发生的性能故障，也不把它归因于本次统一标记。CP01/ARCH03封面目录的有限SQL分页仍保留。本轮不扩为重构；后续如列表卡顿，先固定真实账号、标记量、权限条件，测一次请求耗时/查询数，再决定是否将组织列表接入相同授权投影与分页，不能先分页后漏权限/搜索结果。来源：TEMPLATE-MARK01，`src/lib/content-reactions/service.ts:listReactions`、`template-favorites.ts:favoriteOrganization`；未做浏览器或生产规模测试。
+
+
+**D-20261108-ROLE-RECOVERY｜已确认并修正本单恢复入口锚点。** 同类发布模板复用后，角色31/movable-layout/attempt04的program-recovery.sh首段仍断言pin-wide旧stage与3516旧baseline，自动恢复未触发，因此此前cutover0并不能证明入口可执行。按15/4证据，仅修本单两常量至role31 stage/179f，保原脚本及SHA；只读首段通过guard检查后正确拒绝后继135，未执行停服/切版/写配置/数据。新135.3恢复入口匹配本单stage及实际135，发布前验证自身首段。详见角色原单§19、movable-layout/attempt04/anchor-fix-proof.json与image-fit新批证据。不扩改其他发布或创建治理系统。

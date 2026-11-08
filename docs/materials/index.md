@@ -515,6 +515,8 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 
 2026-11-08图片铺满及选中标记补正沿同一原单§19；用户截图及本批安全工程/发布元证归私有`2026-11-08-character-image-fit/`。新PNG按800/1600行，旧PNG及旧生成裁切不迁移。原31恢复脚本锚点补正证据留movable-layout/attempt04/anchor-fix-proof.json，未执行线上恢复。
 
+最终v0.135.3 /cbaf2390e /VFqcM3XS-0vUU6QIqpZ0a已部署，待用户手动验收。新批`attempt01/final-evidence-summary.json`保fresh主19/native/完整Next、原guard1469、切版0/公网/健康安全元证；`recovery-readonly-preflight.json`核自身stage/135及原guard，无恢复演练。配置/DB/原始价格行及buildEnv仅留服务器，不下载；CodeGraph exact-source索引成功、context未返回的缺口在原单。
+
 原单：`tasks/todo/2026-10-31-character-reference-replan.md` §18.6。已部署v0.134.29，功能待用户手验；最终29源码配对/fresh主构建/公网/健康及恢复元证见私有 `2026-11-07-character-unified-workbench/implementation/attempt03/`，guard-build-reuse记录F0原构建时刻和1469编译文件核对；attempt02保28实际发布和F0原完整工程证据，attempt01保设计、前置检查、目录权限故障及未发布替代源。原生完整日志、配置和一致DB备份仅留服务器，summary只存SHA与非敏感元证，不导出环境或价格原行。
 
 三栏可移动/右侧合并及UX复审原单§18.7–18.8：已部署v0.134.31，功能待用户手验。最终3654/BUILD iTiWbFUml0X1fllspLErl；源码/配对/主fresh19与原生构建/公网/恢复元证归私有 `2026-11-07-character-unified-workbench/movable-layout/attempt04/`。attempt03保最后提示词定位补齐前的离线替代源，attempt02保b897成功构建及停服前基线变化保护停住，attempt01保前置检查及Next保留文件名失败原证。safe summary不导出环境/价格原行/DB，F0原证原时及1469编译文件核对保留，原28/29证据不覆盖。
