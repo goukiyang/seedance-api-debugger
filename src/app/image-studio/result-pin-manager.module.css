@@ -1,0 +1,13 @@
+.root { position: relative; }
+.root > summary { display: flex; align-items: center; justify-content: center; width: 36px; height: 34px; border: 1px solid var(--border-color, #35403e); border-radius: 6px; cursor: pointer; list-style: none; }
+.root > summary::-webkit-details-marker { display: none; }
+.root > summary:focus-visible { outline: 2px solid var(--accent-color, #7fd6cb); outline-offset: 2px; }
+.panel { position: absolute; right: 0; top: calc(100% + 8px); z-index: 40; width: min(440px, calc(100vw - 40px)); max-height: min(440px, 65vh); overflow: auto; padding: 12px; border: 1px solid var(--border-color, #35403e); border-radius: 8px; background: var(--panel-bg, #192321); box-shadow: 0 8px 24px #0006; text-align: left; }
+.panel header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.panel article { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--border-color, #35403e); }
+.panel article:last-child { border-bottom: 0; }
+.panel article > div { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 4px; font-size: 13px; }
+.panel img, .placeholder { width: 54px; height: 54px; flex: 0 0 54px; border-radius: 4px; object-fit: scale-down; }
+.placeholder { display: grid; align-items: center; padding: 4px; font-size: 11px; color: #a5b1ae; background: #131a19; }
+.panel small, .panel time { font-size: 12px; color: #a5b1ae; }
+.panel p { font-size: 13px; line-height: 1.5; }

@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '角色融合提示词上线', outline: [
-  '用八维卡片与规则批量生成角色提示词',
-  '保存本人配方，复制或导出提示词',
-  '本地规则生成，每轮 ¥0',
+const notice = { title: '角色风格管理与候选同步', outline: [
+  '风格提示词独立弹窗统一调整，各部位生成内容分开编辑',
+  '点击候选直接同步到当前采用，支持撤销',
+  '历史原提示词和独立补充输入保持',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

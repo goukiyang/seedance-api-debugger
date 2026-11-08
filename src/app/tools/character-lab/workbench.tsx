@@ -37,7 +37,7 @@ export function CharacterLabWorkbench(p: Props) {
   const [ready, setReady] = useState(false);
   const [prompt, setPrompt] = useState<'current' | 'next' | null>(null);
   const [promptReference, setPromptReference] = useState<CharacterLabReference | undefined>();
-  const [undo, setUndo] = useState<Pick<CharacterLabDraft, 'mainFace' | 'views'> | null>(null);
+  const [undo, setUndo] = useState<(Pick<CharacterLabDraft, 'mainFace' | 'views'> & { part: Part; reference?: CharacterLabReference }) | null>(null);
   const positionRef = useRef(position), promptTrigger = useRef<HTMLElement | null>(null);
   positionRef.current = position;
   function showPrompt(tab: 'current' | 'next', reference?: CharacterLabReference) {
@@ -109,12 +109,13 @@ export function CharacterLabWorkbench(p: Props) {
     const candidate = { planId: plan.id, ...(characterLabIsGrid(plan) ? { cell: 0 } : {}) };
     change(target, candidate, plan.id, true);
   }
-  function adopt() {
-    if (!base || !validBase) return;
-    setUndo({ mainFace: p.draft.mainFace, views: p.draft.views });
-    if (part === 'faces' && base.cell !== undefined) p.onUpdate({ mainFace: { planId: base.planId, cell: base.cell } });
-    else if (part === 'side') p.onUpdate({ views: { ...p.draft.views, side: base } });
-    else p.onUpdate({ views: { ...p.draft.views, 'body-front': { planId: base.planId, cell: 0 }, 'body-back': { planId: base.planId, cell: 1 } } });
+  function adopt(choice = base) {
+    const plan = p.plans.find(item => item.id === choice?.planId);
+    if (p.locked || !choice || !plan || !p.tasks[plan.id]?.asset || stale(plan) || sameLabReference(choice, current)) return;
+    setUndo({ mainFace: p.draft.mainFace, views: p.draft.views, part, reference: current });
+    if (part === 'faces' && choice.cell !== undefined) p.onUpdate({ mainFace: { planId: choice.planId, cell: choice.cell } });
+    else if (part === 'side') p.onUpdate({ views: { ...p.draft.views, side: choice } });
+    else p.onUpdate({ views: { ...p.draft.views, 'body-front': { planId: choice.planId, cell: 0 }, 'body-back': { planId: choice.planId, cell: 1 } } });
   }
   async function generate() {
     const captured = positionRef.current;
@@ -140,7 +141,7 @@ export function CharacterLabWorkbench(p: Props) {
       </section>
     </aside>;
   const previewPanel = <section className={styles.adoptedCanvas}>
-        <header><div><h2>{position.part === 'overview' ? '成品预览' : `当前采用 · ${titles[part]}`}</h2>{position.part !== 'overview' && <span>{current ? `第${numbers.get(current.planId)}组${current.cell === undefined ? '' : ` · 候选${current.cell + 1}`}` : '尚未采用'}</span>}</div><div>{position.part !== 'overview' && current && <button type="button" onClick={() => showPrompt('current', current)}>采用图提示词</button>}{undo && <button type="button" disabled={p.locked} onClick={() => { p.onUpdate(undo); setUndo(null); }}><Undo2 size={14} />撤销采用</button>}{position.part !== 'overview' && <button type="button" disabled={p.locked} onClick={() => change('overview')}>查看整张</button>}</div></header>
+        <header><div><h2>{position.part === 'overview' ? '成品预览' : `当前采用 · ${titles[part]}`}</h2>{position.part !== 'overview' && <span>{current ? `第${numbers.get(current.planId)}组${current.cell === undefined ? '' : ` · 候选${current.cell + 1}`}` : '尚未采用'}</span>}</div><div>{position.part !== 'overview' && current && <button type="button" onClick={() => showPrompt('current', current)}>采用图提示词</button>}{undo && <button type="button" disabled={p.locked} onClick={() => { change(undo.part, undo.reference, undo.reference?.planId, true); p.onUpdate({ mainFace: undo.mainFace, views: undo.views }); setUndo(null); }}><Undo2 size={14} />撤销采用</button>}{position.part !== 'overview' && <button type="button" disabled={p.locked} onClick={() => change('overview')}>查看整张</button>}</div></header>
         <div className={styles.adoptedViewport}>{position.part === 'overview' ? composition() : current ? <div className={styles.currentImage} data-body={part === 'body'}>{picture(current, `已采用${titles[part]}`)}<button type="button" className={styles.enlarge} onClick={() => p.onPreview(media(current), `已采用${titles[part]}`)} aria-label="放大当前采用"><Maximize2 size={16} /></button></div> : <button type="button" className={styles.emptyCanvas} onClick={() => document.getElementById('character-supplement')?.focus()}><ImagePlus size={34} /><strong>制作{titles[part]}</strong><span>在制作栏补充要求，生成后挑选采用</span></button>}</div>
         {position.part !== 'overview' && current && <div className={styles.canvasToolbar}><button type="button" disabled={p.locked || stale(currentPlan)} onClick={() => change(part, current, current.planId, true)}>基于当前采用继续微调</button><a href={media(current) + '&download=1'} download={`${titles[part]}.png`}><Download size={15} />下载这张</a>{stale(currentPlan) && <span>正脸已更换，侧脸需同步</span>}</div>}
       </section>;
@@ -152,12 +153,13 @@ export function CharacterLabWorkbench(p: Props) {
           {shown ? <div className={styles.unifiedCandidates} data-columns={part === 'body' || !characterLabIsGrid(shown) ? 1 : shown.count === 9 ? 3 : 2}>{Array.from({ length: part === 'body' || !characterLabIsGrid(shown) ? 1 : shown.count }, (_, index) => {
             const ref = { planId: shown.id, ...(characterLabIsGrid(shown) ? { cell: index } : {}) };
             const adoptedHere = sameLabReference(ref, current);
-            return <div key={index} className={styles.choiceFrame} data-selected={sameLabReference(ref, base)}><button type="button" className={styles.choiceImage} aria-label={part === 'body' ? '选择正背面整组作为编辑底图' : `选择候选${index + 1}作为编辑底图`} aria-pressed={sameLabReference(ref, base)} disabled={p.locked} onClick={() => change(part, ref, shown.id, true)}><CharacterLabImage src={media(ref)} alt={part === 'body' ? '正背面整组' : `候选${index + 1}`} /><span className={styles.choiceNumber}>{part === 'body' ? '整组' : index + 1}</span>{adoptedHere && <span className={styles.choiceAdopted}><Check size={12} />已采用</span>}</button><button type="button" className={styles.choiceZoom} aria-label={`放大候选${index + 1}`} onClick={() => p.onPreview(media(ref), '候选详情')}><Maximize2 size={13} /></button></div>;
+            const selectedHere = adoptedHere;
+            return <div key={index} className={styles.choiceFrame} data-selected={selectedHere}><button type="button" className={styles.choiceImage} aria-label={part === 'body' ? '采用正背面整组到成品' : stale(shown) ? `查看候选${index + 1}，需按新正脸重新生成` : `采用候选${index + 1}到成品`} aria-pressed={selectedHere} disabled={p.locked} onClick={() => { change(part, ref, shown.id, true); adopt(ref); }}><CharacterLabImage src={media(ref)} alt={part === 'body' ? '正背面整组' : `候选${index + 1}`} /><span className={styles.choiceNumber}>{part === 'body' ? '整组' : index + 1}{selectedHere && <><Check size={12} />已选中</>}</span>{adoptedHere && <span className={styles.choiceAdopted}>已采用</span>}</button><button type="button" className={styles.choiceZoom} aria-label={`放大候选${index + 1}`} onClick={() => p.onPreview(media(ref), '候选详情')}><Maximize2 size={13} /></button></div>;
           })}</div> : <div className={styles.noCandidates}><ImagePlus size={28} /><span>生成后在这里挑选</span></div>}
         </section>
         <section className={styles.inlineEditor}>
           <div className={styles.editingBase}><div><strong>{validBase && base ? `基于第${numbers.get(base.planId)}组${base.cell === undefined ? '整组' : ` · 候选${base.cell + 1}`}` : part === 'side' ? '基于当前采用的正脸' : '基于原始角色'}</strong><small>{base && stale(basePlan) ? '属于旧正脸，改用当前正脸重新生成' : selectedIsAdopted ? '已用于当前成品' : validBase ? '选中作为编辑底图，尚未采用' : '生成新的候选'}</small></div>{base && <button type="button" disabled={p.locked} onClick={() => change(part, undefined, undefined, true)}>从参考重新生成</button>}</div>
-          <button type="button" className={!hasNewText && validBase && !selectedIsAdopted ? styles.primary : styles.outline} disabled={p.locked || !validBase || selectedIsAdopted} onClick={adopt}>{selectedIsAdopted ? <><Check size={14} />已采用</> : part === 'body' ? '采用这组正背面' : '采用选中候选'}</button>
+          {validBase && !selectedIsAdopted && <button type="button" className={!hasNewText ? styles.primary : styles.outline} disabled={p.locked} onClick={() => adopt()}>采用当前编辑底图</button>}
           <div className={styles.nextSettings}>{part !== 'body' ? <fieldset disabled={p.locked}><legend>下次生成</legend>{([4, 9] as const).map(count => <button key={count} type="button" aria-pressed={p.draft.count === count} onClick={() => p.onUpdate({ count })}>{count}宫格</button>)}</fieldset> : <span>下次生成：正背面同组</span>}<button type="button" onClick={() => showPrompt('next')}>提示词设置</button></div>
           {part === 'faces' && !validBase && <label className={styles.sliderLabel}><span>面部变化 <b>{characterLabStrength(p.draft.diversity)}</b></span><input type="range" min={0} max={100} value={p.draft.diversity} disabled={p.locked} onChange={event => p.onUpdate({ diversity: Number(event.target.value) })} /></label>}
           {p.settings}

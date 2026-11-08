@@ -1169,10 +1169,12 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 
 - TPL-OWNER-CARD02 / GALLERY03 / RATE-READ01：已部署v0.134.25 / 3516a22ee / WuPPvlzZS71IUIxEaLQ7J，待用户手动验收。继承正式24与首页限高CSS；作者保存、非作者来源关联私有参数另存、全状态卡片图下零增高、模块封面完整三行、共享常显缩小30%/有限原号核对、通用模型积分规则按费率页只读折叠均在同一批。两版各6组SQLite/13组hook/30组native+计价/完整Next types lint通过；7服务4timer、33公网资源同SHA、3匿名401、内外health及8个worker reader通过。原价/数据/策略不改，无新DDL或收费生成。新相容guard 200544768 / ymCCwzq0anLlN0zkh5tbq；仅回程序，不回数据，不可回旧21reader。原失败证据与回退入口见联合原单§16.7及2026-11-07-template-owner-card/attempt05。旧未知、视频现场缺证及CPU待核保持。
 
-- PIN-CONSIST01 / WORKS-WIDE02：已部署v0.134.26 / e730b7334 / NXJFuymZl8lJq1A317gfm，待用户手动验收。默认空模块/合法复用历史的列表、置顶写入与读出统一，具体资格原因按需、原号和版本保护保留；广场全宽＋动态增列＋370px上限＋scale-down，信息按钮hover/focus、触摸可达。原42个null模块成功输出均为20头像+22角色工具，普通模板0，已纠正误计；38近期原始样本含12工具。图1已匹配9ecf原号：9宫格执行工作区复用表情旧配方，26仍会错拒；v27按冻结复现证明追补中，见原单§16.8.1。两版各6 SQLite/9按钮/30原生+计价/完整Next types lint，7服务4timer、40资源同SHA、匿名置顶PUT401、8个worker reader通过。guard554ab5eb2/xqwYjnesnV5QbgJjO80dK保持新reader，回退只回程序；原价、历史及原未知保护保持。原单§16.8及私有资料含失败、实际发布与恢复入口。
+- PIN-CONSIST01 / WORKS-WIDE02：已部署v0.134.27 / d0c1b3169 / cqHwJ1BrxECXfOkCNFins，待用户手动验收。图1精确匹配9ecf：9宫格工作区合法复用表情历史配方，原source被误当发布归属；按可信冻结复现证明统一菜单、置顶写及读，不改原快照/费用/权限。v26广场全宽动态增列/370px上限/scale-down及info hover/focus/触摸保持。原42空模块计数实为20头像+22角色，普通模板0，误记已纠正。主/guard各9 SQLite/9按钮及完整Next types lint、原生/计价通过；7服务4timer、6启动检查、2资源同SHA、3匿名401+置顶PUT401、44后台文件同源（其中设置子集8）、health200通过。最终stage03复用02原成功构建，只补运行链接准备，原失败及原时刻保留。guard c57681596/phBaNJOYNUJyPtNdI9bVE，恢复只回程序，不回数据；详见联合原单§16.8.1及私有pin-wide-gallery/reproduction。新增D-20261107-PIN-MEDIA-SCOPE待测，旧未知/视频缺证/CPU线索保持。 后续只读复核另有6条无来源旧图、可见状态、整组并发与刷新恢复边界，见§16.8.2；未计作已修复。
+  - PIN-RECOVERY01 / DELETE-FAST01：原135.1完整构建通过未切版；现完整合并实际135.3/cbaf239，准备135.4最终构建部署/用户手验。普通与喜欢目录有界恢复；本人发布管理独立于可见性；旧图按冻结执行显式发布；单图定向鉴权保原件别名；个人工作区删除不等已受理任务，旧待确认仅用户明确继续时沿原号/原版本执行，刷新只GET。无生产删除/生成/收费/配置写；详原联合工单§16.8.4，原价/权限/任务/回执和坏记录失败关闭保持。
 
 <!-- CHARACTER-SINGLE-WORKBENCH-DESIGN-20261107 -->
-- [ ] 角色三栏换位与右侧制作栏改v0.134.31：已完整继承实发30/179f桥上传热修，保原key/nonce、busy503及增强工程脚本；角色5UI＋版本/记录，3栏拖动/2处调宽，提示词/补充/生成/版本集中一栏。旧30/b897全构建通过但停服前鲜核保护停住，未覆盖热修；最终角色movable attempt03从179f重组，fresh主工程/Next继续，F0 guard原证复用。价d03/policy35fc保持，实际功能用户手验；[原单§18.8](tasks/todo/2026-10-31-character-reference-replan.md#188-保留上传热修的31封源与最终交付2026-11-07)。
+- [x] 角色三栏工作台已部署v0.134.31 /3654ea83f /iTiWbFUml0X1fllspLErl，待用户手动验收。三栏手柄换位、两处分隔线调宽/复位/账号记忆；右制作栏集中候选、独立补充与其下生成、提示词/版本来源，提示词打开定位/关闭回焦点；历史批次/原提示词、未采用细调和正侧4/9/身体整组沿原合同。完整保留实发179f桥上传修复，主fresh19/native/Next、F0原1469编译证据、6启动/7服务4timer/8唯一资源/3匿名401/health200过，cutover0无恢复，切版价d03/private35fc与原数据保持。最终恢复固定角色movable attempt04，只回程序不回数据，01/02/03原证保留；[原单§18.8](tasks/todo/2026-10-31-character-reference-replan.md#188-保留上传热修的31封源与最终交付2026-11-07)。
+- [x] 角色预览铺满/候选状态已部署v0.135.3 /cbaf2390e /VFqcM3XS-0vUU6QIqpZ0a，待用户手动验收。随栏宽自然铺开，蓝色“已选中”/绿色“已采用”，新PNG同步800/1600排版，旧成品/裁切/读者保留；继承实发135融合。fresh19/native/计价/完整Next types lint、F0原1469编译文件、6启动/7服务4timer/8资源/3匿名401/health200通过，cutover0无恢复，价d03/private35fc及原数据保持。新恢复入口自身首段只读通过，原31两锚点已补正，未恢复服务或业务数据；[原单§19](tasks/todo/2026-10-31-character-reference-replan.md)。
 <!-- /CHARACTER-SINGLE-WORKBENCH-DESIGN-20261107 -->
 
 <!-- MODEL-ACCESS01-20261108 -->
@@ -1180,6 +1182,10 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 
 [模型开放统一由费率页控制](todo/2026-11-08-model-availability-pricing.md)：实施中。图片/视频/增强/H3沿原pricingEnabled，文字/抠图补同页开放控制；关闭从新选择隐藏并拦新受理，历史/草稿/原号与冻结合同保留。不改金额、不真实调用模型，继承31/融合正式源后保护部署，功能待用户手验。
 <!-- /MODEL-ACCESS01-20261108 -->
+<!-- CHARACTER-UNIFIED-STYLE-20261108 -->
+- [ ] 角色风格独立入口/统一弹窗：一份风格覆盖各部位新生成，内容弹窗不混风格；清除硬编码摄影锁，style/content保存互不覆盖，旧字段镜像保读者及历史原词。5文件实现及隔离19已完成，类型/最终构建与接续保护部署进行中；预留135.6，先继承实际发布基线。[原单§20](tasks/todo/2026-10-31-character-reference-replan.md)。
+<!-- /CHARACTER-UNIFIED-STYLE-20261108 -->
+
 
 ## CHAR-FUSION01 角色融合提示词（2026-11-07）
 

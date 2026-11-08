@@ -22,10 +22,12 @@ async function main() {
   globalThis.fetch = async () => { networkCalls++; throw new Error('Offline fixture only'); };
   const { prisma } = await import('../src/lib/prisma');
   const { STUDIO_TASK_SETTINGS_FILES } = await import('../src/lib/image-studio/task-settings-storage');
-  const { saveStudioModule, shareSavedStudioModule } = await import('../src/lib/image-studio/modules');
+  const { saveStudioModule, shareSavedStudioModule, deleteStudioModule } = await import('../src/lib/image-studio/modules');
   const { resolveSharedStudioDefinition, prepareSharedStudioMethodWorkspace, openSharedStudioModule } = await import('../src/lib/image-studio/shared-contract');
-  const { mutateStudioPin, readableStudioPins, resolveStudioPinnedAsset } = await import('../src/lib/image-studio/result-pins');
+  const { mutateStudioPin, readableStudioPins, resolveStudioPinnedAsset, readStudioOwnPinState, studioPinCommandStatus, resultPinsKey } = await import('../src/lib/image-studio/result-pins');
   const { listStudioResultFeed } = await import('../src/lib/image-studio/result-feed');
+  const database = await prisma.$queryRawUnsafe<Array<{ file: string }>>('PRAGMA database_list');
+  assert.ok(database.some(row => row.file === path.join(directory, 'fixture.sqlite')));
   const checks: string[] = [];
   const author: SessionUser = { id: 'pin-author', name: 'Author', username: 'pin-author', email: 'pin-author@fixture.invalid',
     role: 'admin', account_type: 'internal', user_profile: '', feature_profile_id: null, status: 'active', expires_at: null };
@@ -47,7 +49,7 @@ async function main() {
     const presetId = published.sourcePresetId!;
     const output = async (id: string, taskModule: string | null = null, source: string | null = null, owner = author.id) => {
       const assetId = `asset-${id}`;
-      await prisma.asset.create({ data: { id: assetId, owner_id: owner, type: 'image', original_url: `/fixture/${id}.png`,
+      await prisma.asset.create({ data: { id: assetId, owner_id: owner, type: 'image', original_url: `/uploads/pin-fixture/${id}.png`,
         file_name: `${id}.png`, mime_type: 'image/png', file_size: 32, width: 4, height: 4 } });
       return prisma.imageStudioTask.create({ data: { id, batch_id: id, owner_id: owner, module_id: taskModule, source_preset_id: source,
         ordinal: 1, fingerprint: createHash('sha256').update(id).digest('hex'), prompt: 'synthetic-private-prompt', context: '',
@@ -166,10 +168,136 @@ async function main() {
       (error: unknown) => error instanceof Error && /受保护参考素材/.test(error.message));
     assert.ok(!(await readableStudioPins(colleague, presetId))?.pins.some(pin => pin.taskId === reproduced.id));
     checks.push('unproven, inconsistent, self-referencing, other-workspace and protected reproductions stay blocked; private media revocation stays effective');
+
+    const older = await output('older-source-null', legacyWorkspaceId);
+    const olderFrozen = JSON.stringify({ version: 1, moduleId: legacyWorkspaceId, moduleRevision: 5, sourcePresetId: null });
+    await prisma.imageStudioTask.update({ where: { id: older.id }, data: { snapshot_json: olderFrozen } });
+    await mutateStudioPin(author, { ...command, moduleId: legacyWorkspaceId, taskId: older.id, assetId: older.asset_id!,
+      expectedRevision: 1, requestId: randomUUID() });
+    assert.ok((await readableStudioPins(colleague, legacyPresetId))?.pins.some(pin => pin.taskId === older.id));
+    const keptOlder = await prisma.imageStudioTask.findUniqueOrThrow({ where: { id: older.id } });
+    assert.equal(keptOlder.source_preset_id, null); assert.equal(keptOlder.snapshot_json, olderFrozen);
+    const unprovenOlder = await output('unproven-older', legacyWorkspaceId);
+    await assert.rejects(mutateStudioPin(author, { ...command, moduleId: legacyWorkspaceId, taskId: unprovenOlder.id,
+      assetId: unprovenOlder.asset_id!, expectedRevision: 2, requestId: randomUUID() }), { status: 403 });
+    checks.push('explicit owner publication accepts matching frozen old execution without inventing recipe source; unproven old output stays blocked');
+
+    const own = await output('colleague-managed', live.id, presetId, colleague.id);
+    const ownCommand = { viewerId: colleague.id, moduleId: live.id, taskId: own.id, assetId: own.asset_id!,
+      active: true, expectedRevision: 4, requestId: randomUUID(), presetId };
+    await mutateStudioPin(colleague, ownCommand);
+    await prisma.platformSetting.create({ data: { key: 'studio_fixed_references_v1:managed-private', value_json: JSON.stringify({
+      ownerId: colleague.id, references: [{ assetId: own.asset_id }] }) } });
+    const ownState = await readStudioOwnPinState(colleague, live.id);
+    assert.equal(ownState.ownPins?.length, 1); assert.equal(ownState.ownPins![0].availability, 'restricted');
+    assert.equal(ownState.ownPins![0].thumbnailUrl, null); assert.ok(!ownState.assetIds.includes(own.asset_id!));
+    assert.ok(!JSON.stringify(ownState).includes('synthetic-private-prompt'));
+    assert.equal((await studioPinCommandStatus(colleague, ownCommand)).status, 'completed');
+    await prisma.imageStudioPreset.update({ where: { id: presetId }, data: { is_shared: false } });
+    assert.equal((await mutateStudioPin(colleague, ownCommand)).replayed, true);
+    const withdrawnState = await readStudioOwnPinState(colleague, live.id);
+    assert.ok(withdrawnState.disabledReason); assert.equal(withdrawnState.ownPins![0].availability, 'unavailable');
+    const withdrawnFeed = await listStudioResultFeed(colleague, live.id);
+    assert.equal(withdrawnFeed.sharedPins.length, 0); assert.ok(withdrawnFeed.pinState.ownAssetIds?.includes(own.asset_id!));
+    assert.equal(withdrawnFeed.pinState.ownPins, undefined);
+    await assert.rejects(mutateStudioPin(colleague, { ...ownCommand, expectedRevision: 5, requestId: randomUUID() }), { status: 403 });
+    await mutateStudioPin(colleague, { ...ownCommand, active: false, expectedRevision: 5, requestId: randomUUID() });
+    assert.equal((await readStudioOwnPinState(colleague, live.id)).ownPins?.length, 0);
+    await prisma.imageStudioPreset.update({ where: { id: presetId }, data: { is_shared: true } });
+    checks.push('private/withdrawn output keeps a truthful owner state and original receipt; only owner can unpin without restoring publication');
+
+    const doomedId = randomUUID(), doomedPreset = randomUUID();
+    await prisma.imageStudioPreset.create({ data: { id: doomedPreset, owner_id: colleague.id, scope: 'creator', is_shared: true, name: 'Owned', model: 'fixture' } });
+    await prisma.imageStudioModule.create({ data: { id: doomedId, owner_id: colleague.id, name: 'Owned', source_preset_id: doomedPreset } });
+    const doomedTask = await output('doomed-own-pin', doomedId, doomedPreset, colleague.id);
+    const doomedCommand = { ...ownCommand, moduleId: doomedId, taskId: doomedTask.id, assetId: doomedTask.asset_id!, presetId: doomedPreset, expectedRevision: 0, requestId: randomUUID() };
+    await mutateStudioPin(colleague, doomedCommand);
+    await prisma.imageStudioModule.delete({ where: { id: doomedId } });
+    assert.equal((await studioPinCommandStatus(colleague, doomedCommand)).status, 'completed');
+    await assert.rejects(mutateStudioPin(author, { ...doomedCommand, viewerId: author.id, active: false, expectedRevision: 1, requestId: randomUUID() }), { status: 403 });
+    const removeDoomed = { ...doomedCommand, active: false, expectedRevision: 1, requestId: randomUUID() };
+    await mutateStudioPin(colleague, removeDoomed);
+    assert.equal((await studioPinCommandStatus(colleague, removeDoomed)).status, 'completed');
+    assert.equal((await mutateStudioPin(colleague, removeDoomed)).replayed, true);
+    assert.equal((await studioPinCommandStatus(colleague, { ...removeDoomed, requestId: randomUUID() })).status, 'unknown');
+    checks.push('explicit own unpin and receipt recovery remain possible after workspace deletion, without exposing or cancelling another owner pin');
+
+    const history = [];
+    for (let i = 0; i < 30; i++) history.push(await output(`cursor-${i}`, moduleId, presetId));
+    const page = await listStudioResultFeed(author, moduleId); assert.ok(page.nextCursor);
+    const nextOwn = await output('new-pin-revision', moduleId, presetId);
+    await mutateStudioPin(author, { ...command, taskId: nextOwn.id, assetId: nextOwn.asset_id!, expectedRevision: 6, requestId: randomUUID() });
+    await assert.rejects(listStudioResultFeed(author, moduleId, page.nextCursor!), { status: 409, code: 'studio-directory-changed' });
+    assert.ok((await listStudioResultFeed(author, moduleId)).directoryVersion);
+    checks.push('a stale directory emits its dedicated recoverable code, while a fresh read has the new version');
+
+    const profileId = randomUUID(), profileModule = randomUUID();
+    await prisma.imageStudioPreset.create({ data: { id: profileId, owner_id: author.id, scope: 'creator', is_shared: true, name: 'Profile', model: 'fixture' } });
+    await prisma.imageStudioModule.create({ data: { id: profileModule, owner_id: author.id, name: 'Profile', source_preset_id: profileId } });
+    const profileTasks = [];
+    for (let i = 0; i < 200; i++) profileTasks.push(await output(`target-profile-${i}`, profileModule, profileId));
+    for (let i = 0; i < 1000; i++) {
+      const assetId = `private-profile-${i}`;
+      await prisma.asset.create({ data: { id: assetId, owner_id: author.id, type: 'image', original_url: `/uploads/private-profile/${i}.png`, file_name: `${i}.png`, mime_type: 'image/png', file_size: 4 } });
+      await prisma.platformSetting.create({ data: { key: `studio_fixed_references_v1:profile-${i}`, value_json: JSON.stringify({ ownerId: author.id, references: [{ assetId }] }) } });
+    }
+    await prisma.platformSetting.create({ data: { key: resultPinsKey(profileId), value_json: JSON.stringify({ version: 1, presetId: profileId,
+      revision: 1, receipts: [], pins: profileTasks.map(task => ({ taskId: task.id, assetId: task.asset_id, ownerId: author.id, moduleId: profileModule, pinnedAt: new Date().toISOString() })) }) } });
+    const target = profileTasks[0];
+    await prisma.platformSetting.create({ data: { key: `studio_result_pin_asset_v1:${target.asset_id}`, value_json: JSON.stringify({ version: 1, presetId: profileId }) } });
+    let observed: Array<{ model: string; action: string; rows: number }> | null = null;
+    prisma.$use(async (params, next) => { const value = await next(params); if (observed) observed.push({ model: params.model || 'raw', action: params.action, rows: Array.isArray(value) ? value.length : value == null ? 0 : 1 }); return value; });
+    assert.ok(await resolveStudioPinnedAsset(colleague, target.asset_id!));
+    const profile = [];
+    for (let sample = 0; sample < 7; sample++) {
+      observed = []; const start = performance.now(); assert.ok(await resolveStudioPinnedAsset(colleague, target.asset_id!));
+      profile.push({ ms: performance.now() - start, queries: observed }); observed = null;
+    }
+    for (const sample of profile) {
+      assert.equal(sample.queries.find(q => q.model === 'ImageStudioTask' && q.action === 'findMany')?.rows, 1);
+      assert.equal(sample.queries.find(q => q.model === 'Asset' && q.action === 'findMany')?.rows, 1);
+      assert.ok(!sample.queries.some(q => q.model === 'PlatformSetting' && q.action === 'findMany' && q.rows >= 1000));
+    }
+    await prisma.asset.update({ where: { id: target.asset_id! }, data: { thumbnail_url: '/uploads/private-profile/0.png' } });
+    assert.equal(await resolveStudioPinnedAsset(colleague, target.asset_id!), null);
+    await prisma.asset.update({ where: { id: target.asset_id! }, data: { thumbnail_url: null } });
+    await prisma.platformSetting.create({ data: { key: 'studio_fixed_references_v1:incompatible-row', value_json: '{"ownerId":"other","references":null}' } });
+    await assert.rejects(resolveStudioPinnedAsset(colleague, target.asset_id!), /参考内容权限记录无效/);
+    await prisma.platformSetting.delete({ where: { key: 'studio_fixed_references_v1:incompatible-row' } });
+    checks.push('single-media validation reads one target task/asset at 200 pins + 1000 bindings; protected thumbnail aliases and malformed-record fail-closed behavior remain');
+
+    const { assertStudioPostAuthorization } = await import('../src/lib/image-studio/worker');
+    const { assertStudioDeletionIdle } = await import('../src/lib/image-studio/workspace-deletion');
+    const deleteId = randomUUID();
+    await prisma.imageStudioModule.create({ data: { id: deleteId, owner_id: author.id, name: 'Delete fixture' } });
+    const accepted = await output('accepted-before-delete', deleteId);
+    const frozenBeforeDelete = JSON.stringify({ version: 1, moduleId: deleteId, sourcePresetId: null, moduleRevision: 0 });
+    const running = await prisma.imageStudioTask.update({ where: { id: accepted.id }, data: { status: 'running',
+      snapshot_json: frozenBeforeDelete, lease_token: 'fixture-lease', lease_until: new Date(Date.now() + 300000) } });
+    await assert.rejects(assertStudioDeletionIdle(prisma, author.id, deleteId), { status: 409 });
+    const deletionId = randomUUID(), deletingStarted = performance.now();
+    const deleted = await deleteStudioModule(author.id, deleteId, 0, deletionId);
+    const deletionMs = performance.now() - deletingStarted;
+    assert.equal(deleted.deleted, true); assert.equal(await prisma.imageStudioModule.findUnique({ where: { id: deleteId } }), null);
+    assert.equal((await deleteStudioModule(author.id, deleteId, 0, deletionId)).requestId, deletionId);
+    assert.equal((await prisma.imageStudioTask.findUniqueOrThrow({ where: { id: accepted.id } })).snapshot_json, frozenBeforeDelete);
+    await assertStudioPostAuthorization(running);
+    await assert.rejects(saveStudioModule(author.id, { id: deleteId, revision: 0, name: 'Late old save', prompt: '', context: '', count: 1, referenceIds: [], aspectRatio: 'auto' }), { status: 409 });
+    const blockedId = randomUUID();
+    await prisma.imageStudioModule.create({ data: { id: blockedId, owner_id: author.id, name: 'Unaccepted batch' } });
+    await prisma.platformSetting.create({ data: { key: `studio_batch_v1:${author.id}:unaccepted`, value_json: JSON.stringify({ ownerId: author.id,
+      moduleId: blockedId, state: 'queued', items: [{ taskId: null, cancelled: false }] }) } });
+    await assert.rejects(deleteStudioModule(author.id, blockedId, 0, randomUUID()), { status: 409 });
+    const changedId = randomUUID();
+    await prisma.imageStudioModule.create({ data: { id: changedId, owner_id: author.id, name: 'Newer settings', revision: 2 } });
+    await assert.rejects(deleteStudioModule(author.id, changedId, 1, randomUUID()), { status: 409 });
+    assert.equal((await prisma.imageStudioModule.findUniqueOrThrow({ where: { id: changedId } })).revision, 2);
+    checks.push('personal workspace deletes during an accepted running task; snapshot/lease/original receipt survive; late save and unaccepted batch remain blocked');
+
     assert.equal(networkCalls, 0);
     assert.equal(await prisma.creditLedger.count(), 0);
     checks.push('hidden own result can unpin; stale revision fails; no generation, network or billing writes');
-    console.log(JSON.stringify({ ok: true, count: checks.length, checks, networkCalls, productionWrites: 0 }, null, 2));
+    console.log(JSON.stringify({ ok: true, count: checks.length, checks, profile, deletionMs, networkCalls, productionWrites: 0 }, null, 2));
   } finally { globalThis.fetch = oldFetch; await prisma.$disconnect(); await rm(directory, { recursive: true, force: true }); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

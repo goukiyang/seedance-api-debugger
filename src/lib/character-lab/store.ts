@@ -2,7 +2,7 @@ import { prisma } from '@/lib/prisma';
 import { StudioError } from '@/lib/image-studio/tasks';
 import type { SessionUser } from '@/lib/auth/session';
 import type { CharacterLabConfig, CharacterLabDraft, CharacterLabFace, CharacterLabPlan, CharacterLabPromptFields, CharacterLabReference, CharacterLabViews, CharacterLabWorkspace } from './types';
-import { labDefaultStageStyles, labViewPromptFields } from './prompts';
+import { labDefaultStageStyles, labDefaultStyle, labViewPromptFields } from './prompts';
 import { characterLabOperations } from './types';
 
 export const CONFIG_KEY = 'character-lab:v1:config';
@@ -80,11 +80,11 @@ export async function readLabPlan(owner: string, id: string) {
 }
 export const defaultLabConfig: CharacterLabConfig = {
   revision: 0, updatedAt: null, ...labDefaultStageStyles,
-  basePrompt: '根据原始角色设计图生成真人面部候选。所有格子采用统一的正面头肩构图、摄影环境、平视镜头、中性表情和光线，每格仅一位人物。变化重点是人物身份与面部结构，而不是表情、拍摄角度或服装。',
+  basePrompt: '根据原始角色设计图生成人物面部候选。所有格子采用统一的正面头肩构图、环境、平视镜头、中性表情和光线，每格仅一位人物。变化重点是人物身份与面部结构，而不是表情、拍摄角度或服装。',
   characterContext: '从原图判断角色的年龄感、整体气质和关键身份特征。保留必要的发型、眼镜及标志性配饰。原图中的多个视角属于同一角色，不将其误认成不同人物。',
   faceVariables: '系统性改变脸长与脸宽、颧骨、下颌、额头、眉骨、眼形与眼距、鼻梁与鼻翼、唇形与五官比例。各格使用不同的骨相和特征组合；禁止同一张脸仅换表情或角度。',
-  styleConstraints: '真实人物摄影，自然皮肤纹理与合理解剖结构，统一灰色摄影背景。避免动漫、插画、游戏建模和塑料皮肤。不添加编号、字幕、标注、边框装饰或水印。',
-  resultPrompt: '生成同一个人物的角色参考图，整体宽高比2:3，左右两列等宽，上排占42%高度，下排占58%。左上正面头肩特写，右上侧面头肩特写，左下正面全身，右下背面全身。四格人物身份、发型、眼镜、服装和配饰一致，保留原角色身体设计、服装颜色、比例和辨识特征。全身格必须完整包含头顶和鞋底。统一灰色背景、镜头与光线，不加文字。',
+  styleConstraints: labDefaultStyle,
+  resultPrompt: '生成同一个人物的角色参考图，整体宽高比2:3，左右两列等宽，上排占42%高度，下排占58%。左上正面头肩特写，右上侧面头肩特写，左下正面全身，右下背面全身。四格人物身份、发型、眼镜、服装和配饰一致，保留原角色身体设计、服装颜色、比例和辨识特征。全身格必须完整包含头顶和鞋底。统一镜头与光线，不加文字。',
 };
 export async function labConfig() {
   const row = await prisma.platformSetting.findUnique({ where: { key: CONFIG_KEY } });
@@ -94,12 +94,15 @@ export async function labConfigVersions() {
   const rows = await prisma.platformSetting.findMany({ where: { key: { startsWith: `${CONFIG_KEY}:version:` } }, orderBy: { created_at: 'desc' } });
   return rows.map(row => JSON.parse(row.value_json) as CharacterLabConfig);
 }
-export async function saveLabConfig(user: SessionUser, revision: unknown, input: unknown) {
+export async function saveLabConfig(user: SessionUser, revision: unknown, input: unknown, scope?: 'content' | 'style') {
   const fresh = await prisma.user.findUnique({ where: { id: user.id }, select: { role: true, status: true, account_type: true } });
   if (!fresh || fresh.role !== 'admin' || fresh.status !== 'active' || fresh.account_type !== 'internal') throw new StudioError('仅管理员可以修改生成规则', 403);
   if (!Number.isInteger(revision) || !input || typeof input !== 'object' || Array.isArray(input)) throw new StudioError('规则版本无效');
   const fields = input as Record<string, unknown>;
-  const checked = Object.fromEntries((['basePrompt', 'characterContext', 'faceVariables', 'styleConstraints', 'resultPrompt'] as const)
+  const keys = scope === 'style' ? ['styleConstraints'] : scope === 'content'
+    ? ['basePrompt', 'characterContext', 'faceVariables', 'resultPrompt']
+    : ['basePrompt', 'characterContext', 'faceVariables', 'styleConstraints', 'resultPrompt'];
+  const checked = Object.fromEntries(keys
     .map(key => [key, labText(fields[key], 3000, '生成规则')])) as CharacterLabPromptFields;
   if (Object.values(checked).some(item => !item)) throw new StudioError('生成规则不能为空');
   return prisma.$transaction(async tx => {
@@ -107,7 +110,11 @@ export async function saveLabConfig(user: SessionUser, revision: unknown, input:
     const current = row ? JSON.parse(row.value_json) as CharacterLabConfig : defaultLabConfig;
     if (current.revision !== revision) throw new StudioError('规则已在另一处更新，请重新读取；当前编辑保留', 409);
     const config = { ...current, ...checked, revision: current.revision + 1, updatedAt: new Date().toISOString() };
-    for (const field of [...Object.values(labViewPromptFields), ...Object.keys(labDefaultStageStyles) as Array<keyof typeof labDefaultStageStyles>]) {
+    // Mirror the existing stage fields so compatible older readers use the same saved style.
+    if (scope === 'style') Object.assign(config, { sideStyleConstraints: checked.styleConstraints,
+      bodyStyleConstraints: checked.styleConstraints, resultStyleConstraints: checked.styleConstraints });
+    for (const field of scope === 'style' ? [] : [...Object.values(labViewPromptFields),
+      ...(scope === 'content' ? [] : Object.keys(labDefaultStageStyles) as Array<keyof typeof labDefaultStageStyles>)]) {
       if (fields[field] !== undefined) {
         const value = labText(fields[field], 3000, '生成规则');
         if (!value) throw new StudioError('生成规则不能为空');
