@@ -69,6 +69,7 @@ export function useStudioDeletion({ userId, onSettled, blocked }: {
   const [pending, setPending] = useState<Pending[]>([]);
   const pendingRef = useRef<Pending[]>([]);
   const [busyId, setBusyId] = useState('');
+  const [writing, setWriting] = useState(false);
   const [error, setError] = useState('');
   const scope = useRef({ actorId: userId });
   if (scope.current.actorId !== userId) scope.current = { actorId: userId };
@@ -93,7 +94,7 @@ export function useStudioDeletion({ userId, onSettled, blocked }: {
       setPending(pendingRef.current);
     } catch (cause) { setError(cause instanceof Error ? cause.message : '本机删除记录未能读取'); }
   }, [userId]);
-  useEffect(() => { alive.current = true; busy.current = false; setBusyId(''); setError(''); reload(); window.addEventListener('storage', reload);
+  useEffect(() => { alive.current = true; busy.current = false; setBusyId(''); setWriting(false); setError(''); reload(); window.addEventListener('storage', reload);
     return () => { alive.current = false; window.removeEventListener('storage', reload); }; }, [reload]);
   const current = (expected: typeof scope.current) => alive.current && scope.current === expected && !isClientSessionBlocked();
   async function settle(command: Pending, receipt: unknown, expected: typeof scope.current, state?: Settled['current']) {
@@ -154,7 +155,7 @@ export function useStudioDeletion({ userId, onSettled, blocked }: {
         if (blockedReason) throw new Error(blockedReason);
         const command: Pending = original || { version: 1, actorId: userId, objectKind: target.objectKind, id: target.id,
           requestId: crypto.randomUUID(), ...(target.objectKind === 'workspace' ? { moduleRevision: target.moduleRevision } : { sourceRevision: target.sourceRevision }) };
-        busy.current = true; setBusyId(`${target.objectKind}:${target.id}`); setError('');
+        busy.current = true; setBusyId(`${target.objectKind}:${target.id}`); setWriting(true); setError('');
         let sent = false;
         try {
           if (!original) await claim(command);
@@ -185,7 +186,7 @@ export function useStudioDeletion({ userId, onSettled, blocked }: {
           // The existing confirmation owns this feedback. Unknown commands
           // stay available in the header tools, without another page-level wall.
           throw new Error(message);
-        } finally { if (current(expected)) { busy.current = false; setBusyId(''); } }
+        } finally { if (current(expected)) { busy.current = false; setBusyId(''); setWriting(false); } }
       },
     });
   }
@@ -195,5 +196,5 @@ export function useStudioDeletion({ userId, onSettled, blocked }: {
       : { version: 1, actorId: command.actorId, objectKind: 'source', id: command.id, sourceRevision: command.sourceRevision!, allowed: true, reason: null };
     return request(target, name, anchor);
   }
-  return { request, check, continueOriginal, pending, busyId, error, productDialog };
+  return { request, check, continueOriginal, pending, busyId, writing, error, productDialog };
 }

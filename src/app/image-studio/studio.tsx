@@ -1400,11 +1400,12 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     routedContentHandled.current = `${userId}:${window.location.search}`;
     setPendingModuleScroll(null); setCoverView(true);
   };
-  const deletionFeedback = (deletion.error || deletion.pending.length > 0) && <details className={styles.deletionFeedback} onKeyDown={event => { if (event.key === 'Escape') { event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus(); } }}>
+  const deletionPending = deletion.pending.filter(command => !deletion.writing || deletion.busyId !== `${command.objectKind}:${command.id}`);
+  const deletionFeedback = (deletion.error || deletionPending.length > 0) && <details className={styles.deletionFeedback} onKeyDown={event => { if (event.key === 'Escape') { event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus(); } }}>
     <summary aria-label="删除操作需要核对" title={deletion.error || '查看待核对的删除操作'}><span aria-hidden="true">!</span></summary>
     <div role="region" aria-label="删除操作">
       {deletion.error && <p role="status">{deletion.error}</p>}
-      {deletion.pending.map(command => <div key={command.requestId}>
+      {deletionPending.map(command => <div key={command.requestId}>
         <button type="button" disabled={Boolean(deletion.busyId)} onClick={() => void deletion.check(command)}>核对原删除</button>
         <button type="button" disabled={Boolean(deletion.busyId)} onClick={event => void deletion.continueOriginal(command,
           [...modules, ...directory].find(item => item.id === command.id || item.sourcePresetId === command.id)?.name || (command.objectKind === 'workspace' ? '该工作区' : '该模板'), event.currentTarget)}>继续原删除</button>
