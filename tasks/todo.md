@@ -1176,6 +1176,10 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 - [x] 角色预览铺满/候选状态已部署v0.135.3 /cbaf2390e /VFqcM3XS-0vUU6QIqpZ0a，待用户手动验收。随栏宽自然铺开，蓝色“已选中”/绿色“已采用”，新PNG同步800/1600排版，旧成品/裁切/读者保留；继承实发135融合。fresh19/native/计价/完整Next types lint、F0原1469编译文件、6启动/7服务4timer/8资源/3匿名401/health200通过，cutover0无恢复，价d03/private35fc及原数据保持。新恢复入口自身首段只读通过，原31两锚点已补正，未恢复服务或业务数据；[原单§19](tasks/todo/2026-10-31-character-reference-replan.md)。
 <!-- /CHARACTER-SINGLE-WORKBENCH-DESIGN-20261107 -->
 
+<!-- CHARACTER-UNIFIED-STYLE-20261108 -->
+- [ ] 角色风格独立入口/统一弹窗：一份风格覆盖各部位新生成，内容弹窗不混风格；清除硬编码摄影锁，style/content保存互不覆盖，旧字段镜像保读者及历史原词。5文件实现及隔离19已完成，类型/最终构建与接续保护部署进行中；预留135.6，先继承实际发布基线。[原单§20](tasks/todo/2026-10-31-character-reference-replan.md)。
+<!-- /CHARACTER-UNIFIED-STYLE-20261108 -->
+
 
 ## CHAR-FUSION01 角色融合提示词（2026-11-07）
 
