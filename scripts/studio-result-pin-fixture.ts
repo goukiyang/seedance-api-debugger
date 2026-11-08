@@ -65,7 +65,8 @@ async function main() {
     assert.equal((await resolveStudioPinnedAsset(colleague, legacy.asset_id!))?.asset.id, legacy.asset_id);
     checks.push('null-module default result pins, replays original receipt and stays readable without rewriting the task');
 
-    const live = await openSharedStudioModule(colleague, presetId, randomUUID());
+    await assert.rejects(openSharedStudioModule(colleague, presetId, randomUUID()), { status: 409 });
+    const live = await openSharedStudioModule(colleague, presetId, randomUUID(), undefined, { explicitSelection: true });
     const shared = await listStudioResultFeed(colleague, live.id);
     assert.equal(shared.sharedPins.length, 1);
     assert.ok(!JSON.stringify(shared).includes('synthetic-private-prompt'));
