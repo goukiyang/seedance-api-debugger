@@ -103,11 +103,11 @@ export function parseStudioDeletionReceipt(value: Record<string, unknown>, actor
   }
   return value as StudioDeletionReceipt;
 }
-export async function assertStudioDeletionIdle(client: Client, ownerId: string, moduleId: string) {
+export async function assertStudioDeletionIdle(client: Client, ownerId: string, moduleId: string, allowAcceptedTasks = false) {
   // Unknown submission/output states remain protected along with active tasks.
-  const pending = await client.imageStudioTask.count({ where: { owner_id: ownerId, module_id: moduleId,
+  const pending = allowAcceptedTasks ? 0 : await client.imageStudioTask.count({ where: { owner_id: ownerId, module_id: moduleId,
     status: { notIn: ['succeeded', 'failed', 'cancelled', 'canceled'] } } });
-  if (pending) throw new StudioSharingError('模板还有生成中或结果未确认的任务，请先核对原任务再删除', 409);
+  if (pending && !allowAcceptedTasks) throw new StudioSharingError('模板还有生成中或结果未确认的任务，请先核对原任务再删除', 409);
   const batches = await client.platformSetting.findMany({ where: { OR: [
     { key: { startsWith: `studio_batch_v1:${ownerId}:` } }, { key: { startsWith: `studio_channel_batch_v1:${ownerId}:` } },
   ], value_json: { contains: `"moduleId":${JSON.stringify(moduleId)}` } }, select: { value_json: true } });
@@ -125,7 +125,7 @@ export async function assertStudioDeletionIdle(client: Client, ownerId: string, 
     // A saved batch receipt without its accepted task is not a completed task.
     const ids = batch.items.flatMap(item => typeof item?.taskId === 'string' ? [item.taskId] : []);
     const confirmed = await client.imageStudioTask.count({ where: { id: { in: ids }, owner_id: ownerId, module_id: moduleId,
-      status: { in: ['succeeded', 'failed', 'cancelled', 'canceled'] } } });
+      ...(!allowAcceptedTasks ? { status: { in: ['succeeded', 'failed', 'cancelled', 'canceled'] } } : {}) } });
     if (confirmed !== new Set(ids).size) throw new StudioSharingError('批量任务结果未确认，请先核对原任务再删除', 409);
   }
 }

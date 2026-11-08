@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '角色预览与候选选择优化', outline: [
-  '成品图片随栏宽铺开，减少多余留白',
-  '蓝色已选中与绿色已采用标记更清楚',
-  '新保存成品同步调整排版，已有版本保留',
+const notice = { title: '角色风格管理与候选同步', outline: [
+  '风格提示词独立弹窗统一调整，各部位生成内容分开编辑',
+  '点击候选直接同步到当前采用，支持撤销',
+  '历史原提示词和独立补充输入保持',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
