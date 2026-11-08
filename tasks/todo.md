@@ -1,3 +1,9 @@
+<!-- WORKS-REC02-PUBLIC-20261108 -->
+## WORKS-REC02 全员预计算推荐
+
+v0.137.0候选继承0.136.0及已上线首页/侧栏/模板修正，新增真实加减分、12进入/低于8退出、按当前权限的全员后台结果和「推荐」筛选。页面不重放历史、不启动算分；首次8分不能虚构已入选，迟到证据沿真实资格历史纠正。隔离工程13组Works及40项既有HD检查通过，未调用生产数据/模型/浏览器；聚焦实现dd4acdcc9已推送。最终完整候选检查、保护部署与用户手验待完成。详细合同和实际回执沿正式根原作品工单§18，公开源码说明见[实现记录](todo/2026-11-02-team-works-implementation.md#works-rec02-background-recommendation-for-internal-feishu-users-2026-11-08)。本轮未新增范围外问题。
+<!-- /WORKS-REC02-PUBLIC-20261108 -->
+
 <!-- WORKS-RECOMMENDATION-AUDIT-PUBLIC-20261108 -->
 ## 作品评分推荐现状核验
 
