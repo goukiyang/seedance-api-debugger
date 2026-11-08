@@ -165,6 +165,14 @@ const usageSources = [usageGate, 'scripts/admin-usage-migration-engineering.py',
   'ops/sd2-usage-attribution-migrate.py', 'ops/sd2-admin-usage-public-proof.mjs',
   'ops/sd2-usage-role-start.mjs', 'scripts/canvas-role-coordinator.ts'];
 const publicUsageFixtures = [
+  { file: 'scripts/template-sharing-chain-engineering.cjs', schema: 'template-sharing-chain-engineering.v1', databaseFlag: 'applicationDatabaseOpened', timeoutMs: 180000, sources: [
+    'src/app/image-studio/studio.tsx', 'src/app/image-studio/use-shared-studio.ts', 'src/app/image-studio/use-sharing-command.ts',
+    'src/lib/image-studio/shared-contract.ts', 'src/lib/image-studio/modules.ts', 'src/lib/image-studio/presets.ts',
+    'src/lib/image-studio/definition-read.ts', 'src/components/TemplateDefinitionRead.tsx', 'src/lib/image-studio/module-projection.ts',
+    'src/app/image-studio/fixed-reference-save-state.ts', 'src/lib/image-studio/shared-types.ts', 'src/lib/image-studio/tasks.ts',
+    'src/lib/image-studio/protected-assets.ts', 'scripts/template-sharing-version-engineering.cjs',
+    'src/app/api/image-studio/presets/route.ts', 'src/lib/performance/trace-contract.ts'
+  ] },
   { file: 'scripts/cover-pool-engineering.ts', schema: 'cover-pool-engineering.v1', databaseFlag: 'applicationDatabaseOpened', sources: [
     'scripts/cover-pool-engineering.ts', 'src/lib/content-reactions/independent.ts', 'src/lib/content-reactions/template-mark.ts', 'src/lib/image-studio/gallery.ts',
     'src/lib/image-studio/gallery-context.ts', 'src/lib/image-studio/gallery-types.ts', 'src/lib/image-studio/shared-contract.ts',

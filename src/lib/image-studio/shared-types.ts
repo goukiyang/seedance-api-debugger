@@ -147,6 +147,7 @@ export type SharedStudioDefinitionPersonalInput = {
 export type SharedStudioLiveDTO = SharedStudioIntent & Partial<SharedStudioStateProjection> & {
   templateRead?: StudioTemplateRead;
   intent: SharedStudioIntent;
+  generationIntent?: SharedStudioIntent;
   mode: 'publisher' | 'live';
   available: boolean;
   methodDraft?: boolean;
@@ -163,6 +164,7 @@ export type SharedStudioPublicDefinition = Partial<SharedStudioStateProjection> 
   requiresIdentityVerification?: boolean;
   deletion?: StudioDeletionCapability;
   intent: SharedStudioIntent;
+  generationIntent?: SharedStudioIntent;
   presetId: string;
   revision: string;
   name: string;

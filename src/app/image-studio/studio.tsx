@@ -62,6 +62,7 @@ import { isClientSessionBlocked } from '@/lib/auth/client-session-boundary';
 
 import { ModuleGroupPicker } from './group-picker';
 import { hasSharedDefaults, useSharedStudio } from './use-shared-studio';
+import { receiveStudioModuleProjection, receiveStudioSharingCurrent } from '@/lib/image-studio/module-projection';
 import { planStudioDefinitionRebase } from '@/lib/image-studio/definition-rebase';
 import type { SharedStudioFixedReferenceRepair, SharedStudioIntent, SharedStudioLiveDTO, SharedStudioStateProjection, SharedStudioReasonCode, SharedStudioCapabilities } from '@/lib/image-studio/shared-types';
 import { useSharingCommand } from './use-sharing-command';
@@ -160,7 +161,7 @@ function studioTaskPhase(task: StudioTask) {
   return ({ queued: '等待生成', provider: '生成中', unknown: '生成结果待确认', download: '原图下载中', recover: '恢复原图中', validate: '图片校验中', save: '保存中', stopped: '原图交付停止', failed: '未能交付图片', ready: studioTaskHasViewableImage(task) ? '已完成' : task.status === 'succeeded' ? '图片已移除' : '生成结果待确认' } as Record<string, string>)[phase || '']
     || (task.status === 'running' ? '生成中' : task.status === 'queued' ? '等待生成' : task.status === 'uncertain' ? '生成结果待确认' : '未能交付图片');
 }
-type StudioModule = { personalPromptState?: string; personalPromptReason?: string; privateDefinition?: boolean; canReadPrivatePrompt?: boolean; requiresIdentityVerification?: boolean;
+type StudioModule = { definitionSyncPending?: boolean; personalPromptState?: string; personalPromptReason?: string; privateDefinition?: boolean; canReadPrivatePrompt?: boolean; requiresIdentityVerification?: boolean;
   taskSettings?: StudioTaskSettings; settingsSourceTaskId?: string | null; templateRead?: StudioTemplateRead; sharingPreference?: { enabled: boolean; revision: number; requestId?: string } | null; canChooseSharing?: boolean; fixedCover?: ModuleCoverDTO | null; coverEditable?: boolean; sharedLive?: SharedStudioView | null; templateImages?: UploadedAssetPayload[]; templateReferenceIds?: string[]; templatePrompt?: string; personalPrompt?: string; fixedReferences?: FixedStudioReference[]; contextEditable?: boolean; referencePolicy?: StudioReferencePolicy; id: string; name: string; prompt: string; context?: string; contextConfigured: boolean; count: number; referenceLimit: number; aspectRatio: string; resolution: ImageResolution; model: string; quality: string; groupName: string; banner: UploadedAssetPayload | null; cover?: { resultUrl: string; thumbnailUrl?: string | null; referenceUrl?: string | null } | null; prices: Record<string, number | null>; unitCredits: number | null; reproduceFromTaskId: string | null; sourcePresetId?: string | null; sourcePresetShared?: boolean | null; sourcePresetOwnedByViewer?: boolean; sourcePresetCanManageSharing?: boolean; images: UploadedAssetPayload[]; revision: number; saved: boolean; createdAt: string; fixedReferenceCount?: number; fixedReferencesEditable?: boolean; styleGroupIds?: string[]; styleGroups?: StudioStyleSummary[]; skills?: SkillSummary[]; skillIds?: string[]; reproductionState?: { fixedReferenceCount: number; styleGroups: StudioStyleSummary[] } | null };
 type StudioPreset = { intent?: SharedStudioIntent; templateRead?: StudioTemplateRead; id: string; name: string; revision: string; deletion?: StudioDeletionTarget; moduleContextVersion?: string | null; scope: 'admin' | 'creator'; isShared: boolean; canManageSharing?: boolean; ownedByViewer?: boolean; groupName: string; model: string; quality: string; resolution: ImageResolution; count: number; referenceLimit: number; aspectRatio: string; images: UploadedAssetPayload[]; banner: UploadedAssetPayload | null; contextConfigured: boolean; createdAt: string };
 type QuickStudioPreset = StudioPreset & { personalPrompt?: string; personalPromptState?: string; personalPromptReason?: string; sourceTaskId?: string; taskSettings?: StudioTaskSettings; prompt: string; context: string; personalOverrides?: PersonalStudioOverrides; personalImages?: UploadedAssetPayload[]; referencesAvailable: boolean; referencePolicy?: StudioReferencePolicy; fixedReferences?: FixedStudioReference[]; styleGroupIds: string[]; skillIds?: string[] };
@@ -459,7 +460,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   const sharedOpenSequence = useRef(0);
   const receiveSharedDefinition = useCallback((next: StudioModule) => {
     const normalized = studioRepairModule(next);
-    setModules(current => current.map(item => item.id === next.id && item.sharedLive?.intent.presetId === next.sharedLive?.intent.presetId ? normalized : item));
+    setModules(current => current.map(item => item.id === next.id && item.sharedLive?.intent.presetId === next.sharedLive?.intent.presetId ? receiveStudioModuleProjection(item, normalized) : item));
   }, []);
   const invalidateSharedDefinition = useCallback((presetId: string | null, reason: string, reasonCode?: SharedStudioReasonCode, capabilities?: SharedStudioCapabilities) => {
     if (reasonCode === 'read-unavailable' || reasonCode === 'state-conflict') return;
@@ -639,7 +640,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   const sharing = useSharingCommand({ userId, onSettled: (presetId, current) => {
     if (current) {
       setPresets(items => items.map(item => item.id === presetId ? { ...item, isShared: current.isShared, revision: current.sourceRevision } : item));
-      setModules(items => items.map(item => item.sourcePresetId === presetId ? { ...item, sourcePresetShared: current.isShared } : item));
+      setModules(items => items.map(item => receiveStudioSharingCurrent(item, presetId, current)));
     }
     shared.refresh();
     pool.refresh();
@@ -1599,7 +1600,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
         shared.refresh(); pool.refresh({ invalidateRevision: true });
         navigateToModule(next.groupName || '未分组', next.id, { ensureLoaded: false });
       }}
-      onModuleChange={next => { setModules(current => current.map(item => item.id === next.id ? next.sharedLive ? studioRepairModule(next) : { ...next, name: item.name, groupName: item.groupName } : item)); setRemovedDefaultGroups(current => current.filter(group => group !== next.groupName)); shared.refresh(); }}
+      onModuleChange={next => { setModules(current => current.map(item => item.id === next.id ? receiveStudioModuleProjection(item, next.sharedLive ? studioRepairModule(next) : { ...next, name: item.name, groupName: item.groupName }) : item)); setRemovedDefaultGroups(current => current.filter(group => group !== next.groupName)); shared.refresh(); }}
       ratios={{ custom: customRatios, busy: ratiosBusy, error: ratiosError, onRetry: () => void syncRatios(), onCustom: syncRatios }}
       onReloadSettings={discard => globalEditor.controller.load(discard)} />)}
     {(loading || hydrating) && <p role="status">正在读取模块…</p>}
@@ -1809,10 +1810,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         // Removing local storage in another tab is not an original receipt.
         if (!command) return;
         if (pendingFixedSaveRef.current && pendingFixedSaveRef.current.requestId !== command.requestId) {
-          setFixedSaveStorageError('原修复保存记录已变化，请保留草稿并核对'); return;
+          setFixedSaveStorageError('原模板保存记录已变化，请保留草稿并核对'); return;
         }
         pendingFixedSaveRef.current = command; setPendingFixedSave(command);
-      } catch { setFixedSaveStorageError('原修复保存记录暂无法读取，本模板保存暂未提交，请保留草稿'); }
+      } catch { setFixedSaveStorageError('原模板保存记录暂无法读取，本模板保存暂未提交，请保留草稿'); }
     };
     read();
     const receive = (event: StorageEvent) => { if (event.key === fixedReferenceSaveKey(userId, module.id)) read(); };
@@ -1821,8 +1822,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   }, [userId, module.id, sessionChanged, fixedSaveScopeKey]);
   const unresolvedFixedRepairs = fixedRepairAllowed && Boolean(repairDefinition?.fixedReferences.some((item, sourceIndex) => item.repairable
     && !fixedReferenceRepairs.some(change => change.sourceIndex === sourceIndex && change.originalAssetId === item.id)));
-  const definitionSaveBlocked = fixedSaveUnknown || definitionEditable && sharedLive?.capabilities?.saveDefinition.allowed === false || unresolvedFixedRepairs;
-  const definitionSaveReason = fixedSaveUnknown ? fixedSaveStorageError || '原修复保存结果待确认，请先核对原保存；当前编辑保留'
+  const definitionSaveBlocked = Boolean(module.definitionSyncPending) || fixedSaveUnknown || definitionEditable && sharedLive?.capabilities?.saveDefinition.allowed === false || unresolvedFixedRepairs;
+  const definitionSaveReason = module.definitionSyncPending ? '共享状态已更新，正在核对最新模板；当前编辑保留' : fixedSaveUnknown ? fixedSaveStorageError || '原模板保存结果待确认，请先核对原保存；当前编辑保留'
     : unresolvedFixedRepairs ? '请先移除或替换全部失效固定参考，再保存；正常项和当前编辑保留'
     : definitionSaveBlocked ? sharedLive?.capabilities?.saveDefinition.reason || '模板定义暂不能保存，当前编辑保留' : '';
   const [reproductionReferences, setReproductionReferences] = useState<FixedStudioReference[]>([]);
@@ -2038,7 +2039,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     ? IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] || [] : [])).filter(value => modelAvailable('image', moduleModel, { quality: value }, imageStudioPricingChannelId(imageChannels, moduleModel, imageChannelId, value)));
   const resolutionChoices = (isGptImageStudioModel(moduleModel) ? IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS] : selectedChannelModel?.resolutions ?? (legacyImageRoute || resolutionSupportUnconfirmed
     ? IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[moduleModel as keyof typeof IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS] || [] : [])).filter(value => modelAvailable('image', moduleModel, { quality, resolution: value }, imageStudioPricingChannelId(imageChannels, moduleModel, imageChannelId, quality)));
-  const generationInputs = { sharedLive: sharedLive?.intent, personalOverrides: sharedLive ? personalOverrides : undefined, evolution: evolution ? evolutionInput : undefined, prompt, count, referenceLimit, aspectRatio, resolution: legacyImageRoute && !preserveSelectedBananaParameters ? normalizeImageResolution(moduleModel, resolution) : resolution, referenceIds: moduleDraft.referenceIds, model: moduleModel, quality: legacyImageRoute && !preserveSelectedBananaParameters ? normalizeImageStudioQuality(moduleModel, quality) : quality, channelId: imageChannelId, referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), skillIds: moduleDraft.skillIds, skillVersions: Object.fromEntries(skills.filter(group => group.promptVersion).map(group => [group.id, group.promptVersion!])), styleGroupIds: moduleDraft.styleGroupIds };
+  const generationIntent = sharedLive?.generationIntent || sharedLive?.intent;
+  const generationInputs = { sharedLive: generationIntent, personalOverrides: sharedLive ? personalOverrides : undefined, evolution: evolution ? evolutionInput : undefined, prompt, count, referenceLimit, aspectRatio, resolution: legacyImageRoute && !preserveSelectedBananaParameters ? normalizeImageResolution(moduleModel, resolution) : resolution, referenceIds: moduleDraft.referenceIds, model: moduleModel, quality: legacyImageRoute && !preserveSelectedBananaParameters ? normalizeImageStudioQuality(moduleModel, quality) : quality, channelId: imageChannelId, referencePolicy, context: moduleContext, fixedReferences: fixedReferencePayload(fixedReferences), skillIds: moduleDraft.skillIds, skillVersions: Object.fromEntries(skills.filter(group => group.promptVersion).map(group => [group.id, group.promptVersion!])), styleGroupIds: moduleDraft.styleGroupIds };
   const generationDraft = JSON.stringify({ ...generationInputs, taskSettings: studioTaskSettings(globalContextMode, globalSettingsSourceTaskId) });
   // Ordinary edits still use the saved definition. Explicit task restoration is
   // a separate, server-verified source and never publishes the editor draft.
@@ -2078,7 +2080,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const generationReferenceIds = [...images, ...auxiliaryImages, ...(!sharedLive ? generationTemplateImages : [])].map(image => image.id);
   const generationReferences = [...images, ...auxiliaryImages, ...generationTemplateImages, ...generationFixedReferences];
   const generationDefinitionSignature = JSON.stringify({
-    sharedLive: sharedLive?.intent, context: restoredSnapshot ? restoredSnapshot.moduleContext : reproduceSourceTaskId ? undefined : effectiveGenerationDefinition.context,
+    sharedLive: generationIntent, context: restoredSnapshot ? restoredSnapshot.moduleContext : reproduceSourceTaskId ? undefined : effectiveGenerationDefinition.context,
     contextConfigured: restoredSnapshot ? restoredSnapshot.contextConfigured : reproduceSourceTaskId ? reproductionContextConfigured : effectiveGenerationDefinition.contextConfigured,
     templatePrompt: reproduceSourceTaskId ? undefined : effectiveGenerationDefinition.templatePrompt, templateReferenceIds: generationTemplateImages.map(image => image.id),
     fixedReferences: fixedReferencePayload(generationFixedReferences), fixedCount: generationTemplateCount,
@@ -2118,7 +2120,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   };
   const definitionReviewPlan = definitionReview ? planStudioDefinitionRebase(definitionBaselineFields.current,
     currentDefinitionFields, studioDefinitionFields(definitionReview), definitionFieldLabels) : null;
-  const batch = useStudioBatch({ userId, moduleId: module.id, actualQuoteRequired, pricingBySpecification, sharedLive: sharedLive?.intent, sourceAvailable: sharedReady && !restoredSettingsError, onSourceChanged: onSharedRefresh, quotePayload: settings && !restoredSettingsError ? generationPayload(undefined, '') : null, unitCredits: moduleUnitCredits, effectiveChannelId: effectiveImageChannelId,
+  const batch = useStudioBatch({ userId, moduleId: module.id, actualQuoteRequired, pricingBySpecification, sharedLive: generationIntent, sourceAvailable: sharedReady && !restoredSettingsError, onSourceChanged: onSharedRefresh, quotePayload: settings && !restoredSettingsError ? generationPayload(undefined, '') : null, unitCredits: moduleUnitCredits, effectiveChannelId: effectiveImageChannelId,
     draftSignature: effectiveGenerationSignature, readSettings: onReloadSettings });
   const contextVersion = useModuleContextVersion({ moduleId: module.id, raw: effectiveGenerationDefinition.context || '', taskId: restoredTaskSettings?.sourceTaskId || reproduceSourceTaskId,
     editable: contextEditable, enabled: !hidden && draftLoaded && !draftRestoring, composing: contextComposing,
@@ -2159,7 +2161,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const savedModel = savedOverrides.model ?? baseline.model;
   const savedResolution = savedOverrides.resolution ?? baseline.resolution;
   const savedQuality = savedOverrides.quality ?? baseline.quality;
-  const defaultGenerationDraft = JSON.stringify({ sharedLive: sharedLive?.intent, personalOverrides: sharedLive ? savedOverrides : undefined, evolution: evolution ? { direction: evolution.defaultDirection, manual: false } : undefined, prompt: sharedLive ? savedOverrides.prompt ?? '' : baseline.prompt,
+  const defaultGenerationDraft = JSON.stringify({ sharedLive: generationIntent, personalOverrides: sharedLive ? savedOverrides : undefined, evolution: evolution ? { direction: evolution.defaultDirection, manual: false } : undefined, prompt: sharedLive ? savedOverrides.prompt ?? '' : baseline.prompt,
     count: savedOverrides.count ?? baseline.count, referenceLimit: baseline.referenceLimit, aspectRatio: savedOverrides.aspectRatio ?? baseline.aspectRatio,
     resolution: legacyImageRoute ? normalizeImageResolution(savedModel, savedResolution) : savedResolution, referenceIds: baseline.referenceIds, model: savedModel,
     quality: legacyImageRoute ? normalizeImageStudioQuality(savedModel, savedQuality) : savedQuality, channelId: 'original', referencePolicy: baseline.referencePolicy, context: savedModuleContext, fixedReferences: fixedReferencePayload(savedFixedReferences), skillIds: baseline.skillIds || [], skillVersions: generationInputs.skillVersions, styleGroupIds: baseline.styleGroupIds,
@@ -2242,10 +2244,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     (restoredSnapshot ? generationReferencePolicy.auxiliaryMax : auxiliaryLimit) - ordinaryReferenceCount, MAX_REFERENCE_IMAGES - images.length - ordinaryReferenceCount));
   // A shared view can only be (un)shared through its source preset by someone who manages it.
   const sharingLocked = Boolean(sharedLive && !(module.sourcePresetCanManageSharing && module.sourcePresetId));
-  const sourceSharingBlocked = sharedLive ? !sharedReady : Boolean(module.sourcePresetId && module.sourcePresetShared === false && !module.sourcePresetOwnedByViewer);
+  const sourceSharingBlocked = sharedLive ? !sharedReady || Boolean(module.definitionSyncPending) : Boolean(module.sourcePresetId && module.sourcePresetShared === false && !module.sourcePresetOwnedByViewer);
 
   useLayoutEffect(() => {
-    if (!sharedLive || !draftLoaded || draftRestoring) return;
+    if (!sharedLive || module.definitionSyncPending || !draftLoaded || draftRestoring) return;
     const token = `${sharedLive.intent.definitionToken}:${module.revision}:${sharedLive.available}:${sharedReady}`;
     if (appliedSharedToken.current === token) return;
     const previous = definitionBaseline.current;
@@ -2255,7 +2257,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     // Keep its fresh CAS revision even when local definition edits are retained.
     revisionRef.current = Math.max(revisionRef.current, module.revision); setModuleRevision(revisionRef.current);
     appliedSharedToken.current = token;
-    setBillingQuote(null);
+    const previousGeneration = previous.sharedLive?.generationIntent || previous.sharedLive?.intent;
+    if (!sharedReady || previousGeneration?.definitionToken !== generationIntent?.definitionToken) setBillingQuote(null);
     if (!previous.sharedLive && sharedLive.mode === 'publisher' && sharedLive.available) {
       // First publication changes the source binding, not the editor's current draft.
       definitionBaseline.current = module;
@@ -2404,7 +2407,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
 
   async function saveModule(reproduceTaskId = reproduceSourceTaskId, revisionOverride = revisionRef.current, manualSettings = true, fixedOverride?: FixedStudioReference[], personalOnly = false) {
     if (isClientSessionBlocked()) return false;
-    if (definitionReviewBusy) return false;
+    if (definitionReviewBusy || module.definitionSyncPending) return false;
     if (!definitionEditable) { setModuleSaveError('只有原模板作者可以保存默认设置；请另存为自己的参数模板。'); return false; }
     if (manualSettings && !personalOnly && definitionConflict) { setModuleSaveError('共享模板内容已更新，请先核对差异；当前草稿保留。'); return false; }
     // Re-read the original object's persistent lock even if repair instructions
@@ -2413,8 +2416,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       try {
         const original = pendingFixedSaveRef.current || readFixedReferenceSave(userId, module.id);
         if (original) { pendingFixedSaveRef.current = original; setPendingFixedSave(original);
-          setModuleSaveError('原修复保存结果待确认，请先核对原保存，不会换号重发'); return false; }
-      } catch { setFixedSaveStorageError('本机修复保存记录无法读取，本次尚未提交'); return false; }
+          setModuleSaveError('原模板保存结果待确认，请先核对原保存，不会换号重发'); return false; }
+      } catch { setFixedSaveStorageError('本机模板保存记录无法读取，本次尚未提交'); return false; }
     }
     if (manualSettings && !personalOnly && definitionSaveBlocked) { setModuleSaveError(definitionSaveReason); return false; }
     if (!sharedReady && !(manualSettings && definitionReady && sharedLive?.capabilities?.saveDefinition.allowed)) { setModuleSaveError('模板暂不可用，本人草稿和历史保留'); return false; }
@@ -2480,11 +2483,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     let postStarted = false;
     try {
       if (isClientSessionBlocked()) return false;
-      if (saveDefinition && fixedRepairAllowed && fixedReferenceRepairs.length) {
+      if (saveDefinition) {
         const intent = definitionBaseline.current.sharedLive?.intent;
-        if (!intent?.presetId || !intent.definitionToken || !validSaveScope()) throw new Error('原模板版本尚未确认，本次尚未提交');
-        repairSave = await claimFixedReferenceSave({ version: 1, actorId: userId, moduleId: module.id, presetId: intent.presetId,
-          requestId: request.requestId, expectedRevision: revisionOverride, definitionToken: intent.definitionToken });
+        if (!validSaveScope() || sharedLive && (!intent?.presetId || !intent.definitionToken)) throw new Error('原模板版本尚未确认，本次尚未提交');
+        repairSave = await claimFixedReferenceSave({ version: 1, actorId: userId, moduleId: module.id, presetId: intent?.presetId || `module-source:${module.id}`,
+          requestId: request.requestId, expectedRevision: revisionOverride, definitionToken: intent?.definitionToken || 'first-publication' });
         if (!validSaveScope()) { await clearFixedReferenceSave(repairSave); return false; }
         pendingFixedSaveRef.current = repairSave; setPendingFixedSave(repairSave);
       }
@@ -2493,7 +2496,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         body: JSON.stringify({ ...savePayload, requestId: request.requestId }) }));
       if (!validSaveScope()) return false;
       if (repairSave && (result.commandReceipt?.requestId !== repairSave.requestId
-        || !fixedReferenceReceiptMatches({ status: 'completed', receipt: result.commandReceipt }, repairSave))) throw new Error('原修复保存回执尚未确认，请核对原保存');
+        || !fixedReferenceReceiptMatches({ status: 'completed', receipt: result.commandReceipt }, repairSave))) throw new Error('原模板保存回执尚未确认，请核对原保存');
       if (!sameStudioTaskSettings(result.taskSettings, saveMode) || !Number.isInteger(result.revision) || result.revision <= revisionOverride
         || publishNew && (result.sharedLive?.mode !== 'publisher' || result.sourcePresetShared !== true || result.sourcePresetId !== `module-source:${module.id}`)) throw new Error('保存结果尚未确认，当前草稿已保留，请核对后重试');
       if (repairSave) { await clearFixedReferenceSave(repairSave); if (!validSaveScope()) return false;
@@ -2522,10 +2525,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       const outcome = (e as { commandOutcome?: { status?: string; actorId?: string; moduleId?: string; requestId?: string } })?.commandOutcome;
       request.unknown = postStarted && !(outcome?.status === 'not-applied' && outcome.actorId === userId && outcome.moduleId === module.id && outcome.requestId === request.requestId);
       if (!request.unknown) moduleSaveRequest.current = null;
-      if (!repairSave && saveDefinition && fixedRepairAllowed && fixedReferenceRepairs.length) {
+      if (!repairSave && saveDefinition) {
         try { const original = readFixedReferenceSave(userId, module.id);
           if (original) { pendingFixedSaveRef.current = original; setPendingFixedSave(original); } }
-        catch { setFixedSaveStorageError('本机修复保存记录无法读取，本次尚未提交'); }
+        catch { setFixedSaveStorageError('本机模板保存记录无法读取，本次尚未提交'); }
       }
       if (repairSave && (!postStarted || fixedReferenceSaveRejected(e, repairSave))) {
         try { await clearFixedReferenceSave(repairSave); if (!validSaveScope()) return false;
@@ -2687,10 +2690,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       if (!valid()) return;
       if (!fixedReferenceReceiptMatches(result, command)) throw new Error(result.status === 'not-found'
         ? '尚未查到原保存回执，结果仍待确认；不会重新提交' : '原保存回执尚未确认，请继续核对原保存');
+      revisionRef.current = Math.max(revisionRef.current, Number(result.receipt.revision)); setModuleRevision(revisionRef.current);
       await clearFixedReferenceSave(command); if (!valid()) return;
       pendingFixedSaveRef.current = null; setPendingFixedSave(null); setFixedSaveStorageError('');
-      moduleSaveRequest.current = null; setDefinitionConflict(true); setModuleSaveError('原修复保存已确认。当前编辑保留，请核对最新模板后再保存');
-      setSaveStatus('原修复保存已确认，当前草稿未自动覆盖或提交');
+      moduleSaveRequest.current = null; setDefinitionConflict(true); setModuleSaveError('原模板保存已确认。当前编辑保留，请核对最新模板后再保存');
+      setSaveStatus('原模板保存已确认，当前草稿未自动覆盖或提交');
       // Refresh current facts separately; do not adopt receipt/current as the
       // current editor's baseline or consume a successor revision silently.
       onSharedRefresh();
@@ -3587,7 +3591,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     const historicalEvolution = (retryTask?.snapshot as (StudioSnapshot & { evolution?: EvolutionInput }) | undefined)?.evolution;
     const historicalUsage = (retryTask?.snapshot as (StudioSnapshot & { usageAttribution?: { projectId?: string | null } }) | undefined)?.usageAttribution;
     return { requestId, ...(templateWorkbench && !retryTask && imageFeishu.choice ? { image_feishu: imageFeishu.choice } : {}),
-      ...(sharedLive ? { sharedLive: sharedLive.intent, personalOverrides: personalOverridesRef.current } : {}), prompt: retryTask?.prompt ?? prompt,
+      ...(sharedLive ? { sharedLive: generationIntent, personalOverrides: personalOverridesRef.current } : {}), prompt: retryTask?.prompt ?? prompt,
       ...(!retryTask ? { taskSettings: studioTaskSettings(globalContextMode, globalSettingsSourceTaskId) } : {}),
       ...(restoredTaskSettings && !retryTask ? { restoredSettings: { protocol: 'task-settings-v1', sourceTaskId: restoredTaskSettings.sourceTaskId } } : {}),
       projectId: retryTask ? historicalUsage?.projectId ?? null : usageProject.projectId,
@@ -4934,7 +4938,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       <div className={styles.moduleSettingsActions}>
         {definitionEditable ? <button type="button" className={`${styles.primary} sd2-loading-surface`} data-busy={moduleSaving} title={definitionSaveReason || undefined} disabled={definitionSaveBlocked || !sharedReady && !definitionReady || moduleSaving || definitionReviewBusy || sharingPreferenceSaving || uploading || bannerUploading || !settingsDirty && !unpublishedSharing} onClick={() => void saveModuleSettings()}><Save size={16} />{moduleSaving ? '正在保存' : personalSettingsOpen ? '保存本次设置' : sharedLive ? definitionEditable ? '保存共享模板' : '保存本次设置' : unpublishedSharing ? '保存并共享模板' : templateWorkbench ? '保存模块设置' : '保存模板设置'}</button> : <button type="button" className={styles.primary} disabled={presetSaving || moduleSaving || uploading || bannerUploading || submitting || Boolean(pendingSubmission) || !sharedReady || !module.saved} onClick={() => void saveAsPreset()}><Save size={16} />{namedSavePending ? '核对上次保存' : '另存为设置'}</button>}
       </div>
-      {definitionSaveReason && <p role="status" className={styles.muted}>{definitionSaveReason}</p>}
+      {definitionSaveReason && <p role="status" className={styles.muted}>{definitionSaveReason}{module.definitionSyncPending && <button type="button" onClick={onSharedRefresh}>重新读取</button>}</p>}
       {fixedSaveUnknown && <p role="status" className={styles.muted}><button type="button" disabled={checkingFixedSave || moduleSaving || sessionChanged}
         onClick={() => void queryFixedReferenceSave()}>{checkingFixedSave ? '正在核对原保存' : '核对原保存'}</button></p>}
       {moduleSaveError && <p role="alert" className={styles.muted}>{moduleSaveError}{fixedSaveUnknown ? null : moduleSaveRequest.current?.unknown && moduleSaveRequest.current.definitionSave ? <button type="button" disabled={checkingFixedSave || moduleSaving} onClick={() => void queryModuleSave()}>{checkingFixedSave ? '正在核对' : '核对原保存'}</button> : definitionConflict && definitionReady ? <button type="button" disabled={definitionReviewBusy || moduleSaving || uploading || bannerUploading} onClick={() => void reviewLatestDefinition()}>{definitionReviewBusy ? '正在读取' : '核对最新版本'}</button> : <button type="button" disabled={definitionSaveBlocked || moduleSaving || uploading || bannerUploading} onClick={() => void saveModuleSettings()}>重试保存</button>}</p>}

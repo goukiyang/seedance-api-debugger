@@ -3,7 +3,7 @@ import { observeOperation } from '@/lib/performance/server-operations';
 import { likedStudioTaskPage } from './liked-task-page';
 import { studioClaimScanPage } from './claim-scan';
 import { readPrivateStudioDefinition, readPrivateImageTaskSnapshot, transformPrivateImageTask } from './private-storage.server';
-import { privateFieldOrigins } from '@/lib/security/private-prompt-fields.server';
+import { privateFieldOrigins, transferPrivateOrigins } from '@/lib/security/private-prompt-fields.server';
 import { validStudioPresetId } from './preset-id';
 import { isStoredPrivatePrompt, privateOrigin } from '@/lib/security/private-prompts.server';
 import { readFileSync } from 'node:fs';
@@ -148,10 +148,14 @@ export async function resolveStudioTaskSharedUse(user: ImageStudioIdentity, modu
     if (intent) throw new SharedStudioDefinitionError('共享模板绑定不存在，请重新打开模板');
     return null;
   }
-  if (!sameSharedStudioIntent(intent, shared.definition.intent)) {
+  if (!intent || !sameSharedStudioIntent(intent, shared.definition.intent)
+    && !sameSharedStudioIntent(intent, shared.definition.generationIntent)) {
     throw new SharedStudioDefinitionError();
   }
-  return shared;
+  // Keep the exact accepted identity through quoting, freezing and batch resume.
+  const definition = { ...shared.definition, intent };
+  transferPrivateOrigins(shared.definition, definition, ['prompt', 'templatePrompt', 'context']);
+  return { ...shared, definition };
 }
 
 export async function resolveOwnedStudioTaskSharedUse(ownerId: string, moduleId: string | undefined,

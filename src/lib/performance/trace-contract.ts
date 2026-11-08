@@ -2,7 +2,7 @@
 export const TRACE_ID_HEADER = 'x-sd2-request-id';
 export const TRACE_START_HEADER = 'x-sd2-request-start';
 export const TRACE_OPERATIONS = ['admin.page', 'admin.usage-costs', 'admin.usage-record-page', 'admin.usage-analytics',
-  'admin.usage-records', 'admin.usage-export', 'studio.settings', 'studio.modules', 'studio.shared', 'studio.gallery',
+  'admin.usage-records', 'admin.usage-export', 'studio.settings', 'studio.modules', 'studio.presets', 'studio.shared', 'studio.gallery',
   'studio.cover-editor', 'studio.cover-media', 'credits.summary', 'avatar.read', 'release.read', 'admin.cost-ledger-export'] as const;
 export type TraceOperation = typeof TRACE_OPERATIONS[number];
 export const TRACE_PHASES = ['auth', 'parse', 'data', 'serialize', 'snapshot', 'resolve', 'file', 'render',
@@ -21,6 +21,7 @@ export function traceOperationForPath(pathname: string): TraceOperation | null {
     case '/api/admin/usage-analytics/export': return 'admin.usage-export';
     case '/api/image-studio/settings': return 'studio.settings';
     case '/api/image-studio/modules': return 'studio.modules';
+    case '/api/image-studio/presets': return 'studio.presets';
     case '/api/image-studio/shared': return 'studio.shared';
     case '/api/image-studio/gallery/query': return 'studio.gallery';
     case '/api/me/credits': return 'credits.summary';

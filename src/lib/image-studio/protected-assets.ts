@@ -8,6 +8,7 @@ import { catalogVisibilitySql, CatalogSqlCompatibilityError } from '@/lib/assets
 import { studioReproductionBindingWhere, studioSettingsSourcePrefixes } from './reproduction-record-keys';
 
 type Client = Pick<Prisma.TransactionClient, 'platformSetting' | 'asset'>;
+export class StudioAssetProtectionError extends Error {}
 type Protection = { assetId: string; ownerId: string; kind: 'template' | 'style' };
 
 export class StudioCoverReferenceError extends Error {
@@ -50,14 +51,14 @@ export function studioProtectedBindings(rows: Array<{ key: string; value_json: s
   return rows.flatMap(row => {
     if (studioSettingsSourcePrefixes.some(prefix => row.key.startsWith(prefix))) return [];
     let value: Record<string, unknown>;
-    try { value = JSON.parse(row.value_json); } catch { throw new Error('参考内容权限记录无法读取'); }
-    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('参考内容权限记录无效');
+    try { value = JSON.parse(row.value_json); } catch { throw new StudioAssetProtectionError('参考内容权限记录无法读取'); }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new StudioAssetProtectionError('参考内容权限记录无效');
     const historical = row.key.startsWith('studio_shared_reproduction_v1:');
     const ownerId = historical ? value.sourceOwnerId : value.ownerId;
     const references = historical ? value.templateFixedReferences : value.references;
-    if (!value || typeof ownerId !== 'string' || !Array.isArray(references)) throw new Error('参考内容权限记录无效');
+    if (!value || typeof ownerId !== 'string' || !Array.isArray(references)) throw new StudioAssetProtectionError('参考内容权限记录无效');
     return references.flatMap(item => {
-      if (!item || typeof item.assetId !== 'string') throw new Error('参考内容权限记录无效');
+      if (!item || typeof item.assetId !== 'string') throw new StudioAssetProtectionError('参考内容权限记录无效');
       return [{ assetId: item.assetId, ownerId,
         kind: row.key.startsWith('studio_style_group_v1:') ? 'style' as const : 'template' as const }];
     });
@@ -139,7 +140,7 @@ export async function readableStudioCoverIds(user: ImageStudioIdentity,
         json_type(value_json, '$.ownerId') IS NOT 'text' OR json_type(value_json, '$.references') IS NOT 'array'
         OR EXISTS (SELECT 1 FROM json_each(value_json, '$.references') r WHERE json_type(r.value, '$.assetId') IS NOT 'text')
       ELSE 1 END LIMIT 1`);
-  if (corrupt.length) throw new Error('参考内容权限记录无法读取');
+  if (corrupt.length) throw new StudioAssetProtectionError('参考内容权限记录无法读取');
   const rows = await prisma.$queryRaw<Array<{ assetId: string; ownerId: string; settingKey: string; original_url: string; thumbnail_url: string | null }>>(Prisma.sql`
     SELECT a.id AS assetId, json_extract(p.value_json, '$.ownerId') AS ownerId, p.key AS settingKey,
       a.original_url, a.thumbnail_url FROM PlatformSetting p, json_each(p.value_json, '$.references') r

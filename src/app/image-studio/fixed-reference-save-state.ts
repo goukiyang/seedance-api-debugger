@@ -1,4 +1,4 @@
-// Only command metadata belongs here. Template bodies, personal input and
+// Definition saves, including first publication, retain only command metadata here. Template bodies, personal input and
 // asset URLs remain in the existing separate draft, never in the unknown lock.
 export type FixedReferenceSavePending = {
   version: 1; actorId: string; moduleId: string; presetId: string; requestId: string;
@@ -15,7 +15,7 @@ function parse(raw: string | null, actorId: string, moduleId: string): FixedRefe
     || !id(value.actorId) || !id(value.moduleId) || !id(value.presetId) || !id(value.requestId)
     || !Number.isSafeInteger(value.expectedRevision) || Number(value.expectedRevision) < 0
     || typeof value.definitionToken !== 'string' || !value.definitionToken || value.definitionToken.length > 160) {
-    throw new Error('原修复保存记录无法确认，请保留当前草稿并核对本机存储');
+    throw new Error('原模板保存记录无法确认，请保留当前草稿并核对本机存储');
   }
   return { version: 1, actorId, moduleId, presetId: value.presetId, requestId: value.requestId,
     expectedRevision: value.expectedRevision as number, definitionToken: value.definitionToken };
@@ -26,13 +26,13 @@ export function readFixedReferenceSave(actorId: string, moduleId: string) {
 export async function claimFixedReferenceSave(command: FixedReferenceSavePending) {
   const key = fixedReferenceSaveKey(command.actorId, command.moduleId);
   // Serialize claims from the same origin's tabs, not unrelated objects.
-  if (!navigator.locks) throw new Error('浏览器暂不能安全保存修复记录，本次尚未提交');
+  if (!navigator.locks) throw new Error('浏览器暂不能安全保存原号记录，本次尚未提交');
   return navigator.locks.request(key, () => {
     if (readFixedReferenceSave(command.actorId, command.moduleId)) throw new Error('此模板已有待确认保存，请先核对原保存');
     const raw = JSON.stringify({ version: 1, actorId: command.actorId, moduleId: command.moduleId, presetId: command.presetId,
       requestId: command.requestId, expectedRevision: command.expectedRevision, definitionToken: command.definitionToken });
     localStorage.setItem(key, raw);
-    if (localStorage.getItem(key) !== raw) throw new Error('修复保存记录未能持久保留，本次尚未提交');
+    if (localStorage.getItem(key) !== raw) throw new Error('模板保存记录未能持久保留，本次尚未提交');
     return parse(raw, command.actorId, command.moduleId)!;
   });
 }

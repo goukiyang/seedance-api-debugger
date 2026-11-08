@@ -233,7 +233,7 @@ async function sharedModuleDTO(row: StudioModuleRow, ownerId: string, settings: 
     canViewDefinition: templateRead.canViewTemplateContext,
     reasonCode: resolved ? null : sharedRead.unavailable?.reasonCode });
   const viewState = { ...state, capabilities: { ...state.capabilities, viewDefinition: { allowed: templateRead.canViewTemplateContext, reasonCode: templateRead.canViewTemplateContext ? null : 'access-revoked' as const, reason: templateRead.canViewTemplateContext ? null : '无权读取模板上下文' } } };
-  const sharedLive: SharedStudioLiveDTO = { ...viewState, templateRead, ...intent, intent, mode: binding.mode, available: Boolean(resolved), methodDraft: resolved?.methodDraft ?? false,
+  const sharedLive: SharedStudioLiveDTO = { ...viewState, templateRead, ...intent, intent, ...(dto?.generationIntent ? { generationIntent: dto.generationIntent } : {}), mode: binding.mode, available: Boolean(resolved), methodDraft: resolved?.methodDraft ?? false,
     ...(unavailableReason ? { unavailableReason } : {}), overriddenFields: Object.keys(overrides) as SharedStudioLiveDTO['overriddenFields'],
     ...(defaults ? { defaults } : {}), ...(repairDefinition ? { repairDefinition } : {}) };
   const fixedCover = dto?.fixedCover ?? await studioFixedCoverDTO(actor, { kind: 'preset', id: binding.presetId });
@@ -365,7 +365,7 @@ export async function listStudioModules(ownerId: string, cursor?: string, isAdmi
     // source's current authorization/lifecycle. Unknown dependencies never grant
     // generate; opening the workspace still performs the full strict read.
     const available = sharedRead ? Boolean(resolved) : canViewSource && !archived && reasonCode === null;
-    const sharedLive: SharedStudioLiveDTO = { ...state, ...intent, intent, mode: binding.mode, available, methodDraft: methodDraftIds.has(item.id),
+    const sharedLive: SharedStudioLiveDTO = { ...state, ...intent, intent, ...(resolved?.publicDTO.generationIntent ? { generationIntent: resolved.publicDTO.generationIntent } : {}), mode: binding.mode, available, methodDraft: methodDraftIds.has(item.id),
       overriddenFields: Object.keys(resolved?.personalOverrides || {}) as SharedStudioLiveDTO['overriddenFields'],
       ...(resolved ? { defaults: resolved.publicDTO.defaults } : {}),
       ...(sharedRead?.unavailable ? { unavailableReason: sharedRead.unavailable.message } : {}) };
@@ -493,9 +493,7 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
       const businessRejected = error instanceof StudioSharingError || error instanceof StudioFixedReferenceError
         || error instanceof StudioReferencePolicyError || error instanceof StudioStyleError;
       let noOriginalReceipt = false;
-      if (businessRejected && (Object.prototype.hasOwnProperty.call(body, 'fixedReferenceRepairs')
-        || error instanceof StudioSharingError && Boolean(error.conflictScope))
-        && typeof body.requestId === 'string' && /^[A-Za-z0-9:_-]{1,160}$/.test(body.requestId)) {
+      if (businessRejected && typeof body.requestId === 'string' && /^[A-Za-z0-9:_-]{1,160}$/.test(body.requestId)) {
         try {
           const fresh = await assertStudioActor(ownerId);
           noOriginalReceipt = !await readOwnedReceipt(prisma, fresh.id, body.requestId);
@@ -510,8 +508,7 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
       throw error;
     }
     const dto = await studioModuleDTOForUser(actor, id);
-    return Object.prototype.hasOwnProperty.call(body, 'fixedReferenceRepairs')
-      ? { ...dto, commandReceipt: { ...publicStudioReceipt(published.receipt), requestId: body.requestId } } : dto;
+    return { ...dto, commandReceipt: { ...publicStudioReceipt(published.receipt), requestId: body.requestId } };
   }
   if (!createOnly && binding) {
     if (body.saveIntent !== 'personal') throw new StudioModuleError('请明确保存个人输入或模板定义，当前草稿仍保留', 400);

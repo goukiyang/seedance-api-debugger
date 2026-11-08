@@ -7,6 +7,9 @@ import { getStudioPresetFixedReferences } from './fixed-references';
 import { assertStudioActor, resolveSharedStudioDefinition, StudioSharingError } from './shared-contract';
 import { studioPresetArchived } from './preset-lifecycle';
 import { resolveStudioTemplateAuthor } from './template-author';
+import { readPrivateStudioDefinition } from './private-storage.server';
+import { privateFieldOrigins } from '@/lib/security/private-prompt-fields.server';
+import { requirePrivatePromptRequest } from '@/lib/security/private-prompt-request.server';
 import type { ImageStudioIdentity } from './access';
 import type { SharedStudioReasonCode, StudioTemplateDefinitionRead, StudioTemplateRead } from './shared-types';
 
@@ -21,14 +24,19 @@ export async function readStudioTemplateDefinition(user: ImageStudioIdentity,
     throw new StudioDefinitionReadError('模板不存在或无权读取', 404);
   }
   if (!resolved.preset) {
-    const row = await prisma.imageStudioModule.findFirst({ where: { id: resolved.templateRead.sourceId, owner_id: resolved.actor.id } });
-    if (!row) throw new StudioDefinitionReadError('模板不存在或无权读取', 404);
+    const stored = await prisma.imageStudioModule.findFirst({ where: { id: resolved.templateRead.sourceId, owner_id: resolved.actor.id } });
+    if (!stored) throw new StudioDefinitionReadError('模板不存在或无权读取', 404);
+    const row = readPrivateStudioDefinition('image-module', stored);
+    const origins = [...privateFieldOrigins(row, 'prompt'), ...privateFieldOrigins(row, 'context')];
+    if (origins.length) await requirePrivatePromptRequest(resolved.actor.id, origins);
     const contextVersion = await resolveModuleContextVersion(row.context).then(code => ({ code, state: 'ready' })).catch(() => null);
     return { templateRead: resolved.templateRead, definition: { name: row.name, templatePrompt: row.prompt, context: row.context,
       sourceRevision: String(row.revision), contextVersion, limits: { count: row.count, referenceLimit: row.reference_limit, aspectRatio: row.aspect_ratio },
       referenceNotes: [] }, lifecycle: 'active', generation: { available: true, reasonCode: null }, readAt: new Date().toISOString() };
   }
-  const source = resolved.preset;
+  const source = readPrivateStudioDefinition('image-preset', resolved.preset);
+  const origins = [...privateFieldOrigins(source, 'prompt'), ...privateFieldOrigins(source, 'context')];
+  if (origins.length) await requirePrivatePromptRequest(resolved.actor.id, origins);
   const archived = await studioPresetArchived(source.id);
   let available: boolean | null = false;
   let reasonCode: SharedStudioReasonCode | null = archived ? 'source-archived' : !resolved.ordinarilyVisible ? 'source-withdrawn' : null;

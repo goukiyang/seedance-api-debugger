@@ -7,7 +7,7 @@ import { getStudioModuleFixedReferences, getStudioPresetFixedReferences, parseSt
 import { getStudioModuleReferencePolicy, getStudioPresetReferencePolicy, parseStudioReferencePolicy, setStudioPresetReferencePolicy, validateStudioReferenceCounts, StudioReferencePolicyError, type StudioReferencePolicy } from './reference-policy';
 import { getStudioModuleStyleIds, getStudioStyleGroup, parseStudioStyleIds, resolveStudioStyleReferences, setStudioPresetStyleIds, StudioStyleError, type StudioStyleGroup } from './style-groups';
 import { getSkill, getSkillSelection, setSkillSelection } from './skills';
-import { studioVisibleAssetWhere } from './protected-assets';
+import { studioVisibleAssetWhere, StudioAssetProtectionError } from './protected-assets';
 import { IMAGE_STUDIO_MODELS, normalizeImageStudioQuality, normalizeImageResolution } from './model-catalog';
 import { normalizeStudioRatio } from './ratios';
 import { getImageStudioSettings } from './settings';
@@ -51,6 +51,7 @@ export type SharedStudioReproduction = {
 };
 export type SharedStudioDefinition = {
   intent: SharedStudioIntent;
+  generationIntent?: SharedStudioIntent;
   sourceOwnerId: string;
   sourceRevision: string;
   name: string;
@@ -83,6 +84,10 @@ function canonical(value: unknown): unknown {
   return value;
 }
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
+function generationIntent(presetId: string, content: unknown): SharedStudioIntent {
+  return { protocol: SHARED_STUDIO_PROTOCOL, presetId, definitionToken: privatePromptPolicy()
+    ? privatePromptIndex('image-shared-generation', JSON.stringify(canonical(content))) : digest(content) };
+}
 const has = (value: object, field: string) => Object.prototype.hasOwnProperty.call(value, field);
 
 export async function assertStudioActor(ownerId: string, client: SharedStudioClient = prisma) {
@@ -117,6 +122,7 @@ function sharedRatio(value: unknown) {
   catch (error) { throw new StudioSharingError((error as Error).message, 400); }
 }
 function normalizeSharedError(error: unknown) {
+  if (error instanceof StudioAssetProtectionError) return new StudioSharingError('参考图片权限暂时无法确认', 503, 'read-unavailable');
   if (error instanceof StudioFixedReferenceError || error instanceof StudioReferencePolicyError || error instanceof StudioStyleError) {
     if (![400, 403, 404, 409].includes(error.status)) return new StudioSharingError('暂时无法读取模板依赖，请稍后重试', 503, 'read-unavailable');
     return new StudioSharingError(error.message, error.status, 'dependency-invalid');
@@ -228,14 +234,15 @@ async function resolveSharedStudioDefinitionInternal(user: ImageStudioIdentity, 
       definitionToken: digest([storedSource.updated_at.toISOString(), copy, root.definition.intent.definitionToken,
         styles.groups.map(group => [group.id, group.revision])]) };
     const defaults = { ...root.definition.generationDefaults, ...copy.parameters };
-    const definition = { ...root.definition, intent, name: storedSource.name, groupName: storedSource.group_name || '未分组',
+    const contentIntent = generationIntent(presetId, [root.definition.generationIntent || root.definition.intent, copy.parameters, styles.groups, styles.references]);
+    const definition = { ...root.definition, intent, generationIntent: contentIntent, name: storedSource.name, groupName: storedSource.group_name || '未分组',
       generationDefaults: defaults, sourceRevision: storedSource.updated_at.toISOString(), styleGroupIds: copy.styleGroupIds,
       styleGroups: styles.groups, styleReferences: styles.references };
     transferPrivateOrigins(root.definition, definition, ['prompt', 'templatePrompt', 'context']);
     const state = projectSharedStudioCapabilities({ objectKind: 'live', lifecycle: 'active', sharing: 'private', dependency: 'ready',
       sourceRevision: definition.sourceRevision, moduleRevision: null, definitionToken: intent.definitionToken,
       actorAllowed: true, ownsWorkspace: false, canViewSource: true, canManageSource: false, canViewDefinition: false });
-    return { definition, publicDTO: { ...root.publicDTO, ...state, intent, presetId, revision: definition.sourceRevision,
+    return { definition, publicDTO: { ...root.publicDTO, ...state, intent, generationIntent: contentIntent, presetId, revision: definition.sourceRevision,
       name: definition.name, groupName: definition.groupName, defaults, isShared: false, ownedByViewer: storedSource.owner_id === actor.id,
       canManageSharing: false, contextEditable: false, templatePrompt: '', context: '', deletion: studioSourceDeletionCapability(actor, storedSource),
       fixedReferences: [], styleGroupIds: copy.styleGroupIds, styleGroups: styles.groups.map(group => ({ id: group.id, name: group.name,
@@ -306,7 +313,12 @@ async function resolveSharedStudioDefinitionData(actor: ImageStudioIdentity, sou
     referenceLimit: source.reference_limit, referencePolicy };
   const sourceRevision = source.updated_at.toISOString();
   const context = reproduction?.moduleContext ?? source.context;
-  const definition: SharedStudioDefinition = { intent, sourceOwnerId: source.owner_id, sourceRevision, name: source.name,
+  const generationAssets = Array.from(new Set([...templateReferenceIds, ...fixedReferences.map(ref => ref.assetId), ...styles.references.map(ref => ref.assetId)])).sort();
+  const contentIntent = generationIntent(presetId, { ownerId: source.owner_id, prompt: source.prompt, context, generationDefaults,
+    templateReferenceIds, fixedReferences, styleGroupIds, styles: styles.groups, reproduction,
+    assets: generationAssets.map(id => { const asset = byId.get(id)!;
+      return [asset.id, asset.owner_id, asset.status, asset.type, asset.hash, asset.original_url, asset.width, asset.height]; }) });
+  const definition: SharedStudioDefinition = { intent, generationIntent: contentIntent, sourceOwnerId: source.owner_id, sourceRevision, name: source.name,
     groupName: source.group_name || '未分组', bannerAssetId: source.banner_asset_id, prompt: source.prompt, templatePrompt: source.prompt,
     context, generationDefaults, templateReferenceIds, referencePolicy, fixedReferences, styleGroupIds, styleGroups: styles.groups,
     styleReferences: styles.references, ...(reproduction ? { reproduction } : {}) };
@@ -324,7 +336,7 @@ async function resolveSharedStudioDefinitionData(actor: ImageStudioIdentity, sou
   const sourceState = projectSharedStudioCapabilities({ objectKind: source.owner_id === actor.id ? 'publisher' : 'live', lifecycle: 'active',
     sharing: source.is_shared ? 'shared' : 'private', dependency: 'ready', sourceRevision, moduleRevision: null, definitionToken: intent.definitionToken,
     actorAllowed: true, ownsWorkspace: false, canViewSource: true, canManageSource: canManageStudioPreset(actor, source), canViewDefinition: canSeeContext });
-  const publicDTO: SharedStudioPublicDefinition = { ...sourceState, ...privateCapabilities, privateDefinition: protectedOrigins.length > 0, deletion: studioSourceDeletionCapability(actor, source), intent, presetId, revision: sourceRevision, name: definition.name, groupName: definition.groupName,
+  const publicDTO: SharedStudioPublicDefinition = { ...sourceState, ...privateCapabilities, privateDefinition: protectedOrigins.length > 0, deletion: studioSourceDeletionCapability(actor, source), intent, generationIntent: contentIntent, presetId, revision: sourceRevision, name: definition.name, groupName: definition.groupName,
     banner: source.banner_asset_id && readableIds.has(source.banner_asset_id) ? image(source.banner_asset_id) : null,
     fixedCover: await studioFixedCoverDTO(actor, { kind: 'preset', id: presetId }, client), coverEditable: canManageStudioPreset(actor, source),
     templatePrompt: canSeeContext ? source.prompt : '', context: canSeeContext ? context : '', contextConfigured: Boolean(context.trim()),
@@ -469,8 +481,9 @@ export async function resolveSharedStudioModule(user: ImageStudioIdentity, modul
   const methodPin = await client.platformSetting.findUnique({ where: { key: `studio_works_method_pin_v1:${moduleId}` }, select: { value_json: true } });
   if (methodPin) {
     const pin = parseRecord(methodPin.value_json, '作品方法草稿来源无法确认');
-    if (pin.ownerId !== user.id || pin.presetId !== binding.presetId || pin.sourceRevision !== definition.sourceRevision
-      || pin.definitionToken !== definition.intent.definitionToken) {
+    const versionMatches = pin.generationToken ? pin.generationToken === definition.generationIntent?.definitionToken
+      : pin.sourceRevision === definition.sourceRevision && pin.definitionToken === definition.intent.definitionToken;
+    if (pin.ownerId !== user.id || pin.presetId !== binding.presetId || !versionMatches) {
       throw new StudioSharingError('原作品使用的模板版本已变化，当前草稿保留；请重新选择可用方法', 409, 'state-conflict');
     }
   }
@@ -517,7 +530,8 @@ export async function studioMethodHistoryModuleId(user: ImageStudioIdentity, mod
 export async function prepareSharedStudioMethodWorkspace(user: ImageStudioIdentity, presetId: string,
   expectedVersion: string, expectedToken: string | null, client: SharedStudioClient, actualSettings: SharedStudioPersonalOverrides) {
   const { definition } = await resolveSharedStudioDefinition(user, presetId, client);
-  if (!expectedToken || definition.sourceRevision !== expectedVersion || definition.intent.definitionToken !== expectedToken) {
+  const generationMatches = Boolean(expectedToken && definition.generationIntent?.definitionToken === expectedToken);
+  if (!generationMatches && (!expectedToken || definition.sourceRevision !== expectedVersion || definition.intent.definitionToken !== expectedToken)) {
     throw new StudioSharingError('原作品使用的模板版本已变化，不能改用新版', 409, 'state-conflict');
   }
   const moduleId = randomUUID();
@@ -526,7 +540,8 @@ export async function prepareSharedStudioMethodWorkspace(user: ImageStudioIdenti
   await bindStudioModule(client, moduleId, { protocol: SHARED_STUDIO_PROTOCOL, ownerId: user.id, presetId, mode: 'live' });
   await writeSharedStudioPersonalState(user, workspace, { personalOverrides: actualSettings }, client);
   await writeSetting(client, `studio_works_method_pin_v1:${moduleId}`, user.id, { ownerId: user.id, presetId,
-    sourceRevision: expectedVersion, definitionToken: expectedToken });
+    sourceRevision: definition.sourceRevision, definitionToken: definition.intent.definitionToken,
+    ...(generationMatches ? { generationToken: expectedToken } : {}) });
   return moduleId;
 }
 
@@ -1444,12 +1459,21 @@ export function sharedDependencySettingKeys(rows: Array<{ id: string; owner_id: 
     moduleCoverKey({ kind: 'preset', id: row.id }),
   ]);
 }
-export async function sharedDependencyState(rows: Array<{ id: string; owner_id: string; reference_ids: string; banner_asset_id: string | null }>, client: SharedStudioClient) {
+export async function sharedDependencyState(rows: Array<{ id: string; owner_id: string; reference_ids: string; banner_asset_id: string | null }>, client: SharedStudioClient, decodeReproduction = true) {
   const keys = sharedDependencySettingKeys(rows);
   const dependencies = await client.platformSetting.findMany({ where: { key: { in: keys } }, select: { key: true, value_json: true }, orderBy: { key: 'asc' } });
-  for (const row of dependencies) {
-    if (row.key.startsWith('studio_shared_reproduction_v1:')) row.value_json = JSON.stringify(await transformReproduction(client,
-      row.key.slice('studio_shared_reproduction_v1:'.length), JSON.parse(row.value_json) as SharedStudioReproduction, false));
+  // Keep existing edit tokens; catalog summaries hash stored identities without
+  // decoding every template body. Target resolution remains strict.
+  if (decodeReproduction) for (const row of dependencies) {
+    if (row.key.startsWith('studio_shared_reproduction_v1:')) {
+      let value: SharedStudioReproduction;
+      try { value = JSON.parse(row.value_json); }
+      catch { throw new StudioSharingError('历史模板定义无法读取', 409, 'dependency-invalid'); }
+      if (!value || typeof value !== 'object' || typeof value.sourceTaskId !== 'string' || !value.sourceTaskId
+        || typeof value.moduleContext !== 'string') throw new StudioSharingError('历史模板定义无法确认', 409, 'dependency-invalid');
+      row.value_json = JSON.stringify(await transformReproduction(client,
+        row.key.slice('studio_shared_reproduction_v1:'.length), value, false));
+    }
   }
   const styleIds = new Set<string>();
   const assetIds = new Set<string>();
@@ -1492,11 +1516,19 @@ async function sharedCatalogState(user: ImageStudioIdentity, client: SharedStudi
   const archived = await client.platformSetting.findMany({ where: { key: { in: rows.map(row => archivedPresetKey(row.id)) } }, select: { key: true } });
   const archivedKeys = new Set(archived.map(row => row.key));
   const visible = rows.filter(row => row.is_shared && canViewStudioPreset(actor, row) && !archivedKeys.has(archivedPresetKey(row.id)));
-  const { dependencies, styles, dependencyAssets } = await sharedDependencyState(visible, client);
+  const { dependencies, styles, dependencyAssets } = await sharedDependencyState(visible, client, false);
   const deletedSources = await listStudioDeletedSources(actor.id, client);
-  const visibleAssets = await studioVisibleAssetWhere(actor, client);
   const bannerIds = visible.flatMap(row => row.banner_asset_id ? [row.banner_asset_id] : []);
-  const assets = await client.asset.findMany({ where: { id: { in: bannerIds }, status: 'active', type: 'image', AND: [visibleAssets] }, select: { id: true, owner_id: true, width: true, height: true }, orderBy: { id: 'asc' } });
+  let visibleAssets: Prisma.AssetWhereInput | null = null;
+  let assets: Array<{ id: string; owner_id: string; width: number | null; height: number | null }> = [];
+  try {
+    visibleAssets = await studioVisibleAssetWhere(actor, client, bannerIds);
+    assets = await client.asset.findMany({ where: { id: { in: bannerIds }, status: 'active', type: 'image', AND: [visibleAssets] }, select: { id: true, owner_id: true, width: true, height: true }, orderBy: { id: 'asc' } });
+  } catch (error) {
+    // Unknown protection blocks media, never disclosure. Safe catalog text can
+    // still load; each template's actual references are checked by its resolver.
+    if (!(error instanceof StudioAssetProtectionError)) throw error;
+  }
   const byId = new Map(assets.map(asset => [asset.id, asset]));
   const catalogState = [actor.id, actor.role, actor.account_type, actor.feature_profile_id,
     visible.map(row => ({ id: row.id, ownerId: row.owner_id, scope: row.scope, shared: row.is_shared, name: row.name, group: row.group_name,
@@ -1518,7 +1550,7 @@ export async function listSharedStudioCatalog(user: ImageStudioIdentity, options
     let reasonCode: SharedStudioStateProjection['reasonCode'] = null;
     try { definitionToken = (await resolveSharedStudioDefinition(actor, row.id, client)).definition.intent.definitionToken; }
     catch (error) {
-      if (!(error instanceof StudioSharingError) || ![403, 404, 409].includes(error.status)) throw error;
+      if (!(error instanceof StudioSharingError) || ![403, 404, 409].includes(error.status) && error.reasonCode !== 'read-unavailable') throw error;
       available = false; reasonCode = error.reasonCode; definitionToken = error.intent?.definitionToken ?? null;
     }
     const state = projectSharedStudioCapabilities({ objectKind: row.owner_id === actor.id ? 'publisher' : 'live', lifecycle: 'active', sharing: 'shared',

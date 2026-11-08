@@ -30,7 +30,7 @@ export type SharedStudioEntry = {
   isShared: boolean; fixedCover?: ModuleCoverDTO | null; coverEditable?: boolean;
   revision?: string; available: boolean; unavailableReason?: string;
 };
-type SharedModule = { id: string; sharedLive?: Pick<SharedStudioLiveDTO, 'intent' | 'available'> & Partial<SharedStudioLiveDTO> | null };
+type SharedModule = { id: string; revision?: number; sharedLive?: Pick<SharedStudioLiveDTO, 'intent' | 'available'> & Partial<SharedStudioLiveDTO> | null };
 type Catalog = { owner: string; items: SharedStudioEntry[]; revision: string; cursor: string | null; pages: number; ready: boolean };
 class SharedReadError extends Error {
   constructor(public status: number, message: string, public reasonCode?: SharedStudioReasonCode) { super(message); }
@@ -53,7 +53,8 @@ export function useSharedStudio<T extends SharedModule>({ userId, activeModule, 
   const { sessionChanged } = useAppSession();
   const presetId = activeModule?.sharedLive?.intent.presetId || '';
   const moduleId = activeModule?.id || '';
-  const scopeKey = `${userId}:${presetId}:${moduleId}`;
+  const scopeKey = JSON.stringify([userId, presetId, moduleId, activeModule?.revision,
+    activeModule?.sharedLive?.sourceRevision, activeModule?.sharedLive?.intent.definitionToken, activeModule?.sharedLive?.available]);
   const scope = useRef({ key: scopeKey });
   if (scope.current.key !== scopeKey) scope.current = { key: scopeKey };
   const latest = useRef({ activeModule, onDefinition, onUnavailable });

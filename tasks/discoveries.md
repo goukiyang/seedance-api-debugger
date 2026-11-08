@@ -82,12 +82,14 @@ PIN相关原四项处理：135.4/38fc52f已部署目录恢复、本人管理/取
 
 ## 2026-11-08 共享全链路追加审计（SHARE-CHAIN01）
 
-- **D-20261108-SHARE-STATE-ORDER｜已确认缺陷 / P1，待实施。** 实际a50/135.11的共享receiver直接替换；真实React延迟旧读在active props已为8后仍投递7并回退token。已发布共享onSettled又仅写isShared，丢掉真实回执的moduleRevision（示例9/页面8）；两个正常入口足以重现旧版本冲突。修法按同账号/对象的统一确认投影与读取代次，不能只加Math.max、比较hash大小或吞撤权。上轮原文回调修复仍有效，不冒整个共享已闭环。
-- **D-20261108-SHARE-COMMAND-DURABILITY｜已确认恢复缺口 / P2，待实施。** 普通模板定义保存原号只在moduleSaveRequest ref，temporaryDraftPayload无原号，真实React重挂后null。服务器原回执没有丢；未证重复生成/扣费。沿既有耐久命令方式保最小元数据，刷新先查原号，不把私有正文写本机。
-- **D-20261108-SHARE-DEFINITION-STORAGE｜已确认交集缺陷 / P2，待实施。** 严格加密合成库中，作者只读definition返回存储信封，专用private-editor返回同一授权明文，组件直接渲染context。需接既有私有正文授权/解密/脱敏边界；不是生产明文泄漏证明，也不授管理员绕策略的权限。
-- **D-20261108-SHARE-COUPLING-ISOLATION｜结构耦合及已复现风险 / P2，待实施。** 真实rename仅改名、生成正文/参数/参考不变，仍改生成token；无关合成坏复现记录使目录/旧revision整体失败，健康定向读取成功。生产本次17条复现、82binding相关JSON异常0，不冒本轮线上根因。分离展示/生成合同、目录摘要与条目解析，私密保护失败不能被静默忽略。
+- **D-20261108-SHARE-STATE-ORDER｜已确认缺陷 / P1，源码已修，待发布。** 实际a50/135.11的共享receiver直接替换；真实React延迟旧读在active props已为8后仍投递7并回退token。已发布共享onSettled又仅写isShared，丢掉真实回执的moduleRevision（示例9/页面8）；两个正常入口足以重现旧版本冲突。修法按同账号/对象的统一确认投影与读取代次，不能只加Math.max、比较hash大小或吞撤权。上轮原文回调修复仍有效，不冒整个共享已闭环。
+- **D-20261108-SHARE-COMMAND-DURABILITY｜已确认恢复缺口 / P2，源码已修，待发布。** 普通模板定义保存原号只在moduleSaveRequest ref，temporaryDraftPayload无原号，真实React重挂后null。服务器原回执没有丢；未证重复生成/扣费。沿既有耐久命令方式保最小元数据，刷新先查原号，不把私有正文写本机。
+- **D-20261108-SHARE-DEFINITION-STORAGE｜已确认交集缺陷 / P2，源码已修，待发布。** 严格加密合成库中，作者只读definition返回存储信封，专用private-editor返回同一授权明文，组件直接渲染context。需接既有私有正文授权/解密/脱敏边界；不是生产明文泄漏证明，也不授管理员绕策略的权限。
+- **D-20261108-SHARE-COUPLING-ISOLATION｜结构耦合及已复现风险 / P2，源码已修，待发布。** 真实rename仅改名、生成正文/参数/参考不变，仍改生成token；无关合成坏复现记录使目录/旧revision整体失败，健康定向读取成功。生产本次17条复现、82binding相关JSON异常0，不冒本轮线上根因。分离展示/生成合同、目录摘要与条目解析，私密保护失败不能被静默忽略。
 - **D-20261108-SHARE-LEGACY-MATRIX｜兼容范围待核 / P2。** 生产只读有24个带source无新binding工作区、11个共享原件无新publisher映射；82新绑定owner/source匹配且无缺workspace。需分类旧apply/个人副本/历史/现代live，不按名字推断迁移，不批量回填。多人吞吐和逐模板实页未验，不把2秒轮询/32队列上限当人数承诺。
 
 - **D-20261108-SHARE-NAV-NAME｜交集待核线索 / P3。** 飞书导航label读raw workspace.name，共享源改名主要改source.name并增workspace revision。可能与站内实时源名不同；尚未专门验证新/旧受理快照及真实卡片，也未决定使用受理名还是当前名。先对照，不自动改发图或共享范围。
 
 完整证据、边界和整改顺序见[共享全链路审计](../docs/template-sharing-chain-audit-2026-11-08.md)及[原联合单§16.11](todo/2026-11-05-template-sharing-cutout-open-preflight.md)。原17项和完整构建复用，新增三批诊断仅复现新缺口，无生产业务写/收费生成/浏览器验收；上述新增缺陷尚未修改上线。
+
+SHARE-CHAIN-FIX01差量：A01补正普通save父层已有refresh，保护下沉到接收端和scope；R4继续追查发现素材权限全量兼容读取也会受坏行影响，已采用明确错误类型、未知媒体拒绝与条目隔离，未忽略权限。无binding/无publisher旧记录仅加合成读样本，不批量迁移。实际部署与手验仍见原联合单§16.12；飞书命名线索及吞吐未冒已闭环。

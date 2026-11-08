@@ -1,3 +1,4 @@
+import { traceHttpRequest } from '@/lib/performance/request-trace';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { applyStudioPreset, canUseCompanyTemplates, linkStudioQuickPreset, listStudioPresets, manageStudioPreset, saveStudioPreset, setStudioPresetSharing, studioSharingCommandStatus, studioPresetDeletionStatus, studioPresetLifecycleHistory } from '@/lib/image-studio/presets';
@@ -6,6 +7,8 @@ import { StudioTaskSettingsError } from '@/lib/image-studio/task-settings';
 import { StudioStyleError } from '@/lib/image-studio/style-groups';
 import { StudioSharingError, studioParameterCopyStatus } from '@/lib/image-studio/shared-contract';
 import { StudioFixedReferenceError } from '@/lib/image-studio/fixed-references';
+import { PrivatePromptAccessError } from '@/lib/security/private-prompt-identity.server';
+import { PrivatePromptError } from '@/lib/security/private-prompts.server';
 import { StudioReferencePolicyError } from '@/lib/image-studio/reference-policy';
 import { ModuleCoverError } from '@/lib/image-studio/module-cover';
 import { listAdminStudioDefinitionDirectory, readStudioTemplateAuthorContact, readStudioTemplateDefinition,
@@ -14,6 +17,7 @@ import { listAdminStudioDefinitionDirectory, readStudioTemplateAuthorContact, re
 export const dynamic = 'force-dynamic';
 const privateHeaders = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
 export async function GET(request: NextRequest) {
+  return traceHttpRequest('studio.presets', request.headers, async () => {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录', reasonCode: 'login-required' }, { status: 401, headers: privateHeaders });
   if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限公司飞书账号使用共享模板', reasonCode: 'access-revoked' }, { status: 403, headers: privateHeaders });
@@ -48,13 +52,16 @@ export async function GET(request: NextRequest) {
     if (mode) return NextResponse.json({ error: '模板读取方式无效' }, { status: 400, headers: privateHeaders });
     return NextResponse.json({ presets: await listStudioPresets(user, moduleId, presetId) }, { headers: privateHeaders });
   } catch (error) {
+    if (error instanceof PrivatePromptAccessError || error instanceof PrivatePromptError) return NextResponse.json({ error: error.message, reasonCode: 'access-revoked' }, { status: error.status, headers: privateHeaders });
     if (error instanceof StudioTaskSettingsError) return NextResponse.json({ error: error.message, reasonCode: 'state-conflict' }, { status: error.status, headers: privateHeaders });
     if (error instanceof StudioModuleError || error instanceof StudioStyleError || error instanceof StudioSharingError || error instanceof StudioFixedReferenceError || error instanceof StudioReferencePolicyError || error instanceof ModuleCoverError || error instanceof StudioDefinitionReadError) return NextResponse.json({ error: error.message, reasonCode: error instanceof StudioSharingError || error instanceof StudioDefinitionReadError ? error.reasonCode : 'state-conflict',
       ...(error instanceof StudioModuleError && error.commandOutcome ? { commandOutcome: error.commandOutcome } : {}) }, { status: error.status, headers: privateHeaders });
     return NextResponse.json({ error: '模板读取失败，请重试', reasonCode: 'read-unavailable' }, { status: 503, headers: privateHeaders });
   }
+  });
 }
 export async function POST(request: NextRequest) {
+  return traceHttpRequest('studio.presets', request.headers, async () => {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录', reasonCode: 'login-required' }, { status: 401, headers: privateHeaders });
   if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限公司飞书账号使用共享模板', reasonCode: 'access-revoked' }, { status: 403, headers: privateHeaders });
@@ -81,4 +88,5 @@ export async function POST(request: NextRequest) {
       ...(error instanceof StudioModuleError && error.commandOutcome ? { commandOutcome: error.commandOutcome } : {}) }, { status: error.status, headers: privateHeaders });
     return NextResponse.json({ error: '模板操作结果未确认，请保留原请求编号查询', reasonCode: 'read-unavailable' }, { status: 503, headers: privateHeaders });
   }
+  });
 }
