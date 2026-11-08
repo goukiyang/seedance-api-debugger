@@ -1,0 +1,42 @@
+import assert from 'node:assert/strict';
+import { defaults, generateBatch, refreshBoss, required, changeRow, missingRequired, bossRow, textFor, csvFor, parseSettings, CONFIG } from '../src/lib/character-fusion/engine';
+
+const settings = defaults();
+settings.rules.source.find(t => t.label === '动物')!.status = 'exclude';
+settings.rules.source.find(t => t.label === '植物')!.status = 'must';
+settings.rules.mechanism[0].status = 'must';
+settings.rules.equipment[0].status = 'must';
+settings.bossLocks.concept = true;
+for (let seed = 1; seed <= 32; seed++) {
+  const rows = generateBatch(settings, seed);
+  assert.equal(rows.length, 16);
+  assert(rows.every(r => r.category.source !== '动物'));
+  for (const c of CONFIG) for (const label of required(settings, c.id)) assert(rows.some(r => r.category[c.id] === label));
+  assert.equal(new Set(rows.map(r => r.category.source)).size, 11);
+  assert.equal(new Set(rows.map(r => r.name)).size, 16);
+  assert.equal(refreshBoss(settings, () => .8).boss.concept, settings.boss.concept);
+  assert.equal(refreshBoss(settings, () => .8).boss.equipment, settings.boss.equipment);
+  assert.deepEqual(missingRequired(settings, changeRow(settings, rows, rows[0].id, undefined, seed + 999)), []);
+}
+const restored = parseSettings(JSON.parse(JSON.stringify(settings)));
+assert.equal(restored.bossLocks.concept, true);
+const singleton = defaults();
+for (const c of CONFIG) singleton.rules[c.id] = [{ label: c.tags[0], status: 'must' }];
+const rows = generateBatch(singleton, 99);
+assert.equal(new Set(rows.map(r => r.name)).size, 16);
+assert(rows.some(r => r.category.equipment === singleton.rules.equipment[0].label));
+const before = generateBatch(defaults(), 6);
+const changed = changeRow(defaults(), before, before[0].id, { dimension: 'personality', value: '温柔保护型' }, 150)[0];
+assert.deepEqual(changed.source, before[0].source); assert.deepEqual(changed.concept, before[0].concept); assert.deepEqual(changed.mechanism, before[0].mechanism); assert.deepEqual(changed.detail, before[0].detail);
+const bossSettings = defaults(); bossSettings.bossLocks.source = true;
+assert.equal(refreshBoss(bossSettings, () => .5).boss.source, bossSettings.boss.source);
+assert.equal(bossRow(bossSettings, [], 88).category.source, bossSettings.boss.source);
+singleton.requirements = '全局要求测试';
+assert(textFor(rows[0], singleton).includes('全局要求测试'));
+assert(csvFor([{ ...rows[0], name: '=1+1' }], singleton).includes('"\'=1+1"'));
+assert(!/[\u3400-\u9fff]/.test(textFor(rows[0], { requirements: defaults().requirements, lang: 'en' })));
+const invalid = defaults(); invalid.rules.source.forEach(t => { t.status = 'exclude'; });
+assert.throws(() => generateBatch(invalid), /全部排除/);
+const capacity = defaults(); capacity.count = 4; capacity.rules.source.slice(0, 5).forEach(t => { t.status = 'must'; });
+assert.throws(() => generateBatch(capacity), /超过/);
+console.log('PASS: 32 batches; exclusions, required coverage, locks, domain diversity, unique names, single-dimension preservation, recipe roundtrip and validation. No model/network/database calls.');
