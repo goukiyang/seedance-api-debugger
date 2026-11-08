@@ -186,9 +186,21 @@ Git：沿原独立分支实施，发布前精确继承当次实发135.9/9d61后�
 <!-- FUSION-MENU01-20261108 -->
 ## MENU01 顶部工具下拉入口（2026-11-08）
 
-用户追加：把角色融合提示词放入顶部工具栏的工具下拉菜单，保页面现有广场侧栏。已核ComposerTopbar实际渲染ToolsMenu，后者独立手写五工具而遗漏角色融合；navigation的工具组与顶部归属匹配已包含该路由。
+**已部署v0.135.12，待用户手动验收。** 顶部「工具 → 角色融合提示词」，进入[角色融合工作台](https://sd2.youdooart.com/tools/character-fusion)，页面内现有广场侧栏保留。
 
-修正只改ToolsMenu：导入userNavGroups并读取唯一“工具”组，再沿原isNavItemVisible过滤。原五项顺序/权限、点击关闭与手机原入口保持；顶部与侧栏不再维护两份条目清单。无页面/业务/数据/费用变更。独立提交d8992209e930ec01e78a041d8fca166c2ce1466d，单文件lint无警告/错误与diff检查通过；不为导航链接新增测试或运行浏览器功能验收。
+根因与修法：ComposerTopbar实际渲染ToolsMenu，后者独立手写五工具而遗漏角色融合；navigation的唯一工具组与顶部归属匹配已包含路由。仅将ToolsMenu改为读取userNavGroups的工具组，沿原isNavItemVisible过滤。原工具的顺序/权限、点击关闭与手机入口保持；顶部与侧栏共用条目清单，无API、业务、数据、费用或配方改变。
 
-**本追加尚未上线。** 当前实发135.10/008保持；15的135.11已冻结并开构建，不插入。独立小提交已交6协调后继继承，若其大包需久则申请15后的独立小修窗；当前未占Next或生产写。发布后补实际版本、入口加载及健康证据；原角色融合UX02交付不因此撤销。本轮未新增范围外业务问题。
+Git与范围：原代码独立提交d8992209e930ec01e78a041d8fca166c2ce1466d已推。6在135.11完成后明确临时交出唯一构建/发布窗；新隔离工作区character-fusion-topmenu-20261108从实际a50be1b6a131dd93351f68e66cd4981c87f4089d建立，bba3574f2接同字节菜单，a9dc355e797f03f0426c694bf825c37c8c228b84配套135.12版本/通知，合计严格4文件。完整保135.11共享热修；发布分支origin/codex/character-fusion-topmenu-20261108已推并核远端一致，没有改原脏档或其它候选。
+
+工程：原单文件lint无警告/错误与diff检查通过；最终源fresh native/计价/model-access、完整Next（含全量types/lint）通过。新工作区CodeGraph 18:11:20Z覆盖1984源码，零pending/hash差异/解析错误；精确ToolsMenu结构查询与实际源一致。此前原工作区两次索引失败保留为过程，当前发布源已接齐。未新增导航链接测试、运行浏览器、真实模型、收费生成或功能回归验收。
+
+实发：source a9dc355e797f03f0426c694bf825c37c8c228b84，BUILD xmR-TDTilrFAKvwuTDUWn；stage /data/video-api-debugger/release-staging/character-fusion-topmenu-20261108/attempt01，pair ae9b84fb-b385-48d0-a391-f87a058072e8。cutover0，无恢复；18:18:42Z公网版本/实际7服务cwd匹配，清单派生layout-460a74daa54fb6cd.js公网200并与成品SHA 9f2162b481d4f7d58f7972b4c5c30b01c790888ba7b40b1e66e8cbb6bd14e2e8相同；18:19:06Z内外健康200、7服务4timer及无发布控制器有证，6个实际启动门通过。工程与公网加载不冒用户点开后的功能效果。
+
+保护与接续：价格两行全字段SHA d03c539d74a31b5e2a6a0305724b1b9f193e0ade878370898c7632d1bdc96539、私有策略和数据链接保持。自然排空writer、配置备份和一致DB备份quick_check通过；无DDL、生产数据恢复或历史重写。固定相容回退仍bbeb854c82e47650ba3ea703f1918800af96881b /bQTt2tX_GFRrdmNPmYcpf，原16:31:10Z完整构建及1491编译文件逐字节复用，不重建/改时。沿用本stage program-recovery.sh release-input.json，绑定本次stage和a50基线，语法检查通过，保业务DB/媒体/账本/回执；未做恢复演练，不使用旧F0/77。必要原证在同stage的main-build-success.json、source-pair-contract.json、public-deployed.json、service-health.json、database-protected.json与guard-build-reuse.json，未下载或提交env/DB/buildEnv/价格原行。
+
+构建/发布窗已于健康收口后交回6，并交实际source/BUILD供后继完整继承；本任务此后只文档收口，不再占Next或生产写。顶部菜单可见、点开进入及手机效果待用户手验。本轮未新增范围外业务问题。
 <!-- /FUSION-MENU01-20261108 -->
+
+菜单追加的索引接续：准备入口首次因记录提交切换HEAD、再次因git ls-files扫描30秒超时而未成功，未复用旧结果冒当前索引；ToolsMenu→navigation→合法页面的局部关系已按实际源码核对。未因辅助索引卡点重复工程检查或阻断入口提交。
+
+MENU01索引后续：新隔离工作区a9dc355e797f03f0426c694bf825c37c8c228b84于18:11:20Z准备成功，1984源码、零pending/hash差异/解析错误；精确ToolsMenu结构查询返回当前共享目录读取与原过滤/关闭主体，已回实际源码核对。前述旧工作区两次失败保留为过程，不再是当前发布源的索引缺口。

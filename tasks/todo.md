@@ -1203,5 +1203,5 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 <!-- FUSION-MENU01-TODO-20261108 -->
 ## FUSION-MENU01 顶部工具下拉入口（2026-11-08）
 
-已实现，待后继发布。独立d8992209e，仅ToolsMenu 2增2删，复用navigation既有工具组，角色融合与原五工具同权限/顺序进入顶部菜单；局部lint/diff通过。当前线上135.10尚不含该追加；15的135.11已冻结，正在与6协调下个可用候选/窗口，不插运行中包。原单：[MENU01](todo/2026-11-08-character-fusion.md#menu01-顶部工具下拉入口2026-11-08)。
+**已部署v0.135.12，待用户手验。** 顶部「工具 → 角色融合提示词」，页面现有广场侧栏保留。ToolsMenu共用navigation工具组，原过滤/顺序/关闭行为保持；原d899同字节继承，基于实际135.11/a50，仅菜单+版本4文件，实发a9dc355e797f03f0426c694bf825c37c8c228b84 /xmR-TDTilrFAKvwuTDUWn。fresh工程门/完整Next typeslint、6启动、7服务4timer、公网layoutJS同SHA与内外健康通过，cutover0；bbeb相容回退/价格/数据保护保持。窗口已交回6，未运行浏览器或功能验收。原单：[MENU01](todo/2026-11-08-character-fusion.md#menu01-顶部工具下拉入口2026-11-08)。
 <!-- /FUSION-MENU01-TODO-20261108 -->
