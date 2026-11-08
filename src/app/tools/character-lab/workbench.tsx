@@ -38,8 +38,13 @@ export function CharacterLabWorkbench(p: Props) {
   const [prompt, setPrompt] = useState<'current' | 'next' | null>(null);
   const [promptReference, setPromptReference] = useState<CharacterLabReference | undefined>();
   const [undo, setUndo] = useState<Pick<CharacterLabDraft, 'mainFace' | 'views'> | null>(null);
-  const positionRef = useRef(position);
+  const positionRef = useRef(position), promptTrigger = useRef<HTMLElement | null>(null);
   positionRef.current = position;
+  function showPrompt(tab: 'current' | 'next', reference?: CharacterLabReference) {
+    promptTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setPromptReference(reference); setPrompt(tab);
+    requestAnimationFrame(() => document.getElementById('character-recipe-panel')?.scrollIntoView({ block: 'start' }));
+  }
   useEffect(() => {
     try {
       const value = JSON.parse(localStorage.getItem(positionKey) || 'null');
@@ -135,14 +140,14 @@ export function CharacterLabWorkbench(p: Props) {
       </section>
     </aside>;
   const previewPanel = <section className={styles.adoptedCanvas}>
-        <header><div><h2>{position.part === 'overview' ? '成品预览' : `当前采用 · ${titles[part]}`}</h2>{position.part !== 'overview' && <span>{current ? `第${numbers.get(current.planId)}组${current.cell === undefined ? '' : ` · 候选${current.cell + 1}`}` : '尚未采用'}</span>}</div><div>{position.part !== 'overview' && current && <button type="button" onClick={() => { setPromptReference(current); setPrompt('current'); }}>采用图提示词</button>}{undo && <button type="button" disabled={p.locked} onClick={() => { p.onUpdate(undo); setUndo(null); }}><Undo2 size={14} />撤销采用</button>}{position.part !== 'overview' && <button type="button" disabled={p.locked} onClick={() => change('overview')}>查看整张</button>}</div></header>
+        <header><div><h2>{position.part === 'overview' ? '成品预览' : `当前采用 · ${titles[part]}`}</h2>{position.part !== 'overview' && <span>{current ? `第${numbers.get(current.planId)}组${current.cell === undefined ? '' : ` · 候选${current.cell + 1}`}` : '尚未采用'}</span>}</div><div>{position.part !== 'overview' && current && <button type="button" onClick={() => showPrompt('current', current)}>采用图提示词</button>}{undo && <button type="button" disabled={p.locked} onClick={() => { p.onUpdate(undo); setUndo(null); }}><Undo2 size={14} />撤销采用</button>}{position.part !== 'overview' && <button type="button" disabled={p.locked} onClick={() => change('overview')}>查看整张</button>}</div></header>
         <div className={styles.adoptedViewport}>{position.part === 'overview' ? composition() : current ? <div className={styles.currentImage} data-body={part === 'body'}>{picture(current, `已采用${titles[part]}`)}<button type="button" className={styles.enlarge} onClick={() => p.onPreview(media(current), `已采用${titles[part]}`)} aria-label="放大当前采用"><Maximize2 size={16} /></button></div> : <button type="button" className={styles.emptyCanvas} onClick={() => document.getElementById('character-supplement')?.focus()}><ImagePlus size={34} /><strong>制作{titles[part]}</strong><span>在制作栏补充要求，生成后挑选采用</span></button>}</div>
         {position.part !== 'overview' && current && <div className={styles.canvasToolbar}><button type="button" disabled={p.locked || stale(currentPlan)} onClick={() => change(part, current, current.planId, true)}>基于当前采用继续微调</button><a href={media(current) + '&download=1'} download={`${titles[part]}.png`}><Download size={15} />下载这张</a>{stale(currentPlan) && <span>正脸已更换，侧脸需同步</span>}</div>}
       </section>;
   const editorPanel = <aside className={styles.candidateEditor}>
         <nav className={styles.generationTabs} aria-label="制作部位">{(['faces', 'side', 'body'] as const).map(target => <button type="button" key={target} aria-pressed={part === target} disabled={p.locked} onClick={() => change(target)}>{titles[target]}</button>)}</nav>
         <section className={styles.candidateSection}><header><h2>{part === 'body' ? '正背面候选' : shown ? `${shown.count === 9 && characterLabIsGrid(shown) ? '九' : characterLabIsGrid(shown) ? '四' : '单张'}选一 · ${titles[part]}` : `${titles[part]}候选`}</h2><button type="button" onClick={p.onQuery} aria-label="查询生成状态"><RefreshCw size={15} /></button></header>
-          <div className={styles.batchToolbar}><span>{shown ? `第${numbers.get(shown.id)}组` : '还没有候选'}</span>{shown && <><button type="button" onClick={() => { setPromptReference(shown ? { planId: shown.id } : undefined); setPrompt('current'); }}>本批提示词</button><button type="button" aria-label="放大本批候选" onClick={() => p.onPreview(characterLabMediaUrl(shown.id), '本批候选')}><Maximize2 size={14} /></button></>}{shown && p.tasks[shown.id] && <ImageResultStatusDetails active={!p.locked} scopeKey={`${p.ownerId}:${p.workspace.id}:${shown.id}:batch-status`} label="查看本批状态与来源" heading="本批状态与来源"><p>{statuses[p.tasks[shown.id]!.status] || '状态待确认'}{p.tasks[shown.id]!.error && ` · ${p.tasks[shown.id]!.error}`}</p><ImageFeishuStatus owner={p.ownerId} taskId={p.tasks[shown.id]!.id} presentationLabel="本批生成" /></ImageResultStatusDetails>}</div>
+          <div className={styles.batchToolbar}><span>{shown ? `第${numbers.get(shown.id)}组` : '还没有候选'}</span>{shown && <><button type="button" onClick={() => showPrompt('current', shown ? { planId: shown.id } : undefined)}>本批提示词</button><button type="button" aria-label="放大本批候选" onClick={() => p.onPreview(characterLabMediaUrl(shown.id), '本批候选')}><Maximize2 size={14} /></button></>}{shown && p.tasks[shown.id] && <ImageResultStatusDetails active={!p.locked} scopeKey={`${p.ownerId}:${p.workspace.id}:${shown.id}:batch-status`} label="查看本批状态与来源" heading="本批状态与来源"><p>{statuses[p.tasks[shown.id]!.status] || '状态待确认'}{p.tasks[shown.id]!.error && ` · ${p.tasks[shown.id]!.error}`}</p><ImageFeishuStatus owner={p.ownerId} taskId={p.tasks[shown.id]!.id} presentationLabel="本批生成" /></ImageResultStatusDetails>}</div>
           {generationStatus && <p role="status" className={styles.inlineStatus}>{generationStatus}</p>}
           {shown ? <div className={styles.unifiedCandidates} data-columns={part === 'body' || !characterLabIsGrid(shown) ? 1 : shown.count === 9 ? 3 : 2}>{Array.from({ length: part === 'body' || !characterLabIsGrid(shown) ? 1 : shown.count }, (_, index) => {
             const ref = { planId: shown.id, ...(characterLabIsGrid(shown) ? { cell: index } : {}) };
@@ -153,7 +158,7 @@ export function CharacterLabWorkbench(p: Props) {
         <section className={styles.inlineEditor}>
           <div className={styles.editingBase}><div><strong>{validBase && base ? `基于第${numbers.get(base.planId)}组${base.cell === undefined ? '整组' : ` · 候选${base.cell + 1}`}` : part === 'side' ? '基于当前采用的正脸' : '基于原始角色'}</strong><small>{base && stale(basePlan) ? '属于旧正脸，改用当前正脸重新生成' : selectedIsAdopted ? '已用于当前成品' : validBase ? '选中作为编辑底图，尚未采用' : '生成新的候选'}</small></div>{base && <button type="button" disabled={p.locked} onClick={() => change(part, undefined, undefined, true)}>从参考重新生成</button>}</div>
           <button type="button" className={!hasNewText && validBase && !selectedIsAdopted ? styles.primary : styles.outline} disabled={p.locked || !validBase || selectedIsAdopted} onClick={adopt}>{selectedIsAdopted ? <><Check size={14} />已采用</> : part === 'body' ? '采用这组正背面' : '采用选中候选'}</button>
-          <div className={styles.nextSettings}>{part !== 'body' ? <fieldset disabled={p.locked}><legend>下次生成</legend>{([4, 9] as const).map(count => <button key={count} type="button" aria-pressed={p.draft.count === count} onClick={() => p.onUpdate({ count })}>{count}宫格</button>)}</fieldset> : <span>下次生成：正背面同组</span>}<button type="button" onClick={() => { setPromptReference(undefined); setPrompt('next'); }}>提示词设置</button></div>
+          <div className={styles.nextSettings}>{part !== 'body' ? <fieldset disabled={p.locked}><legend>下次生成</legend>{([4, 9] as const).map(count => <button key={count} type="button" aria-pressed={p.draft.count === count} onClick={() => p.onUpdate({ count })}>{count}宫格</button>)}</fieldset> : <span>下次生成：正背面同组</span>}<button type="button" onClick={() => showPrompt('next')}>提示词设置</button></div>
           {part === 'faces' && !validBase && <label className={styles.sliderLabel}><span>面部变化 <b>{characterLabStrength(p.draft.diversity)}</b></span><input type="range" min={0} max={100} value={p.draft.diversity} disabled={p.locked} onChange={event => p.onUpdate({ diversity: Number(event.target.value) })} /></label>}
           {p.settings}
           <label className={styles.field}><span>{titles[part]}{validBase ? '微调要求' : '补充要求'}</span><textarea id="character-supplement" rows={3} maxLength={3000} disabled={p.locked} value={text} placeholder={part === 'body' ? '例如：保留原图比例，调整肩甲和背部服装细节' : part === 'side' ? '例如：略收下颌，保留正脸的鼻唇轮廓与发型' : '例如：眼距略窄一点，保留骨相和年龄感'} onChange={event => { const value = event.target.value; p.onUpdate({ [fields[part]]: value }); setPosition(old => ({ ...old, texts: { ...old.texts, [referenceKey(part, old.bases[part])]: value } })); }} /></label>
@@ -162,7 +167,7 @@ export function CharacterLabWorkbench(p: Props) {
           {part === 'body' && <span className={styles.editHint}>以原图决定身体比例和服装，正背面一起生成、一起采用。</span>}
           {relatedPending && <p role="status" className={styles.inlineStatus}>本部位已有{statuses[p.tasks[p.pending.find(id => p.plans.some(plan => plan.id === id && partOf(plan) === part)) || '']?.status || ''] || '结果待核对'}的请求，可在候选区查询进度。</p>}
         </section>
-    {prompt && <CharacterLabPromptPanel ownerId={p.ownerId} workspaceId={p.workspace.id} title={titles[part]} reference={promptReference || base || (shown ? { planId: shown.id } : undefined)} tab={prompt} onTab={setPrompt} onClose={() => setPrompt(null)} isAdmin={p.isAdmin} disabled={p.locked}
+    {prompt && <CharacterLabPromptPanel ownerId={p.ownerId} workspaceId={p.workspace.id} title={titles[part]} reference={promptReference || base || (shown ? { planId: shown.id } : undefined)} tab={prompt} onTab={setPrompt} onClose={() => { setPrompt(null); requestAnimationFrame(() => (promptTrigger.current?.isConnected ? promptTrigger.current : document.getElementById('character-supplement'))?.focus()); }} isAdmin={p.isAdmin} disabled={p.locked}
       previewPayload={{ action: 'preview-prompt', contextProtocol: 1, layoutProtocol: 1, workspaceId: p.workspace.id, kind: operation === 'refine-face' || operation === 'refine-side' || !operation ? 'faces' : 'result', operation, input: validBase ? base : undefined, draft: p.draft, description: text }}
       escapeEnabled onBrowse={id => { const plan = p.plans.find(item => item.id === id); if (plan) browse(plan); }}
       onRestore={p.onRestore} onReproduce={async id => { const captured = positionRef.current; const generated = await p.onReproduce(id); if (generated && positionRef.current === captured) setPosition(old => ({ ...old, batches: { ...old.batches, [part]: generated } })); }} onRestorePersonal={(plan, value) => { const target = partOf(plan); if (target !== part) return false; p.onUpdate({ ...labPersonalFields(plan), [fields[part]]: value }); setPosition(old => ({ ...old, texts: { ...old.texts, [referenceKey(part, base)]: value } })); return true; }}
@@ -176,7 +181,7 @@ export function CharacterLabWorkbench(p: Props) {
       const target = partOf(plan);
       if (target === 'legacy' || plan.sourceAssetId !== p.draft.sourceAssetId) { p.onLegacy(plan); return; }
       change(target, target === 'body' ? { planId: reference.planId } : reference, plan.id, true);
-      setPromptReference(reference); setPrompt('current');
+      showPrompt('current', reference);
     })}
   </aside>;
   return <CharacterLabLayout ownerId={p.ownerId} panels={{ materials: materialsPanel, preview: previewPanel, editor: editorPanel }} />;
