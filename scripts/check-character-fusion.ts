@@ -35,7 +35,7 @@ singleton.requirements = '全局要求测试';
 assert(textFor(rows[0], singleton).includes('全局要求测试'));
 assert(csvFor([{ ...rows[0], name: '=1+1' }], singleton).includes('"\'=1+1"'));
 assert(rows.every(row => !/[\u3400-\u9fff]/.test(textFor(row, { requirements: defaults().requirements, lang: 'en' }))));
-const bilingualRow = { ...rows[0], detail: { ...rows[0].detail, equipment: '反向雨伞盾' } };
+const bilingualRow = { ...rows[0], category: { ...rows[0].category, equipment: '防护装备类' }, detail: { ...rows[0].detail, equipment: '反向雨伞盾' } };
 assert(textFor(bilingualRow, { requirements: defaults().requirements, lang: 'en' }).includes('reverse umbrella shield'));
 bilingualRow.detail.equipment = '能反扣为浮力救生舱的肩盾';
 assert(textFor(bilingualRow, { requirements: defaults().requirements, lang: 'en' }).includes('flotation rescue capsule'));
