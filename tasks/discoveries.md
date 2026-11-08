@@ -82,7 +82,7 @@ PIN相关原四项处理：135.4/38fc52f已部署目录恢复、本人管理/取
 
 ## 2026-11-08 共享全链路追加审计（SHARE-CHAIN01）
 
-- **D-20261108-SHARE-STATE-ORDER｜已确认缺陷 / P1，源码已修，待发布。** 实际a50/135.11的共享receiver直接替换；真实React延迟旧读在active props已为8后仍投递7并回退token。已发布共享onSettled又仅写isShared，丢掉真实回执的moduleRevision（示例9/页面8）；两个正常入口足以重现旧版本冲突。修法按同账号/对象的统一确认投影与读取代次，不能只加Math.max、比较hash大小或吞撤权。上轮原文回调修复仍有效，不冒整个共享已闭环。
+- **D-20261108-SHARE-STATE-ORDER｜已确认缺陷 / P1，源码已修，待发布。** 实际a50/135.11的共享receiver直接替换；真实React延迟旧读在active props已为8后仍投递7并回退token。已发布共享onSettled又仅写isShared，丢掉真实回执的moduleRevision（示例9/页面8）；接收端隔离复现成立；普通save父层原已有refresh，不能断言该完整路径必然回退。修法按同账号/对象的统一确认投影与读取代次，不能只加Math.max、比较hash大小或吞撤权。上轮原文回调修复仍有效，不冒整个共享已闭环。
 - **D-20261108-SHARE-COMMAND-DURABILITY｜已确认恢复缺口 / P2，源码已修，待发布。** 普通模板定义保存原号只在moduleSaveRequest ref，temporaryDraftPayload无原号，真实React重挂后null。服务器原回执没有丢；未证重复生成/扣费。沿既有耐久命令方式保最小元数据，刷新先查原号，不把私有正文写本机。
 - **D-20261108-SHARE-DEFINITION-STORAGE｜已确认交集缺陷 / P2，源码已修，待发布。** 严格加密合成库中，作者只读definition返回存储信封，专用private-editor返回同一授权明文，组件直接渲染context。需接既有私有正文授权/解密/脱敏边界；不是生产明文泄漏证明，也不授管理员绕策略的权限。
 - **D-20261108-SHARE-COUPLING-ISOLATION｜结构耦合及已复现风险 / P2，源码已修，待发布。** 真实rename仅改名、生成正文/参数/参考不变，仍改生成token；无关合成坏复现记录使目录/旧revision整体失败，健康定向读取成功。生产本次17条复现、82binding相关JSON异常0，不冒本轮线上根因。分离展示/生成合同、目录摘要与条目解析，私密保护失败不能被静默忽略。
