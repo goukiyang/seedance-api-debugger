@@ -1,4 +1,5 @@
 'use client';
+import { usePricingModelAvailability } from '@/lib/pricing/use-model-availability';
 
 import { useProductDialog } from '@/components/useProductDialog';
 import { ContextClipboardActions } from '@/components/ContextClipboardActions';
@@ -7,7 +8,7 @@ import { GenerationCompletionSettings } from '@/components/GenerationCompletion'
 import { useEffect, useId, useRef, useState, type ComponentProps } from 'react';
 import { RefreshCw, Save, X } from 'lucide-react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
-import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_NEW_REQUEST_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS,
+import { IMAGE_STUDIO_NEW_REQUEST_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS,
   IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, IMAGE_STUDIO_QUALITY_LABELS, defaultImageResolution, defaultImageStudioQuality,
   imageStudioNewQualityOptions, imageStudioQualityLabel, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import { MAX_REFERENCE_IMAGES } from '@/lib/image-studio/limits';
@@ -20,12 +21,14 @@ import { useResolutionApply } from './use-resolution-apply';
 import { ResolutionApplyPanel } from './resolution-apply-panel';
 import type { ResolutionDelta } from '@/lib/image-studio/resolution-apply-types';
 import { PrivateDefinitionEditor } from './PrivateDefinitionEditor';
+import { StudioGlobalPricingRules } from './global-pricing-rules';
 
 export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, canEdit, ratios, getExcluded, onDeltas }: {
   open: boolean; onClose: () => void; editor: ReturnType<typeof useStudioSettings>; ownerId: string; canEdit: boolean;
   ratios: Pick<ComponentProps<typeof RatioPicker>, 'custom' | 'busy' | 'error' | 'onRetry' | 'onCustom'>;
   getExcluded: () => string[]; onDeltas: (deltas: ResolutionDelta[]) => void;
 }) {
+  const { isAvailable: modelAvailable, reason: modelAvailabilityReason } = usePricingModelAvailability();
   const { confirm, productDialog } = useProductDialog();
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -130,14 +133,14 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
         </div>
         <div className={styles.modelQualityRow}>
           <label className={styles.compactField}><strong>生成模型</strong>
-            <select value={defaults.model} disabled={!canEdit || editor.loading} onChange={event => {
+            <select value={modelAvailable('image', defaults.model) ? defaults.model : ''} disabled={!canEdit || editor.loading} onChange={event => {
               const model = event.target.value as ImageStudioModel;
               const replacesLegacyBanana = defaults.model === 'gemini-3.1-flash-image-preview' && model === 'gemini-nano-banana-2.1';
               editor.controller.editTemplateDefaults(replacesLegacyBanana ? { model }
                 : { model, quality: defaultImageStudioQuality(model), resolution: defaultImageResolution(model) });
             }}>
-              {defaults.model === 'gemini-3.1-flash-image-preview' && <option value={defaults.model} disabled>{IMAGE_STUDIO_MODEL_LABELS[defaults.model]}</option>}
-              {IMAGE_STUDIO_NEW_REQUEST_MODELS.map(model => {
+              <option value="" disabled>{modelAvailabilityReason || "请选择已开放模型"}</option>
+              {IMAGE_STUDIO_NEW_REQUEST_MODELS.filter(model => modelAvailable('image', model)).map(model => {
                 const ready = editor.settings?.modelReady?.[model] ?? editor.settings?.providerReady;
                 return <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model]}{ready === false ? '（服务未就绪）' : ''}</option>;
               })}
@@ -181,13 +184,7 @@ export function StudioGlobalSettingsDialog({ open, onClose, editor, ownerId, can
         {selectedModelReady === false && <p className={styles.muted}>所选模型的图片服务当前未就绪；这里仍可保存默认值，服务就绪后再使用。</p>}
         {conflictFields('templateDefaults')}
       </section>
-      <p className={styles.label}>通用模型积分规则</p>
-      {IMAGE_STUDIO_MODELS.map(model => <label className={styles.label} key={model}>{IMAGE_STUDIO_MODEL_LABELS[model]} 每张积分
-        <input type="number" min={0} max={100000} step={1} disabled={!canEdit || editor.loading}
-          placeholder={model === 'gemini-3-pro-image-preview' ? '未设置' : '20'} value={editor.draft?.prices[model] ?? ''}
-          onChange={event => { if (canEdit) editor.controller.editPrice(model, event.target.value === '' ? null : Number(event.target.value)); }} />
-      </label>)}
-      {conflictFields('prices')}
+      <StudioGlobalPricingRules key={ownerId} open={open} ownerId={ownerId} />
       <button type="button" className={styles.primary} disabled={!canEdit || editor.conflicts.length > 0 || (batch.scope ? !batch.canCommit || batch.busy : !editor.dirty) || editor.loading || editor.saving || batch.writing || ratios.busy || ratioEditing} onClick={save}><Save size={16} />{editor.saving || batch.writing ? '正在保存或应用' : batch.scope ? '保存并应用分辨率' : '保存设置'}</button>
     </>}
     <p role="status">{editor.status || '正在读取通用设置'}</p>

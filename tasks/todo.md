@@ -9,6 +9,11 @@
 
 已部署v0.134.24，待用户手动验收。应用74b6f09d1／BUILD -kbbpJwQu6tLhRpQH2wRj，于洛杉矶2026-11-07 11:45收口；仅一份首页CSS和三版本文件。最近项目保持单排，卡片高112px/宽最多280px、封面80px，单项目不铺满，手机横向浏览；标题/时间/原入口保留，骨架同高。CSS解析、完整工程/计价/Next含类型、启动/服务、实际CSS公网字节与健康通过；原guard及23刷新证据复用，无价格/权限/数据变化或回退。详细原单§28.1与原证留正式工作区私有，本轮未新增范围外问题。
 <!-- /HOME-PROJECT-HEIGHT01-PUBLIC-20261107 -->
+<!-- BR-DIAG01-20261108 -->
+## BR-DIAG01 生产桥诊断修复
+
+[原单](todo/2026-11-08-bridge-diag-rootcause.md)：网站0.134.30候选，继承实际0.134.29。上传票据按原键/nonce有界恢复，持续繁忙返回清楚503；16项隔离工程通过，完整构建与上线待完成。扩展修复独立交付0.6.25；不混用版本，不改schema或生产数据。
+<!-- /BR-DIAG01-20261108 -->
 
 <!-- HOME-WORKS01-PUBLIC-20261107 -->
 ## HOME-WORKS01 创作首页与广场合并
@@ -1162,6 +1167,38 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 <!-- SHARE-COLLEAGUE01-20261107 -->
 ### SHARE-COLLEAGUE01 同事共享模板打开与正常风格生成
 
-已部署v0.134.21 / bb1e2a8a5 / qk3KkN_2IPMDDo88rP3HW，待用户手动验收。原共享单§16.3/16.4：20恢复空live工作区打开、正常风格选择及明确拒绝回执；21补统一默认模板编号、私密任务来源/原冻结快照跨加载，并新构建相容guard a3eb7d518 / LmuG-gXhGygd9yW5-bBSt。全库42模板和41工作区来源编号新规则拒0、旧拒1；真实生产两模块四字段保持。独立main/guard native/pricing/Next/types/lint、6启动门、7服务4timer、1公网JS/3匿名401与health200，价格8f4不变，无本轮生成或收费。21首轮聚合依赖登记漏项已修且原失败保持；源码与配置无新schema，回退只回程序不回数据。用户追加同类排查：API漏StudioStyleError、worker/provider私密错误单模块识别继续补；旧截图原号归属、视频现场和同事功能手验缺口保持，不自动结束或重发。资料docs/materials/2026-11-07-template-sharing-generation/attempt02；新范围外CPU线索已登记D-20261107-SHARED-CPU。
-同类尾批v22按原单§16.5接续：明确风格/提示词错误回执与跨加载私密错误识别；原21已健康，待小批构建和保护发布。
+已部署v0.134.22 / 9a116be26 / a11zrypusif8s0CqQWHY8，待用户手动验收。原共享单§16.3–16.5：20修空live工作区503、普通风格409与明确拒绝回执；21统一默认模板编号、任务私密来源/原冻结快照跨加载，新建相容guard a3eb7d518/LmuG-gXhGygd9yW5-bBSt；22补API漏StudioStyleError及worker5＋provider1处跨加载私密错误漏认。42模板/41工作区来源编号新规则拒0，旧拒1；生产同源快照过度帧503→200、技能03200→200，同事原文0字。15回执/18私密、完整types、fresh native/pricing/Next通过；6启动门/7服务4timer/1公网JS/3匿名401与health200。管理正常两次保存使价6c9更新14260367，停服前旧价检查拒绝后只读核history/回执并继承新价，未写业务价；最终两键SHA7d8e及源/工作区四字段保持，无新生成/费用或schema/迁移。guard原完整产物/时间复用，只回程序不回数据。旧截图原号归属、视频现场及同事手验仍缺，不自动结束或重发。原失败/环境误配与最终证据在docs/materials/2026-11-07-template-colleague-open、template-sharing-generation、template-sharing-similar，范围表见后者audit-scope.md。已有D-20261107-SHARED-CPU待核，不冒本模板根因；尾批未新增范围外线索。
 <!-- /SHARE-COLLEAGUE01-20261107 -->
+
+
+<!-- TPL-OWNER-CARD02-20261107 -->
+### TPL-OWNER-CARD02 作者保存边界与全状态结果卡（原规划；后续实施见下）
+
+用户本轮要求合并重新设计：原模板作者可保存默认；非作者（含管理员普通使用）只另存自己的参数模板，不以拥有live工作区当作者，不扩大原文/素材权限或绕撤权。现“保存本次设置”确为个人工作区持久化，未证越权改写原定义；另存又被contextEditable和publisher gate拒绝，须同步接合法另存，不能只藏按钮。图片成品已按需详情，无media分支仍直出metadata/primaryActions/supplement，造成排队/生成/重试图下多行；统一卡壳，信息/取消/停止/尝试记录进“⋯”及详情，异常图标保可达，图下新增高度0。原共享合并单§16.6列角色、全部状态、源码映射、根来源关联/相容读取、验收及回退要求；与UIH01衔接。基实际生产v0.134.22/9a116be26，仅保存规划及两张问题图，未改业务代码、测试功能或部署。
+<!-- /TPL-OWNER-CARD02-20261107 -->
+
+
+- TPL-OWNER-CARD02 / GALLERY03 / RATE-READ01：已部署v0.134.25 / 3516a22ee / WuPPvlzZS71IUIxEaLQ7J，待用户手动验收。继承正式24与首页限高CSS；作者保存、非作者来源关联私有参数另存、全状态卡片图下零增高、模块封面完整三行、共享常显缩小30%/有限原号核对、通用模型积分规则按费率页只读折叠均在同一批。两版各6组SQLite/13组hook/30组native+计价/完整Next types lint通过；7服务4timer、33公网资源同SHA、3匿名401、内外health及8个worker reader通过。原价/数据/策略不改，无新DDL或收费生成。新相容guard 200544768 / ymCCwzq0anLlN0zkh5tbq；仅回程序，不回数据，不可回旧21reader。原失败证据与回退入口见联合原单§16.7及2026-11-07-template-owner-card/attempt05。旧未知、视频现场缺证及CPU待核保持。
+
+- PIN-CONSIST01 / WORKS-WIDE02：已部署v0.134.27 / d0c1b3169 / cqHwJ1BrxECXfOkCNFins，待用户手动验收。图1精确匹配9ecf：9宫格工作区合法复用表情历史配方，原source被误当发布归属；按可信冻结复现证明统一菜单、置顶写及读，不改原快照/费用/权限。v26广场全宽动态增列/370px上限/scale-down及info hover/focus/触摸保持。原42空模块计数实为20头像+22角色，普通模板0，误记已纠正。主/guard各9 SQLite/9按钮及完整Next types lint、原生/计价通过；7服务4timer、6启动检查、2资源同SHA、3匿名401+置顶PUT401、44后台文件同源（其中设置子集8）、health200通过。最终stage03复用02原成功构建，只补运行链接准备，原失败及原时刻保留。guard c57681596/phBaNJOYNUJyPtNdI9bVE，恢复只回程序，不回数据；详见联合原单§16.8.1及私有pin-wide-gallery/reproduction。新增D-20261107-PIN-MEDIA-SCOPE待测，旧未知/视频缺证/CPU线索保持。 后续只读复核另有6条无来源旧图、可见状态、整组并发与刷新恢复边界，见§16.8.2；未计作已修复。
+  - PIN-RECOVERY01 / DELETE-FAST01：已部署135.4 / 38fc52f1a / tbnrYXNkjO59pkM8oPhi3，待用户手验。目录有界恢复、本人置顶独立管理/取消、可信旧图显式发布、单图定向鉴权和个人工作区快速删除已同批上线；已受理任务/图片/历史/费用保留，未知仅查原号，用户明确继续才沿原id/revision执行。完整22聚焦/types/native/Next、7服务4timer/6启动/2资源/5匿名401/health通过；F0原guard1469及原完成时间复用，恢复首段只读通过、未实际回退。价/私有策略不变，未真实生成或生产删除；详原联合单§16.8.4。全局坏行失败关闭、整组CAS、旧未知与CPU等残留保留。
+  - NAMED-SETTINGS01：同模板“另存为设置”已实现，12项隔离检查通过，融合角色预览差量准备135.8（135.7未实发）。独立owner/module命名空间，不新建模板/工作区或改共享默认；保存/切换个人参数、补充、风格和临时参考，主图保留；原号恢复与旧另存只查保护保留。继承实际135.6/7c63；待完整构建部署与用户手验，详原联合工单§16.9。
+
+<!-- CHARACTER-SINGLE-WORKBENCH-DESIGN-20261107 -->
+- [x] 角色三栏工作台已部署v0.134.31 /3654ea83f /iTiWbFUml0X1fllspLErl，待用户手动验收。三栏手柄换位、两处分隔线调宽/复位/账号记忆；右制作栏集中候选、独立补充与其下生成、提示词/版本来源，提示词打开定位/关闭回焦点；历史批次/原提示词、未采用细调和正侧4/9/身体整组沿原合同。完整保留实发179f桥上传修复，主fresh19/native/Next、F0原1469编译证据、6启动/7服务4timer/8唯一资源/3匿名401/health200过，cutover0无恢复，切版价d03/private35fc与原数据保持。最终恢复固定角色movable attempt04，只回程序不回数据，01/02/03原证保留；[原单§18.8](tasks/todo/2026-10-31-character-reference-replan.md#188-保留上传热修的31封源与最终交付2026-11-07)。
+- [x] 角色预览铺满/候选状态已部署v0.135.3 /cbaf2390e /VFqcM3XS-0vUU6QIqpZ0a，待用户手动验收。随栏宽自然铺开，蓝色“已选中”/绿色“已采用”，新PNG同步800/1600排版，旧成品/裁切/读者保留；继承实发135融合。fresh19/native/计价/完整Next types lint、F0原1469编译文件、6启动/7服务4timer/8资源/3匿名401/health200通过，cutover0无恢复，价d03/private35fc及原数据保持。新恢复入口自身首段只读通过，原31两锚点已补正，未恢复服务或业务数据；[原单§19](tasks/todo/2026-10-31-character-reference-replan.md)。
+<!-- /CHARACTER-SINGLE-WORKBENCH-DESIGN-20261107 -->
+
+<!-- MODEL-ACCESS01-20261108 -->
+## MODEL-ACCESS01
+
+[模型开放统一由费率页控制](todo/2026-11-08-model-availability-pricing.md)：实现完成，工程检查/正式源集成中。图片/视频/增强/H3沿原pricingEnabled，文字/抠图补同页开放控制；关闭从新选择隐藏并拦新受理，历史/草稿/原号与冻结合同保留。17项范围断言及真实隔离SQLite保存/关闭/重开/CAS/原回执/撤权/价格保护已过；类型复查、最终主/新相容guard完整构建与保护部署待完成。无金额调整或真实模型调用，按实际后继正式源接续，功能用户手验。
+<!-- /MODEL-ACCESS01-20261108 -->
+<!-- CHARACTER-UNIFIED-STYLE-20261108 -->
+- [ ] 角色风格独立入口/统一弹窗：一份风格覆盖各部位新生成，内容弹窗不混风格；清除硬编码摄影锁，style/content保存互不覆盖，旧字段镜像保读者及历史原词。5文件实现及隔离19已完成，类型/最终构建与接续保护部署进行中；预留135.6，先继承实际发布基线。[原单§20](tasks/todo/2026-10-31-character-reference-replan.md)。
+<!-- /CHARACTER-UNIFIED-STYLE-20261108 -->
+
+
+## CHAR-FUSION01 角色融合提示词（2026-11-07）
+
+- 实施中，独立分支 codex/character-fusion-20261108，以当前正式2266/v0.134.29为基线。独立本地规则页、本人服务端配方、复制导出和复制并打开出图入口；不调用收费模型。完整范围、结构判断、Git、检查、发布与用户手验见[原工单](todo/2026-11-08-character-fusion.md)。

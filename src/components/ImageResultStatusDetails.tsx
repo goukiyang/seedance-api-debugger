@@ -111,7 +111,7 @@ export function ImageResultStatusDetails({ detail, children, reason = false, act
         <div hidden={moreMenu && !detailsSelected}>
         <strong>{title}</strong>
         {detail && <p className={styles.statusDetailText}>{detail}</p>}
-        {children}
+        {open && (!moreMenu || detailsSelected) && children}
         <div className={styles.statusDetailActions}>
           {detail && <button type="button" className={styles.issueClose} disabled={copyState === 'busy'} onClick={() => void copyDetail()}>
             {copyState === 'busy' ? '复制中' : structured ? '复制说明' : '复制完整详情'}

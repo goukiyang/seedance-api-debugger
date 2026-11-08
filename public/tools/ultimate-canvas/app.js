@@ -2032,18 +2032,23 @@
             const node = engine.nodes.get(select.closest('.canvas-node')?.dataset.nodeId);
             const selected = node?.data?.textModel || caps.text?.model || 'gpt-5.5';
             const models = [...(caps.text?.model_options || [])];
-            if (!models.some(item => item.value === selected)) models.unshift({ value: selected, label: selected });
-            select.disabled = !caps.text?.enabled;
+            const available = models.some(item => item.value === selected);
+            select.disabled = !caps.text?.enabled || !models.length;
             const key = JSON.stringify(models);
-            if (select.dataset.optionsKey === key && select.value === selected) return;
+            if (select.dataset.optionsKey === key && select.value === (available ? selected : '')) return;
             select.replaceChildren(...models.map(item => new Option(item.label, item.value, false, item.value === selected)));
+            if (!available) {
+                const placeholder = new Option('请选择已开放模型', '', false, true);
+                placeholder.disabled = true;
+                select.prepend(placeholder);
+            }
             select.dataset.optionsKey = key;
         });
         document.querySelectorAll('.node-type-image [data-generation-model-label]').forEach(el => {
-            el.textContent = caps.image?.model || caps.image?.label || '图形生成';
+            el.textContent = caps.image?.model_options?.find(item => item.value === caps.image?.model)?.label || '图形生成';
         });
         document.querySelectorAll('.node-type-video [data-generation-model-label]').forEach(el => {
-            el.textContent = caps.video?.model || caps.video?.label || '默认视频 API';
+            el.textContent = caps.video?.model_options?.find(item => item.value === caps.video?.model)?.label || '视频生成';
         });
         renderAllGenerationNodeControls();
     }
@@ -2112,7 +2117,8 @@
             }
             if (node.data?.canvasStyle) {
                 const style = node.data.canvasStyle;
-                imageSelect.replaceChildren(new Option(style.modelLabel || style.model, style.model));
+                const available = capability.model_options?.some(item => item.value === style.model);
+                imageSelect.replaceChildren(new Option(available ? style.modelLabel || style.model : '风格模型已关闭', available ? style.model : ''));
                 imageSelect.disabled = true;
                 imageSelect.title = '使用风格模板的模型；移除风格后可自由选择';
                 return;
@@ -2120,11 +2126,12 @@
             const selected = selectedModel;
             const options = imageChannelModelOptions(channel, capability).filter(item => item?.value);
             if (selected && !options.some(item => item.value === selected)) {
-                options.unshift({ value: selected, label: `${selected}（当前通道不支持）`, ready: false, unavailable: true });
+                options.unshift({ value: '', label: '请选择已开放模型', ready: false, unavailable: true });
             }
             imageSelect.replaceChildren(...options.map(item => {
                 const label = item.label || item.value;
-                const option = new Option(item.ready === false && !item.unavailable ? `${label}（当前通道不支持）` : label, item.value, false, item.value === selected);
+                const option = new Option(item.ready === false && !item.unavailable ? `${label}（当前通道不支持）` : label, item.value, false,
+                    item.value === selected || item.value === '' && item.unavailable === true);
                 option.disabled = item.ready === false || item.unavailable === true;
                 return option;
             }));
@@ -2136,10 +2143,10 @@
         if (!label || !node) return;
         const capabilities = canvasRuntime.bootstrap?.capabilities || {};
         if (node.type === 'image') {
-            label.textContent = capabilities.image?.model || capabilities.image?.label || '图形生成';
+            label.textContent = capabilities.image?.model_options?.find(item => item.value === capabilities.image?.model)?.label || '图形生成';
         } else if (node.type === 'video') {
             const model = generationSettingsForNode(node).model;
-            label.textContent = capabilities.video?.model_options?.find(item => item.value === model)?.label || model || '待选择模型';
+            label.textContent = capabilities.video?.model_options?.find(item => item.value === model)?.label || '请选择已开放模型';
         }
     }
 
@@ -2180,6 +2187,30 @@
             return null;
         }
     }
+
+    let modelAvailabilityRefreshPending = false;
+    async function refreshCanvasModelAvailability() {
+        if (!canvasRuntime.bootstrapLoaded || canvasRuntime.contextSwitching || modelAvailabilityRefreshPending) return;
+        const before = canvasRuntime.bootstrap, context = uploadContextKey();
+        if (!before?.user?.id) return;
+        modelAvailabilityRefreshPending = true;
+        try {
+            const availability = await requestJson('/api/model-availability', { cache: 'no-store' });
+            if (availability.menuRevision && availability.menuRevision === before.modelAvailabilityRevision) return;
+            const url = new URL('/api/tools/ultimate-canvas/bootstrap', window.location.origin);
+            if (canvasRuntime.selectedProjectId) url.searchParams.set('project_id', canvasRuntime.selectedProjectId);
+            if (canvasRuntime.selectedVideoCardId) url.searchParams.set('video_card_id', canvasRuntime.selectedVideoCardId);
+            const data = await requestJson(url.toString(), { cache: 'no-store' });
+            if (before !== canvasRuntime.bootstrap || context !== uploadContextKey() || data.user?.id !== before.user.id) return;
+            // Refresh capabilities only: never restore/save the document or resubmit an original task.
+            canvasRuntime.bootstrap = { ...before, capabilities: data.capabilities, modelAvailabilityRevision: data.modelAvailabilityRevision };
+            updateGenerationLabels(canvasRuntime.bootstrap);
+        } catch (error) { showCanvasNotice(error?.message || '模型开放状态尚未刷新，原参数已保留', 'warn'); }
+        finally { modelAvailabilityRefreshPending = false; }
+    }
+    window.addEventListener('focus', () => void refreshCanvasModelAvailability());
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) void refreshCanvasModelAvailability(); });
+    window.addEventListener('storage', event => { if (event.key === 'sd2:model-availability-updated') void refreshCanvasModelAvailability(); });
 
     function renderRuntimeContextControls(data = canvasRuntime.bootstrap) {
         if (!data) return;
@@ -4448,15 +4479,6 @@
         for (const item of legacyOptions) {
             if (!item || typeof item.value !== 'string' || !item.value || options.has(item.value)) continue;
             options.set(item.value, { value: item.value, label: item.label || item.value });
-        }
-        for (const item of canvasImageChannels()) {
-            for (const value of Object.keys(item.models || {})) {
-                if (!value || options.has(value)) continue;
-                options.set(value, { value, label: value });
-            }
-        }
-        if (!options.size && capability.model) {
-            options.set(capability.model, { value: capability.model, label: capability.label || capability.model });
         }
         return [...options.values()].map(option => {
             const legacy = usesLegacyImageRoute(option.value, { id: channel?.id });
@@ -7176,6 +7198,9 @@
         const api = window.CanvasGenerationAPI;
         const payload = savedPayload || collectGenerationPayload(nodeEl);
         if (!api || !payload) return;
+        if (['text', 'script'].includes(payload.kind) && !canvasRuntime.bootstrap?.capabilities?.text?.model_options?.some(item => item.value === payload.model)) {
+            showCanvasNotice('所选文字模型已关闭，请选择已开放模型；原输入已保留', 'warn'); return;
+        }
 
         if (payload.kind === 'image') {
             const node = engine.nodes.get(payload.nodeId);

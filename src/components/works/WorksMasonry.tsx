@@ -51,7 +51,11 @@ export function WorksMasonry({ items, playback, contextKey, detailOpen, layoutKe
     return () => { observer.disconnect(); window.removeEventListener('resize', update); };
   }, [navigationEpoch]);
   useLayoutEffect(() => { const element = container.current; if (element) setMargin(element.getBoundingClientRect().top + window.scrollY); }, [items, busyKeys, detailOpen, layoutKey]);
-  const lanes = width >= 1450 ? 5 : width >= 1100 ? 4 : width >= 760 ? 3 : 2, gap = width < 600 ? 10 : 18, columnWidth = Math.max(0, (width - gap * (lanes - 1)) / lanes);
+  const gap = width < 600 ? 10 : 18;
+  const minimumLanes = width >= 1450 ? 5 : width >= 1100 ? 4 : width >= 760 ? 3 : 2;
+  // Keep existing density on smaller screens; wide screens add columns instead of enlarging thumbnails.
+  const lanes = Math.max(minimumLanes, Math.ceil((width + gap) / (370 + gap)));
+  const columnWidth = Math.max(0, (width - gap * (lanes - 1)) / lanes);
   const focusedIndex = items.findIndex(work => work.id === (restore?.focusId || focused)), geometry = `${width}:${margin}:${items.map(work => `${work.id}:${work.width}:${work.height}`).join(',')}`;
   const getItemKey = useCallback((index: number) => itemsRef.current[index].id, []);
   const virtual = useWindowVirtualizer({ count: width ? items.length : 0, lanes, gap, scrollMargin: margin, overscan: 2, getItemKey,

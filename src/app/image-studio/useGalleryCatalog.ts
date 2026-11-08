@@ -17,6 +17,7 @@ export function useGalleryCatalog(userId: string, query: GalleryQuery, enabled: 
   const latest = useRef(state); latest.current = state;
   const resultScope = useRef('');
   const activeRead = useRef<AbortController | null>(null);
+  const reconnectReads = useRef({ scope: '', count: 0 });
   const revisionInvalidationEpoch = useRef(0);
   const revisionInvalidation = useRef<{ scope: string; epoch: number } | null>(null);
   const pendingSharedRevision = useRef<{ owner: string; scope: string; revision: string } | null>(null);
@@ -94,6 +95,15 @@ export function useGalleryCatalog(userId: string, query: GalleryQuery, enabled: 
     return () => { valid = false; controller.abort(); if (activeRead.current === controller) activeRead.current = null; };
   }, [userId, scope, page, tick, enabled, sessionChanged, refresh]); // query fields are covered by scope.
   const data = !sessionChanged && !isClientSessionBlocked() && state.owner === userId ? state.data : null;
+  useEffect(() => {
+    const key = JSON.stringify([scope, page]);
+    if (reconnectReads.current.scope !== key || !state.loading && !state.error) reconnectReads.current = { scope: key, count: 0 };
+    if (!enabled || state.owner !== userId || !state.error || state.denied || state.loading || sessionChanged || isClientSessionBlocked()
+      || document.hidden || !navigator.onLine || reconnectReads.current.count >= 3) return;
+    const count = reconnectReads.current.count;
+    const timer = setTimeout(() => { reconnectReads.current.count++; refresh(); }, [1000, 3000, 8000][count]);
+    return () => clearTimeout(timer);
+  }, [enabled, scope, page, state.owner, state.error, state.denied, state.loading, sessionChanged, userId, refresh]);
   return { data, matchingScope: Boolean(data && !state.denied && !state.error && resultScope.current === scope && revisionInvalidation.current?.scope !== scope),
     loading: state.owner !== userId || state.loading || !state.error && resultScope.current !== scope,
     error: state.owner === userId ? state.error : '', denied: state.owner === userId && state.denied === true, setPage, refresh };

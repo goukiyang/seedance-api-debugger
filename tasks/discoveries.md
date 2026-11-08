@@ -10,6 +10,20 @@
 
 ## 待核线索
 
+<!-- D-20261107-PIN-MEDIA-SCOPE -->
+**D-20261107-PIN-MEDIA-SCOPE｜已证读取放大 / P3，非已证当前延迟根因。** resolveStudioPinnedAsset查单asset索引后仍读整root（上限200）；可见性又读全部私密绑定，列表前后各核。生产29同源码隔离SQLite顺序6组×7暖样本：1pin/0绑定p50=5.63ms、10次查询/6返回行；200pin/0绑定10.96ms/404行；1pin/1000绑定29.98ms/2006行；200pin/1000绑定42.61ms/2404行。计数是Prisma返回行，不是底层扫描行，非HTTP/并发SLO或改造收益。生产只读当次仅3pin（最大组2）、77相关绑定/23引用/20独立asset、格式异常0，另9metadata子记录按reader排除。另在合成库添加1个无关不兼容私密引用后，两个模板的同事媒体和普通feed失败、管理员读正常，证明全局parse的故障放大；生产坏行0，属已复现风险，不冒当前根因。定向catalog SQL同样有全局兼容检查，不能只传assetIds或忽略坏行就称修复。沿[原单§16.8.3](todo/2026-11-05-template-sharing-cutout-open-preflight.md)优先按原索引缩小任务/资产范围并复用权限投影，保撤权/文件别名/私密保护，不先建缓存、表或服务；无真实坏行时不加理论兜底。原始42样本、源码身份及故障注入见正式根私有pin-wide-gallery/architecture-audit-20261107。
+<!-- /D-20261107-PIN-MEDIA-SCOPE -->
+
+<!-- D-20261107-PIN-REMAINING -->
+**D-20261107-PIN-LEGACY-SOURCE｜已确认历史谱系边界 / P2，待界定兼容发布。** 同一9宫格旧工作区6条成功active、任务与冻结source均null的结果全部早于当前共享源创建（2026-10-04T14:34:12Z）；原冻结名为未命名/表情，publisher/binding/reproduction关联均无。现规则403可复现，原图保留；不是42条工具样本，也不证明6条都应按今天源共享。现代绑定不可变，不按名字猜来源。不能回写source冒历史事实；补可信执行/显式发布关联，沿原单§16.8.3处理。
+
+**D-20261107-PIN-VISIBILITY-STATE｜已复现本人管理状态投影缺口 / P2，待实施。** 私密化后stored pin保留而普通读者被正确过滤，管理员仍可见；补测普通生成者自己也可遇stored=1/visible=0，后端active=false可取消，但按钮从可见集合推断active，不能得知此记录仍已发布。应分离本人已记录管理状态与读者可见投影/原因，不放松私密或原图权限。生产本次3条pin，同asset私密引用重合0（未覆盖文件别名的ACL全判定），不冒现场发生证明。
+
+**D-20261107-PIN-CONFLICT-RECOVERY｜已确认目录游标恢复缺陷 / P2，待实施；CAS保留。** 隔离生产29原源码两用户对不同图从同revision提交，一成功一409；旧feed游标在置顶变化后连续两次409，新读成功。普通onRetry仍用taskRetryCursor，已翻页silent不更新nextCursor；喜欢列表refresh虽首读但pageReads>1仍保旧nextCursor，后续more可再遇同409。最小修法针对目录失效重建分页边界，保持已见结果/账号/模块/筛选；不吞全部409或移除CAS。待确认置顶原操作只存模块Map，整页刷新接续提示丢失但服务器记录不丢；未证生产重复操作、丢图或并发频率。
+
+统一入口为[原联合工单§16.8.3](todo/2026-11-05-template-sharing-cutout-open-preflight.md)。新证为正式根私有pin-wide-gallery/architecture-audit-20261107下生产只读元数据与两次隔离探针（均退出0、无网络/费用）；12相关源SHA与生产29一致。原§16.8.2保留前次判断，以上为后续取证收窄，不冒已修复/功能验收，不重复建单。
+<!-- /D-20261107-PIN-REMAINING -->
+
 <!-- D-20261107-SHARED-CPU -->
 **D-20261107-SHARED-CPU｜同机资源待核 / P3。** 2026-11-07T17:05:03Z只读资源核对：服务器4逻辑核，PID830293（仅命令名python3）已运行2863727秒，ps报告CPU99.3%。未调查用途、所属项目或合法负载，不能据此判定异常、模板故障根因或用户延迟收益。可能压缩同机可用CPU预算，后续先核归属与时间窗口再判断；本轮不杀进程、不改资源分配。原证：[共享生成修复资料](../docs/materials/2026-11-07-template-sharing-generation/shared-cpu-clue.json)，仅含资源元数据，无进程参数或业务内容。
 <!-- /D-20261107-SHARED-CPU -->
@@ -23,6 +37,13 @@
 | D-20261101-01 | 待核线索 / P2 | 生产构建已确认共享 Prisma 类导入桥；实际客户端实例数、跨 Next 路由 bundle 的展示缓存是否共用仍未知。可能重复建连接或重算菜单，不能认定已发生。 | [窄拓扑证据](../docs/materials/2026-11-01-admin-usage-read-snapshot/built-cache-topology.md)、[初始化](/Volumes/Data/Projects/video-api-debugger-worktrees/admin-usage-read-snapshot-reader-20261101/src/lib/prisma.ts) | 待核；需要时映射实际初始化与缓存身份，不先改 singleton / TTL，不加生产探针。 |
 
 ## 已确认问题
+
+<!-- D-20261108-RELEASE-RECOVERY-ANCHOR -->
+**D-20261108-RELEASE-RECOVERY-ANCHOR｜已确认，相关入口已修正；未实际回退演练。** 复用135.0 stage发现program-recovery.sh仍断言旧pin-wide-gallery/attempt03及3516，与fusion真实stage/3654不符，事故时会在停服前拒绝；没有由本次切版触发现场故障。原作者4修其fusion stage、角色2修其role31入口，各保原脚本及SHA。本人最终135.4 stage pin-recovery-20261108/attempt02锚点为本stage/cbaf239基线，F0原构建1469文件验证；真实切版后marker/备份/contract齐备时第一段只读前置通过，实际恢复未执行。不能复制切版成功回执冒恢复入口可用，后继按实际源/目录接续；[原联合单§16.8.4](todo/2026-11-05-template-sharing-cutout-open-preflight.md)，私有recovery-readonly-preflight.json保存无业务写证据。
+<!-- /D-20261108-RELEASE-RECOVERY-ANCHOR -->
+
+PIN相关原四项处理：135.4/38fc52f已部署目录恢复、本人管理/取消、可信旧图显式发布及单图定向权限，完整22聚焦/types/native/Next及发布检查通过，待用户手验。新单图Prisma目标任务/Asset各1行，但全局兼容坏行探测与整组CAS仍保持；旧6图未批量发布，旧未知/CPU等不关闭。详原联合工单§16.8.4及正式根私有recovery-20261108证据；上方§16.8.3为原调查事实，不冒全站无问题。
+
 
 **D-20261105-ACTUAL-RATE-COVERAGE｜已修复部署，功能待用户手验**：历史aff41下已确认样片用3/4.5固定点数、IP未接人民币，原抽查30条流水与各自冻结合同一致；该历史事实保留。2026-11-06 RATE-VIDEO01/v0.134.7已正常CAS新增16条同代同分辨率人民币关系、移除2条旧通用规则，当前22条视频规则按10点/元，新缺价付费报价拒绝旧兜底。原40金额/来源/开关及旧账不改，新用户赠分仍关；站内继承不冒供应商实扣。[原单最新交付](todo/2026-11-05-ledger-rate-accounting.md#rate-video01-最终交付)为唯一详情。
 
@@ -51,3 +72,6 @@
 - 小修沿既有授权及项目工程检查执行；结构性、大范围及影响不明事项先出方案等用户确认。功能验收仍由用户手动完成，不以构建、推送或健康检查冒充通过。
 
 - **D-20261104-TEMPLATE-MARK-LIST-SCALE｜个人收藏列表先全量解析再分页｜待核线索 / P3**：`/api/content-reactions` 的模板组织列表沿 `listReactions` 先读取本账号全部有效标记，逐条 `resolveReactionContent` 后再截取页；分组统计也读本账号模板标记。实现事实已核，当前收藏数量、请求耗时和瓶颈未测，不能判成已发生的性能故障，也不把它归因于本次统一标记。CP01/ARCH03封面目录的有限SQL分页仍保留。本轮不扩为重构；后续如列表卡顿，先固定真实账号、标记量、权限条件，测一次请求耗时/查询数，再决定是否将组织列表接入相同授权投影与分页，不能先分页后漏权限/搜索结果。来源：TEMPLATE-MARK01，`src/lib/content-reactions/service.ts:listReactions`、`template-favorites.ts:favoriteOrganization`；未做浏览器或生产规模测试。
+
+
+**D-20261108-ROLE-RECOVERY｜已确认并修正本单恢复入口锚点。** 同类发布模板复用后，角色31/movable-layout/attempt04的program-recovery.sh首段仍断言pin-wide旧stage与3516旧baseline，自动恢复未触发，因此此前cutover0并不能证明入口可执行。按15/4证据，仅修本单两常量至role31 stage/179f，保原脚本及SHA；只读首段通过guard检查后正确拒绝后继135，未执行停服/切版/写配置/数据。新135.3恢复入口匹配本单stage及实际135，发布前验证自身首段。详见角色原单§19、movable-layout/attempt04/anchor-fix-proof.json与image-fit新批证据。不扩改其他发布或创建治理系统。

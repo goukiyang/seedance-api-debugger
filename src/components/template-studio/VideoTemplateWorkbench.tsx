@@ -18,6 +18,7 @@ import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { RelativeTime } from '@/components/RelativeTime';
 import { normalizeH3VideoConfig, h3DisabledReason, type H3VideoConfig } from '@/components/H3MachineStatus';
 import { SEEDANCE_VIDEO_MODEL_OPTIONS } from '@/lib/provider/seedance-models';
+import { usePricingModelAvailability } from '@/lib/pricing/use-model-availability';
 import { videoDeliveryStageForTask } from '@/lib/video/delivery-status';
 import MediaPreview from '@/components/MediaPreview';
 import { MultiviewEntry } from '@/components/MultiviewEntry';
@@ -349,6 +350,7 @@ function runQuery(filters: RunFilters, cursor?: string | null) {
 }
 
 export default function VideoTemplateWorkbench({ userId }: Props) {
+  const { isAvailable: modelAvailable, reason: modelAvailabilityReason } = usePricingModelAvailability();
   const { confirm, productDialog } = useProductDialog();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -481,8 +483,8 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
   const videoProvider = stringValue(activeDraft?.parameters.provider ?? '');
   const savedVideoModel = stringValue(activeDraft?.parameters.model ?? '');
   const savedLora = stringValue(activeDraft?.parameters.h3LoraId ?? '');
-  const videoModelOptions = videoProvider === 'seedance' ? SEEDANCE_VIDEO_MODEL_OPTIONS
-    : videoProvider === 'h3' && videoConfig?.ready ? [{ id: 'h3', label: 'H3 本地模型' }] : [];
+  const videoModelOptions = videoProvider === 'seedance' ? SEEDANCE_VIDEO_MODEL_OPTIONS.filter(model => modelAvailable('video', model.id, {}, 'seedance'))
+    : videoProvider === 'h3' && videoConfig?.ready && modelAvailable('h3', videoConfig.default_preset_id) ? [{ id: 'h3', label: 'H3 本地模型' }] : [];
   const loraOptions = videoProvider === 'h3' && videoConfig?.ready ? videoConfig.lora_options : [];
   useDialogDismiss({
     open: Boolean(templateEdit),
@@ -1938,9 +1940,9 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                       <div className={styles.sectionTitle}><span>生成参数</span><span className={styles.fieldHint}>将随草稿与历史快照保存</span></div>
                       <div className={styles.parameterGrid}>
                         <div className={styles.field}><label htmlFor="studio-param-provider">服务通道</label><select id="studio-param-provider" value={videoProvider} onChange={(event) => updateParameter('provider', event.target.value || undefined)}><option value="">沿用生成页选择</option><option value="seedance">Seedance</option><option value="h3">H3</option>{videoProvider && !['seedance', 'h3'].includes(videoProvider) && <option value={videoProvider} disabled>已保存通道：{videoProvider}（暂不可识别）</option>}</select></div>
-                        <div className={styles.field}><label htmlFor="studio-param-model">视频模型</label><select id="studio-param-model" value={savedVideoModel} onChange={(event) => updateParameter('model', event.target.value || undefined)}>
+                        <div className={styles.field}><label htmlFor="studio-param-model">视频模型</label><select id="studio-param-model" value={!savedVideoModel || videoModelOptions.some(option => option.id === savedVideoModel) ? savedVideoModel : "model-closed"} onChange={(event) => updateParameter('model', event.target.value || undefined)}>
                           <option value="">沿用生成页选择</option>
-                          {savedVideoModel && !videoModelOptions.some(option => option.id === savedVideoModel) && <option value={savedVideoModel} disabled>已保存：{savedVideoModel}（当前不可选，值保留）</option>}
+                          <option value="model-closed" disabled>{modelAvailabilityReason || "请选择已开放模型"}</option>
                           {videoModelOptions.map(option => <option key={option.id} value={option.id} disabled={videoProvider === 'h3' && (videoCatalogBusy || Boolean(videoCatalogError))}>{option.label} · {videoProvider === 'h3' ? 'H3通道' : 'Seedance通道'}</option>)}
                         </select>{!videoProvider && <span className={styles.fieldHint}>选定通道后才显示适用模型；现有值不会自动改写。</span>}
                         {savedVideoModel && !videoModelOptions.some(option => option.id === savedVideoModel) && <span className={styles.fieldHint}>此模型不在当前可用目录中；仍保留原编号，请确认通道或重新选择。</span>}
@@ -1974,11 +1976,11 @@ export default function VideoTemplateWorkbench({ userId }: Props) {
                       <div className={styles.textModelField}>
                         <div className={styles.field}>
                           <label htmlFor="studio-text-model">文案模型</label>
-                          <select id="studio-text-model" value={llmModel} disabled={working || requestUnknown || !capabilities?.llmEnabled} onChange={event => chooseLlmModel(event.target.value)}>
-                            {(capabilities?.llmModels || STUDIO_TEXT_MODELS).map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
+                          <select id="studio-text-model" value={modelAvailable('text', llmModel) ? llmModel : ''} disabled={working || requestUnknown || !capabilities?.llmEnabled} onChange={event => chooseLlmModel(event.target.value)}>
+                            <option value="" disabled>{modelAvailabilityReason || "请选择已开放模型"}</option>{(capabilities?.llmModels || STUDIO_TEXT_MODELS).filter(model => modelAvailable('text', model.id)).map(model => <option key={model.id} value={model.id}>{model.label}</option>)}
                           </select>
                         </div>
-                        {modelRecovery?.scope === modelScope && modelRecovery.value !== llmModel && <button className={styles.quietButton} type="button" disabled={working || requestUnknown} title={studioTextModelLabel(modelRecovery.value)} onClick={() => chooseLlmModel(modelRecovery.value)}>恢复上次模型</button>}
+                        {modelRecovery?.scope === modelScope && modelRecovery.value !== llmModel && modelAvailable('text', modelRecovery.value) && <button className={styles.quietButton} type="button" disabled={working || requestUnknown} title={studioTextModelLabel(modelRecovery.value)} onClick={() => chooseLlmModel(modelRecovery.value)}>恢复上次模型</button>}
                       </div>
                       <div className={styles.promptTools}>
                         <button className={styles.primaryButton} type="button" disabled={Boolean(llmBlocker)} title={llmBlocker?.message} onClick={() => void submitRun('llm')}><Sparkles size={15} />生成文案</button>

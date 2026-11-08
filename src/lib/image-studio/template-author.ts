@@ -5,6 +5,7 @@ import { displayUserName } from '@/lib/users/display';
 import { canUseCompanyTemplates, canViewStudioPreset, type ImageStudioIdentity } from './access';
 import { assertStudioActor, readStudioTemplateSourceIdentity, type SharedStudioClient } from './shared-contract';
 import type { StudioTemplateRead } from './shared-types';
+import { readStudioParameterCopy } from './parameter-copy';
 
 type OwnerRow = { id: string; name: string; username: string; avatar_url: string | null; account_type: string;
   status: string; feishu_open_id: string | null; feishu_tenant_key: string | null };
@@ -47,7 +48,11 @@ export async function resolveStudioTemplateAuthor(user: ImageStudioIdentity,
     }
     presetId = workspace.source_preset_id;
   }
-  const preset = await client.imageStudioPreset.findUnique({ where: { id: presetId! } });
+  let preset = await client.imageStudioPreset.findUnique({ where: { id: presetId! } });
+  if (preset && canViewStudioPreset(actor, preset)) {
+    const copy = await readStudioParameterCopy(client, preset);
+    if (copy) preset = await client.imageStudioPreset.findUnique({ where: { id: copy.rootPresetId } });
+  }
   if (!preset) return { actor, preset: null, owner: null, bindingConfirmed: false, ordinarilyVisible: false,
     templateRead: unknown('unknown', presetId!, null) };
   const ordinarilyVisible = canViewStudioPreset(actor, preset);

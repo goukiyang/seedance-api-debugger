@@ -1,4 +1,5 @@
 'use client';
+import { usePricingModelAvailability } from '@/lib/pricing/use-model-availability';
 import { ProjectSelector } from '@/components/ProjectSelector';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -250,6 +251,8 @@ function persistDraft(owner: string, tab: string, value: MultiviewGenerationDraf
 }
 function message(cause: unknown, fallback: string) { return cause instanceof Error ? cause.message : fallback; }
 export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
+  const { isAvailable: modelAvailable, reason: modelAvailabilityReason } = usePricingModelAvailability();
+  const availableModels = SEEDANCE_VIDEO_MODEL_OPTIONS.filter(item => modelAvailable('video', item.id, {}, 'seedance'));
   const { user, hasLoadedUser, sessionChanged, userLoadError, refreshUser, refreshCredits } = useAppSession();
   const owner = user?.id || '';
   const projectCreate = useProjectCreateOperation(owner, 'multiview');
@@ -1166,7 +1169,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   if (!sessionReady) return <section className={styles.panel} role="status">当前登录或权限状态尚未确认，生成已暂停。输入和原请求记录仍保留。</section>;
   if (!allowed) return <section className={styles.panel}><p>当前账号不能使用普通视频生成。已有视频仍按原权限查看。</p><button type="button" onClick={props.onUseExisting}>使用已有视频</button></section>;
   if (!ready || !draft) return <section className={styles.panel} role="status">正在恢复本账号的设置…</section>;
-  const selectedModel = SEEDANCE_VIDEO_MODEL_OPTIONS.find(item => item.id === draft.model);
+  const selectedModel = availableModels.find(item => item.id === draft.model);
   const durationOptions = seedanceVideoDurationOptions(draft.model);
   const settingsDisabled = submitting || closing || working || Boolean(creating) || active || accountRequestBlocked || recoveryBlocked;
   const formDisabled = submitting || closing || working || Boolean(creating) || settingsRisk.busy;
@@ -1236,7 +1239,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
         </details>
         {presetError && !active && <p className={styles.feedback} role="status">{presetError}<button type="button" className={styles.quiet} onClick={() => setPresetRefresh(value => value + 1)}>重新读取</button></p>}
         <div className={styles.parameters}>
-          <label>模型<select value={draft.model} disabled={formDisabled} onChange={event => change({ model: event.target.value })}>{!selectedModel && <option value={draft.model}>{draft.model || '未选择'}</option>}{SEEDANCE_VIDEO_MODEL_OPTIONS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
+          <label>模型<select value={selectedModel ? draft.model : ''} disabled={formDisabled} onChange={event => change({ model: event.target.value })}><option value="" disabled>{modelAvailabilityReason || "请选择已开放模型"}</option>{availableModels.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
           <label>时长<select value={draft.duration} disabled={formDisabled} onChange={event => change({ duration: Number(event.target.value) })}>{!durationOptions.some(value => value === draft.duration) && <option value={draft.duration}>{draft.duration}秒（需确认）</option>}{durationOptions.map(value => <option key={value} value={value}>{value}秒</option>)}</select></label>
           <label>清晰度<select value={draft.resolution} disabled={formDisabled} onChange={event => change({ resolution: event.target.value, resolutionApprovalConfirmed: false, resolutionApprovalId: '' })}>{!RESOLUTION_OPTIONS.some(value => value === draft.resolution) && <option value={draft.resolution}>{draft.resolution || '未选择'}</option>}{RESOLUTION_OPTIONS.map(value => <option key={value} value={value}>{value === '1080p' && hd && !hd.exempt ? '1080p（需审批）' : value}</option>)}</select></label>
         </div>

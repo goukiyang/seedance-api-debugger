@@ -30,7 +30,7 @@ function matches(row: Row, where: Row): boolean {
 
 export type GalleryPageSelection = { moduleIds: string[]; presetIds: string[] };
 export async function createGalleryReadContext(tx: Prisma.TransactionClient, ownerId: string, selection?: GalleryPageSelection) {
-  if (selection && selection.moduleIds.length + selection.presetIds.length > 24) throw new Error('gallery_page_exceeds_limit');
+  if (selection && selection.moduleIds.length + selection.presetIds.length > 120) throw new Error('gallery_page_exceeds_limit');
   const modules = await tx.imageStudioModule.findMany({ where: { owner_id: ownerId, ...(selection ? { id: { in: selection.moduleIds } } : {}) }, orderBy: [{ created_at: 'asc' }, { id: 'asc' }] });
   const sources = await tx.imageStudioPreset.findMany({ where: selection ? { id: { in: [...selection.presetIds, ...modules.flatMap(row => row.source_preset_id ? [row.source_preset_id] : [])] } } : { OR: [{ owner_id: ownerId }, { is_shared: true },
     { id: { in: modules.flatMap(row => row.source_preset_id ? [row.source_preset_id] : []) } }] }, orderBy: { id: 'asc' } });
@@ -72,6 +72,7 @@ export async function createGalleryReadContext(tx: Prisma.TransactionClient, own
         if (memo.has(token)) return memo.get(token);
         const read = async () => {
           let rows = tables[property];
+          if (property === 'imageStudioPreset' && typeof args.where?.id === 'string' && !sources.some(row => row.id === args.where!.id)) rows = undefined!;
           // The asset projection is intentionally bounded to the collected dependencies.
           const ids = args.where?.id as string | { in?: string[] } | undefined;
           if (property === 'asset' && (!ids || typeof ids !== 'string' && !Array.isArray(ids.in)

@@ -9,6 +9,11 @@
 .coverPin { position: absolute; top: 0; right: 0; display: flex; justify-content: flex-end; max-width: calc(100% - 84px); }
 .coverPin > [data-studio-pin-control] { justify-content: flex-end; }
 .moreSlot { position: absolute; top: 6px; right: 6px; z-index: 8; }
+.issueSlot { position: absolute; bottom: 8px; right: 8px; z-index: 8; }
+@media (hover: hover) and (pointer: fine) {
+  .moreSlot { opacity: 0; pointer-events: none; }
+  .card:hover .moreSlot, .card:focus-within .moreSlot, .moreSlot:has([aria-expanded=true]) { opacity: 1; pointer-events: auto; }
+}
 .moreTrigger { position: relative; isolation: isolate; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #e0e9e5; cursor: pointer; }
 .moreTrigger::before { content: ''; position: absolute; inset: 6.6px; z-index: -1; border: 1px solid #414b48; border-radius: 5px; background: #202725e8; pointer-events: none; }
 .moreTrigger:hover::before { background: #303c37; }

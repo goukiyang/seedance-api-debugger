@@ -9,13 +9,15 @@ export function studioTemplateTaskWhere(
   excludedToolBatches: string[] = [],
   historyModuleId?: string,
 ): Prisma.ImageStudioTaskWhereInput {
+  const defaultId = defaultStudioModuleId(viewerId);
   return { owner_id: viewerId, deleted_at: null,
     ...(excludedToolBatches.length ? { batch_id: { notIn: excludedToolBatches } } : {}),
-    ...(moduleId === defaultStudioModuleId(viewerId) && !historical ? { AND: [{ OR: [
+    ...((moduleId === defaultId || historyModuleId === defaultId) && !historical ? { AND: [{ OR: [
       { snapshot_json: null },
       { AND: [{ NOT: { snapshot_json: { contains: '"avatar":' } } }, { NOT: { snapshot_json: { contains: '"avatarLayout":' } } }] },
     ] }] } : {}),
-    ...(moduleId ? moduleId === defaultStudioModuleId(viewerId) ? { OR: [{ module_id: null }, { module_id: moduleId }] }
+    ...(moduleId ? moduleId === defaultId ? { OR: [{ module_id: null }, { module_id: moduleId }] }
+      : historyModuleId === defaultId ? { OR: [{ module_id: null }, { module_id: { in: [moduleId, historyModuleId] } }] }
       : { module_id: historyModuleId ? { in: [moduleId, historyModuleId] } : moduleId } : {}),
   };
 }
