@@ -10,7 +10,7 @@ import { fusionAssistant } from '@/lib/character-fusion/assistant';
 import type { FusionRecipe } from '@/lib/character-fusion/recipes';
 import styles from './studio.module.css';
 const API = '/api/character-fusion/recipes';
-const untranslated = (s: FusionSettings) => CONFIG.flatMap(c => s.rules[c.id].filter(t => t.status !== 'exclude' && !(c.tags as readonly string[]).includes(t.label) && !t.en).map(t => ({ dimension: c.id, label: t.label })));
+const untranslated = (s: FusionSettings) => CONFIG.filter(c => s.bossDimensions.includes(c.id)).flatMap(c => s.rules[c.id].filter(t => t.status !== 'exclude' && !(c.tags as readonly string[]).includes(t.label) && !t.en).map(t => ({ dimension: c.id, label: t.label })));
 const missingEnglish = (s: FusionSettings) => untranslated(s).length > 0 || s.requirementsEnabled && s.requirements !== defaults().requirements && /[\u3400-\u9fff]/.test(s.requirements) && !s.requirementsEn.trim();
 type RecipeForm = { action: 'save' | 'rename'; id: string; name: string; revision?: string };
 

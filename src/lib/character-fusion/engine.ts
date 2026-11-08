@@ -17,6 +17,7 @@ export type FusionRow = {
   id: string; name: string; category: Categories; source: Source; concept: Concept; bridge: string;
   mechanism: { cn: string; en: string }; personality: { pose: string; en: string };
   detail: Partial<Record<Dimension, string>>; advanced: boolean; isBoss?: boolean;
+  translations?: Array<{ dimension: Dimension; label: string; en: string }>;
   role?: string; cards?: Array<{ id: string; title: string; titleEn: string; label: string; en: string }>;
 };
 export const COUNTS = [4, 8, 12, 16, 24, 32];
@@ -143,7 +144,7 @@ function uniqueName(row: FusionRow, others: FusionRow[]) {
 export function generateBatch(s: FusionSettings, seed = Date.now()) {
   const error = validateGeneration(s); if (error) throw new Error(error);
   const result: FusionRow[] = [];
-  chooseCategories(s, seeded(seed)).forEach((category, i) => result.push({ ...uniqueName(makeRow(category, seed + i * 257), result), role: s.role, cards: cardChoices(s, i, seeded(seed + i)) }));
+  chooseCategories(s, seeded(seed)).forEach((category, i) => result.push({ ...uniqueName(makeRow(category, seed + i * 257), result), role: s.role, translations: translationsFor(s, category), cards: cardChoices(s, i, seeded(seed + i)) }));
   return result;
 }
 export function bossRow(s: FusionSettings, others: FusionRow[], seed = Date.now()) {
@@ -151,7 +152,10 @@ export function bossRow(s: FusionSettings, others: FusionRow[], seed = Date.now(
   const category = { ...s.boss };
   for (const c of ADDONS) if (!s.bossDimensions.includes(c.id)) category[c.id] = '';
   for (const c of s.cards.filter(c => c.joined)) if (!c.tags.some(t => t.label === c.value && t.status !== 'exclude')) throw new Error(`请为${c.title}选择可用标签。`);
-  return { ...uniqueName(makeRow(category, seed), others), role: s.role, cards: cardChoices(s, 0, seeded(seed), true) };
+  return { ...uniqueName(makeRow(category, seed), others), role: s.role, translations: translationsFor(s, category), cards: cardChoices(s, 0, seeded(seed), true) };
+}
+function translationsFor(s: Pick<FusionSettings, 'rules'>, category: Categories, prior: FusionRow['translations'] = []): NonNullable<FusionRow['translations']> {
+  return CONFIG.flatMap(c => { const label = category[c.id], en = s.rules[c.id].find(t => t.label === label)?.en || prior.find(t => t.dimension === c.id && t.label === label)?.en; return en ? [{ dimension: c.id, label, en }] : []; });
 }
 function cardChoices(s: FusionSettings, index: number, rnd: () => number, manual = false): NonNullable<FusionRow['cards']> {
   return s.cards.filter(c => c.joined).map(c => {
@@ -178,7 +182,7 @@ export function changeRow(s: FusionSettings, rows: FusionRow[], id: string, chan
     } else if (!soleRequired) category[c.id] = optional(c.id) && rnd() > .43 ? '' : pick(allowed(s, c.id), rnd) || '';
   }
   const row = uniqueName(makeRow(category, seed, change ? old : undefined, change?.dimension), others);
-  return rows.map(r => r.id === id ? { ...row, id, advanced: old.advanced, isBoss: old.isBoss, role: old.role, cards: old.cards } : r);
+  return rows.map(r => r.id === id ? { ...row, id, advanced: old.advanced, isBoss: old.isBoss, role: old.role, cards: old.cards, translations: translationsFor(s, category, old.translations) } : r);
 }
 export function textFor(row: FusionRow, settings: Pick<FusionSettings, 'requirements' | 'lang'> & Partial<Pick<FusionSettings, 'requirementsEnabled' | 'requirementsEn' | 'rules'>>) {
   const c = row.category;
@@ -202,7 +206,8 @@ export function textFor(row: FusionRow, settings: Pick<FusionSettings, 'requirem
     c.physique ? `Silhouette: ${englishDetail('physique', c.physique, row.detail.physique)}, with coherent weight distribution and readable large forms.` : '',
   ].join(' ');
   let en = `Original character concept: ${translate(SOURCE_EN, row.source.name)} ${translate(CONCEPT_EN, row.concept.name)}${row.name.match(/ \d+$/)?.[0] || ''}. A ${translate(SOURCE_EN, row.source.name)} crossed with a ${translate(CONCEPT_EN, row.concept.name)}. Preserve a recognizable source silhouette and reinterpret its signature physical feature as a ${translate(PROP_EN, row.concept.prop)}. Main functional system: ${row.mechanism.en}. ${extrasEn} Design language inspired by ${translate(EN_LABEL, c.concept)}; ${row.personality.en}. ${!fixed ? '' : settings.requirementsEn?.trim() ? `Fixed art direction: ${settings.requirementsEn.trim()}` : fixed === DEFAULT_REQUIREMENTS ? 'Premium family-friendly stylized 3D cartoon, approximately 2.5 heads tall, simplified rounded geometry, bold readable silhouette, vibrant clean colors, matte materials, soft studio lighting, charming and sophisticated, clear assembly thickness and animation-friendly joints.' : `Fixed art direction: ${settings.requirementsEn?.trim() || fixed}`} ${row.role ? `Narrative role: ${roleEn[row.role] || row.role}.` : ''} ${cardEn} One full-body character, front three-quarter view, complete visible mechanism, believable connections, strong form hierarchy.${row.advanced ? ' Advanced fusion: show stored, activated and released states, driven by one coherent mechanical chain, with a clear dominant body silhouette.' : ''}`;
-  for (const tags of Object.values(settings.rules || {})) for (const tag of tags) {
+  const translated = settings.rules ? translationsFor({ rules: settings.rules }, c, row.translations) : row.translations || [];
+  for (const tag of translated) {
     if (!tag.en) continue;
     en = en.replaceAll(tag.label + '探索者', tag.en + ' explorer').replaceAll(tag.label + '主题装置', tag.en + ' themed device').replaceAll(tag.label, tag.en);
   }
