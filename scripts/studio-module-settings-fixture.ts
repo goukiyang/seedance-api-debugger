@@ -10,7 +10,7 @@ import path from 'node:path';
 async function main() {
   const run = await mkdtemp(path.join(os.tmpdir(), 'sd2-module-settings-'));
   process.env.DATABASE_URL = `file:${run}/fixture.sqlite`;
-  process.env.NODE_ENV = 'test'; process.env.STUDIO_TASK_SETTINGS_V2_WRITE = '1';
+  Reflect.set(process.env, 'NODE_ENV', 'test'); process.env.STUDIO_TASK_SETTINGS_V2_WRITE = '1';
   delete process.env.FEISHU_ALLOWED_TENANT_KEY;
   for (const key of Object.keys(process.env).filter(key => key.startsWith('PRIVATE_PROMPTS_'))) delete process.env[key];
   const schema = spawnSync(process.execPath, ['node_modules/prisma/build/index.js', 'db', 'push', '--skip-generate', '--schema', 'prisma/schema.prisma'],

@@ -3,6 +3,7 @@ import packageInfo from '../../package.json';
 const notice = { title: '模板内保存多套设置', outline: [
   '另存为设置留在当前模板，命名后直接切换',
   '个人方案不修改共享默认设置，主图保留',
+  '角色规则保存后，预览及时更新',
   '断网后核对原保存，避免重复创建',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

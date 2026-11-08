@@ -566,7 +566,7 @@ F0兼容guard source `f0fc87f9896daa685c1067bb341e85ee21933a9a`、BUILD `_JwQu0Z
 原始工程、发布、公网与只读恢复证据已按白名单存正式根私有`docs/materials/2026-11-07-pin-wide-gallery/recovery-20261108/`（本地忽略、0700）。135.1成功但未部署证据单独保留，首错fixture01/client04及修正边界仍保留；未下载DB备份、配置快照、价格全字段正文、凭据或用户媒体。后继已交还发布窗并告知从实际38fc52f源继承；本轮只做记录收口，不再改运行源。
 
 
-### 16.9 NAMED-SETTINGS01 同模板另存设置（2026-11-08，实施完成待发布）
+### 16.9 NAMED-SETTINGS01 同模板另存设置（2026-11-08，135.8准备发布）
 
 用户明确：生成区底部“另存为”保存同一模板下的多套不同设置，不是另建模板。135.4实发原入口作者默认勾共享，走saveSharedStudioPresetAs新建publisher工作区；非作者走personal-parameters并openShared新工作区。旧personal-quick仍创建ImageStudioPreset，且未绑定工作区会改source与共享意图，不能仅把checkbox去掉或改文案冒修复。
 
@@ -580,3 +580,7 @@ F0兼容guard source `f0fc87f9896daa685c1067bb341e85ee21933a9a`、BUILD `_JwQu0Z
 
 
 **构建差量与真实回归（e639未部署）。** 首次冻结e639在原native末尾失败1项studio-restored-settings-engineering:318，原“没有恢复标记的作者风格草稿应拒绝”检查正确；其余14项native、其它public fixtures及pricing已通过并保原证。原因是初版为了命名方案放行所有作者纯style选择，超出了普通B合同。现改为请求draft显式`personalStyleSelection=true`，只在前端明确套用命名方案、且非历史恢复/重试时发送；没有标记仍原拒绝，混入上下文/固定定义不放行。报价与创建复用同一parser/normalizer，旧冻结输出不改。verify01 fixture06-marker十二项及原完整restored-contract-marker用例均退出0；并补同一命名弹窗内丢回执后的原命令接续，保留原body/号、不另起保存。此次为真实行为回归，不能靠改旧断言或重标旧成功遮掉；新冻结源须补受影响构建，未编辑任何运行中的发布器，线上135.6保持。
+
+**attempt02工程类型错误。** 冻结12c64的12项设置检查、完整fresh native/pricing均通过；Next编译完成后，内置types在新增fixture对只读NODE_ENV直接赋值处拒绝，未切版。仅按现有角色夹具的Reflect.set方式修正测试环境赋值；业务源码和所有断言不变，保留原native成功及Next失败日志，先完整typecheck再续最终构建。此次无线上影响，不把构建失败冒成发布成功。
+
+**最终候选合并。** attempt02类型错误仅改Reflect.set后，隔离完整tsc退出0（release02/types03-result.json）。135.7未实发。新包尚未启动时，与原角色任务共同确定只合9288682ad四文件客户端预览修复至135.8：保存revision传至预览，旧请求/旧错误按账号、工作区、revision和输入隔离；历史当前图配方仍冻结。复用原React4组红绿证据并核最终源hash，最终集成包再做原生/计价和完整Next工程构建，不扩后端、费用或配置写入。135.9后继由另一现有任务从实际135.8完整继承，本批唯一控制发布窗。
