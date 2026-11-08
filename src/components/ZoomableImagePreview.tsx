@@ -77,6 +77,7 @@ export type ZoomableImagePreviewProps = {
   onPrevious?: () => void;
   onNext?: () => void;
   onImageLoaded?: (src: string) => void;
+  onFullSizeCopied?: () => void;
   resolveDownload?: (src: string) => (() => void | Promise<unknown>) | undefined;
   onClose: () => void;
 };
@@ -271,7 +272,7 @@ type ComparisonNotice = { kind: 'retry' | 'reselect'; message: string; saved?: C
 const sides: Side[] = ['current', 'comparison'];
 const viewIdentity = (side: Side, image: ImageComparisonSource) => imageSourceIdentity(image) + ':' + side;
 
-export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, previewKey, sourceVersion, localFrame, sourceRole, imageNeighbors = [], preparation, contentKey, imageSharing = true, previewOnly = false, metadata, safeDetails, comparison, comparisonCandidates = [], details, notice, hasNavigation, onPrevious, onNext, onImageLoaded, resolveDownload, onClose }: ZoomableImagePreviewProps) {
+export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, previewKey, sourceVersion, localFrame, sourceRole, imageNeighbors = [], preparation, contentKey, imageSharing = true, previewOnly = false, metadata, safeDetails, comparison, comparisonCandidates = [], details, notice, hasNavigation, onPrevious, onNext, onImageLoaded, onFullSizeCopied, resolveDownload, onClose }: ZoomableImagePreviewProps) {
   const { user, hasLoadedUser, userLoadError, sessionChanged } = useAppSession();
   const owner = user?.id || '';
   const account = hasLoadedUser && !userLoadError && !sessionChanged ? `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}` : '';
@@ -1053,9 +1054,9 @@ export function ZoomableImagePreview({ src, thumbnailSrc, alt, fileName, title, 
             const current = () => alive.current && expectedScope() && readScopeRef.current.account === expectedAccount && !readScopeRef.current.previewOnly && sourcesRef.current[safeSide] === expectedSource;
             const authorizationSource = decoded?.displayKind === 'hd' ? versionedHdSource(selectedImage.src, 'hd', decoded.hd?.sourceVersion, decoded.hd?.representationVersion)
               : displaySource(selectedImage.src, 'original');
-            setCopyState({ src: copySource, busy: true }); void copyImage(copySource, { isCurrent: current, authorizationSource,
+            setCopyState({ src: copySource, busy: true }); void copyImage(copySource, { isCurrent: current, actorId: user?.works_preview ? user.id : undefined, authorizationSource,
               expectedVersion: decoded?.authorizationVersion, representationVersion: decoded?.representationVersion,
-              localFrame: localFrame?.url === selectedImage.src ? localFrame : undefined }).then(() => { if (current()) setCopyState({ src: copySource, success: true, message: copying }); }).catch(error => { if (current()) setCopyState({ src: copySource, message: error instanceof Error ? error.message : '复制失败，请重试' }); });
+              localFrame: localFrame?.url === selectedImage.src ? localFrame : undefined }).then(() => { if (current()) { setCopyState({ src: copySource, success: true, message: copying }); if (isOriginalSubject && decoded?.fullSize) onFullSizeCopied?.(); } }).catch(error => { if (current()) setCopyState({ src: copySource, message: error instanceof Error ? error.message : '复制失败，请重试' }); });
           }}>{copyState?.success && copyState.src === copySource ? <Check size={16} /> : <Copy size={16} />}{copyState?.busy ? '正在复制' : safeSide === 'current' ? '复制当前图' : '复制对比图'}</button>}
           {!selectedPreviewOnly && displaySource(selectedImage.src, 'preview') !== displaySource(selectedImage.src, 'original') && <button type="button" className={styles.menuAction} aria-pressed={activeOriginal} onClick={() => {
             userAction.current++; stopGestures();

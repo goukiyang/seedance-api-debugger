@@ -6,6 +6,7 @@ import { authorizedImageResponse, discardHdViewingInterest, privateImageHeaders 
 import { performance } from 'node:perf_hooks';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { studioOutputTaskWhere, studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
+import { observeOriginalAssetDownload } from '@/lib/works/recommendation-events';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -36,8 +37,9 @@ export async function GET(_request: NextRequest, { params }: { params: { assetId
     const detail = _request.nextUrl.searchParams.get('detail') === '1';
     const download = _request.nextUrl.searchParams.get('download') === '1';
     const hd = ['hd', 'hd-description', 'hd-download'].find(key => _request.nextUrl.searchParams.get(key) === '1') as 'hd' | 'hd-description' | 'hd-download' | undefined;
-    return await authorizedImageResponse(_request, asset.original_url, hd || (thumbnail ? 'thumbnail' : preview ? 'preview' : detail ? 'detail' : download ? 'download' : 'original'), asset.mime_type || 'application/octet-stream', asset.file_name, started,
+    const response = await authorizedImageResponse(_request, asset.original_url, hd || (thumbnail ? 'thumbnail' : preview ? 'preview' : detail ? 'detail' : download ? 'download' : 'original'), asset.mime_type || 'application/octet-stream', asset.file_name, started,
       { requesterId: user.id, owner: { kind: 'asset', id: asset.id, ownerId: asset.owner_id } });
+    return (download && !hd || hd === 'hd-download') && !thumbnail && !preview && !detail ? observeOriginalAssetDownload(_request, response, user, asset.id) : response;
   } catch {
     return NextResponse.json({ error: '图片读取失败，请重试' }, { status: 503, headers: privateImageHeaders });
   }

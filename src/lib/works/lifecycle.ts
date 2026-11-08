@@ -8,6 +8,7 @@ import { assertCanUseReferenceImage } from '@/lib/reference-albums/permissions';
 import { getWorkAccess } from './access';
 import { runWorkOperation } from './operations';
 import { WorkError, type WorkLifecycleMutation } from './types';
+import { invalidateWorkRecommendations } from './recommendation-events';
 
 const id = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9_:-]{1,180}$/.test(value);
 async function assertSourceOwner(db: Prisma.TransactionClient, user: SessionUser, work: Work) {
@@ -32,6 +33,7 @@ export async function mutateWorkLifecycle(user: SessionUser, workId: string, inp
     const changed = await tx.work.updateMany({ where: { id: workId, author_id: actor.id, revision: input.expectedRevision, current_version_id: input.expectedMediaVersion }, data: { ...data, revision: { increment: 1 } } });
     if (!changed.count) throw new WorkError('作品状态已变化，请重新打开后操作', 409);
     const fresh = await tx.work.findUniqueOrThrow({ where: { id: workId } });
+    await invalidateWorkRecommendations(tx, workId);
     return { kind: 'lifecycle', workId, revision: fresh.revision, discoverable: fresh.discoverable, withdrawn: Boolean(fresh.withdrawn_at) };
   });
 }

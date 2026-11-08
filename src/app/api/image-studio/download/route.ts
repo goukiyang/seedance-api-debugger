@@ -9,6 +9,7 @@ import { studioVisibleAssetWhere } from '@/lib/image-studio/protected-assets';
 import { STUDIO_BATCH_LIMITS, safeBatchFileName } from '@/lib/image-studio/batch-contract';
 import { studioBatchView } from '@/lib/image-studio/batches';
 import { studioTaskHasViewableOutput, studioOutputFormatForMime } from '@/lib/image-studio/dimension-mismatch';
+import { observeOriginalAssetDownload } from '@/lib/works/recommendation-events';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -39,7 +40,7 @@ export async function GET(request: NextRequest) {
     if (files.length === 1 && !batch) {
       const response = await mediaPreviewResponse(request, files[0].url, files[0].mimeType);
       response.headers.set('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(files[0].name).replace(/'/g, '%27')}`);
-      return response;
+      return observeOriginalAssetDownload(request, response, user, tasks[0].asset_id!);
     }
     if (request.method === 'HEAD') return new Response(null, { headers: { ...privateImageHeaders, 'Content-Type': 'application/zip', 'Content-Disposition': 'attachment; filename="generated-images.zip"' } });
     const zip = new ZipFile();

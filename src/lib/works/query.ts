@@ -7,6 +7,8 @@ import { workAccessSql, type WorkPermissionRow } from './access';
 import { WORKS_PROTOCOL, WorkError, type WorkAudience, type WorkCard, type WorkPage, type WorkQuery } from './types';
 import { projectWorkProvenance } from './provenance';
 import { readWorkActivity } from './activity';
+import { recommendationVisibleSql, recommendationReadCtes } from './recommendation-read';
+import { recommendationSchemaReady } from './recommendation-events';
 
 type PageKey = WorkPermissionRow & { completed_at: Date; project_visible: number | bigint };
 type Position = { time: string; id: string };
@@ -33,7 +35,7 @@ const idValue = (value: string | null) => {
 };
 export function parseWorkQuery(params: URLSearchParams): WorkQuery {
   const medium = params.get('medium') || 'all', scope = params.get('scope') || 'all';
-  if (!['all', 'image', 'video'].includes(medium) || !['all', 'mine', 'favorites', 'hidden', 'managed'].includes(scope)) throw new WorkError('筛选条件无效');
+  if (!['all', 'image', 'video'].includes(medium) || !['all', 'recommended', 'mine', 'favorites', 'hidden', 'managed'].includes(scope)) throw new WorkError('筛选条件无效');
   return { medium: medium as WorkQuery['medium'], scope: scope as WorkQuery['scope'], q: (params.get('q') || '').trim().slice(0, 120),
     author: idValue(params.get('author')), project: idValue(params.get('project')), collection: idValue(params.get('collection')) };
 }
@@ -120,7 +122,10 @@ export async function readWorkPage(user: SessionUser, params: URLSearchParams, d
   const limit = Number.isSafeInteger(requestedLimit) && requestedLimit > 0 ? Math.min(24, requestedLimit) : 24;
   const access = await workAccessSql(db, user);
   if (query.collection && !await db.workCollection.findFirst({ where: { id: query.collection, owner_id: user.id, removed_at: null }, select: { id: true } })) throw new WorkError('收藏集不存在或不属于当前账号', 404);
+  const recommendedReady = query.scope === 'recommended' && await recommendationSchemaReady(db);
   const filters: Prisma.Sql[] = [Prisma.sql`w.admitted_at <= ${new Date(window.upper)}`];
+  if (query.scope === 'recommended') filters.push(recommendedReady
+    ? recommendationVisibleSql() : Prisma.sql`0=1`);
   filters.push(query.scope === 'managed' ? Prisma.sql`${access.owner}` : Prisma.sql`(${access.canPreview})`);
   if (query.scope !== 'managed' && query.scope !== 'favorites' && !query.collection) filters.push(Prisma.sql`w.discoverable = 1`);
   if (query.scope === 'mine') filters.push(access.owner);
@@ -133,13 +138,32 @@ export async function readWorkPage(user: SessionUser, params: URLSearchParams, d
   if (query.collection) filters.push(Prisma.sql`EXISTS (SELECT 1 FROM WorkCollectionItem ci WHERE ci.collection_id = ${query.collection} AND ci.work_id = w.id)`);
   if (query.q) filters.push(Prisma.sql`w.title LIKE ${'%' + query.q.replace(/[\\%_]/g, '\\$&') + '%'} ESCAPE ${'\\'}`);
   const where = Prisma.join(filters.map(filter => Prisma.sql`(${filter})`), ' AND ');
-  const select = async (extra: Prisma.Sql, ascending = false, amount = limit + 1) => db.$queryRaw<PageKey[]>(Prisma.sql`WITH ${access.ctes}
-    SELECT w.id, v.id AS media_id, w.revision AS work_revision, w.completed_at,
-      (${access.canPreview}) AS can_preview, (${access.canDownload}) AS can_download, (${access.canReuse}) AS can_reuse,
-      (${access.nativePreview}) AS native_preview, ${access.referenceId} AS reference_id,
-      (${access.projectView(Prisma.sql`w.project_id`)}) AS project_visible
-    FROM Work w ${access.joins} LEFT JOIN WorkPersonalState personal ON personal.work_id = w.id AND personal.owner_id = ${user.id}
-    WHERE ${where} ${extra} ORDER BY w.completed_at ${ascending ? Prisma.raw('ASC') : Prisma.raw('DESC')}, w.id ${ascending ? Prisma.raw('ASC') : Prisma.raw('DESC')} LIMIT ${amount}`);
+  const projection = Prisma.sql`w.id,v.id AS media_id,w.revision AS work_revision,w.completed_at,
+    (${access.canPreview}) AS can_preview,(${access.canDownload}) AS can_download,(${access.canReuse}) AS can_reuse,
+    (${access.nativePreview}) AS native_preview,${access.referenceId} AS reference_id,
+    (${access.projectView(Prisma.sql`w.project_id`)}) AS project_visible`;
+  const select = async (extra: Prisma.Sql, ascending = false, amount = limit + 1) => {
+    const direction = ascending ? Prisma.raw('ASC') : Prisma.raw('DESC');
+    if (query.scope === 'recommended') {
+      if (!recommendedReady) return [] as PageKey[];
+      return db.$queryRaw<PageKey[]>(Prisma.sql`WITH ${access.ctes},
+        ${recommendationReadCtes(user.id, access, new Date(window.upper))},
+        eligible AS MATERIALIZED (
+          SELECT ${projection},COALESCE(context.submission_key,w.id) AS group_key
+          FROM recommendation_pool admission CROSS JOIN Work w ON w.id=admission.work_id ${access.joins}
+          LEFT JOIN WorkPersonalState personal ON personal.work_id=w.id AND personal.owner_id=${user.id}
+          LEFT JOIN WorkContext context ON context.work_id=w.id AND context.media_version_id=v.id AND context.schema_version=1
+          WHERE ${where}
+        ), representatives AS (
+          SELECT *,row_number() OVER (PARTITION BY group_key ORDER BY completed_at DESC,id DESC) AS group_position FROM eligible
+        ) SELECT * FROM representatives w WHERE group_position=1 ${extra}
+        ORDER BY w.completed_at ${direction},w.id ${direction} LIMIT ${amount}`);
+    }
+    return db.$queryRaw<PageKey[]>(Prisma.sql`WITH ${access.ctes}
+      SELECT ${projection} FROM Work w ${access.joins}
+      LEFT JOIN WorkPersonalState personal ON personal.work_id=w.id AND personal.owner_id=${user.id}
+      WHERE ${where} ${extra} ORDER BY w.completed_at ${direction},w.id ${direction} LIMIT ${amount}`);
+  };
   let keys: PageKey[], hasPrevious = false, hasNext = false, anchorUnavailable = false, anchorId: string | null = null;
   if (requestedAnchor) {
     const anchor = (await select(Prisma.sql`AND w.id = ${requestedAnchor}`, false, 1))[0];
@@ -161,10 +185,17 @@ export async function readWorkPage(user: SessionUser, params: URLSearchParams, d
     }
   }
   const base: WindowToken = { v: 1, owner: user.id, query: queryHash, upper: window.upper };
+  let omittedIds: string[] | undefined;
+  if (query.scope === 'recommended' && params.has('check')) {
+    const checked = Array.from(new Set(params.get('check')!.split(',')));
+    if (checked.length > 48 || checked.some(id => !idValue(id))) throw new WorkError('作品核对范围无效');
+    const current = new Set((await select(Prisma.sql`AND w.id IN (${Prisma.join(checked)})`, false, 48)).map(key => key.id));
+    omittedIds = checked.filter(id => !current.has(id));
+  }
   return { protocol: WORKS_PROTOCOL, viewerId: user.id, items: await projectWorkCards(access.user, keys, db), window: encode(base),
     previousCursor: hasPrevious && keys.length ? encode({ ...base, position: point(keys[0]) }) : null,
     nextCursor: hasNext && keys.length ? encode({ ...base, position: point(keys[keys.length - 1]) }) : null,
-    anchorId, anchorUnavailable };
+    anchorId, anchorUnavailable, ...(omittedIds ? { omittedIds } : {}) };
 }
 
 export async function readWorkDetail(user: SessionUser, id: string, db: Prisma.TransactionClient = prisma) {

@@ -19,13 +19,14 @@ export type WorkCard = {
   provenance?: WorkProvenance;
 };
 export type WorkQuery = {
-  q?: string; medium?: 'all' | WorkMedium; scope?: 'all' | 'mine' | 'favorites' | 'hidden' | 'managed';
+  q?: string; medium?: 'all' | WorkMedium; scope?: 'all' | 'recommended' | 'mine' | 'favorites' | 'hidden' | 'managed';
   author?: string; project?: string; collection?: string;
 };
 export type WorkPage = {
   protocol: typeof WORKS_PROTOCOL; viewerId: string; items: WorkCard[];
   window: string; previousCursor: string | null; nextCursor: string | null;
   anchorId: string | null; anchorUnavailable: boolean;
+  omittedIds?: string[];
 };
 export type WorkCollectionDTO = { id: string; name: string; revision: number; createdAt: string };
 export type WorkCollectionPage = { viewerId: string; collections: WorkCollectionDTO[]; nextCursor: string | null };

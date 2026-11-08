@@ -7,13 +7,14 @@ import { prepareImagePreview, type ImagePreviewPreparation, type PreparedImagePr
 import { invalidateImageReadSource } from '@/lib/media/image-read-session';
 import { matchesWorkImage, type PreparedWorkImage } from '@/lib/works/image-preview';
 
-export function WorkPreviewImage({ work, preparation, attempt, onFailure }: { work: WorkCard; preparation?: PreparedWorkImage; attempt: number; onFailure: () => void }) {
+export function WorkPreviewImage({ work, preparation, attempt, onFailure, onDisplayed }: { work: WorkCard; preparation?: PreparedWorkImage; attempt: number; onFailure: () => void; onDisplayed?: () => void }) {
   const { user, hasLoadedUser, userLoadError, sessionChanged } = useAppSession();
   const account = hasLoadedUser && !userLoadError && !sessionChanged ? `${user?.id || 'anonymous'}:${user?.role || ''}:${user?.account_type || ''}` : '';
   const source = work.detailPreviewUrl || work.previewUrl || '', previewOnly = !work.downloadUrl && !work.reuse;
   const key = JSON.stringify([account, source, attempt, previewOnly]);
   const [prepared, setPrepared] = useState<{ key: string; handle: ImagePreviewPreparation; state: PreparedImagePreviewState } | null>(null);
   const failure = useRef(onFailure); failure.current = onFailure;
+  const displayed = useRef(onDisplayed); displayed.current = onDisplayed;
   const preparedHandle = !attempt && matchesWorkImage(preparation, account, work) ? preparation?.handle : undefined;
   useEffect(() => {
     if (!account || !source) return;
@@ -34,7 +35,7 @@ export function WorkPreviewImage({ work, preparation, attempt, onFailure }: { wo
     onLoad={event => {
       const image = event.currentTarget;
       if (current?.state.result.decoded && image.currentSrc === current.state.result.imageSrc) requestAnimationFrame(() => requestAnimationFrame(() => {
-        if (!document.hidden && image.isConnected && current.handle.isCurrent()) current.handle.markDisplayed();
+        if (!document.hidden && image.isConnected && current.handle.isCurrent()) { current.handle.markDisplayed(); displayed.current?.(); }
       }));
     }} />;
 }

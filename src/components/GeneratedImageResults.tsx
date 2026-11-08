@@ -417,7 +417,7 @@ export function GeneratedImageResults<T extends GeneratedImageResult>({ items, s
     const base = { id: item.id, itemId: item.id, operationId, scope, anchor, action: kind === 'copy' ? '复制' : '下载' };
     setFeedback({ ...base, phase: 'busy', busy: true, message: kind === 'copy' ? '复制中' : '准备下载' });
     try {
-      if (kind === 'copy' && item.media) await copyImage(item.media.src, { isCurrent: current });
+      if (kind === 'copy' && item.media) await copyImage(item.media.src, { isCurrent: current, actorId: user?.works_preview ? previewContext.current.owner : undefined });
       else if (item.download) await item.download();
       else throw new Error('当前图片暂不可下载');
       if (current()) setFeedback({ ...base, phase: 'success', busy: false, message: kind === 'copy' ? '图片已复制' : item.downloadMessage || '已交给浏览器下载' });

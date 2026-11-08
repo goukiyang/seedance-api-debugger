@@ -70,11 +70,9 @@ async function main() {
     const shouldStop = () => stopping || isImageStudioDraining();
     worksWork = import('../src/lib/works/ingestion').then(module => module.processWorksRegistrationPass({ shouldStop }))
       .then(async () => {
-        if (!shouldStop() && process.env.WORKS_PREVIEW_USER_ID?.trim()) {
-          const { processWorkRecommendationTrial } = await import('../src/lib/works/recommendation-trial');
-          await processWorkRecommendationTrial(shouldStop).catch(() => {
-            console.warn('[works] recommendation trial pass deferred');
-          });
+        if (!shouldStop()) {
+          const { processWorkRecommendations } = await import('../src/lib/works/recommendation-worker');
+          await processWorkRecommendations(shouldStop).catch(() => console.warn('[works] recommendation pass deferred'));
         }
       })
       .catch(() => console.warn('[works] directory pass deferred; original tasks and billing retained')).finally(() => { worksWork = null; });
