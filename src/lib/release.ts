@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '修复置顶管理与工作区删除', outline: [
-  '目录变化后恢复翻页，保留当前编辑',
-  '本人置顶可管理，旧图按真实归属发布',
-  '删除个人工作区不再等待已受理任务完成',
+const notice = { title: '模板内保存多套设置', outline: [
+  '另存为设置留在当前模板，命名后直接切换',
+  '个人方案不修改共享默认设置，主图保留',
+  '断网后核对原保存，避免重复创建',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
