@@ -132,7 +132,7 @@ async function main() {
     checks.push('same-workspace historical reproduction can pin and replay; colleague reads output while original source and snapshot stay frozen');
 
     // The reported task ran in an older named workspace with no publisher binding.
-    const legacyPresetId = 'legacy-nine-grid-preset', legacyWorkspaceId = 'legacy-nine-grid-workspace';
+    const legacyPresetId = randomUUID(), legacyWorkspaceId = randomUUID();
     await prisma.imageStudioPreset.create({ data: { id: legacyPresetId, owner_id: author.id, scope: 'creator',
       is_shared: true, name: 'Legacy nine grid', model: 'fixture' } });
     await prisma.imageStudioModule.create({ data: { id: legacyWorkspaceId, owner_id: author.id, name: 'Legacy nine grid',
