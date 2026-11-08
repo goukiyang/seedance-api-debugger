@@ -82,14 +82,18 @@ PIN相关原四项处理：135.4/38fc52f已部署目录恢复、本人管理/取
 
 ## 2026-11-08 共享全链路追加审计（SHARE-CHAIN01）
 
-- **D-20261108-SHARE-STATE-ORDER｜已确认缺陷 / P1，源码已修，待发布。** 实际a50/135.11的共享receiver直接替换；真实React延迟旧读在active props已为8后仍投递7并回退token。已发布共享onSettled又仅写isShared，丢掉真实回执的moduleRevision（示例9/页面8）；接收端隔离复现成立；普通save父层原已有refresh，不能断言该完整路径必然回退。修法按同账号/对象的统一确认投影与读取代次，不能只加Math.max、比较hash大小或吞撤权。上轮原文回调修复仍有效，不冒整个共享已闭环。
-- **D-20261108-SHARE-COMMAND-DURABILITY｜已确认恢复缺口 / P2，源码已修，待发布。** 普通模板定义保存原号只在moduleSaveRequest ref，temporaryDraftPayload无原号，真实React重挂后null。服务器原回执没有丢；未证重复生成/扣费。沿既有耐久命令方式保最小元数据，刷新先查原号，不把私有正文写本机。
-- **D-20261108-SHARE-DEFINITION-STORAGE｜已确认交集缺陷 / P2，源码已修，待发布。** 严格加密合成库中，作者只读definition返回存储信封，专用private-editor返回同一授权明文，组件直接渲染context。需接既有私有正文授权/解密/脱敏边界；不是生产明文泄漏证明，也不授管理员绕策略的权限。
-- **D-20261108-SHARE-COUPLING-ISOLATION｜结构耦合及已复现风险 / P2，源码已修，待发布。** 真实rename仅改名、生成正文/参数/参考不变，仍改生成token；无关合成坏复现记录使目录/旧revision整体失败，健康定向读取成功。生产本次17条复现、82binding相关JSON异常0，不冒本轮线上根因。分离展示/生成合同、目录摘要与条目解析，私密保护失败不能被静默忽略。
-- **D-20261108-SHARE-LEGACY-MATRIX｜兼容范围待核 / P2。** 生产只读有24个带source无新binding工作区、11个共享原件无新publisher映射；82新绑定owner/source匹配且无缺workspace。需分类旧apply/个人副本/历史/现代live，不按名字推断迁移，不批量回填。多人吞吐和逐模板实页未验，不把2秒轮询/32队列上限当人数承诺。
+- **D-20261108-SHARE-STATE-ORDER｜已确认缺陷 / P1，已部署v0.138.0，功能待手验。** 实际a50/135.11的共享receiver直接替换；真实React延迟旧读在active props已为8后仍投递7并回退token。已发布共享onSettled又仅写isShared，丢掉真实回执的moduleRevision（示例9/页面8）；接收端隔离复现成立；普通save父层原已有refresh，不能断言该完整路径必然回退。修法按同账号/对象的统一确认投影与读取代次，不能只加Math.max、比较hash大小或吞撤权。上轮原文回调修复仍有效，不冒整个共享已闭环。
+- **D-20261108-SHARE-COMMAND-DURABILITY｜已确认恢复缺口 / P2，已部署v0.138.0，功能待手验。** 普通模板定义保存原号只在moduleSaveRequest ref，temporaryDraftPayload无原号，真实React重挂后null。服务器原回执没有丢；未证重复生成/扣费。沿既有耐久命令方式保最小元数据，刷新先查原号，不把私有正文写本机。
+- **D-20261108-SHARE-DEFINITION-STORAGE｜已确认交集缺陷 / P2，已部署v0.138.0，功能待手验。** 严格加密合成库中，作者只读definition返回存储信封，专用private-editor返回同一授权明文，组件直接渲染context。需接既有私有正文授权/解密/脱敏边界；不是生产明文泄漏证明，也不授管理员绕策略的权限。
+- **D-20261108-SHARE-COUPLING-ISOLATION｜结构耦合及已复现风险 / P2，已部署v0.138.0，功能待手验。** 真实rename仅改名、生成正文/参数/参考不变，仍改生成token；无关合成坏复现记录使目录/旧revision整体失败，健康定向读取成功。生产本次17条复现、82binding相关JSON异常0，不冒本轮线上根因。分离展示/生成合同、目录摘要与条目解析，私密保护失败不能被静默忽略。
+- **D-20261108-SHARE-LEGACY-MATRIX｜兼容样本已补 / P2，生产逐模板待手验。** 原18:08Z生产只读有24个带source无新binding工作区、11个共享原件无新publisher映射；82新绑定owner/source匹配且无缺workspace。需分类旧apply/个人副本/历史/现代live，不按名字推断迁移，不批量回填。多人吞吐和逐模板实页未验，不把2秒轮询/32队列上限当人数承诺。 无binding/无publisher与参数副本/modern live隔离样本已过；不回填旧记录。
 
-- **D-20261108-SHARE-NAV-NAME｜交集缺陷 / P3，源码已修，待发布。** 飞书导航label读raw workspace.name，共享源改名主要改source.name并增workspace revision。已核任务快照冻结实际源moduleName；新导航优先该次受理名，旧无字段任务保本人工作区名。隔离工程检查覆盖新/旧路径，真实飞书卡片待手验；不重发、不改共享范围。
+- **D-20261108-SHARE-NAV-NAME｜交集缺陷 / P3，已部署v0.138.0，功能待手验。** 飞书导航label读raw workspace.name，共享源改名主要改source.name并增workspace revision。已核任务快照冻结实际源moduleName；新导航优先该次受理名，旧无字段任务保本人工作区名。隔离工程检查覆盖新/旧路径，真实飞书卡片待手验；不重发、不改共享范围。
 
 完整证据、边界和整改顺序见[共享全链路审计](../docs/template-sharing-chain-audit-2026-11-08.md)及[原联合单§16.11](todo/2026-11-05-template-sharing-cutout-open-preflight.md)。原17项和完整构建复用，新增三批诊断仅复现新缺口，无生产业务写/收费生成/浏览器验收；上述新增缺陷尚未修改上线。
 
-SHARE-CHAIN-FIX01差量：A01补正普通save父层已有refresh，保护下沉到接收端和scope；R4继续追查发现素材权限全量兼容读取也会受坏行影响，已采用明确错误类型、未知媒体拒绝与条目隔离，未忽略权限。无binding/无publisher旧记录仅加合成读样本，不批量迁移。实际部署与手验仍见原联合单§16.12；飞书命名线索及吞吐未冒已闭环。
+SHARE-CHAIN-FIX01收口：R1–R5及飞书命名交集已部署0.138.0，实际回执/原失败沿联合单§16.13与审计§8；数据与费用不回滚。旧生产模板逐项、真实卡片与多人吞吐仍待手验/取证。
+
+## 2026-11-08 发布资源页面预检（任务外发现）
+
+- **D-20261108-RELEASE-PAGE-PREFLIGHT｜已确认流程缺口 / P2，通用工具固化待办。** 我在03发布资源配置中猜用了不存在的`/tools/page`，后核触发保护回guard；应用构建/服务本身已过，未回业务数据。04按真实app-build-manifest先核4个路径及1514原成品字节，同构建接续成功。本轮已做前置核对；后续在现有发布准备工具加同样局部预检，让缺项在停服前拒绝，保公网HTTP/字节核对，避免靠事后回退发现配置拼错。未顺手扩建平台或把通用工具冒已改。

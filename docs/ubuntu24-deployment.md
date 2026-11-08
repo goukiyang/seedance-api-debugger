@@ -463,3 +463,14 @@ sudo nginx -t
 - 固化 ESLint 配置，让 `npm run lint` 可非交互执行。
 - 建立 CI：安装依赖、Prisma generate、lint、build、发布包抽检。
 - 补齐 `.env.example`，覆盖源码实际使用的生产变量。
+
+
+<!-- SHARE-CHAIN-FIX01-138 -->
+## 2026-11-08：共享链路 v0.138.0
+
+实际source 88899f3477ede694247e3282970da590abdb1ee5 / BUILD iyTda8_zchUn4upVpJdl8；stage template-sharing-chain-fix-20261108/attempt04，pair b7a5cad7-276c-4875-a2e8-4f3d31965281，20:19:45Z公网、20:20:31Z健康，7核心服务/4timer与控制器0。R1–R5及飞书命名交集已落地，功能用户手验。公网48资源/2 protected、匿名GET3及写2均401；39专项、fresh native/计价与完整Next有证。应用源与之后文档HEAD分开。
+
+03后核误配/tools/page导致保护回guard，04真实编译路径预验，核1514成品字节复用原20:09:32完整构建和原native/时间；无重建、无DDL、无数据/费用回滚，只读继承137三派生表/7索引/sqlite_sequence。guard bbeb/0.135.9+points-pricing-guard.2/BQT原1491字节和16:31原时间保留；04仅恢复入口只读准入有证，03实际回退原证不改。后继发布不可照跑旧恢复脚本。
+
+完整记录沿共享审计§8及原联合单§16.13；私有44元证在正式根docs/materials/2026-11-07-pin-wide-gallery/recovery-20261108/sharing-chain-fix-138，700/600、Git忽略，不含DB/env/原价格/密钥/用户正文。费率全字段d03保持。通用编译页面预检固化作为任务外发现，未冒已做。
+<!-- /SHARE-CHAIN-FIX01-138 -->

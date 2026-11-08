@@ -530,3 +530,10 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 ### 2026-11-08 角色融合提示词
 
 [原工单](../../tasks/todo/2026-11-08-character-fusion.md)／[安全发布摘要](2026-11-08-character-fusion-prototype/release-summary.md)：v0.135.0 / 应用9b2eccae8 / BUILD u_Nz4s0rvT7Lzfs9T5Op8已保护部署，待用户手验。原型单文件保留正式根同名目录prototype.html；私有implementation/attempt03为同源规则、构建/类型、配对/guard复用、启动/公网/健康及一致备份元证，不含DB原件、环境或配置。前两次离线候选为主动让窗/继承新正式源而替代，未切生产，不冒已完整构建；最终attempt03完整构建及切版通过，服务器原日志和程序恢复入口保留。
+
+
+<!-- SHARE-CHAIN-FIX01-138 -->
+## 共享链路整改0.138.0（2026-11-08）
+
+[全链路审计与实际收口](../template-sharing-chain-audit-2026-11-08.md)；原联合单§16.13。应用88899/iyT，04成功，39专项与完整native/Next有证，功能待用户手验。正式根私有白名单元证：2026-11-07-pin-wide-gallery/recovery-20261108/sharing-chain-fix-138（44份逐SHA、700/600、Git忽略；保01/02/03原失败及04成功，不含DB/env/原费率/密钥/正文）。
+<!-- /SHARE-CHAIN-FIX01-138 -->
