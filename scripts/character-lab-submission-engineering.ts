@@ -451,10 +451,25 @@ async function main() {
     assert.deepEqual(await sample(1200, 500), [0, 255, 0]);
     assert.deepEqual(await sample(400, 1700), [0, 0, 255]);
     assert.deepEqual(await sample(1200, 1700), [255, 255, 0]);
+    assert.deepEqual(await sample(1, 1), [255, 0, 0]);
+    assert.deepEqual(await sample(400, 799), [255, 0, 0]);
+    assert.deepEqual(await sample(400, 800), [0, 0, 255]);
+    assert.deepEqual(await sample(1598, 2398), [255, 255, 0]);
     await assert.rejects(compositions.composeLabSheet(user, { ...selected, draft: { ...selected.draft, mainFace: { ...face, cell: 5 } } }), /侧脸对应旧正脸/);
+    // A prior rendering of these same choices stays readable and must not satisfy a new save.
+    const oldSources = { sourceAssetId, mainFace: face, side: views.side, front: views['body-front'], back: views['body-back'] };
+    const oldId = sha(JSON.stringify([owner, workspaceId, 'sheet-2x2-v1', oldSources, '四格']));
+    const oldPng = await sharp({ create: { width: 16, height: 24, channels: 3, background: '#888888' } }).png().toBuffer();
+    mkdirSync(path.join(directory, 'storage/character-lab-compositions'), { recursive: true });
+    writeFileSync(path.join(directory, 'storage/character-lab-compositions', oldId + '.png'), oldPng);
+    await db.platformSetting.update({ where: { key: store.workspaceKey(owner, workspaceId) }, data: { value_json: JSON.stringify({
+      ...selected, compositions: [{ id: oldId, name: '四格', savedAt: selected.updatedAt, layout: 'sheet-2x2-v1', sources: oldSources }],
+    }) } });
     const saved = await compositions.saveLabComposition(user, { workspaceId, revision: selected.revision, name: '四格' });
     const repeated = await compositions.saveLabComposition(user, { workspaceId, revision: saved.revision, name: '四格' });
-    assert.equal(repeated.compositions?.length, 1);
+    assert.equal(repeated.compositions?.length, 2);
+    assert.notEqual(saved.compositions![0].id, oldId);
+    assert.ok((await compositions.readLabComposition(user, workspaceId, oldId)).png.equals(oldPng));
     const savedPng = await compositions.readLabComposition(user, workspaceId, saved.compositions![0].id);
     assert.ok(savedPng.png.equals(png));
     const savedByLegacy = await store.updateLabWorkspace(owner, workspaceId, saved.revision, saved.name, saved.draft);
@@ -509,13 +524,13 @@ async function main() {
     assert.match(preview.prompt || '', /NEW_SAVED_RULES_FOR_NEXT_GENERATION/);
     assert.doesNotMatch((await recipes.labRecipe(user, first.id)).completePrompt || '', /NEW_SAVED_RULES_FOR_NEXT_GENERATION/);
     const sidePreview = await recipes.previewLabPrompt(user, { workspaceId, contextProtocol: 1, kind: 'result', operation: 'side', draft: nextDraft, description: 'FOREIGN_OVERRIDE' });
-    assert.match(sidePreview.prompt || '', /SIDE_STYLE_SENTINEL/);
+    assert.match(sidePreview.prompt || '', /NEW_SAVED_RULES_FOR_NEXT_GENERATION/);
     assert.match(sidePreview.prompt || '', /SIDE_ONLY_SENTINEL/);
-    assert.doesNotMatch(sidePreview.prompt || '', /NEW_SAVED_RULES_FOR_NEXT_GENERATION|BODY_STYLE_SENTINEL|FACE_ONLY_SENTINEL|FOREIGN_OVERRIDE/);
+    assert.doesNotMatch(sidePreview.prompt || '', /SIDE_STYLE_SENTINEL|BODY_STYLE_SENTINEL|FACE_ONLY_SENTINEL|FOREIGN_OVERRIDE/);
     const bodyPreview = await recipes.previewLabPrompt(user, { workspaceId, contextProtocol: 1, kind: 'result', operation: 'body-pair', draft: nextDraft });
-    assert.match(bodyPreview.prompt || '', /BODY_STYLE_SENTINEL/);
+    assert.match(bodyPreview.prompt || '', /NEW_SAVED_RULES_FOR_NEXT_GENERATION/);
     assert.match(bodyPreview.prompt || '', /BODY_ONLY_SENTINEL/);
-    assert.doesNotMatch(bodyPreview.prompt || '', /NEW_SAVED_RULES_FOR_NEXT_GENERATION|SIDE_STYLE_SENTINEL|FACE_ONLY_SENTINEL/);
+    assert.doesNotMatch(bodyPreview.prompt || '', /SIDE_STYLE_SENTINEL|BODY_STYLE_SENTINEL|FACE_ONLY_SENTINEL/);
     const savedText = await store.updateLabWorkspace(owner, workspaceId, savedByLegacy.revision, savedByLegacy.name, nextDraft);
     const oldPageDraft = { ...savedText.draft, faceDescription: undefined, bodyDescription: undefined, sideDescription: undefined };
     const oldPageSaved = await store.updateLabWorkspace(owner, workspaceId, savedText.revision, savedText.name, oldPageDraft);
@@ -554,6 +569,36 @@ async function main() {
       return /原提交结果待确认/.test(String(error));
     });
 
+    const beforeStyle = await store.labConfig();
+    const contentSaved = await store.saveLabConfig(user, beforeStyle.revision, { ...beforeStyle,
+      basePrompt: beforeStyle.basePrompt + ' CONTENT_SCOPE_SENTINEL', styleConstraints: 'MUST_NOT_OVERWRITE_STYLE',
+      sideStyleConstraints: 'MUST_NOT_OVERWRITE_SIDE' }, 'content');
+    assert.equal(contentSaved.styleConstraints, beforeStyle.styleConstraints);
+    assert.equal(contentSaved.sideStyleConstraints, beforeStyle.sideStyleConstraints);
+    assert.match(contentSaved.basePrompt, /CONTENT_SCOPE_SENTINEL/);
+    const styleSaved = await store.saveLabConfig(user, contentSaved.revision, { ...contentSaved,
+      styleConstraints: 'ILLUSTRATION_STYLE_SENTINEL', basePrompt: 'MUST_NOT_OVERWRITE_CONTENT',
+      bodyPairPrompt: 'MUST_NOT_OVERWRITE_BODY_CONTENT' }, 'style');
+    assert.equal(styleSaved.basePrompt, contentSaved.basePrompt);
+    assert.equal(styleSaved.bodyPairPrompt, contentSaved.bodyPairPrompt);
+    for (const field of ['styleConstraints', 'sideStyleConstraints', 'bodyStyleConstraints', 'resultStyleConstraints'] as const) {
+      assert.equal(styleSaved[field], 'ILLUSTRATION_STYLE_SENTINEL');
+    }
+    await assert.rejects(store.saveLabConfig(user, contentSaved.revision, { styleConstraints: 'STALE_STYLE' }, 'style'), /另一处更新/);
+    assert.equal((await store.labConfig()).styleConstraints, 'ILLUSTRATION_STYLE_SENTINEL');
+    const promptFunctions = await import('../src/lib/character-lab/prompts');
+    assert.ok(Object.values(promptFunctions.labDefaultStageStyles).every(style => style === store.defaultLabConfig.styleConstraints));
+    const neutralContent = { ...styleSaved, basePrompt: '根据原始角色设计图生成真人面部候选。统一摄影环境。保留用户衣服细节。',
+      resultPrompt: '生成角色参考图。统一灰色背景、镜头与光线，不加文字。' };
+    const prompts = [promptFunctions.faceLabPrompt(neutralContent, { ...draft, diversity: 100 }), promptFunctions.resultLabPrompt(neutralContent, draft, false),
+      ...(['side', 'refine-face', 'refine-side', 'body-front', 'body-back', 'body-pair'] as const)
+        .map(operation => promptFunctions.labViewPrompt(neutralContent, operation, '', { count: 4 }))];
+    for (const prompt of prompts) {
+      assert.match(prompt, /ILLUSTRATION_STYLE_SENTINEL/);
+      assert.doesNotMatch(prompt, /真实人物|自然摄影|灰色|摄影环境|真人|SIDE_STYLE_SENTINEL|BODY_STYLE_SENTINEL/);
+    }
+    assert.match(prompts[0], /保留用户衣服细节/);
+    assert.equal((await recipes.labRecipe(user, first.id)).completePrompt, detail.completePrompt);
     assert.equal(forbiddenCalls, 0);
     console.log(JSON.stringify({ schema: 'character-lab-submission-engineering.v1', synthetic: true,
       checks: ['lab_source_ignores_global_default_fixed_style_skill', 'quote_create_source_and_specification_match',
@@ -562,7 +607,7 @@ async function main() {
         'same_slot_pending_only', 'body_pair_single_task_description_crops_and_slot_conflicts', 'legacy_projection_and_writer', 'composition_png_order_identity_and_idempotency',
         'recipe_detail_full_context_and_member_projection', 'restore_reads_only_and_composition_lineage',
         'current_rules_vs_historical_quote_and_single_submission', 'recipe_guard_preserves_unknown_receipts',
-        'independent_context_prepare_and_old_request_lookup', 'independent_history_empty_and_workspace_preservation', 'independent_style_and_preview_scopes', 'explicit_head_4_9_crops_refine_and_body_pair_input'],
+        'independent_context_prepare_and_old_request_lookup', 'independent_history_empty_and_workspace_preservation', 'unified_style_content_scopes_and_preview', 'explicit_head_4_9_crops_refine_and_body_pair_input'],
       taskId: created.id, batchId: created.batch_id, databasePath, productionWrites: 0, paidRequests: 0,
       browserRuns: 0, forbiddenCalls }, null, 2));
   } finally {

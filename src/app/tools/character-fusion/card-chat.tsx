@@ -17,7 +17,7 @@ export default function CardChat({ value, onChange, onConfirm, onClose }: { valu
     if (busy || !value.input.trim()) return;
     const messages: FusionMessage[] = [...value.messages, { role: 'user', content: value.input.trim() }];
     const pending = { ...value, messages, input: '', draft: null };
-    onChange(pending); setBusy(true); setError('');
+    setBusy(true); setError('');
     const request = new AbortController(); controller.current = request;
     try {
       const data = await fusionAssistant(CARD_CHAT_SYSTEM, messages, request.signal) as { reply?: unknown; draft?: unknown };
@@ -25,7 +25,7 @@ export default function CardChat({ value, onChange, onConfirm, onClose }: { valu
       if (!data || typeof data.reply !== 'string' || !data.reply.trim()) throw new Error('模型没有返回有效回复，当前卡片未加入。');
       const draft = data.draft ? parseCardDraft(data.draft) : null;
       onChange({ ...pending, messages: [...messages, { role: 'assistant', content: JSON.stringify(data), reply: data.reply }], draft });
-    } catch (e) { if (!request.signal.aborted) { onChange({ ...value, input: value.input }); setError(e instanceof Error ? e.message : '对话暂未完成，输入已保留。'); } }
+    } catch (e) { if (!request.signal.aborted) setError(e instanceof Error ? e.message : '对话暂未完成，输入已保留。'); }
     finally { if (!request.signal.aborted) setBusy(false); }
   };
   return <section className={styles.chat} aria-labelledby="card-chat-title">

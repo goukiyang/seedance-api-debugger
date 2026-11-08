@@ -1,3 +1,4 @@
+import { assertSupplementaryModelEnabled } from '@/lib/pricing/model-access.server';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession, requireAdmin } from '@/lib/auth/session';
@@ -86,6 +87,7 @@ export async function POST(request: NextRequest) {
     }
 
     const input = { template, moduleType, intent, contextText, sessionRules, contextAssetIds };
+    await assertSupplementaryModelEnabled('text', settings.default_model);
     const usageStartedAt = new Date();
     const result = await generateModuleBuilderDraftWithLlm({ settings, input });
     const status = result.needsClarification

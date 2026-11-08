@@ -122,7 +122,7 @@ export async function GET(request: NextRequest) {
     observed({ rows: result.tasks.length, bytes: Buffer.byteLength(JSON.stringify(response)) });
     return NextResponse.json(response, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   }
-  catch (error) { return NextResponse.json({ error: error instanceof StudioError || error instanceof StudioPinError ? error.message : '生成记录读取失败，请重试' }, { status: error instanceof StudioError || error instanceof StudioPinError ? error.status : 503 }); }
+  catch (error) { return NextResponse.json({ error: error instanceof StudioError || error instanceof StudioPinError ? error.message : '生成记录读取失败，请重试', ...(error instanceof StudioPinError && error.code ? { code: error.code } : {}) }, { status: error instanceof StudioError || error instanceof StudioPinError ? error.status : 503 }); }
 }
 export async function POST(request: NextRequest) {
   const startedAt = Date.now();

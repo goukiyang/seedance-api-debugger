@@ -5,6 +5,7 @@ import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { assertInternalOnly } from '@/lib/access/feature-guard';
 import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { projectPricingGuide } from './guide';
+import { MODEL_ACCESS_KEY, parseModelAccessSettings, projectPricingModelAvailability } from './model-availability-contract';
 import { PricingItemUnavailableError } from './item-unavailable';
 import { isSeedanceVideoDuration } from '@/lib/provider/seedance-models';
 import { assertPricingImageConsumerReady, pricingImageConsumerState } from './runtime';
@@ -375,6 +376,14 @@ async function snapshot(actor: PricingAdminActor, state: State, client: PricingC
     limits: PRICING_ADMIN_LIMITS, runtime: { imageReady: runtime.ready, reason: 'reason' in runtime ? runtime.reason || null : null },
     updatedAt: state.policy.updatedAt, updatedBy: state.policy.updatedBy };
 }
+export async function getPricingModelAvailability(client: PricingClient = prisma) {
+  const [state, access] = await Promise.all([readState(client),
+    client.platformSetting.findUnique({ where: { key: MODEL_ACCESS_KEY }, select: { value_json: true } })]);
+  const projected = projectPricingModelAvailability(state.rows, state.policy.revision, parseModelAccessSettings(access?.value_json ?? null));
+  // Opaque display revision derived only from the public projection, never private source/key fingerprints.
+  return { ...projected, menuRevision: pricingFingerprint(projected) };
+}
+
 export async function getAdminPricingSnapshot(actor: Actor, client: PricingClient = prisma): Promise<PricingAdminSnapshot> {
   if (client === prisma) return prisma.$transaction(tx => getAdminPricingSnapshot(actor, tx), { maxWait: 10000, timeout: 30000 });
   const admin = await freshActor(actor, client); return snapshot(admin, await readState(client), client);

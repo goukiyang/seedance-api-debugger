@@ -1,7 +1,9 @@
 'use client';
+import { imageStudioPricingChannelId } from '@/lib/image-studio/channels';
+import { usePricingModelAvailability } from '@/lib/pricing/use-model-availability';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, ChevronDown, Copy, Download, Grid2X2, History, ImagePlus, Loader2, Maximize2, Plus, RefreshCw, Save, Settings2, SlidersHorizontal, UserRound, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, ChevronDown, Copy, Download, Grid2X2, History, ImagePlus, Loader2, Maximize2, Palette, Plus, RefreshCw, Save, Settings2, SlidersHorizontal, UserRound, X } from 'lucide-react';
 import { useMaterialArrival } from '@/components/useMaterialArrival';
 import { ResourceLibraryPicker } from '@/components/ResourceLibraryPicker';
 import { ImageGenerationChannelSelect } from '@/components/ImageGenerationChannelSelect';
@@ -25,7 +27,7 @@ import { handImageDownloadToBrowser } from '@/lib/media/native-download';
 import { imageUiQuoteFields, imageUiQuotePriceText, validImageUiQuote } from '@/app/image-studio/use-studio-batch';
 import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_MODEL_LABELS, IMAGE_STUDIO_MODEL_QUALITY_OPTIONS, IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS, imageStudioNewQualityOptions, imageStudioQualityLabel } from '@/lib/image-studio/model-catalog';
 import { imageStudioChannelModel, imageStudioChannelModels, imageStudioEffectiveChannelId, imageStudioUsesLegacyRoute, normalizeImageStudioChannels } from '@/lib/image-studio/channels';
-import { faceLabPrompt, labDefaultStageStyles, labDefaultViewPrompts, labStyleField, labViewPrompt, labViewPromptFields } from '@/lib/character-lab/prompts';
+import { faceLabPrompt, labContentPrompt, labDefaultStageStyles, labDefaultViewPrompts, labViewPrompt, labViewPromptFields } from '@/lib/character-lab/prompts';
 import { characterLabIsGrid, characterLabMediaUrl, characterLabSlot, characterLabSlotsOverlap, characterLabReferenceSlot, characterLabStrength, sameLabReference, type CharacterLabRestoredSettings, type CharacterLabOperation, type CharacterLabReference, type CharacterLabView, type CharacterLabBootstrap, type CharacterLabConfig, type CharacterLabDraft, type CharacterLabFace, type CharacterLabPlan, type CharacterLabPromptFields, type CharacterLabQuote, type CharacterLabStage, type CharacterLabTask, type CharacterLabWorkspace, type CharacterLabWorkspacePayload } from '@/lib/character-lab/types';
 import { labPersonalFields } from '@/lib/character-lab/contexts';
 import styles from './studio.module.css';
@@ -47,17 +49,16 @@ function pendingLabPlans(payload: CharacterLabWorkspacePayload, pending: string[
   return Array.from(new Set([...pending, ...payload.plans.filter(plan => payload.submissionByRequestId[plan.id] === 'submitting').map(plan => plan.id)]))
     .filter(id => !payload.taskByRequestId[id] && payload.submissionByRequestId[id] !== 'rejected');
 }
-const faceStyleField = ['styleConstraints', '正脸风格约束', '仅用于正脸候选和正脸微调'] as const;
+const styleFields = [['styleConstraints', '统一风格提示词', '画面风格、背景颜色、光影、质感，以及需要避免的风格']] as const;
+const legacyStyleKeys = ['sideStyleConstraints', 'bodyStyleConstraints', 'resultStyleConstraints'] as const;
 const promptFields = {
   faces: [
     ['basePrompt', '明显变化 · 基础提示词', '明显变化档的候选生成规则'],
     ['characterContext', '角色上下文要求', '从原图理解角色时需要保留的身份与特征'],
     ['faceVariables', '明显变化 · 面部变量', '明显变化档的骨相和五官规则'],
-    faceStyleField,
   ],
   result: [
     ['resultPrompt', '成品生成规则', '面部一致性、服装与四格构图要求'],
-    ['resultStyleConstraints', '旧版整图风格约束', '仅用于旧版整图'],
   ],
 } as const;
 const sameFace = (a: CharacterLabFace | null, b: CharacterLabFace) => a?.planId === b.planId && a.cell === b.cell;
@@ -71,9 +72,14 @@ async function labApi<T>(body?: Record<string, unknown>, query = '') {
 }
 function fieldsOf(config: CharacterLabConfig): CharacterLabPromptFields {
   const { revision, updatedAt, ...fields } = config;
-  return { ...labDefaultStageStyles, ...labDefaultViewPrompts, ...fields };
+  const result = { ...labDefaultStageStyles, ...labDefaultViewPrompts, ...fields };
+  for (const field of ['basePrompt', 'characterContext', 'faceVariables', 'resultPrompt', ...Object.values(labViewPromptFields)] as const) {
+    result[field] = labContentPrompt(result[field] || '');
+  }
+  return result;
 }
 export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceId, initialPrompts, initialBody }: { ownerId: string; isAdmin: boolean; initialWorkspaceId?: string; initialPrompts?: boolean; initialBody?: boolean }) {
+  const { isAvailable: modelAvailable, reason: modelAvailabilityReason } = usePricingModelAvailability();
   const session = useAppSession();
   const { confirm, prompt: askName, productDialog } = useProductDialog();
   const [bootstrap, setBootstrap] = useState<CharacterLabBootstrap | null>(null);
@@ -107,7 +113,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
   const [exportMode, setExportMode] = useState<'sheet' | 'cells' | 'all'>('all');
   const [preferencesReady, setPreferencesReady] = useState(false);
   const [preview, setPreview] = useState<{ src: string; alt: string } | null>(null);
-  const [promptTarget, setPromptTarget] = useState<PromptTarget | 'current' | null>(initialPrompts && isAdmin ? 'current' : null);
+  const [promptTarget, setPromptTarget] = useState<PromptTarget | 'current' | 'style' | null>(initialPrompts && isAdmin ? 'current' : null);
   const [configDraft, setConfigDraft] = useState<CharacterLabPromptFields | null>(null);
   const [configError, setConfigError] = useState('');
   const promptDialog = useRef<HTMLDialogElement>(null);
@@ -124,11 +130,12 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
   const dirty = Boolean(workspace && draft && savedSignature.current !== JSON.stringify([workspace.name, draft]));
   const activePromptTarget = promptTarget === 'current' ? (draft?.stage === 'result' ? 'result' : 'faces') : promptTarget;
   const activePromptFields: readonly (readonly [keyof CharacterLabPromptFields, string, string])[] =
-    !activePromptTarget ? [] : activePromptTarget === 'faces' || activePromptTarget === 'result' ? promptFields[activePromptTarget]
-      : [[labViewPromptFields[activePromptTarget], '生成规则', '只用于当前设置'], [labStyleField(activePromptTarget), activePromptTarget.startsWith('body-') ? '前后身风格约束' : activePromptTarget === 'refine-face' ? '正脸风格约束' : '侧脸风格约束', '只用于对应部位的生成与微调']];
+    !activePromptTarget ? [] : activePromptTarget === 'style' ? styleFields : activePromptTarget === 'faces' || activePromptTarget === 'result' ? promptFields[activePromptTarget]
+      : [[labViewPromptFields[activePromptTarget], '生成内容规则', '人物身份、构图及需要保留或调整的内容']];
   const savedPromptFields = bootstrap ? fieldsOf(bootstrap.config) : null;
   const promptOpen = Boolean(isAdmin && sessionReady && !loading && activePromptTarget && bootstrap && configDraft);
-  const configDirty = Boolean(configDraft && bootstrap && JSON.stringify(configDraft) !== JSON.stringify(savedPromptFields));
+  const configDirty = Boolean(configDraft && savedPromptFields && (Object.keys(configDraft) as Array<keyof CharacterLabPromptFields>)
+    .some(field => !(legacyStyleKeys as readonly string[]).includes(field) && configDraft[field] !== savedPromptFields[field]));
   const scopedConfigDirty = activePromptFields.some(([field]) => configDraft?.[field] !== savedPromptFields?.[field]);
   usePageExitRisk({
     unsaved: [
@@ -510,9 +517,9 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
   const selectedChannel = channels.items.find(item => item.id === effectiveChannel);
   const capability = draft ? imageStudioChannelModel(selectedChannel, draft.model) : undefined;
   const legacyRoute = draft ? imageStudioUsesLegacyRoute(channels, draft.model, draft.channelId) : true;
-  const modelChoices = imageStudioChannelModels(channels, IMAGE_STUDIO_MODELS);
-  const qualityChoices = draft ? draft.model === 'gpt-image-2.5-sunburst' ? imageStudioNewQualityOptions(draft.model) : capability?.qualities ?? (legacyRoute ? IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[draft.model as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] : []) ?? [] : [];
-  const resolutionChoices = draft ? capability?.resolutions ?? (legacyRoute ? IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[draft.model as keyof typeof IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS] : []) ?? [] : [];
+  const modelChoices = imageStudioChannelModels(channels, IMAGE_STUDIO_MODELS).filter(model => modelAvailable('image', model));
+  const qualityChoices = (draft ? draft.model === 'gpt-image-2.5-sunburst' ? imageStudioNewQualityOptions(draft.model) : capability?.qualities ?? (legacyRoute ? IMAGE_STUDIO_MODEL_QUALITY_OPTIONS[draft.model as keyof typeof IMAGE_STUDIO_MODEL_QUALITY_OPTIONS] : []) ?? [] : []).filter(value => Boolean(draft && modelAvailable('image', draft.model, { quality: value }, imageStudioPricingChannelId(channels, draft.model, draft.channelId, value))));
+  const resolutionChoices = (draft ? capability?.resolutions ?? (legacyRoute ? IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[draft.model as keyof typeof IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS] : []) ?? [] : []).filter(value => Boolean(draft && modelAvailable('image', draft.model, { quality: draft.quality, resolution: value }, imageStudioPricingChannelId(channels, draft.model, draft.channelId, draft.quality))));
   function selectFace(face: CharacterLabFace) {
     if (!draft) return;
     setFrontPreview(face);
@@ -539,6 +546,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
     });
   }
   function closePrompts() {
+    if (activePromptTarget === 'style') { setPromptTarget(null); return; }
     if (activePromptTarget && legacyView) { setRecipeTarget(activePromptTarget); setRecipeTab('next'); }
     else setRecipeTarget(null);
     setPromptTarget(null);
@@ -559,13 +567,14 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
   }
   async function saveConfig() {
     if (!bootstrap || !configDraft || !scopedConfigDirty) return;
-    const fields = fieldsOf(bootstrap.config);
+    const { revision, updatedAt, ...fields } = bootstrap.config;
     for (const [field] of activePromptFields) Object.assign(fields, { [field]: configDraft[field] });
+    if (activePromptTarget === 'style') for (const field of legacyStyleKeys) fields[field] = configDraft.styleConstraints;
     setConfigError('');
     await run('config', async () => {
       try {
         const result = await labApi<{ config: CharacterLabConfig; configVersions: CharacterLabConfig[] }>({
-          action: 'save-config', contextProtocol: 1, revision: bootstrap.config.revision, fields,
+          action: 'save-config', contextProtocol: 1, styleProtocol: 1, configScope: activePromptTarget === 'style' ? 'style' : 'content', revision: bootstrap.config.revision, fields,
         });
         if (!alive.current || !active.current) return;
         setBootstrap(current => current ? { ...current, ...result } : current);
@@ -761,6 +770,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
       <div className={styles.brand}><UserRound size={21} /><strong>CHARACTER LAB</strong><span>角色参考图工作台</span></div>
       {legacyView && <button type="button" onClick={() => { setLegacyView(false); setInspectionId(null); setRecipeTarget(null); }}>返回成品工作台</button>}{legacyView && <nav className={styles.steps} aria-label="角色制作阶段">{stages.map((stage, index) => <button type="button" key={stage.id} aria-current={currentStep === stage.id ? 'step' : undefined} disabled={!draft || locked} onClick={() => stage.id === 'body' ? showBodyGeneration() : stage.id === 'result' ? showIndependentViews() : updateDraft({ stage: stage.id })}><b>{draft && stages.findIndex(item => item.id === currentStep) > index ? <Check size={15} /> : index + 1}</b><span>{stage.label}</span></button>)}</nav>}
       <div className={styles.headerActions}>
+        {isAdmin && <button type="button" disabled={locked || !bootstrap} aria-haspopup="dialog" onClick={() => { setConfigError(''); setPromptTarget('style'); }}><Palette size={16} />风格提示词</button>}
         <label className={styles.workspaceLabel}><span className={styles.srOnly}>角色工作区</span><select value={workspace?.id || ''} disabled={locked || !bootstrap} onChange={event => void switchWorkspace(event.target.value)}><option value="" disabled>选择角色</option>{bootstrap?.workspaces.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         <button type="button" className={styles.iconButton} disabled={locked || !bootstrap} onClick={() => void createWorkspace()} title="新建角色" aria-label="新建角色"><Plus size={18} /></button>
         {!legacyView && workspace && <><button type="button" className={styles.primary} disabled={locked || !sheetReady} onClick={() => void saveComposition()}><Save size={15} />保存版本</button><button type="button" disabled={locked || !sheetReady} onClick={copyComposition}><Copy size={15} />复制整张</button><button type="button" disabled={locked || !sheetReady} onClick={() => void run('export', async () => { await saveDraft(); const current = workspaceRef.current!; await handImageDownloadToBrowser(compositionUrl(current.id) + '&download=1', resultName + '.png', () => active.current); })}><Download size={15} />下载</button></>}
@@ -776,7 +786,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
       {unresolved && <span className={styles.pending}>原提交结果待确认 <button type="button" disabled={locked} onClick={() => void run('query', refreshTasks)}>核对原请求</button></span>}
     </div>
     {!sessionReady ? <div className={styles.welcome}><UserRound size={36} /><p>正在核对当前账号，工作现场已保留。</p></div> : loading && !workspace ? <div className={styles.loading}><div /><div /><div /><span>正在恢复角色工作区…</span></div> : !workspace || !draft ? <section className={styles.welcome}><ImagePlus size={44} /><h1>从一张角色原图开始</h1><p>探索不同的真人面孔，再制作完整的角色参考图。</p><button type="button" className={styles.primary} disabled={locked || !bootstrap} onClick={() => void createWorkspace()}><Plus size={17} />新建角色</button>{error && <button type="button" onClick={() => window.location.reload()}>重新读取</button>}</section> : <>
-      {!legacyView ? <CharacterLabWorkbench key={`${ownerId}:${workspace.id}:${draft.sourceAssetId || ''}`} initialPart={bodyOpen ? 'body' : 'overview'} ownerId={ownerId} workspace={workspace} draft={draft} plans={plans} tasks={tasks} isAdmin={isAdmin} locked={locked} pending={pendingPlanIds} allHistory={historyOpen} settings={renderGenerationSettings()} versions={renderVersions}
+      {!legacyView ? <CharacterLabWorkbench key={`${ownerId}:${workspace.id}:${draft.sourceAssetId || ''}`} initialPart={bodyOpen ? 'body' : 'overview'} ownerId={ownerId} workspace={workspace} draft={draft} plans={plans} tasks={tasks} configRevision={bootstrap?.config.revision ?? 0} isAdmin={isAdmin} locked={locked} pending={pendingPlanIds} allHistory={historyOpen} settings={renderGenerationSettings()} versions={renderVersions}
         onUpdate={updateDraft} onSource={() => setPickerOpen(true)} onPreview={(src, alt) => setPreview({ src, alt })} onQuery={() => void run('query', refreshTasks)}
         onGenerate={intent => generate(!intent.operation || intent.operation === 'refine-face' || intent.operation === 'refine-side' ? 'faces' : 'result', intent.operation, undefined, undefined, intent)}
         onLegacy={plan => { setLegacyView(true); browseHistoryPlan(plan); }} onManage={target => { setPromptTarget(target); setConfigError(''); }}
@@ -859,10 +869,11 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
     {promptOpen && activePromptTarget && bootstrap && configDraft && (
       <dialog ref={promptDialog} className={styles.promptDialog} aria-labelledby="character-lab-prompt-title">
         <header className={styles.promptHeader}>
-          <h2 id="character-lab-prompt-title">{promptTitles[activePromptTarget]}</h2>
+          <h2 id="character-lab-prompt-title">{activePromptTarget === 'style' ? '风格提示词' : promptTitles[activePromptTarget]}</h2>
           <button type="button" className={styles.iconButton} aria-label="关闭提示词" disabled={Boolean(busy)} onClick={closePrompts}><X size={18} /></button>
         </header>
         <div className={styles.promptBody}>
+          <p className={styles.hint}>{activePromptTarget === 'style' ? '统一用于正脸、侧脸、前后身及旧版整图。保存后用于新生成，历史图片提示词保持原样。' : '这里只编辑生成内容。画面风格请在独立的“风格提示词”中调整。'}</p>
           <label className={styles.promptRevision}>
             <span>提示词版本</span>
             <select value="" disabled={Boolean(busy)} onChange={event => {
@@ -882,7 +893,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
               ))}
             </select>
           </label>
-          {draft && legacyView && activePromptTarget !== 'result' && <details className={styles.promptPreview}>
+          {draft && legacyView && activePromptTarget !== 'result' && activePromptTarget !== 'style' && <details className={styles.promptPreview}>
             <summary>查看本次规则预览</summary>
             <pre>{activePromptTarget === 'faces'
               ? faceLabPrompt(bootstrap.config, draft)
@@ -892,11 +903,10 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
           {activePromptFields.map(([field, title, placeholder]) => (
             <label className={styles.field} key={field}>
               <span>{title}</span>
-              <textarea rows={field === 'resultPrompt' ? 6 : 4} maxLength={3000} value={configDraft[field]} placeholder={placeholder} disabled={Boolean(busy)} onChange={event => {
+              <textarea rows={activePromptTarget === 'style' ? 9 : field === 'resultPrompt' ? 6 : 4} maxLength={3000} value={configDraft[field]} placeholder={placeholder} disabled={Boolean(busy)} onChange={event => {
                 const value = event.target.value;
                 setConfigDraft(previous => previous ? { ...previous, [field]: value } : previous);
               }} />
-              {field.endsWith('StyleConstraints') || field === 'styleConstraints' ? <small>仅影响对应部位的新生成与微调。</small> : null}
             </label>
           ))}
         </div>
@@ -905,7 +915,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
           <small>保存后用于新生成。</small>
           <button type="button" disabled={Boolean(busy)} onClick={closePrompts}>关闭</button>
           <button type="button" className={styles.primary} disabled={Boolean(busy) || !scopedConfigDirty} onClick={() => void saveConfig()}>
-            <Save size={16} />{busy === 'config' ? '正在保存…' : '保存新版本'}
+            <Save size={16} />{busy === 'config' ? '正在保存…' : activePromptTarget === 'style' ? '保存统一风格' : '保存内容规则'}
           </button>
         </footer>
       </dialog>
@@ -940,7 +950,7 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
       : target === 'side' || target === 'body-front' || target === 'body-back' ? viewOptions(target) : plans.filter(plan => plan.operation === target && sameLabReference(plan.input, localRefinement?.target)))
       .filter(plan => tasks[plan.id]?.asset);
     const siblingIndex = siblings.findIndex(plan => plan.id === reference?.planId);
-    return <CharacterLabPromptPanel ownerId={ownerId} workspaceId={workspace.id} title={savedComposition ? `成品来源 · ${recipeTarget === 'front' ? '正脸' : viewTitles[recipeTarget as CharacterLabView] || '生成记录'}` : recipeTarget === 'front' ? '正脸' : promptTitles[target].replace('提示词', '')}
+    return <CharacterLabPromptPanel ownerId={ownerId} workspaceId={workspace.id} configRevision={bootstrap?.config.revision ?? 0} title={savedComposition ? `成品来源 · ${recipeTarget === 'front' ? '正脸' : viewTitles[recipeTarget as CharacterLabView] || '生成记录'}` : recipeTarget === 'front' ? '正脸' : promptTitles[target].replace('提示词', '')}
       reference={reference} tab={recipeTab} onTab={setRecipeTab} onClose={() => {
         setRecipeTarget(null);
         requestAnimationFrame(() => { const button = recipeTrigger.current?.isConnected ? recipeTrigger.current : document.querySelector<HTMLElement>('[data-character-prompt]'); button?.focus({ preventScroll: true }); });
@@ -1150,6 +1160,6 @@ export default function CharacterLabStudio({ ownerId, isAdmin, initialWorkspaceI
 
   function renderGenerationSettings() {
     if (!draft) return null;
-    return <details className={styles.generationSettings} open={advanced} onToggle={event => setAdvanced(event.currentTarget.open)}><summary>模型与项目<ChevronDown size={14} /></summary><label className={styles.field}><span>模型</span><select disabled={locked} value={draft.model} onChange={event => updateDraft({ model: event.target.value })}>{!modelChoices.includes(draft.model as typeof IMAGE_STUDIO_MODELS[number]) && <option value={draft.model}>{draft.model}</option>}{modelChoices.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || model}</option>)}</select></label><label className={styles.field}><span>供应商</span><ImageGenerationChannelSelect channels={channels} model={draft.model} value={draft.channelId} disabled={locked} onChange={channelId => updateDraft({ channelId })} /></label><div className={styles.parameterPair}><label className={styles.field}><span>画质</span><select value={draft.quality} disabled={locked} onChange={event => updateDraft({ quality: event.target.value })}>{!qualityChoices.includes(draft.quality as never) && <option value={draft.quality}>{imageStudioQualityLabel(draft.model, draft.quality)}</option>}{qualityChoices.map(quality => <option key={quality} value={quality}>{imageStudioQualityLabel(draft.model, quality)}</option>)}</select></label><label className={styles.field}><span>分辨率</span><select value={draft.resolution} disabled={locked} onChange={event => updateDraft({ resolution: event.target.value })}>{!resolutionChoices.includes(draft.resolution as never) && <option value={draft.resolution}>{draft.resolution}</option>}{resolutionChoices.map(resolution => <option key={resolution} value={resolution}>{resolution}</option>)}</select></label></div><ImageUsageProjectSelect ownerId={ownerId} value={draft.projectId} disabled={locked} onChange={projectId => updateDraft({ projectId })} />{draft.context && <label className={styles.field}><span>拆分前共用补充（只读）</span><textarea rows={3} readOnly value={draft.context} /><small>保留原文供复制，不用于正脸、侧脸或前后身的新生成。</small></label>}</details>;
+    return <details className={styles.generationSettings} open={advanced} onToggle={event => setAdvanced(event.currentTarget.open)}><summary>模型与项目<ChevronDown size={14} /></summary><label className={styles.field}><span>模型</span><select disabled={locked} value={modelChoices.includes(draft.model) ? draft.model : ''} onChange={event => updateDraft({ model: event.target.value })}><option value="" disabled>{modelAvailabilityReason || "请选择已开放模型"}</option>{modelChoices.map(model => <option key={model} value={model}>{IMAGE_STUDIO_MODEL_LABELS[model as keyof typeof IMAGE_STUDIO_MODEL_LABELS] || model}</option>)}</select></label><label className={styles.field}><span>供应商</span><ImageGenerationChannelSelect channels={channels} model={draft.model} value={draft.channelId} disabled={locked} onChange={channelId => updateDraft({ channelId })} /></label><div className={styles.parameterPair}><label className={styles.field}><span>画质</span><select value={draft.quality} disabled={locked} onChange={event => updateDraft({ quality: event.target.value })}>{!qualityChoices.includes(draft.quality as never) && <option value={draft.quality}>{imageStudioQualityLabel(draft.model, draft.quality)}</option>}{qualityChoices.map(quality => <option key={quality} value={quality}>{imageStudioQualityLabel(draft.model, quality)}</option>)}</select></label><label className={styles.field}><span>分辨率</span><select value={draft.resolution} disabled={locked} onChange={event => updateDraft({ resolution: event.target.value })}>{!resolutionChoices.includes(draft.resolution as never) && <option value={draft.resolution}>{draft.resolution}</option>}{resolutionChoices.map(resolution => <option key={resolution} value={resolution}>{resolution}</option>)}</select></label></div><ImageUsageProjectSelect ownerId={ownerId} value={draft.projectId} disabled={locked} onChange={projectId => updateDraft({ projectId })} />{draft.context && <label className={styles.field}><span>拆分前共用补充（只读）</span><textarea rows={3} readOnly value={draft.context} /><small>保留原文供复制，不用于正脸、侧脸或前后身的新生成。</small></label>}</details>;
   }
 }

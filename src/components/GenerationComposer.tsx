@@ -1,5 +1,6 @@
 'use client';
 
+import { usePricingModelAvailability } from '@/lib/pricing/use-model-availability';
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import type {
   GenerationMode,
@@ -599,6 +600,7 @@ export function GenerationComposer({
     message: '暂未读取到样片能力配置，请刷新页面后重试。',
   },
 }: Props) {
+  const { isAvailable: modelAvailable, reason: modelAvailabilityReason } = usePricingModelAvailability();
   const workspace = useWorkspace();
   const generationComposerRef = React.useRef<HTMLDivElement | null>(null);
   const workspaceOperationCountRef = React.useRef(0);
@@ -1342,13 +1344,14 @@ export function GenerationComposer({
     });
   }, [imageReferenceAssets]);
 
-  const muskReady = muskConfig?.ready === true;
+  const muskReady = muskConfig?.ready === true && modelAvailable('text', muskConfig.default_model || '');
   const moduleBuilderDisabled = moduleBuilderBusy || muskConfigLoading || !muskReady;
   const muskStatusText = muskConfigLoading
     ? '正在检查 LLM 配置...'
     : muskReady
       ? `LLM 已就绪：${muskConfig?.default_model || 'gpt-5.5'}`
-      : muskConfigError || 'LLM 未配置，无法生成模块或模板。';
+      : muskConfig?.ready === true ? modelAvailabilityReason || '当前文字模型已在费率页关闭。'
+        : muskConfigError || 'LLM 未配置，无法生成模块或模板。';
 
   const mentionCandidates = useMemo<PromptMentionCandidate[]>(() => {
     return [
@@ -1611,11 +1614,7 @@ export function GenerationComposer({
     if (videoSurface || !modeSwitchReady) return;
     if (studioHandoff && !studioSettingsReady && Object.hasOwn(studioHandoff.parameters, 'model')) return;
     const fallbackModel = modelOptions[0]?.id || '';
-    if (!fallbackModel) {
-      if (imageResultHandoff) return;
-      if (selectedModel) setSelectedModel('');
-      return;
-    }
+    if (!fallbackModel || selectedModel) return;
     if (!modelOptions.some((option) => option.id === selectedModel)) {
       if (reuseDraft?.model === selectedModel) return;
       if (imageResultHandoff) return;
@@ -2776,11 +2775,9 @@ export function GenerationComposer({
           }}
           providerStatus={providerStatus}
           modelLabel={modelLabel}
-          modelOptions={videoModelChoices ? [...videoModelChoices.map(option => ({ ...option,
+          modelOptions={videoModelChoices ? videoModelChoices.map(option => ({ ...option,
             disabled: option.disabled || option.surface !== videoSurface && Boolean(modeSwitchBlocker),
-            disabledReason: option.disabledReason || (option.surface !== videoSurface ? modeSwitchBlocker || undefined : undefined) })),
-            ...(!videoModelChoices.some(option => option.surface === videoSurface && option.model === selectedModel) ? [{ id: `${videoSurface}:${selectedModel}`, label: `${videoSurface === 'ip' ? 'IP ' : ''}${selectedModel || '未选择型号'}`, detail: '当前型号不可用，原参数已保留', disabled: true }] : [])] : reuseDraft?.model && selectedModel === reuseDraft.model && !modelOptions.some((option) => option.id === selectedModel)
-            ? [...modelOptions, { id: selectedModel, label: '原模型不可用', detail: selectedModel, disabled: true }]
+            disabledReason: option.disabledReason || (option.surface !== videoSurface ? modeSwitchBlocker || undefined : undefined) }))
             : modelOptions}
           selectedModel={videoModelChoices ? `${videoSurface}:${selectedModel}` : selectedModel}
           parameterModel={selectedModel}

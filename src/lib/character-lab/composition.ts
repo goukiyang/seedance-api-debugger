@@ -5,11 +5,12 @@ import sharp from 'sharp';
 import { prisma } from '@/lib/prisma';
 import type { SessionUser } from '@/lib/auth/session';
 import { StudioError } from '@/lib/image-studio/tasks';
-import { labCellRect, labPng, readLabReference } from './media';
+import { labPng, readLabReference } from './media';
 import { labId, labText, readLabWorkspace, workspaceKey } from './store';
 import { sameLabReference, type CharacterLabWorkspace } from './types';
 
 const layout = 'sheet-2x2-v1';
+const renderVersion = 'natural-proportions-1';
 const folder = () => path.join(process.cwd(), 'storage', 'character-lab-compositions');
 const imagePath = (id: string) => path.join(folder(), id + '.png');
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -32,7 +33,8 @@ export async function composeLabSheet(user: SessionUser, workspace: CharacterLab
     const [slot, choice] = references[index];
     const plan = await readLabReference(user, workspace.id, sourceAssetId, choice, slot);
     if (slot === 'side' && !sameLabReference(plan.mainFace, mainFace)) throw new StudioError('当前侧脸对应旧正脸，请选用与当前正脸匹配的侧脸', 409);
-    const rect = labCellRect(width, height, { kind: 'result', count: 4 }, index);
+    // Square heads above 1:2 full bodies; legacy generated sheets keep their own crop mapping.
+    const rect = { left: index % 2 * 800, top: index < 2 ? 0 : 800, width: 800, height: index < 2 ? 800 : 1600 };
     const input = await sharp(await labPng(user, plan, choice.cell))
       .resize(rect.width, rect.height, { fit: 'contain', background }).flatten({ background }).png().toBuffer();
     panels.push({ input, left: rect.left, top: rect.top });
@@ -48,7 +50,7 @@ export async function saveLabComposition(user: SessionUser, body: Record<string,
   const workspace = JSON.parse(row.value_json) as CharacterLabWorkspace;
   if (workspace.revision !== body.revision) throw new StudioError('工作现场已更新，请核对选用图片后再保存', 409);
   const name = labText(body.name, 80, '作品名称') || workspace.name;
-  const compositionId = digest([user.id, id, layout, selectedSheet(workspace), name]);
+  const compositionId = digest([user.id, id, layout, renderVersion, selectedSheet(workspace), name]);
   if (workspace.compositions?.some(item => item.id === compositionId)) return workspace;
 
   const png = await composeLabSheet(user, workspace);

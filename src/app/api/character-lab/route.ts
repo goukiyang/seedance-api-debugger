@@ -38,8 +38,9 @@ export async function POST(request: NextRequest) {
     else if (action === 'save-result') result = { workspace: await saveLabResult(user, body) };
     else if (action === 'save-composition') result = { workspace: await saveLabComposition(user, body) };
     else if (action === 'save-config') {
-      if (body.contextProtocol !== 1) throw new StudioError('规则已按生成区域独立，请刷新页面后编辑', 409);
-      const config = await saveLabConfig(user, body.revision, body.fields);
+      if (body.contextProtocol !== 1 || body.styleProtocol !== 1) throw new StudioError('风格提示词已独立，请刷新页面后编辑', 409);
+      if (body.configScope !== 'style' && body.configScope !== 'content') throw new StudioError('请选择风格或生成内容设置');
+      const config = await saveLabConfig(user, body.revision, body.fields, body.configScope);
       result = { config, configVersions: await labConfigVersions() };
     } else throw new StudioError('不支持的角色工作台操作');
     return NextResponse.json(result, { headers: labPrivateHeaders });

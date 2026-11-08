@@ -127,7 +127,7 @@ export default function CharacterFusionStudio({ ownerId }: { ownerId: string }) 
     finally { if (activeRef.current) setBusy(false); }
   };
   const allCards = [...CONFIG.map(c => ({ id: c.id, title: c.title })), ...settings.cards.map(c => ({ id: c.id, title: c.title }))];
-  const orderedIds = [...new Set([...cardOrder, ...allCards.map(c => c.id)])].filter(id => allCards.some(c => c.id === id));
+  const orderedIds = Array.from(new Set([...cardOrder, ...allCards.map(c => c.id)])).filter(id => allCards.some(c => c.id === id));
   const moveCard = (source: string, target: string) => { if (!orderedIds.includes(source) || source === target) return; const order = orderedIds.filter(id => id !== source); order.splice(order.indexOf(target), 0, source); setCardOrder(order); };
   const moveBy = (id: string, direction: number) => { const index = orderedIds.indexOf(id), target = index + direction; if (target < 0 || target >= orderedIds.length) return; const order = [...orderedIds]; [order[index], order[target]] = [order[target], order[index]]; setCardOrder(order); };
   const confirmCard = (draft: CardDraft) => run(() => {

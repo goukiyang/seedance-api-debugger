@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { isGeminiImageModel } from '@/lib/image-generation/resolution';
-import { IMAGE_STUDIO_MODELS } from '@/lib/image-studio/model-catalog';
+import { IMAGE_STUDIO_MODELS, IMAGE_STUDIO_NEW_REQUEST_MODELS } from '@/lib/image-studio/model-catalog';
 import { IMAGE_25_QUALITY_MODEL, isImage25Quality, type ImageQualityRoutes } from './quality-routing';
 import type { ImageGenerationChannelDto, ImageGenerationChannelsDto, ImageGenerationModelCapabilityDto } from '@/lib/integrations/image-generation-channel';
 import { sharedImageStudioChannelIssue } from './shared-capabilities';
@@ -126,6 +126,11 @@ export function imageStudioChannelCanBeSelected(channel: ImageStudioChannel | un
   return Boolean(channel && channel.enabled && channel.configured);
 }
 
+export function imageStudioPricingChannelId(channels: ImageStudioChannels, model: string, selectedId: string, quality?: string) {
+  const id = imageStudioEffectiveChannelId(channels, model, selectedId, quality);
+  return id === ORIGINAL_IMAGE_CHANNEL_ID ? imageStudioDefaultChannelId(channels, model) : id;
+}
+
 export function imageStudioChannelModel(channel: ImageStudioChannel | undefined, model: string) {
   return channel?.models[model];
 }
@@ -144,16 +149,10 @@ export function imageStudioChannelUnitCredits(
 }
 
 export function imageStudioChannelModels(channelOrChannels: ImageStudioChannel | ImageStudioChannels, legacyModels: readonly string[]) {
-  const channels = 'items' in channelOrChannels ? channelOrChannels.items : [channelOrChannels];
-  const models = new Set<string>();
-  for (const channel of channels) {
-    if (channel.id === ORIGINAL_IMAGE_CHANNEL_ID) {
-      for (const model of legacyModels) models.add(model);
-      continue;
-    }
-    for (const model of Object.keys(channel.models)) models.add(model);
-  }
-  return legacyModels.filter(model => models.has(model));
+  const channels: ImageStudioChannel[] = 'items' in channelOrChannels ? channelOrChannels.items : [channelOrChannels];
+  return legacyModels.filter(model => IMAGE_STUDIO_NEW_REQUEST_MODELS.some(item => item === model)
+    && channels.some(channel => channel.enabled && channel.configured
+    && channel.models[model]?.ready === true));
 }
 
 export function imageStudioChannelOptionsForModel(

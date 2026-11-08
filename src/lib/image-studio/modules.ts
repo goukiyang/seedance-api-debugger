@@ -405,7 +405,9 @@ export async function deleteStudioModule(ownerId: string, id: unknown, revision:
       if (!current) throw new StudioModuleError('工作区不存在或已删除，请核对原请求结果', 409);
       await assertStudioWorkspaceNotDeleted(ownerId, id, tx);
       if (current.revision !== revision) throw new StudioModuleError('模板已更新，请刷新后再删除', 409);
-      await assertStudioDeletionIdle(tx, ownerId, id);
+      // Accepted tasks execute from their frozen snapshot; deleting personal
+      // configuration neither cancels them nor waits for their provider result.
+      await assertStudioDeletionIdle(tx, ownerId, id, true);
       const binding = await studioSharedBinding(ownerId, id, tx);
       if (binding && binding.presetId !== current.source_preset_id) throw new StudioModuleError('模板来源绑定已变化，请重新读取后删除', 409);
       // Remove only configuration owned through this verified workspace. Source
