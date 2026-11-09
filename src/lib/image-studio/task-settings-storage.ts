@@ -8,7 +8,7 @@ import { parseStudioTaskSettings, STUDIO_TASK_SETTINGS_PROTOCOL, StudioTaskSetti
 
 type Client = Pick<Prisma.TransactionClient, 'platformSetting'>;
 export const STUDIO_TASK_SETTINGS_FILES = [
-  'src/lib/image-studio/task-settings.ts', 'src/lib/image-studio/task-settings-storage.ts',
+  'src/lib/image-studio/task-settings.ts', 'src/lib/image-studio/task-settings-storage.ts', 'src/lib/image-studio/current-inputs.ts',
   'src/lib/image-studio/shared-contract.ts', 'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/batches.ts',
   'src/lib/image-studio/modules.ts', 'src/lib/image-studio/presets.ts',
   'src/lib/image-studio/parameter-copy.ts',

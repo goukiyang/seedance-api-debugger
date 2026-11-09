@@ -22,14 +22,15 @@ export function parseRestoredStudioSettings(value: unknown): RestoredStudioSetti
 
 export function assertRestoredStudioDraft(input: {
   restoredSettings?: RestoredStudioSettings; reproduceFromTaskId?: unknown;
+  currentInputs?: import('./current-inputs').StudioCurrentInputs;
   draft?: { moduleContext?: unknown; globalContext?: unknown; fixedReferences?: unknown;
     styleGroupIds?: string[]; styleGroupVersions?: Record<string, number>; skillIds?: string[]; skillVersions?: Record<string, string> };
 }) {
   // Current and shared selections also carry versions; their consumers check fresh access/revisions.
   if (!input.restoredSettings) return;
   const draft = input.draft;
-  if (input.reproduceFromTaskId !== undefined || draft?.moduleContext !== undefined
-    || draft?.globalContext !== undefined || draft?.fixedReferences !== undefined) {
+  if (draft?.globalContext !== undefined || !input.currentInputs && (input.reproduceFromTaskId !== undefined
+    || draft?.moduleContext !== undefined || draft?.fixedReferences !== undefined)) {
     throw new RestoredStudioSettingsError('恢复设置不能混入未保存的模板内容，请重新选择原记录；个人输入仍保留');
   }
   if (draft?.styleGroupIds !== undefined && (!draft.styleGroupVersions

@@ -167,7 +167,7 @@ export function continuationInput(batch: BatchRecord, body: Record<string, unkno
   const pending = batch.items.filter(item => !item.taskId && !item.cancelled);
   if (!pending.length) throw new StudioError('本批没有未受理条目，请查看原任务', 409);
   const changes = Object.fromEntries(['prompt', 'personalPrompt', 'personalOverrides', 'model', 'quality', 'resolution', 'count', 'aspectRatio',
-    'revision', 'moduleRevision', 'sharedLive', 'restoredSettings', 'taskSettings', 'draft', 'referenceIds', 'imageChannel', 'channelId', 'batchQuoteId', 'pricingRevision', 'budget']
+    'revision', 'moduleRevision', 'sharedLive', 'restoredSettings', 'taskSettings', 'currentInputs', 'draft', 'referenceIds', 'imageChannel', 'channelId', 'batchQuoteId', 'pricingRevision', 'budget']
     .filter(field => Object.prototype.hasOwnProperty.call(body, field)).map(field => [field, body[field]]));
   const previous = { ...batch.input };
   delete previous.imageChannel;
@@ -679,7 +679,7 @@ export async function dispatchStudioBatches() {
         const transientIds = (snapshot.transientReferenceImages || []).map((reference: { id: string }) => reference.id);
         const visibleReferences = await tx.asset.count({ where: { id: { in: transientIds }, owner_id: batch.ownerId, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(user, tx)] } });
         if (visibleReferences !== new Set(transientIds).size) throw new StudioError('本批参考图已不可用，未派发新任务');
-        if (snapshot.restoredSettings && snapshot.templateReferenceImages?.length) {
+        if ((snapshot.restoredSettings || snapshot.currentInputs) && snapshot.templateReferenceImages?.length) {
           const templateIds = snapshot.templateReferenceImages.map((reference: { id: string }) => reference.id);
           const readable = await tx.asset.count({ where: { id: { in: templateIds }, status: 'active', type: 'image',
             AND: [await studioVisibleAssetWhere(user, tx)] } });
