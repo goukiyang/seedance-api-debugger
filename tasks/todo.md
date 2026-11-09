@@ -1,3 +1,9 @@
+<!-- SIDEBAR-COLLAPSE01-PUBLIC-20261108 -->
+## SIDEBAR-COLLAPSE01 侧栏一键收成图标（已部署，待用户手验）
+
+v0.139.1／应用ce2e37dddf182ed27d86bab5a8c129d08b04c325／BUILD MxC-e5gGyp1A2lkXUjBam，洛杉矶2026-11-08 22:17健康收口。共享侧栏顶部按钮切200px文字栏/64px图标栏，保留入口、高亮、悬停名称及账户帮助，按账号记忆并跨标签同步；手机沿原菜单。两共享文件与58d6e2c6d逐字一致，最终同源完整工程/计价/Next含types/lint及45公网资源、7服务/4timer、6启动门通过；无新依赖/DDL/业务写入，保137迁移和当前writer修复。与视频前端修复同包，首候选主动停止的原证保留、不冒全过；界面/手机/返回实际效果仍用户手验。详[实现记录](todo/2026-11-02-team-works-implementation.md#sidebar-collapse01-shared-icon-rail-2026-11-08)及正式根原广场单。未新增范围外问题。
+<!-- /SIDEBAR-COLLAPSE01-PUBLIC-20261108 -->
+
 <!-- HD-DISPLAY-LABEL01-20261108 -->
 ## 大图高清／原图标识（已部署，待用户手验）
 
