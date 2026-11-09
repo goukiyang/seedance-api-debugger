@@ -168,9 +168,13 @@ export async function withHdLease<T>(key: string, action: () => Promise<T>): Pro
     let owner: { pid: number; host: string; token: string };
     try { owner = JSON.parse(await fs.readFile(path.join(lock, 'owner.json'), 'utf8')); }
     catch {
-      // Another owner may still be durably writing its identity. Do not reclaim
-      // or classify that short creation window as an unknown stale lease.
-      if (Date.now() - (await fs.stat(lock)).mtimeMs < 5000) return null;
+      // The owner may finish and remove the directory before this read. Yield
+      // this turn; neither a released nor a newly-created lock authorizes work.
+      const pending = await fs.stat(lock).catch(error => {
+        if (error.code === 'ENOENT') return null;
+        throw error;
+      });
+      if (!pending || Date.now() - pending.mtimeMs < 5000) return null;
       throw new Error('hd_lease_conflict');
     }
     if (!Number.isSafeInteger(owner.pid) || owner.pid <= 0 || owner.host !== os.hostname() || typeof owner.token !== 'string') throw new Error('hd_lease_conflict');

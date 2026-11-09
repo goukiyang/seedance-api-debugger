@@ -90,6 +90,34 @@ let ownerReads: Array<{ table: string; kind: string; rows: number }> = [];
     assert.equal(storage.hdDataMountRecorded('12 1 8:1 / /data rw - ext4 /dev/data rw'), true);
     assert.equal(storage.hdDataMountRecorded('12 1 8:1 / /data-pretend rw - ext4 /dev/data rw'), false);
   });
+  await check('HD lease release during owner lookup yields without pausing or stealing the next turn', async () => {
+    await fixture();
+    const lock = path.join(core.hdDirectory(), 'scheduler.lock');
+    let enter!: () => void, release!: () => void;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const first = core.withHdLease('scheduler', async () => { enter(); await held; return 'committed'; });
+    await entered;
+    const nativeRead = fs.readFile;
+    let released = false, secondRan = false;
+    const read = mock.method(fs, 'readFile', async (file, ...args) => {
+      if (!released && String(file) === path.join(lock, 'owner.json')) {
+        released = true; release(); await first;
+      }
+      return Reflect.apply(nativeRead, fs, [file, ...args]);
+    });
+    try {
+      assert.equal(await core.withHdLease('scheduler', async () => { secondRan = true; return 'stolen'; }), null);
+    } finally { read.mock.restore(); release(); await first; }
+    assert.equal(released, true); assert.equal(secondRan, false); assert.equal(await first, 'committed');
+    assert.equal(await exists(lock), false);
+    assert.equal(await core.withHdLease('scheduler', async () => 'next-owner'), 'next-owner');
+    await fs.mkdir(lock);
+    const old = new Date(Date.now() - 6000); await fs.utimes(lock, old, old);
+    await assert.rejects(core.withHdLease('scheduler', async () => 'unknown-owner'), /hd_lease_conflict/);
+    await fs.rmdir(lock);
+    assert.equal((await core.hdControl()).state, 'active');
+  });
   await check('E01 two real release cwd roots reuse the exact ready key and bytes', async () => {
     const first = await fixture(); const original = await image('same');
     const fixedRoot = path.join(first, 'storage/hd-derivatives'); process.env.HD_DERIVATIVES_ROOT = fixedRoot;

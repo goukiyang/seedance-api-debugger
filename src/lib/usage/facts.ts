@@ -674,6 +674,20 @@ async function attachCash(db: Db, items: InternalFact[], scoped = false, window?
         }
         const values = new Map<string, Row>();
         for (const group of Array.from(groups.values())) {
+          if (!group.proofs.size && group.references.size) {
+            // Keep these predicates on the indexed reference column alone. Adding
+            // event/NULL filters makes SQLite scan the much wider event/NULL family.
+            for (const column of ['provider_task_id', 'provider_request_id'] as const) {
+              const peers = await rows(db, Prisma.sql`"CostLedger"`, fields, Prisma.sql`"id"`,
+                Prisma.sql`${Prisma.raw(`"${column}"`)} IN (${Prisma.join(Array.from(group.references))})`);
+              for (const row of peers) {
+                const reference = row.provider_task_id === null || row.provider_task_id === '' ? row.provider_request_id : row.provider_task_id;
+                if ((row.provider_account_id ?? '') === group.scope && (row.provider_name ?? '') === group.provider
+                  && row.event_type === group.event && typeof reference === 'string' && group.references.has(reference)) values.set(String(row.id), row);
+              }
+            }
+            continue;
+          }
           const matches: Prisma.Sql[] = [];
           if (group.proofs.size) matches.push(Prisma.sql`"official_charge_id" IN (${Prisma.join(Array.from(group.proofs))})`);
           if (group.references.size) matches.push(Prisma.sql`COALESCE(NULLIF("provider_task_id", ''), "provider_request_id") IN (${Prisma.join(Array.from(group.references))})`);
