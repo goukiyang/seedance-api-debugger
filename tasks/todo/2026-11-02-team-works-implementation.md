@@ -104,3 +104,9 @@ The compatible guard remains `bbeb854c82e47650ba3ea703f1918800af96881b` / BUILD 
 - 实现中：推荐与精选/提名后端、默认页签、独立新作区、排序游标和必要构建内置断言。尚未完成构建、Git推送和部署，不以文档或实现存在冒上线。
 - 共享影响：query/card projection 为列表、详情和首页共用；新增配置不扩大这些读取者权限，菜单与卡片使用同一当前版本。独立配置、回执同事务，不新增表或共用财务状态。
 - 沿项目约定仅做必要工程/发布检查，真实多人和界面效果由用户手验；不自动浏览器、收费生成或对生产作品做精选测试。恢复版须保新配置 reader 和原权限，只回程序、不回数据。
+
+## SIDEBAR-COLLAPSE01: Shared icon rail (2026-11-08)
+
+The shared WorkspaceSidebar now offers an explicit desktop collapse/expand button. Its existing 200 px column becomes a 64 px icon rail while the same page grid releases space to the content. Menu destinations, access filters, current-section highlighting and stored return links remain unchanged. Icon links retain accessible names and hover titles; account/help links stay available and the expanded group is preserved. The existing mobile menu remains in effect at 940 px and below. The safe display preference is initialized and stored separately per confirmed account and synchronized across tabs, without changing data or other workspace preferences. No new dependency, schema, business request, generation or pricing change is introduced.
+
+Baseline: actual 2239a1eaaa8e91bf53cb7e6f18a99a4c5a1cb1ed / 0.138.3; inherited the shared-save, image-kind label and process-wide SQLite writer fixes. Status: implemented, engineering and protected release pending; real browser, mobile and cross-page acceptance remains manual. No out-of-scope discovery added.
