@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Bell, BookImage, ChevronDown, CircleHelp, Coins, Folder, Image as ImageIcon, LayoutTemplate, ListTodo, Menu, Network, Plus, RotateCcw, UserRound } from 'lucide-react';
+import { Bell, BookImage, ChevronDown, CircleHelp, Coins, Folder, Image as ImageIcon, LayoutTemplate, ListTodo, Menu, Network, PanelLeftClose, PanelLeftOpen, Plus, ReceiptText, RotateCcw, UserRound } from 'lucide-react';
 import { workspaceSection, type WorkspaceSection } from '@/lib/navigation';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
@@ -22,26 +22,39 @@ export default function WorkspaceSidebar({ accountId, internal, images, worksEna
   const pathname = usePathname();
   const identity = hasLoadedUser && user?.id === accountId ? accountId : '';
   const [open, setOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const [loadedIdentity, setLoadedIdentity] = useState('');
   const [returnLinks, setReturnLinks] = useState<{ identity: string; links: Record<string, string> }>({ identity: '', links: {} });
   const preferencesReady = Boolean(identity && loadedIdentity === identity);
   const workspaceOpen = Boolean(preferencesReady && open);
+  const sidebarCollapsed = Boolean(preferencesReady && collapsed);
   const workspace = useRef<HTMLDivElement>(null);
   const menuButton = useRef<HTMLButtonElement>(null);
   useDialogDismiss({ open: workspaceOpen, dialogRef: workspace, branchRefs: [menuButton], modal: false, onDismiss: () => setOpen(false) });
 
   useEffect(() => {
     setOpen(false);
+    setCollapsed(false);
     setLoadedIdentity('');
     if (!identity) return;
     try { setOpen(localStorage.getItem(`sd2-home-workspace:${identity}`) === 'open'); } catch { /* Keep the in-memory default. */ }
+    const key = `sd2-workspace-sidebar:v1:${identity}`;
+    try { setCollapsed(localStorage.getItem(key) === 'collapsed'); } catch { /* Keep the expanded default. */ }
     setLoadedIdentity(identity);
+    const sync = (event: StorageEvent) => { if (event.key === key || event.key === null) setCollapsed(event.newValue === 'collapsed'); };
+    window.addEventListener('storage', sync);
+    return () => window.removeEventListener('storage', sync);
   }, [identity]);
 
   useEffect(() => {
     if (!preferencesReady) return;
     try { localStorage.setItem(`sd2-home-workspace:${identity}`, open ? 'open' : 'closed'); } catch { /* The workspace remains usable without storage. */ }
   }, [identity, open, preferencesReady]);
+
+  useEffect(() => {
+    if (!preferencesReady) return;
+    try { localStorage.setItem(`sd2-workspace-sidebar:v1:${identity}`, collapsed ? 'collapsed' : 'expanded'); } catch { /* The toggle remains usable without storage. */ }
+  }, [collapsed, identity, preferencesReady]);
 
   useEffect(() => { onReadyChange?.(preferencesReady); }, [onReadyChange, preferencesReady]);
 
@@ -92,31 +105,41 @@ export default function WorkspaceSidebar({ accountId, internal, images, worksEna
   ];
   const accountLinks = [
     { title: '我的用量', href: '/usage', icon: Coins, visible: true, current: current === 'usage' },
-    { title: '费率说明', href: '/pricing', icon: Coins, visible: internal, current: current === 'pricing' },
+    { title: '费率说明', href: '/pricing', icon: ReceiptText, visible: internal, current: current === 'pricing' },
     { title: '个人资料', href: '/account', icon: UserRound, visible: true, current: current === 'account' },
     { title: '通知', href: '/notifications', icon: Bell, visible: true, current: current === 'notifications' },
     { title: '帮助', href: '/help', icon: CircleHelp, visible: true, current: current === 'help' },
   ].filter(link => link.visible);
 
-  return <aside className={styles.sidebar} data-sidebar-scroll="page">
+  const renderLink = (link: (typeof links)[number] | (typeof accountLinks)[number]) => <Link key={link.href} href={destination(link.href)}
+    aria-label={link.title} title={link.title} aria-current={link.current ? 'page' : undefined}
+    className={link.icon === Plus ? styles.createLink : styles.sideLink} onClick={event => onLinkClick(event, link.href)}>
+    <link.icon size={18} aria-hidden="true" /><span>{link.title}</span>
+  </Link>;
+
+  return <aside className={styles.sidebar} data-sidebar-scroll="page" data-collapsed={sidebarCollapsed ? 'true' : 'false'}>
     <button ref={menuButton} type="button" className={styles.workspaceToggle} aria-expanded={workspaceOpen} aria-controls="home-workspace-links" onClick={() => setOpen(value => !value)}>
       <Menu size={18} aria-hidden="true" />工作区
     </button>
     <div ref={workspace} id="home-workspace-links" className={styles.workspaceLinks} data-open={workspaceOpen ? 'true' : 'false'}>
-      <h1>工作区</h1>
+      <div className={styles.sidebarHeader}>
+        <h1>工作区</h1>
+        <button type="button" className={styles.collapseToggle} disabled={!preferencesReady} aria-controls="home-workspace-links"
+          aria-expanded={!sidebarCollapsed} aria-label={sidebarCollapsed ? '展开侧栏' : '收起侧栏'} title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
+          onClick={() => setCollapsed(value => !value)}>
+          {sidebarCollapsed ? <PanelLeftOpen size={18} aria-hidden="true" /> : <PanelLeftClose size={18} aria-hidden="true" />}
+        </button>
+      </div>
       <nav aria-label="工作区">
-        {links.filter(link => link.visible).map(link => <Link key={link.href} href={destination(link.href)} aria-current={link.current ? 'page' : undefined} className={link.icon === Plus ? styles.createLink : styles.sideLink} onClick={event => onLinkClick(event, link.href)}>
-          <link.icon size={18} aria-hidden="true" /><span>{link.title}</span>
-        </Link>)}
+        {links.filter(link => link.visible).map(renderLink)}
       </nav>
       <details className={styles.sidebarMore} open={accountLinks.some(link => link.current)}>
         <summary>账户与帮助<ChevronDown size={15} aria-hidden="true" /></summary>
-        <nav aria-label="账户与帮助">{accountLinks.map(link => <Link key={link.href} href={destination(link.href)} className={styles.sideLink} aria-current={link.current ? 'page' : undefined} onClick={event => onLinkClick(event, link.href)}>
-          <link.icon size={18} aria-hidden="true" /><span>{link.title}</span>
-        </Link>)}</nav>
+        <nav aria-label="账户与帮助">{accountLinks.map(renderLink)}</nav>
       </details>
+      <nav className={styles.railAccountLinks} aria-label="账户与帮助">{accountLinks.map(renderLink)}</nav>
       {onReset && <button type="button" className={styles.reset} onClick={() => { setOpen(false); onReset(); }} title="重置首页位置" aria-label="重置首页位置">
-        <RotateCcw size={15} aria-hidden="true" />重置位置
+        <RotateCcw size={15} aria-hidden="true" /><span>重置位置</span>
       </button>}
     </div>
   </aside>;
