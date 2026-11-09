@@ -3,6 +3,7 @@ import packageInfo from '../../package.json';
 const notice = { title: '领取积分页导航统一', outline: [
   '领取积分页使用作品广场侧栏',
   '保留侧栏折叠和手机菜单习惯',
+  '优化用量报表与高清制作稳定性',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
