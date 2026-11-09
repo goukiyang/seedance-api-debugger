@@ -69,10 +69,12 @@ async function originalVideo(request: Request, access: WorkAccess) {
     return new Response(Readable.toWeb(stream) as ReadableStream<Uint8Array>, { status: range ? 206 : 200, headers });
   } catch (error) { await source.close(); throw error; }
 }
-export async function workMediaResponse(request: Request, user: SessionUser, workId: string) {
+export async function workMediaResponse(request: Request, user: SessionUser, workId: string, started = performance.now()) {
   const params = new URL(request.url).searchParams, version = params.get('version'), variant = params.get('variant') || 'preview';
   if (!version || !['thumbnail', 'preview', 'detail', 'original', 'download', 'hd', 'hd-description', 'hd-download'].includes(variant)) throw new WorkError('成品版本或读取方式无效');
+  const accessStarted = performance.now();
   const access = await getWorkAccess(user, workId);
+  const accessFinished = performance.now();
   if (!access?.canPreview) throw new WorkError('成品已不可用或当前无权查看', 404);
   if (version !== access.media.id) throw new WorkError('成品版本已变化，请重新打开当前作品', 409, 'WORKS_VERSION_CHANGED');
   const { work, media } = access;
@@ -84,7 +86,7 @@ export async function workMediaResponse(request: Request, user: SessionUser, wor
     // Work reads reuse published HD files. Existing background consumers own production.
     const headers = new Headers(request.headers); headers.set('X-Image-Read-Intent', 'status');
     response = await authorizedImageResponse(new Request(request, { headers }), media.source_url, variant as ImageVariant,
-      asset?.mime_type || 'image/png', asset?.file_name || `${work.title}.png`);
+      asset?.mime_type || 'image/png', asset?.file_name || `${work.title}.png`, started);
   } else if (variant === 'thumbnail') {
     if (media.thumbnail_url) response = await storedPreview(request, media.thumbnail_url);
     else {
@@ -96,13 +98,13 @@ export async function workMediaResponse(request: Request, user: SessionUser, wor
   } else if (variant === 'download') {
     if (!access.canDownload || !media.source_url) throw new WorkError('当前仅可预览成品，未获得原件下载权限', 403);
     const asset = media.asset_id ? await prisma.asset.findUnique({ where: { id: media.asset_id }, select: { mime_type: true, file_name: true } }) : null;
-    response = work.medium === 'image' ? await authorizedImageResponse(request, media.source_url, 'download', asset?.mime_type || 'image/png', asset?.file_name || `${work.title}.png`)
+    response = work.medium === 'image' ? await authorizedImageResponse(request, media.source_url, 'download', asset?.mime_type || 'image/png', asset?.file_name || `${work.title}.png`, started)
       : await originalVideo(request, access);
     if (work.medium === 'video') response.headers.set('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(`${work.title.replace(/[\r\n]/g, '')}.mp4`).replace(/'/g, '%27')}`);
   } else if (work.medium === 'image') {
     if (variant === 'detail' && (access.canDownload || access.reuse) && media.source_url) {
       const asset = media.asset_id ? await prisma.asset.findUnique({ where: { id: media.asset_id }, select: { mime_type: true } }) : null;
-      response = await authorizedImageResponse(request, media.source_url, 'original', asset?.mime_type || 'image/png');
+      response = await authorizedImageResponse(request, media.source_url, 'original', asset?.mime_type || 'image/png', undefined, started);
     } else {
       if (!media.thumbnail_url) throw new WorkError('成品预览仍在准备', 409);
       response = await storedPreview(request, media.thumbnail_url);
@@ -112,5 +114,6 @@ export async function workMediaResponse(request: Request, user: SessionUser, wor
   else throw new WorkError('视频预览仍在后台准备，原作品已保留', 409);
   for (const [name, value] of Object.entries(workHeaders)) response.headers.set(name, value);
   response.headers.set('X-Work-Media-Version', media.id);
+  response.headers.append('Server-Timing', `work_access;dur=${(accessFinished - accessStarted).toFixed(1)}`);
   return variant === 'download' || variant === 'hd-download' ? observeWorkDownload(request, response, user, work.id, media.id) : response;
 }

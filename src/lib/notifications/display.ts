@@ -50,6 +50,13 @@ export interface AppNotification {
 
 export type NotificationTone = 'info' | 'success' | 'warning' | 'danger' | 'neutral';
 
+export type SystemAlert = {
+  id: 'hd_hard_pause' | 'hd_control_unavailable';
+  title: string;
+  body: string;
+  href: string;
+};
+
 export function isNotificationUnread(notification: Pick<AppNotification, 'status' | 'read_at'>) {
   return notification.status !== 'read' && !notification.read_at;
 }
