@@ -109,6 +109,20 @@ async function main() {
     platformSetting: { findUnique: async () => null },
   };
   const prisma = { ...tx, $transaction: async (run: (client: typeof tx) => unknown) => run(tx) };
+  let quoteSnapshotReads = 0, deferredVersionReads = 0, previewCleanups = 0;
+  const quotePhases: string[] = [];
+  // This restoration harness uses an already captured synthetic channel. All
+  // quote SQL writes remain prohibited; real private-version staging has its own SQLite evidence.
+  const readonlyTx = new Proxy(tx, { get(target, key) {
+    const delegate = Reflect.get(target, key);
+    return new Proxy(delegate, { get(value, operation) {
+      if (['create', 'createMany', 'update', 'updateMany', 'upsert', 'delete', 'deleteMany'].includes(String(operation))) {
+        return () => { forbiddenCalls++; throw new Error('Quote snapshot attempted a write'); };
+      }
+      return Reflect.get(value, operation);
+    } });
+  } });
+
   const shared = { binding: { ownerId: owner, presetId, mode: 'publisher' }, personalOverrides: {},
     definition: { intent, sourceOwnerId: owner, sourceRevision: 'synthetic-revision', name: 'Synthetic shared',
       templatePrompt: 'must-not-use-current-template-prompt', context: 'must-not-use-current-module',
@@ -135,7 +149,15 @@ async function main() {
     MAX_REFERENCE_IMAGES: 10, DEFAULT_STUDIO_PRIMARY_MAX: 1, MAX_STYLE_GROUP_NOTE_LENGTH: 8000,
     IMAGE_STUDIO_MODELS: ['gpt-image-1'], IMAGE_STUDIO_MODEL_QUALITY_OPTIONS: { 'gpt-image-1': ['medium'] },
     IMAGE_STUDIO_MODEL_COST_USD: { 'gpt-image-1': 0 }, IMAGE_RESOLUTION_OPTIONS: ['1K'], IMAGE_25_QUALITY_MODEL: 'synthetic-other-model',
-    prisma, parseUsageProjectId: (value: unknown) => value, creditCents: (value: number) => Math.round(value * 100),
+    prisma,
+    tracePhase: async (phase: string, run: () => Promise<unknown>) => { quotePhases.push(phase); return run(); },
+    readSharedStudioSnapshot: async (read: (client: typeof tx) => Promise<unknown>) => { quoteSnapshotReads++; return read(readonlyTx); },
+    deferImageChannelVersionWrites: async (client: typeof tx, read: () => Promise<unknown>) => {
+      assert.equal(client, readonlyTx); deferredVersionReads++; return { result: await read(), versions: [] };
+    },
+    cleanupExpiredImageQuotePreviews: async (actor: string) => { assert.equal(actor, owner); previewCleanups++; return { scanned: 0, deleted: 0 }; },
+    readExistingModuleContextVersion: async () => 'synthetic-context-version',
+    parseUsageProjectId: (value: unknown) => value, creditCents: (value: number) => Math.round(value * 100),
     // Retry policy is outside this restoration fixture; durable execution has its own SQLite fixture.
     retryConfig: async () => ({ enabledIds: [] }), RETRY_RULES: [],
     addCredits: (left: number, right: number) => left + right, sumCredits: (values: number[]) => values.reduce((a, b) => a + b, 0),
@@ -302,8 +324,11 @@ async function main() {
   const expectedOne = await prepare(body), expectedTwo = await prepare({ ...body, referenceIds: ['current-main-two'],
     draft: { referencePolicy: { ...policy, primaryIds: ['current-main-two'] } } });
   const expectedSpecifications = [expectedOne.task.billing_contract_json, expectedTwo.task.billing_contract_json].map(value => JSON.parse(value).specification);
-  const beforeQuote = specificationInputs.length;
+  const beforeQuote = specificationInputs.length, createdBeforeQuote = created.length;
   await engine.prepareImageBillingQuote(owner, body);
+  assert.ok(quoteSnapshotReads > 0); assert.equal(deferredVersionReads, 1); assert.equal(previewCleanups, 1);
+  assert.ok(quotePhases.includes('quote.prepare')); assert.ok(quotePhases.includes('quote.confirm'));
+  assert.equal(created.length, createdBeforeQuote);
   assert.equal(JSON.stringify(specificationInputs[beforeQuote]), expectedSpecifications[0]);
   const beforeBatchQuote = specificationInputs.length;
   await engine.quoteStudioBatch(owner, { ...body, sources: [{ name: 'one', assetId: 'current-main' }, { name: 'two', assetId: 'current-main-two' }] });

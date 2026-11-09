@@ -93,6 +93,9 @@ export async function runPricingRequestStatusContractFixture(): Promise<FixtureR
     const actorA = id('actor-a'), actorB = id('actor-b');
     const projectA = id('project-a'), projectB = id('project-b');
     const cardA = id('card-a'), cardB = id('card-b');
+    const dependencyMarkerKeys = ['User:*', `User:${actorA}`, `User:${actorB}`].map(scope =>
+      `catalog_dependency_revision_v1:${createHash('sha256').update(scope).digest('hex')}`);
+    const catalogMarkerKeys = ['catalog_directory_revision_v1:templates', 'catalog_directory_revision_v1:assets', ...dependencyMarkerKeys];
     const sharedKey = id('shared-request'), foreignKey = id('foreign-only-request');
     const missingKey = id('missing-request'), deniedKey = id('inaccessible-project-request');
     const hiddenKey = id('hidden-request');
@@ -147,8 +150,15 @@ export async function runPricingRequestStatusContractFixture(): Promise<FixtureR
     equal(seeded.VideoTask.rows, tasks.length, 'Only explicit original tasks exist before GET');
     equal(seeded.CreditLedger.rows, 2, 'Existing freezes have real ledger rows for the no-write comparison');
     equal((await db.platformSetting.findMany({ select: { key: true }, orderBy: { key: 'asc' } })).map(row => row.key),
-      [CODEX_VIDEO_API_SETTING_KEY, 'catalog_directory_revision_v1:templates', 'catalog_directory_revision_v1:assets'].sort(),
-      'Only API settings and the two directory markers exist before GET; no request receipt');
+      [CODEX_VIDEO_API_SETTING_KEY, ...catalogMarkerKeys].sort(),
+      'Only API settings, two directory markers and three exact fixture-User dependency markers exist before GET; no request or pricing receipt');
+    const catalogMetadata = await db.platformSetting.findMany({ where: { key: { in: catalogMarkerKeys } } });
+    for (const marker of catalogMetadata) {
+      const value = JSON.parse(marker.value_json);
+      equal(Object.keys(value).sort(), ['revision', 'version'], 'Catalog metadata contains no original request or pricing receipt');
+      equal(value.version, 1, 'Seed metadata follows the real catalog revision protocol');
+      ok(typeof value.revision === 'string' && /^[a-f0-9]{64}$/.test(value.revision), 'Each exact catalog marker has a valid revision');
+    }
 
     const setMapping = async (userId: string, enabled = true) => {
       await db.platformSetting.update({ where: { key: CODEX_VIDEO_API_SETTING_KEY }, data: { value_json: JSON.stringify(settingsFor(userId, enabled)) } });

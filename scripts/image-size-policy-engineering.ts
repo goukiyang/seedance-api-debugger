@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import dns from 'node:dns/promises';
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
 import { createRequire } from 'node:module';
@@ -16,7 +16,8 @@ import type { Prisma } from '@prisma/client';
 process.exitCode = 1;
 const deadline = setTimeout(() => process.exit(1), 180000); deadline.ref();
 const sha = (value: Buffer | string) => createHash('sha256').update(value).digest('hex');
-const sourcePaths = ['src/lib/image-studio/ratios.ts', 'src/lib/image-generation/resolution.ts',
+const sourcePaths = ['prisma/schema.prisma', 'src/lib/sqlite-prisma-read-snapshot.ts',
+  'src/lib/usage/sqlite-read-snapshot.ts', 'scripts/usage-sqlite-reader.py', 'src/lib/image-studio/ratios.ts', 'src/lib/image-generation/resolution.ts',
   'src/lib/integrations/image-generation.ts', 'src/lib/image-studio/tasks.ts',
   'src/lib/image-studio/billing-quote-service.ts', 'src/lib/image-studio/billing-quote-store.ts',
   'src/lib/image-studio/batch-billing-quote.ts', 'src/lib/image-studio/batches.ts',
@@ -39,6 +40,10 @@ async function main() {
     '--schema', path.join(root, 'prisma/schema.prisma')], { cwd: directory, env, encoding: 'utf8', timeout: 120000 });
   assert.equal(statSync(databasePath).mode & 0o777, 0o600);
   const { PrismaClient } = await import('@prisma/client'); const db = new PrismaClient(); Reflect.set(globalThis, 'prisma', db);
+  for (const file of ['prisma/schema.prisma', 'scripts/usage-sqlite-reader.py']) {
+    const destination = path.join(directory, file); mkdirSync(path.dirname(destination), { recursive: true });
+    copyFileSync(path.join(root, file), destination);
+  }
   process.chdir(directory);
   const checks: string[] = [];
   let completed = false, forbiddenCalls = 0;

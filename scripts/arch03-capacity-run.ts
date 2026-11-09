@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { copyFile, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import http from 'node:http';
 import https from 'node:https';
@@ -35,6 +35,10 @@ async function main() {
   } } });
   Reflect.set(globalThis, 'prisma', observed); Reflect.set(globalThis, 'prismaSqlitePragmasStarted', true);
   const startedAt = new Date().toISOString(); let completed = false, metrics: unknown, measurements: Array<Record<string, unknown>> = [];
+  for (const file of ['prisma/schema.prisma', 'scripts/usage-sqlite-reader.py']) {
+    const destination = path.join(directory, file); await mkdir(path.dirname(destination), { recursive: true });
+    await copyFile(path.join(root, file), destination);
+  }
   process.chdir(directory);
   try {
     assert.equal(await base.imageStudioTask.count({ where: { id: { startsWith: 'scale-' } } }), 0);

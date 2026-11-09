@@ -191,3 +191,10 @@ SQLite队列工程曾完整通过；补production单例断言后的本机复跑�
 ### 8.1 重型检查前的继承补丁纠正
 
 同项目视频恢复补丁在自身工程中发现图片首帧导入未就绪时Composer未挂载、原恢复入口仍需可见；后继 `ce2e37dddf182ed27d86bab5a8c129d08b04c325` 仅修该条件并增加12组合矩阵，7项工程已过。主控在重型检查前继承该必要delta，v0.139.2保持，最终source另见发布回执。原attempt01/5b7c2ab只完成源码归档和独立Prisma准备，未执行原生/Next或切版，其原证保留；最终候选改用 `shared-architecture-closure-20261108/attempt02`，不将原准备冒完整通过。后续新需求不插入本包。
+
+
+### 8.2 首轮Linux完整门拦截与工程接线修正
+
+attempt02 / eb2af2b 的完整原生门在2026-11-09T06:24:21Z退出1，未执行Next或切版；原始失败报告保留 `.role-tests/image-recovery-gate-2nxGue/failure-report.json`，不改成通过。拦截8项：临时cwd缺schema/Python bootstrap、旧AST VM缺trace绑定、检查清单/回执字段未同步，以及原metadata/空库断言未区分新增精确依赖marker。实际SQLite并发各断言均成功、无P1008，readonly12项及写拒绝实际成功；不能用回执合同错误冒业务已过整门。
+
+集中修正仅11个scripts文件，生产src、数据库、费用与RO策略均不改。多视图GET前后完整配置行（含时间戳）严格相等，G30每GET全库/财务不变，G29只处理明确受控marker；不笼统忽略未知settings。restore22项、readonly12项及真实禁止网络计数0、scheduler15项回执精确对齐、语法/diff已过；本机其余复验停于原Prisma新库准备120秒超时，未进入业务断言，停止重试，余项交Linux最终整门。现有门只有完整run/verify，按其候选准入重新执行必要完整门，未新建恢复平台或跳过失败；既有通过原证保留。最终候选stage接续attempt03，版本仍139.2，应用源以新回执为准。

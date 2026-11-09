@@ -118,6 +118,11 @@ export async function runPricingVideoContextContractFixture(): Promise<FixtureRe
     draft: id('studio-draft'), run: id('studio-run'), task: id('accepted-draft-task'), workspace: id('workspace'),
     approval: id('approval'), settings: id('settings'), budget: id('budget'),
   };
+  const dependencyKey = (scope: string) => `catalog_dependency_revision_v1:${createHash('sha256').update(scope).digest('hex')}`;
+  const directoryMarkerKeys = ['catalog_directory_revision_v1:templates', 'catalog_directory_revision_v1:assets'];
+  // The guarded database starts empty; only these explicit fixture User/Asset writes create dependency metadata.
+  const catalogMarkerKeys = [...directoryMarkerKeys, ...['User:*', ...ids.users.map(userId => `User:${userId}`),
+    'Asset:*', ...ids.assets.map(assetId => `Asset:${assetId}`), 'protection'].map(dependencyKey)].sort();
   const equal = (actual: unknown, expected: unknown, label: string) => { assert.deepEqual(actual, expected, label); assertions++; };
   const ok = (condition: unknown, label: string) => { assert.ok(condition, label); assertions++; };
   const session = (index: number, accountType: SessionUser['account_type'] = 'internal', withFeishu = true): SessionUser => ({
@@ -168,7 +173,16 @@ export async function runPricingVideoContextContractFixture(): Promise<FixtureRe
       await tx.project.deleteMany({ where: { id: { in: ids.projects } } });
       await tx.platformSetting.deleteMany({ where: { key: ids.settings } });
       await tx.user.deleteMany({ where: { id: { in: ids.users } } });
-      await tx.platformSetting.deleteMany({ where: { key: { in: ['catalog_directory_revision_v1:templates', 'catalog_directory_revision_v1:assets'] } } });
+      const markers = await tx.platformSetting.findMany({ where: { key: { in: catalogMarkerKeys } }, orderBy: { key: 'asc' } });
+      equal(markers.map(row => row.key), catalogMarkerKeys, 'Cleanup owns exactly the catalog metadata created in this initially empty fixture');
+      for (const marker of markers) {
+        const value = JSON.parse(marker.value_json);
+        equal(Object.keys(value).sort(), ['revision', 'version'], 'Catalog metadata is not a request or pricing receipt');
+        equal(value.version, 1, 'Only the real catalog metadata protocol is removed');
+        ok(typeof value.revision === 'string' && /^[a-f0-9]{64}$/.test(value.revision), 'Only a valid catalog revision is removed');
+      }
+      const removed = await tx.platformSetting.deleteMany({ where: { key: { in: catalogMarkerKeys } } });
+      equal(removed.count, markers.length, 'Cleanup removes only the exact fixture-owned catalog metadata keys');
     }, { maxWait: 10000, timeout: 30000 });
     seeded = false;
     ok(Object.values(await tableCounts(client)).every(count => count === 0), 'Owned fixture rows are removed and the supplied database is empty again');
@@ -257,6 +271,8 @@ export async function runPricingVideoContextContractFixture(): Promise<FixtureRe
     }, { maxWait: 10000, timeout: 30000 });
     seeded = true;
     const baseline = await protectedProjection(db), mediaBaseline = fileProjection(runtime);
+    equal(baseline.settings.map(row => row.key).sort(), [ids.settings, ...catalogMarkerKeys].sort(),
+      'Seed settings contain only the fixture sentinel and its exact directory/dependency metadata, never request or pricing receipts');
     for (const actor of actors) {
       const persisted = baseline.users.find(user => user.id === actor.id);
       ok(persisted, 'Every session actor has a committed fixture user');
@@ -415,18 +431,20 @@ export async function runPricingVideoContextContractFixture(): Promise<FixtureRe
     } finally { await db.videoStudioTemplate.update({ where: { id: ids.template }, data: { owner_user_id: actorA.id, updated_at: seed.template.updated_at } }); }
     evidence.push('Real project membership, card ownership/status, private template and saved asset checks reject revoked access, missing slots and forged roles instead of returning none.');
     const finalProjection = await protectedProjection(db);
-    // Fixture-owned revocation/restoration writes rotate these markers. Every resolver call above still compares all rows unchanged.
-    for (const key of ['catalog_directory_revision_v1:templates', 'catalog_directory_revision_v1:assets']) {
+    // Controlled membership and Asset[0] revocations rotate only these four markers.
+    // Every resolver call above still compares all persisted rows, including every marker, unchanged.
+    for (const key of [...directoryMarkerKeys, dependencyKey('Asset:*'), dependencyKey(`Asset:${ids.assets[0]}`)]) {
       const before = baseline.settings.find(row => row.key === key)!;
       const after = finalProjection.settings.find(row => row.key === key)!;
       ok(Boolean(before && after), 'Catalog marker identity remains present');
       const value = JSON.parse(after.value_json);
+      equal(Object.keys(value).sort(), ['revision', 'version'], 'Rotated metadata contains no request or pricing receipt');
       equal(value.version, 1, 'Catalog revision retains its version');
       ok(/^[a-f0-9]{64}$/.test(value.revision) && after.value_json !== before.value_json,
         'Controlled membership and asset changes rotate the catalog revision');
       after.updated_at = before.updated_at; after.value_json = before.value_json;
     }
-    equal(finalProjection, baseline, 'After controlled negative-case seed changes are restored, every business row and count match; only the two verified directory revisions rotate');
+    equal(finalProjection, baseline, 'After controlled negative-case seed changes are restored, every business row and count match; only the two verified directory and two Asset dependency revisions rotate');
     equal(fileProjection(runtime), mediaBaseline, 'Resolver and credentials never upload, rewrite or generate fixture media');
     evidence.push('All business-table counts plus existing settings/tasks/wallets/buckets/ledgers/budgets/workspaces/approvals/drafts/runs/assets/projects/card/template projections are compared before and after each read-only group.');
     evidence.push('Media evidence is private synthetic readable bytes only, not decoding, generation, supplier acceptance or fee evidence.');

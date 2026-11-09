@@ -17,6 +17,7 @@ export const ARCH03_CHECKS = [
   'actual_group_delete_reads_off_page_members_and_rejects_account_change',
 ];
 export const ARCH03_SOURCES = [
+  'prisma/schema.prisma', 'src/lib/sqlite-client.ts', 'src/lib/sqlite-prisma-read-snapshot.ts', 'src/lib/platform-setting-prefix.ts',
   'src/lib/image-studio/reproduction-record-keys.ts',
   'scripts/template-usage-counts-checks.ts', 'src/lib/template-studio/usage-counts.ts',
   'scripts/arch03-engineering.ts', 'scripts/arch03-fixture-inputs.mjs', 'scripts/arch03-capacity.ts',

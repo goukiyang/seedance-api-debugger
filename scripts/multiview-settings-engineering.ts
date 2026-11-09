@@ -42,9 +42,32 @@ async function main() {
   // dynamic ESM imports with alias-loaded CJS creates duplicate constructors.
   const { NextRequest } = require('next/server') as typeof import('next/server');
   const { prisma } = require('../src/lib/prisma') as typeof import('../src/lib/prisma');
-  const businessSettingCount = () => prisma.platformSetting.count({ where: { key: { notIn: [
-    'catalog_directory_revision_v1:templates', 'catalog_directory_revision_v1:assets',
-  ] } } });
+  const { catalogDependencyScopes, catalogDependencyMarkerData } = require('../src/lib/image-studio/catalog-revision') as typeof import('../src/lib/image-studio/catalog-revision');
+  const catalogMarkerKeys = new Set(['catalog_directory_revision_v1:templates', 'catalog_directory_revision_v1:assets']);
+  const catalogReadContext = new AsyncLocalStorage<boolean>();
+  const markerWriteActions = new Set(['create', 'createMany', 'update', 'updateMany', 'upsert', 'delete', 'deleteMany']);
+  prisma.$use(async (params, next) => {
+    const result = await next(params);
+    if (!catalogReadContext.getStore() && params.model && markerWriteActions.has(params.action)
+      && !(result && typeof result === 'object' && 'count' in result && result.count === 0)) {
+      for (const marker of catalogDependencyMarkerData(catalogDependencyScopes(params.model, params.args))) catalogMarkerKeys.add(marker.key);
+    }
+    return result;
+  });
+  // Exclude only identities derived from this fixture's observed writes. An
+  // unknown marker-looking key still counts as an unexpected business setting.
+  const businessSettings = async () => {
+    const rows = await prisma.platformSetting.findMany();
+    for (const row of rows) if (catalogMarkerKeys.has(row.key)) {
+      const marker = JSON.parse(row.value_json);
+      assert.deepEqual(Object.keys(marker).sort(), ['revision', 'version']);
+      assert.equal(marker.version, 1);
+      assert.match(marker.revision, /^[a-f0-9]{64}$/);
+      assert.equal(row.updated_by, null);
+    }
+    return rows.filter(row => !catalogMarkerKeys.has(row.key));
+  };
+  const businessSettingCount = async () => (await businessSettings()).length;
   const { createSession, getSession } = require('../src/lib/auth/session') as typeof import('../src/lib/auth/session');
   const contract = require('../src/lib/video/multiview-settings-contract') as typeof import('../src/lib/video/multiview-settings-contract');
   const generation = require('../src/lib/video/multiview-generation-contract') as typeof import('../src/lib/video/multiview-generation-contract');
@@ -86,14 +109,17 @@ async function main() {
         method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
       const store = { headers, cookies: new RequestCookies(headers) } as unknown as Parameters<typeof requestAsyncStorage.run>[0];
-      const response = await requestAsyncStorage.run(store, () => {
+      const settingsBefore = method === 'GET' ? await prisma.platformSetting.findMany({ orderBy: { key: 'asc' } }) : null;
+      const response = await catalogReadContext.run(method === 'GET', () => requestAsyncStorage.run(store, () => {
         const pathOnly = url.split('?')[0];
         if (pathOnly.startsWith('/mutations/')) return mutation.GET(request, { params: { mutationId: pathOnly.slice('/mutations/'.length) } });
         if (pathOnly.endsWith('/apply')) return apply.POST(request, { params: { id: pathOnly.split('/')[1] } });
         if (pathOnly.length > 1) return method === 'GET' ? item.GET(request, { params: { id: pathOnly.slice(1) } })
           : method === 'DELETE' ? item.DELETE(request, { params: { id: pathOnly.slice(1) } }) : item.PATCH(request, { params: { id: pathOnly.slice(1) } });
         return method === 'GET' ? collection.GET(request) : collection.POST(request);
-      });
+      }));
+      if (settingsBefore) assert.deepEqual(await prisma.platformSetting.findMany({ orderBy: { key: 'asc' } }), settingsBefore,
+        'Read-only GET must not change business settings or catalog markers, including same-value timestamp writes');
       assert.match(response.headers.get('cache-control') || '', /private.*no-store/);
       return { status: response.status, body: await response.json() };
     };
@@ -332,6 +358,8 @@ async function main() {
     assert.equal(await prisma.videoTask.count(), 1);
     assert.equal(await prisma.creditLedger.count(), 0);
     checks.push('fresh_disabled_actor_rejected_and_zero_video_generation_or_point_transactions');
+    await businessSettings();
+    checks.push('catalog_markers_match_observed_write_identities_and_strict_version_revision_author_metadata');
     completed = true;
   } finally {
     await prisma.$disconnect();

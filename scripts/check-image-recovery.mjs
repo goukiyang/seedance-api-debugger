@@ -128,11 +128,12 @@ fixtures.push({ file: 'scripts/multiview-settings-batch-engineering.mjs', schema
     'same_work_identity_baseline_and_explicit_original_save', 'authorized_multiview_original_transport'], sources: MULTIVIEW_SETTINGS_FIXTURE_SOURCES });
 fixtures.push({ file: 'scripts/sqlite-transaction-scheduling-engineering.ts', schema: 'sqlite-transaction-scheduling-engineering.v1',
   marker: 'SQLite transaction scheduling engineering receipt: ', checks: [
+    'first_actual_client_initializes_before_first_query',
     'single_worker_callbacks_do_not_block_commit', 'batch_transactions_share_the_same_entry_queue',
     'implicit_directory_write_keeps_atomic_markers', 'bare_sql_write_does_not_starve_transaction_commit',
     'non_catalog_write_is_scheduled_without_new_markers', 'rollback_preserves_data_and_releases_queue',
     'extended_and_instrumented_clients_enter_transaction_queue_only_once', 'expired_wait_never_executes_late_callback',
-    'separate_clients_and_module_copies_share_process_queue', 'second_actual_client_has_its_own_pragma_initialization',
+    'second_actual_client_has_its_own_pragma_initialization', 'separate_clients_and_module_copies_share_process_queue',
     'production_application_module_copies_reuse_one_initialized_client', 'per_client_durability_keeps_application_normal_and_feedback_full',
     'feedback_native_callback_batch_and_implicit_writes_share_admission', 'feedback_singleton_preserves_disabled_logs_and_minimal_errors'], sources: ['src/lib/catalog-directory-writes.ts',
     'src/lib/image-studio/catalog-revision.ts', 'src/lib/image-studio/reproduction-record-keys.ts',

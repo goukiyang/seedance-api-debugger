@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import https from 'node:https';
@@ -54,6 +54,12 @@ async function main() {
   } } });
   Reflect.set(globalThis, 'prisma', observed); Reflect.set(globalThis, 'prismaSqlitePragmasStarted', true);
   Reflect.set(globalThis, 'AsyncLocalStorage', AsyncLocalStorage);
+  // The real read snapshot resolves bootstrap files from the application cwd.
+  // Mirror those exact files in this synthetic application root before chdir.
+  for (const file of ['prisma/schema.prisma', 'scripts/usage-sqlite-reader.py']) {
+    const destination = path.join(directory, file); mkdirSync(path.dirname(destination), { recursive: true });
+    copyFileSync(path.join(root, file), destination);
+  }
   const previousCwd = process.cwd(); process.chdir(directory);
   const checks: string[] = [];
   const metrics: Record<string, unknown> = {};

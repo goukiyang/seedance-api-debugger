@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import http from 'node:http';
+import https from 'node:https';
+import net from 'node:net';
+import tls from 'node:tls';
+import { syncBuiltinESMExports } from 'node:module';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { sqliteClient } from '../src/lib/sqlite-client';
 import { withSqlitePrismaReadSnapshot } from '../src/lib/sqlite-prisma-read-snapshot';
@@ -23,6 +28,26 @@ async function main() {
       : field.type === 'DateTime' ? timestamp : field.type === 'Boolean' ? false : ['Int', 'Float', 'BigInt'].includes(field.type) ? 0 : '');
     await db.$executeRawUnsafe(`INSERT INTO ${quote(model.dbName || name)} (${fields.map(field => quote(field.dbName || field.name)).join(',')}) VALUES (${fields.map(() => '?').join(',')})`, ...data);
   }
+  let forbiddenCalls = 0;
+  const networkGuards: string[] = [];
+  const originals: Array<{ target: object; name: string; value: unknown }> = [];
+  const block = (target: object, name: string, label: string) => {
+    originals.push({ target, name, value: Reflect.get(target, name) });
+    networkGuards.push(label);
+    Reflect.set(target, name, () => {
+      forbiddenCalls++;
+      throw new Error(`Offline fixture network boundary: ${label}`);
+    });
+  };
+  block(globalThis, 'fetch', 'fetch');
+  for (const [label, target] of [['http', http], ['https', https]] as const) {
+    block(target, 'request', `${label}.request`); block(target, 'get', `${label}.get`);
+  }
+  block(net, 'connect', 'net.connect'); block(net, 'createConnection', 'net.createConnection');
+  block(net.Socket.prototype, 'connect', 'net.Socket.connect'); block(tls, 'connect', 'tls.connect');
+  // Update named Node exports too. Child-process spawn/stdio remain available
+  // for the actual Python mode=ro snapshot protocol; no provider is called.
+  syncBuiltinESMExports();
   try {
     for (const name of names) {
       const model = modelOf(name);
@@ -74,14 +99,21 @@ async function main() {
     await assert.rejects(withSqlitePrismaReadSnapshot(tx => tx.$executeRawUnsafe("UPDATE Probe SET value='forbidden' WHERE id=1")), /sqlite_snapshot_query_unsupported/);
     assert.deepEqual(await withSqlitePrismaReadSnapshot(tx => tx.$queryRaw`SELECT value FROM Probe WHERE id=1`), [{ value: 'after' }]);
     checks.push('raw_returning_and_delegate_writes_are_rejected_without_data_change');
+    assert.equal(forbiddenCalls, 0);
     const sources = ['src/lib/sqlite-prisma-read-snapshot.ts', 'src/lib/usage/sqlite-read-snapshot.ts', 'scripts/usage-sqlite-reader.py', 'src/lib/image-studio/read-snapshot.ts'];
     const sha = (file: string) => createHash('sha256').update(readFileSync(path.join(root, file))).digest('hex');
     const receipt = path.join(directory, 'receipt.json');
     writeFileSync(receipt, JSON.stringify({ schema: 'sqlite-prisma-read-snapshot-engineering.v1', synthetic: true,
       runId: process.env.IMAGE_RECOVERY_GATE_RUN_ID || randomUUID(), startedAt, finishedAt: new Date().toISOString(), completed: true,
       checks, prismaVersion: Prisma.prismaVersion.client, sourceSha256: Object.fromEntries(sources.map(file => [file, sha(file)])),
-      fixtureSha256: sha('scripts/sqlite-prisma-read-snapshot-engineering.ts'), productionWrites: 0, paidRequests: 0, browserRuns: 0 }, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
+      fixtureSha256: sha('scripts/sqlite-prisma-read-snapshot-engineering.ts'), forbiddenCalls, networkGuards, productionWrites: 0, paidRequests: 0, browserRuns: 0 }, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
     console.log(`SQLite read delegate engineering receipt: ${receipt}`);
-  } finally { await db.$disconnect(); }
+  } finally {
+    try { await db.$disconnect(); }
+    finally {
+      for (const { target, name, value } of originals.reverse()) Reflect.set(target, name, value);
+      syncBuiltinESMExports();
+    }
+  }
 }
 void main().catch(error => { console.error(error); process.exitCode = 1; });
