@@ -79,3 +79,28 @@ Release closure: `/data/video-api-debugger/release-staging/works-recommendation-
 Six startup gates, seven services, four timers, local/public health, 33 compiled resources with matching bytes, two protected-resource login redirects and GET3/POST2 anonymous 401 checks completed. Pricing fields retained their full-row fingerprint. Normal background checkpoints progressed without opening a page (evidence 1→4, result rows 1→3 at 19:25:47Z); none was qualified yet. These early rows belong only to viewers allowed by the original permissions, not an assertion that every historical work or member has already been backfilled. Historical actions lacking evidence remain unknown.
 
 The compatible guard remains `bbeb854c82e47650ba3ea703f1918800af96881b` / BUILD `bQTt2tX_GFRrdmNPmYcpf`. Recovery switches program/configuration only and retains the derived tables, media, receipts and billing history. Successors must inherit the successful migration record, never apply the CREATE SQL again or treat schema as unchanged relative to the older guard. The release-check lesson is to account for SQLite-owned internal schema objects in the same protected migration proof, before production. No new out-of-scope issue was added.
+
+## WORKS-REC03: 精选与真实复用推荐（2026-11-08 用户批准推进）
+
+### 现状与批准范围
+
+核对实际运行 v0.138.3 / `2239a1eaaa8e91bf53cb7e6f18a99a4c5a1cb1ed`：默认 scope=all，成功成品收录不走评分；推荐另由 Rule 2 筛选。UTC 11月9日01:34:15 一致快照为目录2,837件、评分47件全部8分/未入选、推荐合格0件，134条信号全是作者自用 input，后台44项待处理。此快照不冒全历史已算，也不能凭结果旧时间认定后台停跑（evaluated_at 只在实质变化时更新）。原目录仍受源/项目/媒体权限约束，不等于全员公开。
+
+用户批准精选兜底、少量新作曝光、真实复用排序。本轮同时覆盖首页和 /works，保历史、原件、权限与已有操作；不接奖励、积分、生成、价格或账本。
+
+### 实施合同
+
+1. 页面默认“推荐”，常显“推荐 / 全部作品 / 我的作品”；收藏、隐藏和管理保留。明确链接和本人后续选择优先，按账号恢复现场。旧 API 无 scope 兼容全部目录，新页面明确发送推荐 scope，后端独立筛选。
+2. 管理员在作品详情原管理菜单设为/取消精选；作者提交/撤下本人新作候选。只绑定当前媒体版本与原分享范围，不扩源、项目、模板或原件权限，不代选或批量精选历史作品。
+3. 复用 PlatformSetting 的 `works-editorial:v1:<workId>` 存独立版本、mediaVersion、authorId、精选/提名及时间。沿 fresh actor + WorkOperation 同事务回执和 CAS；未知只查原请求。无需 DDL，不改 Work 或财务历史。
+4. 社区 Rule 3 要求近30天至少一位其他同事真实成功 input/retained。本人使用、打开、拿取、点赞不单独入选；同一人跨用途只算一个人。同用途有当前已证替换/新版取代时保守撤下该用途认可，重新选用可恢复。无旧8–11分缓冲、不沿用 Rule 2 结果，旧原始证据和纯评分函数保留，缺历史证据不补造。
+5. 推荐读只用后台物化结果及当前版本/权限证明，开页不算分、不建任务。排序先分散作者（每轮最多2件），再按精选、有效复用人数、完成时间和ID；同批筛选后只留一个代表。签名游标包含排序边界，旧推荐窗口明确失效，普通目录/收藏窗口不改。
+6. 新作独立显示“新作发现”，最多4件，同作者/同批限一个，当前媒体首次提名起7天；重复开关不刷新首次时间。它不是精选或社区达标，不用全部目录补空白。常规推荐24件主结果搭配至多4件新作，约20%仅为初期展示预算，不承诺每屏或无限列表固定比例。新作读取同一后端 ACL 与筛选。
+7. 首版不做 AI 审美打分、新推荐平台、自动奖励或重写账本；精选冷启动由管理员实际选择，不以生产测试数据填充。
+
+### 进展和保护
+
+- 隔离分支 `codex/works-curated-feed-20261109` 基于已核现网源，正式根原脏改保留。CodeGraph 本树准备及 WorkActions/processWorkRecommendations/projectWorkCards 结构查询成功，关键链路回源码核对。
+- 实现中：推荐与精选/提名后端、默认页签、独立新作区、排序游标和必要构建内置断言。尚未完成构建、Git推送和部署，不以文档或实现存在冒上线。
+- 共享影响：query/card projection 为列表、详情和首页共用；新增配置不扩大这些读取者权限，菜单与卡片使用同一当前版本。独立配置、回执同事务，不新增表或共用财务状态。
+- 沿项目约定仅做必要工程/发布检查，真实多人和界面效果由用户手验；不自动浏览器、收费生成或对生产作品做精选测试。恢复版须保新配置 reader 和原权限，只回程序、不回数据。

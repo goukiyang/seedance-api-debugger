@@ -30,6 +30,9 @@ export function WorkActions({ work, labels = false, cover = false, busy, operate
     else if (!result) setFeedback({ text: '收藏未确认，查看页面提示', failed: true });
   }
   const lifecycle = (action: WorkLifecycleMutation['action']) => void operate(`work:${work.id}`, `/api/works/${work.id}/lifecycle`, { action, expectedRevision: work.revision, expectedMediaVersion: work.mediaVersion });
+  const editorial = (action: 'feature' | 'nominate', active: boolean) => operate(`work:${work.id}`, `/api/works/${work.id}/editorial`, {
+    action, active, expectedVersion: work.editorial?.version || 0, expectedMediaVersion: work.mediaVersion,
+  });
   return <div className={styles.actions}>
     <span className={styles.likeControl} data-work-action="like"><LikeButton active={work.personal.liked} count={work.likeCount} showCount={work.likeCount > 0} animateCount={true} disabled={busy} bloom={bloom} onClick={() => void toggleLike()} /></span>
     <InlineActionFeedback feedback={feedback}><button type="button" data-work-action="favorite" title={work.personal.favorited ? '取消收藏' : '收藏到全部收藏'} aria-label={work.personal.favorited ? '取消收藏' : '收藏到全部收藏'} aria-pressed={work.personal.favorited} disabled={busy} onClick={() => void toggleFavorite()}><Bookmark size={17} fill={work.personal.favorited ? 'currentColor' : 'none'} />{labels && <span>收藏</span>}</button></InlineActionFeedback>
@@ -37,6 +40,8 @@ export function WorkActions({ work, labels = false, cover = false, busy, operate
     {!cover && <span className={styles.actionEnd} data-work-action="manage"><ProductActionMenu label={`管理作品：${work.title}`} disabled={busy} actions={[
       ...(work.personal.favorited ? [{ id: 'classify', label: '归类到集合', onSelect: () => onClassify(work) }] : []),
       { id: 'hide', label: work.personal.hidden ? '恢复对我显示' : '对我隐藏', onSelect: () => state('hide', !work.personal.hidden) },
+      ...(work.editorial?.canFeature ? [{ id: 'feature', label: work.editorial.featured ? '取消精选' : '设为精选', onSelect: () => editorial('feature', !work.editorial?.featured) }] : []),
+      ...(work.editorial?.canNominate ? [{ id: 'nominate', label: work.editorial.nominated ? '撤下新作候选' : work.editorial.nominationExpired ? '新作展示已结束' : '提交新作候选', disabled: !work.editorial.nominated && work.editorial.nominationExpired, onSelect: () => editorial('nominate', !work.editorial?.nominated) }] : []),
       ...(work.canManage ? [
         ...(!work.withdrawn ? [{ id: 'discovery', label: work.discoverable ? '移出广场' : '恢复到广场', onSelect: () => lifecycle(work.discoverable ? 'exclude' : 'restore-discovery') }] : []),
         { id: 'sharing', label: work.withdrawn ? '恢复分享' : '撤回分享', onSelect: () => lifecycle(work.withdrawn ? 'restore-sharing' : 'withdraw') },

@@ -17,9 +17,10 @@ export type WorkCard = {
   discoverable: boolean; withdrawn: boolean; personal: WorkPersonal;
   likeCount: number; collectionIds: string[]; activity?: WorkActivity;
   provenance?: WorkProvenance;
+  editorial?: { version: number; featured: boolean; nominated: boolean; nominationExpired: boolean; canFeature: boolean; canNominate: boolean };
 };
 export type WorkQuery = {
-  q?: string; medium?: 'all' | WorkMedium; scope?: 'all' | 'recommended' | 'mine' | 'favorites' | 'hidden' | 'managed';
+  q?: string; medium?: 'all' | WorkMedium; scope?: 'all' | 'recommended' | 'discoveries' | 'mine' | 'favorites' | 'hidden' | 'managed';
   author?: string; project?: string; collection?: string;
 };
 export type WorkPage = {
@@ -38,6 +39,9 @@ export type WorkStateMutation = WorkMutationIdentity & {
 export type WorkLifecycleMutation = WorkMutationIdentity & {
   action: 'exclude' | 'restore-discovery' | 'withdraw' | 'restore-sharing';
   expectedRevision: number; expectedMediaVersion: string;
+};
+export type WorkEditorialMutation = WorkMutationIdentity & {
+  action: 'feature' | 'nominate'; active: boolean; expectedVersion: number; expectedMediaVersion: string;
 };
 export type WorkOperationReceipt = { requestId: string; state: 'committed'; result: Record<string, unknown> };
 export class WorkError extends Error {

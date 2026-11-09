@@ -1,4 +1,5 @@
 export const WORK_RECOMMENDATION_RULE = 2;
+export const WORK_COMMUNITY_RULE = 3;
 
 const points = { revisit: 1, take: 6, input: 8, retained: 12, replaced: -6, superseded: -4 } as const;
 
@@ -15,8 +16,37 @@ type RecommendationFact = {
 export type RecommendationStep = {
   id: string;
   order: number; // Business order for this version and audience, independent of delivery order.
+  at?: number;
   changes: Record<string, RecommendationFact | null>;
 };
+
+/** Community endorsement counts people, not the author's workflow or repeated takes. */
+export function replayCommunityRecommendation(steps: readonly RecommendationStep[], authorId: string, now = Date.now()) {
+  const facts = new Map<string, { fact: RecommendationFact; at: number }>();
+  for (const step of [...steps].sort((a, b) => a.order - b.order)) {
+    for (const [key, fact] of Object.entries(step.changes)) {
+      if (fact) facts.set(key, { fact, at: step.at || 0 });
+      else facts.delete(key);
+    }
+  }
+  const uses = new Map<string, { actor: string; at: number; replaced: boolean }>();
+  const since = now - 30 * 24 * 60 * 60 * 1000;
+  for (const { fact, at } of Array.from(facts.values())) {
+    if (!fact.actor || fact.actor === authorId) continue;
+    if (!['input', 'retained', 'replaced', 'superseded'].includes(fact.signal)) continue;
+    const key = JSON.stringify([fact.actor, fact.purpose]);
+    const use = uses.get(key) || { actor: fact.actor, at: 0, replaced: false };
+    if (fact.signal === 'replaced' || fact.signal === 'superseded') use.replaced = true;
+    else if (at >= since && at <= now) use.at = Math.max(use.at, at);
+    uses.set(key, use);
+  }
+  const supporters = new Set<string>();
+  let lastUsedAt = 0;
+  for (const use of Array.from(uses.values())) if (!use.replaced && use.at) {
+    supporters.add(use.actor); lastUsedAt = Math.max(lastUsedAt, use.at);
+  }
+  return { rule: WORK_COMMUNITY_RULE, score: supporters.size, qualified: supporters.size > 0, lastUsedAt };
+}
 
 function total(facts: ReadonlyMap<string, RecommendationFact>) {
   const purposes = new Map<string, { actor?: string; ambiguous?: boolean; family?: string; gains: Map<string, number>; losses: Map<string, number> }>();

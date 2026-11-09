@@ -147,6 +147,7 @@ export function WorksMasonry({ items, playback, contextKey, detailOpen, layoutKe
         </ImageResultStatusDetails>
       </div>}
       <div className={styles.cardOverlay}><WorkActions work={work} cover busy={busy} operate={operate} onClassify={onClassify} /></div>
+      {work.editorial?.featured && <span className={styles.featureBadge}>精选</span>}
       {canReuse && <button type="button" className={styles.reuseButton} data-work-action="reuse" disabled={busy} onClick={() => void reuse(work)}><span>一键参考</span><ArrowUpRight size={15} aria-hidden="true" /></button>}
     </div>
     {work.medium === 'video' && <div className={styles.cardInfo}>

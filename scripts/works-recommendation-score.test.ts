@@ -1,10 +1,25 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { replayWorkRecommendation, WORK_RECOMMENDATION_RULE, type RecommendationStep } from '../src/lib/works/recommendation-score';
+import { replayWorkRecommendation, replayCommunityRecommendation, WORK_RECOMMENDATION_RULE, type RecommendationStep } from '../src/lib/works/recommendation-score';
 
 function change(id: string, order: number, changes: RecommendationStep['changes']): RecommendationStep {
   return { id, order, changes };
 }
+
+test('community recommendation needs a recent real use by someone other than the author', () => {
+  const now = Date.now();
+  const fact = (actor: string, signal: 'input' | 'retained' | 'take' | 'replaced', order: number, at = now): RecommendationStep => ({
+    id: String(order), order, at, changes: { [String(order)]: { actor, purpose: actor, chain: 'input', signal } },
+  });
+  assert.equal(replayCommunityRecommendation([fact('author', 'retained', 1), fact('colleague', 'take', 2)], 'author', now).qualified, false);
+  const use = fact('colleague', 'input', 3);
+  assert.equal(replayCommunityRecommendation([use, fact('colleague', 'retained', 4)], 'author', now).score, 1);
+  assert.equal(replayCommunityRecommendation([use, fact('another', 'input', 4)], 'author', now).score, 2);
+  assert.equal(replayCommunityRecommendation([use, fact('colleague', 'replaced', 4)], 'author', now).qualified, false);
+  assert.equal(replayCommunityRecommendation([fact('colleague', 'input', 1, now - 31 * 86400000)], 'author', now).qualified, false);
+  const restored: RecommendationStep = { id: 'restored', order: 5, at: now, changes: { '4': null } };
+  assert.equal(replayCommunityRecommendation([use, fact('colleague', 'replaced', 4), restored], 'author', now).score, 1);
+});
 
 const input = change('input', 1, { input: { purpose: 'shot', chain: 'cut', signal: 'input' } });
 const download = change('take', 2, { take: { purpose: 'shot', chain: 'cut', signal: 'take' } });
