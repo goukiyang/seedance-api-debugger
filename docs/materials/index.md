@@ -1,3 +1,9 @@
+<!-- CLAIM-SIDEBAR01-MATERIALS-20261109 -->
+## 领取积分页统一侧栏（v0.139.4已部署，待用户手验）
+
+[原领取单](../../tasks/todo/2026-11-08-credit-claim-page.md#claim-sidebar01-领取页复用广场侧栏)：86e/v139.4/BUILD7jAhKK8ZzQ3I-d7sLjJxI于10:32:57Z健康收口。广场侧栏与长期项目规则已接，主原生/计价/完整Next含types/lint、B01新8项、6启动/7服务4timer/35资源及2匿名401有证。原始静态准备/归档/输入/运行记录仅保正式根私有2026-11-09-credit-claim-sidebar及服务器attempt03，不公开Git。未改领取或资金合同，真实界面用户手验。
+<!-- /CLAIM-SIDEBAR01-MATERIALS-20261109 -->
+
 <!-- WORKSPACE-SIDEBAR-PAGES-PUBLIC-20261105 -->
 ## 五组页面侧栏统一（v0.134.2）
 

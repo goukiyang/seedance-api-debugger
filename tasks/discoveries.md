@@ -10,6 +10,10 @@
 
 ## 待核线索
 
+<!-- D-20261109-CLAIM-ALL-LINK -->
+**D-20261109-CLAIM-ALL-LINK｜入口可发现性待核 / P3，非已证领取缺陷。** `src/app/points/claim/ClaimPage.tsx` 仅在带campaign且活动结果为空时显示“查看全部活动”；非空的已领/过期专属活动没有同名直接入口。共享侧栏同页点击及返回记忆按原合同保留当前查询，不等同“清除campaign”。顶部积分中的无campaign领取入口仍保留，不能据此称完全无法返回或影响到账。后续用户手验专属活动→全部活动的可发现性，再决定是否补就地返回；本轮只替换侧栏，不扩改领取页业务/资金。来源：[CLAIM-SIDEBAR01](todo/2026-11-08-credit-claim-page.md#claim-sidebar01-领取页复用广场侧栏)，未做浏览器复现。
+<!-- /D-20261109-CLAIM-ALL-LINK -->
+
 <!-- D-20261107-PIN-MEDIA-SCOPE -->
 **D-20261107-PIN-MEDIA-SCOPE｜已证读取放大 / P3，非已证当前延迟根因。** resolveStudioPinnedAsset查单asset索引后仍读整root（上限200）；可见性又读全部私密绑定，列表前后各核。生产29同源码隔离SQLite顺序6组×7暖样本：1pin/0绑定p50=5.63ms、10次查询/6返回行；200pin/0绑定10.96ms/404行；1pin/1000绑定29.98ms/2006行；200pin/1000绑定42.61ms/2404行。计数是Prisma返回行，不是底层扫描行，非HTTP/并发SLO或改造收益。生产只读当次仅3pin（最大组2）、77相关绑定/23引用/20独立asset、格式异常0，另9metadata子记录按reader排除。另在合成库添加1个无关不兼容私密引用后，两个模板的同事媒体和普通feed失败、管理员读正常，证明全局parse的故障放大；生产坏行0，属已复现风险，不冒当前根因。定向catalog SQL同样有全局兼容检查，不能只传assetIds或忽略坏行就称修复。沿[原单§16.8.3](todo/2026-11-05-template-sharing-cutout-open-preflight.md)优先按原索引缩小任务/资产范围并复用权限投影，保撤权/文件别名/私密保护，不先建缓存、表或服务；无真实坏行时不加理论兜底。原始42样本、源码身份及故障注入见正式根私有pin-wide-gallery/architecture-audit-20261107。
 <!-- /D-20261107-PIN-MEDIA-SCOPE -->
