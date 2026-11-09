@@ -3,8 +3,11 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Bell, CheckCheck, ExternalLink, Inbox, RefreshCcw } from 'lucide-react';
+import { useAppSession } from '@/lib/context/AppSessionContext';
+import { SystemAlerts } from './SystemAlerts';
 import {
   type AppNotification,
+  type SystemAlert,
   formatNotificationTime,
   isNotificationUnread,
   notificationActionLabel,
@@ -21,6 +24,7 @@ interface NotificationBellProps {
 
 interface NotificationsResponse {
   notifications?: AppNotification[];
+  system_alerts?: SystemAlert[];
   unread_count?: number;
   notification?: AppNotification;
   error?: string;
@@ -41,38 +45,50 @@ async function readJson(response: Response): Promise<NotificationsResponse> {
 }
 
 export default function NotificationBell({ enabled }: NotificationBellProps) {
+  const { user, sessionChanged } = useAppSession();
+  const account = enabled && !sessionChanged ? user?.id || '' : '';
+  const accountRef = useRef(account);
+  accountRef.current = account;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [systemAlerts, setSystemAlerts] = useState<SystemAlert[]>([]);
+  const alerts = account && user?.role === 'admin' ? systemAlerts : [];
+  const attentionCount = unreadCount + alerts.length;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [actingId, setActingId] = useState<string | null>(null);
   const [markingAll, setMarkingAll] = useState(false);
 
   const refreshNotifications = useCallback(async () => {
-    if (!enabled) return;
+    if (!account) return;
+    const expectedAccount = account;
     setLoading(true);
     setError('');
     try {
       const response = await fetch('/api/notifications?limit=8', { cache: 'no-store' });
       const data = await readJson(response);
+      if (accountRef.current !== expectedAccount) return;
       setNotifications(data.notifications || []);
       setUnreadCount(data.unread_count || 0);
+      setSystemAlerts(data.system_alerts || []);
     } catch (err) {
+      if (accountRef.current !== expectedAccount) return;
       setError(err instanceof Error ? err.message : '通知加载失败');
       setNotifications([]);
       setUnreadCount(0);
     } finally {
-      setLoading(false);
+      if (accountRef.current === expectedAccount) setLoading(false);
     }
-  }, [enabled]);
+  }, [account]);
 
   useEffect(() => {
-    if (!enabled) {
+    if (!account) {
       setOpen(false);
       setNotifications([]);
       setUnreadCount(0);
+      setSystemAlerts([]);
       setError('');
       return;
     }
@@ -85,7 +101,7 @@ export default function NotificationBell({ enabled }: NotificationBellProps) {
       window.clearInterval(timer);
       window.removeEventListener('focus', onFocus);
     };
-  }, [enabled, refreshNotifications]);
+  }, [account, refreshNotifications]);
 
   useEffect(() => {
     if (!open) return;
@@ -165,7 +181,7 @@ export default function NotificationBell({ enabled }: NotificationBellProps) {
       <button
         type="button"
         className={`composer-topbar-icon-btn notification-bell-trigger${open ? ' active' : ''}`}
-        aria-label={unreadCount > 0 ? `通知，${unreadCount} 条未读` : '通知'}
+        aria-label={attentionCount > 0 ? `通知，${unreadCount} 条未读${alerts.length ? `，${alerts.length} 项异常` : ''}` : '通知'}
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => {
@@ -174,7 +190,7 @@ export default function NotificationBell({ enabled }: NotificationBellProps) {
         }}
       >
         <Bell size={17} aria-hidden="true" />
-        {unreadCount > 0 && <span className="notification-bell-badge">{unreadText(unreadCount)}</span>}
+        {attentionCount > 0 && <span className="notification-bell-badge">{unreadText(attentionCount)}</span>}
       </button>
 
       {open && (
@@ -195,6 +211,7 @@ export default function NotificationBell({ enabled }: NotificationBellProps) {
             </div>
           </div>
 
+          <SystemAlerts alerts={alerts} />
           {error && (
             <div className="notification-dropdown-error">
               <AlertTriangle size={14} aria-hidden="true" />

@@ -1,3 +1,4 @@
+import { UsageReportBusyError } from '@/lib/admin/usage-report-admission';
 import { traceHttpRequest, tracePhase } from '@/lib/performance/request-trace';
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminUser } from '@/lib/auth/api-helpers';
@@ -16,6 +17,7 @@ export async function GET(request: NextRequest) {
     const report = await getUsageAnalytics(parseUsageQuery(request.nextUrl.searchParams), request.signal);
     return NextResponse.json({ records: report.records, query: report.query, dataAsOf: report.dataAsOf, reportFingerprint: report.reportFingerprint }, { headers });
   } catch (error) {
+    if (error instanceof UsageReportBusyError) return NextResponse.json({ error: error.message }, { status: error.status, headers: { ...headers, 'Retry-After': '3' } });
     if (error instanceof AuthError || error instanceof UsageQueryError) return NextResponse.json({ error: error.message }, { status: error.status, headers });
     return NextResponse.json({ error: '使用明细读取失败，请保留条件重试原查询' }, { status: 503, headers });
   }

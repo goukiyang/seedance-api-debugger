@@ -3,9 +3,12 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useWorkspaceScroll } from '@/lib/hooks/use-workspace-scroll';
+import { useAppSession } from '@/lib/context/AppSessionContext';
+import { SystemAlerts } from '@/components/SystemAlerts';
 import { AlertTriangle, CheckCheck, ExternalLink, Inbox, RefreshCcw } from 'lucide-react';
 import {
   type AppNotification,
+  type SystemAlert,
   formatNotificationTime,
   isNotificationUnread,
   notificationActionLabel,
@@ -21,6 +24,7 @@ type NotificationView = 'all' | 'unread' | 'failed';
 
 interface NotificationsResponse {
   notifications?: AppNotification[];
+  system_alerts?: SystemAlert[];
   unread_count?: number;
   notification?: AppNotification;
   error?: string;
@@ -48,10 +52,12 @@ function viewUrl(view: NotificationView) {
 }
 
 export default function NotificationsPageClient({ ownerId }: { ownerId: string }) {
+  const { user, sessionChanged } = useAppSession();
   const [view, setView] = useState<NotificationView>('all');
   const [viewReady, setViewReady] = useState(false);
   const [loadedView, setLoadedView] = useState<NotificationView | null>(null);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [systemAlerts, setSystemAlerts] = useState<SystemAlert[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
@@ -84,6 +90,7 @@ export default function NotificationsPageClient({ ownerId }: { ownerId: string }
       const response = await fetch(viewUrl(view), { cache: 'no-store' });
       const data = await readJson(response);
       setNotifications(data.notifications || []);
+      setSystemAlerts(data.system_alerts || []);
       setUnreadCount(data.unread_count || 0);
       setLoadedView(view);
     } catch (err) {
@@ -97,7 +104,11 @@ export default function NotificationsPageClient({ ownerId }: { ownerId: string }
   }, [view, viewReady]);
 
   useEffect(() => {
-    fetchNotifications();
+    void fetchNotifications();
+    const refresh = () => { if (!document.hidden) void fetchNotifications(); };
+    const timer = window.setInterval(refresh, 60_000);
+    window.addEventListener('focus', refresh);
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', refresh); };
   }, [fetchNotifications]);
 
   const updateNotification = (updated: AppNotification) => {
@@ -231,6 +242,7 @@ export default function NotificationsPageClient({ ownerId }: { ownerId: string }
         </div>
       )}
 
+      <SystemAlerts alerts={!sessionChanged && user?.id === ownerId && user.role === 'admin' ? systemAlerts : []} />
       <section className="notifications-list" aria-busy={loading}>
         {loading && notifications.length === 0 ? (
           <div className="notifications-empty">正在加载通知...</div>

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
+import { readHdSystemAlerts } from '@/lib/notifications/hd-alert';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
       ...(status ? { status } : unreadOnly ? { read_at: null } : {}),
     };
 
-    const [notifications, unread_count] = await Promise.all([
+    const [notifications, unread_count, system_alerts] = await Promise.all([
       prisma.notification.findMany({
         where,
         orderBy: { created_at: 'desc' },
@@ -47,9 +48,12 @@ export async function GET(request: NextRequest) {
           status: { not: 'read' },
         },
       }),
+      readHdSystemAlerts(user.role),
     ]);
 
-    return NextResponse.json({ notifications, unread_count });
+    return NextResponse.json({ notifications, unread_count, system_alerts }, {
+      headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' },
+    });
   } catch (error) {
     console.error('[Notifications] List error:', error);
     return NextResponse.json(

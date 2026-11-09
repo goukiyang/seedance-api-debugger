@@ -765,23 +765,6 @@ async function attachCash(db: Db, items: InternalFact[], scoped = false, window?
       for (const peer of peers) addReference(`\0${scope}\0${reference}`, keyOf(peer.kind, peer.id));
     }
   }
-  const externalFacts = new Map<string, boolean>();
-  const externalFactExists = async (key: string) => {
-    if (!window && !adminSlice) return false;
-    if (externalFacts.has(key)) return externalFacts.get(key)!;
-    const separator = key.indexOf(':'), kind = key.slice(0, separator), id = key.slice(separator + 1);
-    const tables: Record<string, { table: string; time: string; extra?: Prisma.Sql }> = {
-      video_task: { table: 'VideoTask', time: 'created_at' }, image_task: { table: 'ImageStudioTask', time: 'created_at' },
-      video_studio_run: { table: 'VideoStudioRun', time: 'created_at', extra: Prisma.sql`"mode" = 'llm'` },
-      agent_text_step: { table: 'AgentRunStep', time: 'created_at', extra: Prisma.sql`"step_key" = 'llm_generate' AND EXISTS (SELECT 1 FROM "AgentRun" r WHERE r."id" = "agent_run_id")` },
-      role_attempt: { table: 'CanvasRoleAttempt', time: 'started_at' },
-    };
-    const source = tables[kind];
-    const found = source ? await db.$queryRaw<Row[]>(Prisma.sql`SELECT "id" FROM ${Prisma.raw(`"${source.table}"`)}
-      WHERE "id" = ${id} AND ${usageSqlTime(Prisma.raw(`"${source.time}"`))} IS NOT NULL AND (${source.extra || Prisma.sql`1 = 1`}) LIMIT 1`) : [];
-    externalFacts.set(key, found.length > 0);
-    return found.length > 0;
-  };
   const events: UsageCashEvent[] = [], groups = new Map<string, UsageCashEvent[]>();
   const groupScopes = new Map<string, string>();
   const linked = new Map<string, UsageCashEvent[]>();
@@ -792,7 +775,7 @@ async function attachCash(db: Db, items: InternalFact[], scoped = false, window?
     const page = await db.requestTasks(requestIds.slice(offset, offset + CHUNK));
     for (const request of page) if (request.task_id) requestTasks.set(request.id, request.task_id);
   }
-  for (const row of ledgers) {
+  const prepared = ledgers.map(row => {
     // A rule refund/release is not a supplier cash refund. Keep only supported
     // cash evidence; pending official rows remain visible as unknown.
     const cashEvidence = row.source_type !== 'transfer' && ['official_charge', 'refund', 'reversal'].includes(String(row.event_type))
@@ -815,7 +798,37 @@ async function attachCash(db: Db, items: InternalFact[], scoped = false, window?
     }
     const existing = Array.from(candidates).filter(value => byKey.has(value));
     const only = candidates.size === 1 ? Array.from(candidates)[0] : null;
-    const sourceKey = only && (existing.length === 1 || await externalFactExists(only)) ? only : null;
+    return { row, cashEvidence, candidates, existing, only, sourceId };
+  });
+  const externalFacts = new Set<string>();
+  if (window || adminSlice) {
+    const tables: Record<string, { table: string; time: string; extra?: Prisma.Sql }> = {
+      video_task: { table: 'VideoTask', time: 'created_at' }, image_task: { table: 'ImageStudioTask', time: 'created_at' },
+      video_studio_run: { table: 'VideoStudioRun', time: 'created_at', extra: Prisma.sql`"mode" = 'llm'` },
+      agent_text_step: { table: 'AgentRunStep', time: 'created_at', extra: Prisma.sql`"step_key" = 'llm_generate' AND EXISTS (SELECT 1 FROM "AgentRun" r WHERE r."id" = "agent_run_id")` },
+      role_attempt: { table: 'CanvasRoleAttempt', time: 'started_at' },
+    };
+    const idsByKind = new Map<string, Set<string>>();
+    for (const { only, existing } of prepared) {
+      if (!only || existing.length) continue;
+      const separator = only.indexOf(':'), kind = only.slice(0, separator), id = only.slice(separator + 1);
+      if (!tables[kind]) continue;
+      const ids = idsByKind.get(kind) || new Set<string>(); ids.add(id); idsByKind.set(kind, ids);
+    }
+    // Resolve out-of-cohort links in the same pinned snapshot. Only the SQL
+    // round trips change; the event loop below retains the original ledger order.
+    for (const [kind, ids] of Array.from(idsByKind)) {
+      const source = tables[kind], values = Array.from(ids);
+      for (let offset = 0; offset < values.length; offset += CHUNK) {
+        const found = await db.$queryRaw<Row[]>(Prisma.sql`SELECT "id" FROM ${Prisma.raw(`"${source.table}"`)}
+          WHERE "id" IN (${Prisma.join(values.slice(offset, offset + CHUNK))})
+          AND ${usageSqlTime(Prisma.raw(`"${source.time}"`))} IS NOT NULL AND (${source.extra || Prisma.sql`1 = 1`})`);
+        for (const row of found) externalFacts.add(keyOf(kind, String(row.id)));
+      }
+    }
+  }
+  for (const { row, cashEvidence, candidates, existing, only, sourceId } of prepared) {
+    const sourceKey = only && (existing.length === 1 || externalFacts.has(only)) ? only : null;
     const amount = usageInteger(row.amount_micros) ?? (() => { const minor = usageInteger(row.amount_minor); return minor === null ? null : minor * BigInt(10000); })();
     const currency = str(row.currency)?.toUpperCase() || null;
     const officialId = str(row.official_charge_id);
