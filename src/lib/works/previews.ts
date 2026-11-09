@@ -10,6 +10,7 @@ import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { assertMultiviewWorkConsumerLock, multiviewWorkAdmission } from '@/lib/video/multiview-work-render';
 import { claimWorkRegistrationJob, failWorkRegistrationJob, workRegistrationLeaseWhere } from './ingestion';
 import { worksRegistrationPaused, worksSchemaReady } from './source-policy';
+import { ensureAutomaticWorkDiscovery } from './editorial';
 import { openWorkStoredVideo, type WorkStoredVideoOrigin, type WorkStoredVideoTask } from './video-storage';
 import { resolveExistingWorkVideoPoster, WORK_PREVIEW_MAX_BYTES as MAX_BYTES, workPreviewRootPath as rootPath } from './preview-files';
 export { resolveWorkPreviewFile } from './preview-files';
@@ -223,6 +224,7 @@ export async function processNextWorkPreview(options: { signal?: AbortSignal } =
         if (!asset || asset.status !== 'active' || asset.type !== 'image' || asset.original_url !== version.source_url
           || asset.hash !== version.content_hash) throw new Error('WORKS_PREVIEW_SOURCE_CHANGED');
         await db.workMediaVersion.update({ where: { id: version.id }, data: { thumbnail_url: poster, preview_status: 'ready', preview_hash: hash(posterBytes) } });
+        await ensureAutomaticWorkDiscovery(db, { ...version.work, current_version_id: version.id });
         await db.workRegistrationJob.updateMany({ where: workRegistrationLeaseWhere(job), data: { status: 'done', error_code: null, lease_token: null, lease_until: null } });
       });
       return { state: 'ready' };
@@ -285,6 +287,7 @@ export async function processNextWorkPreview(options: { signal?: AbortSignal } =
       }
       await db.workMediaVersion.update({ where: { id: version.id }, data: { preview_url: preview, preview_status: 'ready', preview_hash: hash(previewBytes),
         thumbnail_url: poster, width: info.width, height: info.height, duration: info.duration } });
+      await ensureAutomaticWorkDiscovery(db, { ...version.work, current_version_id: version.id });
       await db.workRegistrationJob.updateMany({ where: workRegistrationLeaseWhere(job), data: { status: 'done', error_code: null, lease_token: null, lease_until: null } });
     });
     return { state: 'ready' };

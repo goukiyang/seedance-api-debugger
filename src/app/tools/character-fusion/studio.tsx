@@ -11,6 +11,7 @@ import { usePricingModelAvailability } from '@/lib/pricing/use-model-availabilit
 import type { FusionRecipe } from '@/lib/character-fusion/recipes';
 import styles from './studio.module.css';
 const API = '/api/character-fusion/recipes';
+const LANGUAGE_LABELS = { zh: '中文', en: '英文', both: '中英双语' };
 const untranslated = (s: FusionSettings) => CONFIG.filter(c => s.bossDimensions.includes(c.id)).flatMap(c => s.rules[c.id].filter(t => t.status !== 'exclude' && !(c.tags as readonly string[]).includes(t.label) && !t.en).map(t => ({ dimension: c.id, label: t.label })));
 const missingEnglish = (s: FusionSettings) => untranslated(s).length > 0 || s.requirementsEnabled && s.requirements !== defaults().requirements && /[\u3400-\u9fff]/.test(s.requirements) && !s.requirementsEn.trim();
 type RecipeForm = { action: 'save' | 'rename'; id: string; name: string; revision?: string };
@@ -27,6 +28,8 @@ export default function CharacterFusionStudio({ ownerId }: { ownerId: string }) 
   const [expanded, setExpanded] = useState<string[]>([]), [cardOrder, setCardOrder] = useState<string[]>([]);
   const [chatOpen, setChatOpen] = useState(false), [conversation, setConversation] = useState<CardConversation>(emptyConversation);
   const [translating, setTranslating] = useState(false);
+  const [translationOpen, setTranslationOpen] = useState(false);
+  const translationResult = useRef<HTMLDetailsElement>(null);
   const translationController = useRef<AbortController | null>(null);
   useEffect(() => () => translationController.current?.abort(), []);
   const [settings, setSettings] = useState<FusionSettings>(defaults);
@@ -71,7 +74,14 @@ export default function CharacterFusionStudio({ ownerId }: { ownerId: string }) 
     if (!active) return;
     try {
       const saved = JSON.parse(sessionStorage.getItem(storageKey) || 'null');
-      if (saved) { setSettings(parseSettings(saved.settings)); if (Array.isArray(saved.rows)) setRows(saved.rows); setRulesAtGeneration(saved.rulesAtGeneration || ''); if (saved.conversation?.messages?.length <= 38 && typeof saved.conversation.input === 'string') setConversation({ ...saved.conversation, draft: saved.conversation.draft ? parseCardDraft(saved.conversation.draft) : null }); }
+      if (saved) {
+        const restored = parseSettings(saved.settings);
+        setSettings(restored);
+        setTranslationOpen(Boolean(restored.requirementsEn) || Object.values(restored.rules).some(tags => tags.some(tag => tag.en)));
+        if (Array.isArray(saved.rows)) setRows(saved.rows);
+        setRulesAtGeneration(saved.rulesAtGeneration || '');
+        if (saved.conversation?.messages?.length <= 38 && typeof saved.conversation.input === 'string') setConversation({ ...saved.conversation, draft: saved.conversation.draft ? parseCardDraft(saved.conversation.draft) : null });
+      }
       const ui = JSON.parse(localStorage.getItem(storageKey + ':ui') || '{}');
       if (Array.isArray(ui.expanded)) setExpanded(ui.expanded.filter((id: unknown) => typeof id === 'string'));
       if (Array.isArray(ui.cardOrder)) setCardOrder(ui.cardOrder.filter((id: unknown) => typeof id === 'string'));
@@ -120,9 +130,10 @@ export default function CharacterFusionStudio({ ownerId }: { ownerId: string }) 
   });
   const copy = async (text: string) => {
     setError('');
-    try { if (text.includes('英文尚待补齐')) throw new Error('英文尚待补齐'); await navigator.clipboard.writeText(text); if (activeRef.current) setNotice('已复制到剪贴板。'); return true; }
+    try { if (text.includes('英文尚待补齐')) throw new Error('英文尚待补齐'); await navigator.clipboard.writeText(text); if (activeRef.current) setNotice('已复制' + LANGUAGE_LABELS[settings.lang] + '提示词。'); return true; }
     catch (e) { if (activeRef.current) setError(e instanceof Error && e.message === '英文尚待补齐' ? '请先补齐英文，再复制。' : '复制未成功，请允许剪贴板访问，或导出 TXT 后复制。'); return false; }
   };
+  const copyRows = (items: FusionRow[]) => copy(items.map(row => textFor(row, settings)).join('\n\n'));
   const download = (format: 'txt' | 'csv') => run(() => {
     const content = format === 'txt' ? txtFor(rows, settings) : csvFor(rows, settings);
     if (content.includes('英文尚待补齐')) throw new Error('请先补齐英文，再导出。');
@@ -132,7 +143,7 @@ export default function CharacterFusionStudio({ ownerId }: { ownerId: string }) 
   const sendTo = async (href: string) => {
     const picked = rows.filter(r => selected.includes(r.id));
     if (!picked.length) { setError('请先勾选提示词。'); return; }
-    if (await copy(txtFor(picked, settings)) && activeRef.current) window.location.assign(href);
+    if (await copyRows(picked) && activeRef.current) window.location.assign(href);
   };
   const mutateRecipe = async (body: object) => {
     const response = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -183,11 +194,17 @@ export default function CharacterFusionStudio({ ownerId }: { ownerId: string }) 
       const translated = raw.tags as Array<{ dimension: string; label: string; en: string }>;
       const next = parseSettings({ ...settingsRef.current, requirementsEn: raw.requirementsEn, rules: Object.fromEntries(CONFIG.map(c => [c.id, settingsRef.current.rules[c.id].map(t => { const found = translated.find(v => v.dimension === c.id && v.label === t.label); return found ? { ...t, en: found.en } : t; })])) });
       if (untranslated(next).length || next.requirements.trim() && !next.requirementsEn.trim()) throw new Error('部分英文尚未补齐，本轮翻译未覆盖当前设置。');
-      setSettings(next); setNotice('英文已补齐，中英共用同一角色组合。');
+      const priorRules = JSON.stringify({ rules: settingsRef.current.rules, cards: settingsRef.current.cards });
+      setRulesAtGeneration(current => current === priorRules ? JSON.stringify({ rules: next.rules, cards: next.cards }) : current);
+      setSettings(next); setTranslationOpen(true);
+      setNotice('英文补齐结果已展开。清单当前预览与复制语言：' + LANGUAGE_LABELS[next.lang] + '。');
+      requestAnimationFrame(() => { if (activeRef.current) translationResult.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); });
     } catch (e) { if (!controller.signal.aborted && activeRef.current) setError(e instanceof Error ? e.message : '英文未补齐，原输入保留。'); }
     finally { if (!controller.signal.aborted && activeRef.current) setTranslating(false); }
   };
   const missing = rows.length ? missingRequired(settings, rows) : [];
+  const outputLanguage = LANGUAGE_LABELS[settings.lang];
+  const translatedTags = CONFIG.flatMap(c => settings.rules[c.id].flatMap(tag => tag.en ? [{ dimension: c.title, label: tag.label, en: tag.en }] : []));
   const modelOptions = apiModels.filter(model => modelAvailability.isAvailable('text', model.id));
   const modelReady = modelOptions.some(model => model.id === apiModel);
   const modelStatus = modelError || modelAvailability.reason || (!loadingModels && !modelReady ? '请选择已开放的 API 模型，当前选择和输入已保留。' : '');
@@ -228,14 +245,21 @@ export default function CharacterFusionStudio({ ownerId }: { ownerId: string }) 
       </section>
       <section className={styles.composer} aria-label="生成设置">
         <div className={styles.requirementsHead}><button type="button" role="switch" aria-checked={settings.requirementsEnabled} aria-controls="fusion-requirements" className={styles.switch} onClick={() => setSettings(s => ({ ...s, requirementsEnabled: !s.requirementsEnabled }))}><span /> <span className={styles.srOnly}>启用全局固定要求</span></button><strong>全局固定要求</strong><small>{settings.requirementsEnabled ? '已启用，每条中英提示词都会带入' : '未启用，原内容保留'}</small></div>
-        {settings.requirementsEnabled && <div id="fusion-requirements"><label className={styles.requirements}>中文要求<textarea maxLength={6000} rows={3} value={settings.requirements} onChange={e => setSettings(s => ({ ...s, requirements: e.target.value, requirementsEn: '' }))} placeholder="填写画风、比例、构图、材质与制作约束…" /></label><details className={styles.englishEditor}><summary>英文对应要求</summary><textarea aria-label="英文固定要求" maxLength={10000} rows={3} value={settings.requirementsEn} onChange={e => setSettings(s => ({ ...s, requirementsEn: e.target.value }))} placeholder="默认要求已有内置英文；自定义后可点击补齐英文，也可自行填写。" /></details></div>}
-        <div className={styles.generateBar}><div className={styles.settings}><label>生成数量<select value={settings.count} onChange={e => setSettings(s => ({ ...s, count: Number(e.target.value) }))}>{COUNTS.map(n => <option value={n} key={n}>{n} 条</option>)}</select></label><label>输出语言<select value={settings.lang} onChange={e => setSettings(s => ({ ...s, lang: e.target.value as FusionSettings['lang'] }))}><option value="zh">中文</option><option value="en">English</option><option value="both">中英双语</option></select></label><button disabled={translating || !modelReady} onClick={() => void translate()}>{translating ? '正在补齐…' : '补齐英文'}</button></div><button className={styles.primary} onClick={generate}>生成 {settings.count} 条提示词</button></div>
-        <p className={styles.languageNote}>中英共用同一组合，切语言不换角色。内置内容直接对应；自定义标签和固定要求用“补齐英文”翻译，可编辑英文要求。</p>
+        {settings.requirementsEnabled && <div id="fusion-requirements"><label className={styles.requirements}>中文要求<textarea maxLength={6000} rows={3} value={settings.requirements} onChange={e => setSettings(s => ({ ...s, requirements: e.target.value, requirementsEn: '' }))} placeholder="填写画风、比例、构图、材质与制作约束…" /></label></div>}
+        <div className={styles.generateBar}><div className={styles.settings}><label>生成数量<select value={settings.count} onChange={e => setSettings(s => ({ ...s, count: Number(e.target.value) }))}>{COUNTS.map(n => <option value={n} key={n}>{n} 条</option>)}</select></label><button disabled={translating || !modelReady} onClick={() => void translate()}>{translating ? '正在补齐…' : '补齐英文'}</button></div><button className={styles.primary} onClick={generate}>生成 {settings.count} 条提示词</button></div>
+        <details ref={translationResult} className={styles.englishEditor} open={translationOpen} onToggle={e => setTranslationOpen(e.currentTarget.open)}>
+          <summary>英文补齐结果{(settings.requirementsEn || translatedTags.length > 0) && <small> · 已有译文</small>}</summary>
+          {(settings.requirementsEnabled || settings.requirementsEn) && <label className={styles.requirements}>英文固定要求{!settings.requirementsEnabled && <small>固定要求未启用，不会带入提示词</small>}<textarea lang="en" aria-label="英文固定要求" maxLength={10000} rows={3} value={settings.requirementsEn} onChange={e => setSettings(s => ({ ...s, requirementsEn: e.target.value }))} placeholder="默认要求已有内置英文；自定义要求可补齐英文，也可在此填写。" /></label>}
+          {translatedTags.length > 0 && <dl className={styles.translatedTags}>{translatedTags.map(tag => <div key={tag.dimension + ':' + tag.label}><dt>{tag.dimension} · {tag.label}</dt><dd lang="en">{tag.en}</dd></div>)}</dl>}
+          {!settings.requirementsEn && !translatedTags.length && <p className={styles.languageNote}>补齐后的自定义内容会显示在这里。内置内容已有英文，可在下方清单选择“英文”查看。</p>}
+          {rows.length > 0 && <button type="button" onClick={() => { setSettings(s => ({ ...s, lang: 'en' })); resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}>查看英文提示词</button>}
+        </details>
+        <p className={styles.languageNote}>中英共用同一组合，切换不重新生成。清单旁选择预览与复制语言，完整提示词随之切换。</p>
         {settings.lang !== 'zh' && missingEnglish(settings) && <p role="status" className={styles.hint}>有自定义内容尚无英文，请先补齐。翻译与对话使用站内文字模型，批量组合仍在本地完成。</p>}
       </section>
-      <section className={styles.results} ref={resultsRef} aria-labelledby="results-title"><div className={styles.sectionHead}><h2 id="results-title">提示词清单 <small>{rows.length} 条</small></h2><div className={styles.actions}><button disabled={!rows.length} onClick={() => setSelected(selected.length === rows.length ? [] : rows.map(r => r.id))}>{rows.length && selected.length === rows.length ? '取消全选' : '全选'}</button><button disabled={!rows.length} onClick={() => void copy(txtFor(rows, settings))}><Copy size={16} />全部复制</button><button disabled={!rows.length} onClick={() => download('txt')}><Download size={16} />导出 TXT</button><button disabled={!rows.length} onClick={() => download('csv')}><Download size={16} />CSV</button><button type="button" className={styles.clearButton} disabled={!rows.length} aria-label={clearConfirm ? '确认清除本次提示词清单' : '清除本次提示词清单'} title={clearConfirm ? `再次点击清除这 ${rows.length} 条提示词；点击其他位置取消` : '清除本次提示词清单，规则与配方保留'} onBlur={() => setClearConfirm(false)} onKeyDown={e => { if (e.key === 'Escape') setClearConfirm(false); }} onClick={e => { if (!clearConfirm) { e.currentTarget.focus(); setClearConfirm(true); return; } run(() => { setRows([]); setSelected([]); setRulesAtGeneration(''); setClearConfirm(false); setNotice('本次提示词清单已清除，规则与设置保留。'); }); }}><Trash2 size={16} />{clearConfirm ? '确认清除' : '清除'}</button></div></div>
+      <section className={styles.results} ref={resultsRef} aria-labelledby="results-title"><div className={styles.sectionHead}><h2 id="results-title">提示词清单 <small>{rows.length} 条</small></h2><div className={styles.actions}><label className={styles.outputLanguage}>预览 / 复制<select aria-label="提示词预览与复制语言" value={settings.lang} onChange={e => setSettings(s => ({ ...s, lang: e.target.value as FusionSettings['lang'] }))}><option value="zh">中文</option><option value="en">英文 English</option><option value="both">中英双语</option></select></label><button disabled={!rows.length} onClick={() => setSelected(selected.length === rows.length ? [] : rows.map(r => r.id))}>{rows.length && selected.length === rows.length ? '取消全选' : '全选'}</button><button disabled={!rows.length} onClick={() => void copyRows(rows)}><Copy size={16} />复制全部{outputLanguage}</button><button disabled={!rows.length} onClick={() => download('txt')}><Download size={16} />导出 TXT</button><button disabled={!rows.length} onClick={() => download('csv')}><Download size={16} />CSV</button><button type="button" className={styles.clearButton} disabled={!rows.length} aria-label={clearConfirm ? '确认清除本次提示词清单' : '清除本次提示词清单'} title={clearConfirm ? `再次点击清除这 ${rows.length} 条提示词；点击其他位置取消` : '清除本次提示词清单，规则与配方保留'} onBlur={() => setClearConfirm(false)} onKeyDown={e => { if (e.key === 'Escape') setClearConfirm(false); }} onClick={e => { if (!clearConfirm) { e.currentTarget.focus(); setClearConfirm(true); return; } run(() => { setRows([]); setSelected([]); setRulesAtGeneration(''); setClearConfirm(false); setNotice('本次提示词清单已清除，规则与设置保留。'); }); }}><Trash2 size={16} />{clearConfirm ? '确认清除' : '清除'}</button></div></div>
         {rows.length > 0 && rulesAtGeneration !== JSON.stringify({ rules: settings.rules, cards: settings.cards }) && <p className={styles.hint}>规则已更改，已有清单保留原组合；重新生成后应用新规则。</p>}{missing.length > 0 && <p className={styles.hint}>当前清单缺少必须项：{missing.join('、')}。重新生成可恢复覆盖。</p>}
-        {rows.length ? <><div className={styles.sendBar}><strong>已选 {selected.length} 条</strong><details className={styles.sendMenu}><summary>送去出图 ↗</summary><p>复制所选提示词后打开页面，请粘贴到输入框。不会提交生成。</p><button disabled={!selected.length} onClick={() => void sendTo('/template-studio?type=image')}>复制并打开生图</button><button disabled={!selected.length} onClick={() => void sendTo('/tools/character-lab')}>复制并打开角色参考图</button></details></div><div className={styles.resultList}>{rows.map((row, index) => <ResultRow key={row.id} row={row} index={index} settings={settings} checked={selected.includes(row.id)} onSelect={() => setSelected(ids => ids.includes(row.id) ? ids.filter(id => id !== row.id) : [...ids, row.id])} onCopy={() => void copy(textFor(row, settings))} onRewrite={() => run(() => setRows(changeRow(settings, rows, row.id)))} onSwap={(dimension, value) => run(() => setRows(changeRow(settings, rows, row.id, { dimension, value })))} onDeep={() => setRows(list => list.map(r => r.id === row.id ? { ...r, advanced: !r.advanced } : r))} />)}</div></> : <div className={styles.empty}><h3>从公式到角色，先生成第一批</h3><p>设置上方规则，再点“生成 {settings.count} 条提示词”。</p></div>}
+        {rows.length ? <><div className={styles.sendBar}><strong>已选 {selected.length} 条</strong><details className={styles.sendMenu}><summary>送去出图 ↗</summary><p>复制所选的{outputLanguage}提示词后打开页面，请粘贴到输入框。不会提交生成。</p><button disabled={!selected.length} onClick={() => void sendTo('/template-studio?type=image')}>复制并打开生图</button><button disabled={!selected.length} onClick={() => void sendTo('/tools/character-lab')}>复制并打开角色参考图</button></details></div><div className={styles.resultList}>{rows.map((row, index) => <ResultRow key={row.id} row={row} index={index} settings={settings} checked={selected.includes(row.id)} onSelect={() => setSelected(ids => ids.includes(row.id) ? ids.filter(id => id !== row.id) : [...ids, row.id])} onCopy={() => void copy(textFor(row, settings))} onRewrite={() => run(() => setRows(changeRow(settings, rows, row.id)))} onSwap={(dimension, value) => run(() => setRows(changeRow(settings, rows, row.id, { dimension, value })))} onDeep={() => setRows(list => list.map(r => r.id === row.id ? { ...r, advanced: !r.advanced } : r))} />)}</div></> : <div className={styles.empty}><h3>从公式到角色，先生成第一批</h3><p>设置上方规则，再点“生成 {settings.count} 条提示词”。</p></div>}
       </section>
     </>}
   </main>;
@@ -248,12 +272,13 @@ function ResultRow({ row, index, settings, checked, onSelect, onCopy, onRewrite,
   const [dimension, setDimension] = useState<Dimension>('source'), [value, setValue] = useState('');
   const [swapOpen, setSwapOpen] = useState(false);
   const options = allowed(settings, dimension);
+  const previewLanguages: FusionSettings['lang'][] = settings.lang === 'both' ? ['zh', 'en'] : [settings.lang];
   const scoreSeed = Array.from(row.id).reduce((n, ch) => n + ch.charCodeAt(0), 0);
   return <article className={`${styles.resultRow} ${checked ? styles.selected : ''}`}>
     <div className={styles.resultHeading}><label><input type="checkbox" checked={checked} onChange={onSelect} aria-label={`选择${row.name}`} /><span className={styles.rowIndex}>{String(index + 1).padStart(2, '0')}</span><strong>{row.name}</strong></label><span>{row.role ? `${row.role} · ` : ''}{row.category.personality}</span></div>
     <dl className={styles.metadata}><div><dt>母体</dt><dd>{row.source.name}<small>{row.category.source}</small></dd></div><div><dt>跨界概念</dt><dd>{row.concept.name}<small>{row.category.concept}</small></dd></div><div className={styles.bridge}><dt>连接点 / 机制</dt><dd>{row.bridge}<small>{row.category.mechanism}</small></dd></div>{row.cards?.map(c => <div key={c.id}><dt>{c.title}</dt><dd>{c.label}</dd></div>)}</dl>
-    <details className={styles.prompt}><summary>完整提示词</summary><p>{textFor(row, settings)}</p></details><p className={styles.promptExcerpt}>{textFor(row, settings)}</p>
-    <div className={styles.rowActions}><button onClick={onCopy}><Copy size={15} />复制</button><button aria-expanded={swapOpen} onClick={() => { setSwapOpen(v => !v); setValue(options[0] || ''); }}><RefreshCw size={15} />只换一项</button><button onClick={onRewrite}>重写</button><details className={styles.advanced}><summary>高级融合 / 评分</summary><p>本地规则启发式参考分，不代表模型评审。</p><div className={styles.scores}>{[['融合性', 87], ['差异化', 81], ['可读性', 91], ['3D可行性', 88]].map(([label, base], i) => <span key={label}><b>{Math.min(98, Number(base) + (scoreSeed + i * 17) % 9 - 4)}</b>{label}</span>)}</div><button onClick={onDeep}>{row.advanced ? '恢复基础提示词' : '深挖为高级融合版'}</button></details></div>
+    <details className={styles.prompt}><summary>完整{LANGUAGE_LABELS[settings.lang]}提示词</summary><p>{textFor(row, settings)}</p></details><div className={styles.languagePreviews}>{previewLanguages.map(language => <div key={language}><small>{LANGUAGE_LABELS[language]}预览</small><p lang={language === 'en' ? 'en' : 'zh-CN'} className={styles.promptExcerpt}>{textFor(row, { ...settings, lang: language })}</p></div>)}</div>
+    <div className={styles.rowActions}><button onClick={onCopy}><Copy size={15} />复制{LANGUAGE_LABELS[settings.lang]}</button><button aria-expanded={swapOpen} onClick={() => { setSwapOpen(v => !v); setValue(options[0] || ''); }}><RefreshCw size={15} />只换一项</button><button onClick={onRewrite}>重写</button><details className={styles.advanced}><summary>高级融合 / 评分</summary><p>本地规则启发式参考分，不代表模型评审。</p><div className={styles.scores}>{[['融合性', 87], ['差异化', 81], ['可读性', 91], ['3D可行性', 88]].map(([label, base], i) => <span key={label}><b>{Math.min(98, Number(base) + (scoreSeed + i * 17) % 9 - 4)}</b>{label}</span>)}</div><button onClick={onDeep}>{row.advanced ? '恢复基础提示词' : '深挖为高级融合版'}</button></details></div>
     {swapOpen && <form className={styles.swapForm} onSubmit={e => { e.preventDefault(); onSwap(dimension, value); }}><label>维度<select value={dimension} onChange={e => { const id = e.target.value as Dimension; setDimension(id); setValue(allowed(settings, id)[0] || ''); }}>{CONFIG.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}</select></label><label>替换为<select value={value} onChange={e => setValue(e.target.value)}>{ADDONS.some(c => c.id === dimension) && <option value="">本轮不使用</option>}{options.map(option => <option key={option}>{option}</option>)}</select></label><button>应用替换</button></form>}
   </article>;
 }

@@ -32,6 +32,7 @@ import { captureImageGenerationChannel, getImageGenerationSettingsForModel, isMu
   resolveImageGenerationChannelSnapshot, validateImageGenerationChannel, type ImageGenerationChannelSnapshot, type ImageGenerationResolvedSettings } from '@/lib/integrations/image-generation';
 import { QueueCapacityError, QueueMaintenanceError, reserveImageStudioQueueCapacity } from './queue-capacity';
 import { PRICING_BATCH_PREFIX, PRICING_BATCH_ITEM_PREFIX, publicPricingTaskState, studioTaskState, studioTaskStates } from './pricing-state';
+import { freezeImageWorkMethodUse } from '@/lib/works/method-reference';
 import { assertPricingImageConsumerReady } from '@/lib/pricing/runtime';
 import { samePricingImageCharge, withImagePricing } from '@/lib/pricing/image';
 import { normalizeImageResolution } from '@/lib/image-generation/resolution';
@@ -744,6 +745,7 @@ export async function dispatchStudioBatches() {
         const freeze = Number(data.unit_credits) > 0 ? await allocateTaskCredits(tx, user, Number(data.unit_credits), taskId) : null;
         await assertUsageProject(tx, user, batch.usageContext?.projectId ?? null);
         const created = await tx.imageStudioTask.create({ data: { ...data, id: taskId, status: channelStatus, freeze_snapshot: freeze?.snapshot } });
+        await freezeImageWorkMethodUse(tx, created, batch.id);
         await enqueueFrozenImageFeishuNotification(tx, created, batch.imageFeishu);
         await recordUsageAttribution(tx, { sourceKind: 'image_task', sourceId: taskId,
           actorUserId: batch.ownerId, ownerUserId: batch.ownerId, billingSubjectType: 'user', billingSubjectId: batch.ownerId,

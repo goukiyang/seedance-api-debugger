@@ -110,3 +110,28 @@ The compatible guard remains `bbeb854c82e47650ba3ea703f1918800af96881b` / BUILD 
 The shared WorkspaceSidebar now offers an explicit desktop collapse/expand button. Its existing 200 px column becomes a 64 px icon rail while the same page grid releases space to the content. Menu destinations, access filters, current-section highlighting and stored return links remain unchanged. Icon links retain accessible names and hover titles; account/help links stay available and the expanded group is preserved. The existing mobile menu remains in effect at 940 px and below. The safe display preference is initialized and stored separately per confirmed account and synchronized across tabs, without changing data or other workspace preferences. No new dependency, schema, business request, generation or pricing change is introduced.
 
 Baseline: actual 2239a1eaaa8e91bf53cb7e6f18a99a4c5a1cb1ed / 0.138.3; inherited the shared-save, image-kind label and process-wide SQLite writer fixes. Status: implemented, engineering and protected release pending; real browser, mobile and cross-page acceptance remains manual. No out-of-scope discovery added.
+
+
+## WORKS-AUTO01：自动曝光与一键参考成功归因（2026-11-09 用户授权实施）
+
+范围：按用户本轮明确授权补齐两条链路；保原作品/项目/原图/模板权限，不新增用户操作，打开页面只读后台已准备结果。以实际 ec3758865 / v0.139.6 建独立 `codex/works-auto-discovery-20261109`，候选版本0.140.0；生产同时有已冻结 d943 /139.7 的读性能与HD批，按其发布/健康回执继承后再封最终源，不争用构建/切换窗口，保当前 gpt-chat-catalog-20261109-01 策略。
+
+1. 新成品在现有后台登记/预览完成处自动登记新作曝光；封面ready后才展示，最多4件、同作者/同批去重，沿真实完成时间7天窗口。既有作者主动停止、移出广场、撤回和当前版本/权限均保持；旧作品修复回扫不重置完成时间，不恢复作者已停止的新作。
+2. 可信的一键参考操作在同一原WorkOperation事务中，为新建的本人图片工作区/视频草稿绑定来源。原图片正常受理、图片父批实际子任务受理、视频实际创建处，在原接受事务中冻结本次来源；报价/仅打开/整理提示词不算成功采用。只接本次接受的任务/批次，未知、在途或已成功不改绑；普通已明确全部失败可自然重试，父批原组内子项/重试保持。
+3. 已成功成品经后台目录/安全上下文收录后，幂等形成method采用事件；Rule4预计算合并原媒体采用和方法采用，同一其他同事只计一人。作者自用不算社区认可；证据和原作仍按各viewer当前ACL、隐藏和媒体版本过滤，预览/推荐不授原件或私有配方权限。旧接受请求无来源证据不猜测回填；保当前30天窗口与原扣回逻辑。
+4. 复用现有新作卡、操作回执与样式，补模板/工具超链接、图内一键参考、作者头像靠右；桌面悬停/键盘聚焦显示操作，触屏可直接操作。没有新增确认或发布步骤。
+
+实现源首提交4b036657afc7993832be91d6f531db46025e7f8a已推送；封面ready衔接补丁沿同分支接续。无Prisma schema、依赖、费用或供应商调用变化，仅新增稀疏PlatformSetting来源/接受凭据，现有后台队列完成计算，读取接口不评分。架构判断已依据真实调用链记录并复用；CodeGraph工具当前未暴露，定向核对实际源码，未冒索引更新。
+
+工程：本机Prisma旧生成接口导致首次隔离检查缺模型，已按当前schema重新生成；后续13组Works纯工程检查通过、原7项评分单测通过，0生产写/0真实模型/0收费/0浏览器。两个新增检查和触屏样式在首次通过后补入，最终候选原生构建将按实际新源覆盖；本机全仓类型扫描未完成，已停止，不冒类型通过。真实多人、手机和浏览器功能仍待用户手验。当前未构建最终Linux候选、未发布0.140.0，不把已推源冒线上生效。本轮新发现均在本任务范围，未扩改其它模块。
+
+
+### WORKS-AUTO01 增长收口与最终候选边界（2026-11-09）
+
+自动曝光不再写入人工精选前缀：改用 `works-discovery-auto:v1:<ISO完成时间>:<workId>`，沿既有唯一key索引只取7天窗口，人工选择仍以原 `works-editorial:v1:<workId>` 当前媒体/作者记录优先；展示版本只用人工CAS版本，自动曝光本身不制造用户编辑冲突。正式推荐查询不扫描自动候选，卡片仅为已返回作品点取自动/人工各一键。无新表、索引、清理服务或源权限迁移。
+
+本机最新13组工程已通过，原证 `.role-tests/works-BDb1Eo/receipt.json`；含5000条过期自动曝光记录的真实SQLite EXPLAIN，两个命名空间均走key范围索引、无PlatformSetting全扫；成功图片/视频方法采用、同人去重、原件/证据权限、失败/未知/后续无关请求和停止展示保持。发现新作卡忙态接口实际为string数组，已修正并完成20个改动入口及其依赖的严格类型检查（含标准next-env）；触屏按钮选择器优先级也已补齐，CSS解析通过。CSS与忙态补缺发生在后端原证之后，原时间和结果保留，最终Linux候选补齐真实构建输入绑定，不重复无变检查冒新证。
+
+同项目LANG01仅接79b26精确两UI文件，不接其旧基线或版本；两SHA已与16:18:54Z服务器types/lint原证逐字节核同，最终公共产物证明涵盖角色融合页。140功能范围已经锁定，只继承前一批实际健康源后封最终source，不插入未发布的独立输入合同。15的1397仍未正式交窗，候选已有后继，不能把历史d943或未绿6a当实际线上；9已同意取消独立1398，其两UI随140同批，2已同意输入合同排在140健康后继并保留两个真实任务接受处的freezeImageWorkMethodUse接点。
+
+当前代码均已聚焦推送、未发布；后续保当前GPT目录策略和实际相容guard，复制当次健康前序的固定控制/恢复入口，不并行Next或切换，不改运行中发布工具，不回生产数据。实际页面与多人效果仍由用户手动验收。

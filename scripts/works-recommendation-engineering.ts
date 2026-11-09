@@ -287,6 +287,9 @@ export async function runRecommendationEngineering(db: PrismaClient, owner: Sess
   await assert.rejects(mutateWorkEditorial(owner, nominee.work.id, { ...nomination, requestId: 'rec-nominee-on', expectedVersion: 2 }), error => (error as { code: string }).code === 'WORKS_NOMINATION_EXPIRED');
   assert.equal((await readWorkPage(colleague, new URLSearchParams({ scope: 'discoveries', q: 'rec-new-nominee' }), db)).items.length, 0, 'Toggling nomination cannot restart an expired exposure window');
 
+  const { runAutoReferenceEngineering } = await import('./test-works-auto-reference');
+  const automaticReference = await runAutoReferenceEngineering(db, owner, colleague, createImage);
+
   // Reproduce the observed catalog/user scale without any providers, browser or production data.
   await db.user.createMany({ data: Array.from({ length: 26 }, (_, index) => ({ id: `rec-new-colleague-${index}`, name: 'Synthetic colleague', username: `rec-new-${index}`,
     email: `rec-new-${index}@example.invalid`, password_hash: 'synthetic-not-a-credential', account_type: 'internal', role: 'user', feishu_user_id: `rec-feishu-${index}`, feishu_tenant_key: 'synthetic-tenant' })) });
@@ -303,7 +306,7 @@ export async function runRecommendationEngineering(db: PrismaClient, owner: Sess
   await readWorkPage(colleague, new URLSearchParams({ scope: 'recommended' }), db);
   const readMs = Math.round(performance.now() - readStarted);
   assert.ok(!statements.slice(statementStart).some(row => /\b(?:FROM|JOIN)\s+["`]?WorkRecommendationEvent\b/i.test(row.query)));
-  return { elapsedMs: Math.round(performance.now() - started), realFrozenInput: true, positiveAndNegative: true,
+  return { elapsedMs: Math.round(performance.now() - started), automaticReference, realFrozenInput: true, positiveAndNegative: true,
     multiFeishuAudience: true, duplicateAndReselection: true, immediateAclGate: true, pageOpenScoring: false,
     nativeStreamNoFullBuffer: true, earlyEvidencePreservedWithoutAdmission: true, pauseResume: true,
     privateEvidenceSeparated: true, filteredGroupRepresentative: true, stableQualificationWindow: true,

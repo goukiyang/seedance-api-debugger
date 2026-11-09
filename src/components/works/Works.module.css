@@ -20,7 +20,7 @@
 .discoveryGrid article { min-width: 0; }
 .page .discoveryMedia { display: block; width: 100%; height: 144px; padding: 0; overflow: hidden; background: var(--bg-panel); }
 .discoveryMedia > .media { width: 100%; height: 100%; aspect-ratio: auto !important; }
-.discoveryGrid .authorIdentity { max-width: 100%; margin-top: 6px; }
+.discoveryGrid .authorIdentity { max-width: 100%; margin-top: 0; }
 @media (max-width: 600px) { .discoveryGrid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 .search { display: flex; align-items: center; max-width: 640px; min-width: 0; flex: 1; border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-secondary); background: var(--bg-input); }
 .search input { min-width: 0; width: 100%; flex: 1; padding: 10px 0 10px 10px; background: transparent; border: 0; color: var(--text-primary); outline: none; font: inherit; font-size: 14px; }
@@ -187,6 +187,9 @@
 }
 .page .reuseButton:hover { background: var(--bg-hover); color: var(--text-primary); }
 .page .reuseButton:focus-visible { outline-offset: -3px; }
+@media (hover: none), (pointer: coarse) {
+  .page .discoveryGrid .reuseButton { opacity: 1; pointer-events: auto; }
+}
 .filtersPopover .collectionPanel { margin-top: 12px; padding: 10px 0 0; border-top: 1px solid var(--border-color); }
 .filtersPopover .collectionRow details > div { position: static; width: auto; box-shadow: none; }
 .actions { display: flex; align-items: center; gap: 2px; height: 40px; }
