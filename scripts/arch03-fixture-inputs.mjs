@@ -52,5 +52,5 @@ export const ARCH03_SOURCES = [
   'src/lib/usage/summary-fold.ts', 'src/lib/usage/public-summary-fold.ts', 'src/lib/usage/source-scope.ts',
   'src/lib/usage/csv.ts', 'src/lib/usage/http.ts', 'src/lib/usage/dto.ts', 'src/lib/usage/row-spool.ts', 'src/lib/admin/usage-csv.ts',
   'src/app/admin/usage-costs/page.tsx', 'src/app/admin/usage-records/[sourceKind]/[sourceId]/page.tsx',
-  'src/lib/usage/personal.ts', 'src/lib/admin/usage-analytics.ts',
+  'src/lib/usage/personal.ts', 'src/lib/admin/usage-analytics.ts', 'src/lib/admin/usage-report-admission.ts',
 ];

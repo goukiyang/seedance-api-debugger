@@ -1,3 +1,4 @@
+import { withUsageReportAdmission } from './usage-report-admission';
 import 'server-only';
 import { createHash } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
@@ -429,12 +430,14 @@ async function foldUsageAnalytics(captured: Awaited<ReturnType<typeof captureUsa
 }
 
 export async function getUsageAnalyticsSnapshot(query: UsageQuery, signal?: AbortSignal): Promise<UsageAnalyticsSnapshot> {
-  const spool = await usageRowSpool<CapturedUsageBatch>(() => 0);
-  try {
-    const captured = await tracePhase('snapshot', () => withUsageReadSnapshot((reader, dataAsOf) =>
-      tracePhase('capture', () => captureUsageAnalytics(usageReaderDatabase(reader), query, dataAsOf, spool, signal)), { signal }));
-    return await tracePhase('fold', () => foldUsageAnalytics(captured, spool, query, signal));
-  } finally { await spool.dispose(); }
+  return withUsageReportAdmission(async () => {
+    const spool = await usageRowSpool<CapturedUsageBatch>(() => 0);
+    try {
+      const captured = await tracePhase('snapshot', () => withUsageReadSnapshot((reader, dataAsOf) =>
+        tracePhase('capture', () => captureUsageAnalytics(usageReaderDatabase(reader), query, dataAsOf, spool, signal)), { signal }));
+      return await tracePhase('fold', () => foldUsageAnalytics(captured, spool, query, signal));
+    } finally { await spool.dispose(); }
+  }, signal);
 }
 
 /** Current display photos are separate from the frozen financial snapshot and bounded to the returned page. */

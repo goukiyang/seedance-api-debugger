@@ -15,7 +15,7 @@ import { usageRowSpool } from '../src/lib/usage/row-spool';
 
 const require = createRequire(import.meta.url);
 const fixedAsOf = '2026-11-01T12:00:00.000Z', epoch = Date.parse('2026-11-01T00:00:00.123Z');
-const inputs = ['src/lib/usage/database.ts', 'src/lib/usage/facts.ts', 'src/lib/admin/usage-analytics.ts',
+const inputs = ['src/lib/usage/database.ts', 'src/lib/usage/facts.ts', 'src/lib/admin/usage-analytics.ts', 'src/lib/admin/usage-report-admission.ts',
   'src/lib/usage/cost-ledger-read.ts', 'src/app/admin/costs/list-filters.ts', 'src/app/api/admin/costs/export/route.ts',
   'src/app/api/admin/usage-analytics/route.ts', 'src/app/api/admin/usage-analytics/records/route.ts', 'src/app/api/admin/usage-analytics/export/route.ts',
   'src/lib/usage/sqlite-read-snapshot.ts', 'scripts/usage-sqlite-reader.py', 'scripts/usage-read-snapshot-engineering.ts'];
@@ -88,7 +88,7 @@ async function main() {
     assert.ifError(setup.error); assert.equal(setup.status, 0, setup.stderr);
     db = new PrismaClient({ datasources: { db: { url: `file:${filename}` } }, log: [] });
     const actualDb = db;
-    const trace = { tracePhase: async (_phase: string, run: () => Promise<unknown>) => run(), traceHttpRequest: async (_op: string, _headers: unknown, run: () => Promise<Response>) => run() };
+    const trace = { traceMetadata: () => ({ requestId: null, txId: null, op: null, phase: null }), tracePhase: async (_phase: string, run: () => Promise<unknown>) => run(), traceHttpRequest: async (_op: string, _headers: unknown, run: () => Promise<Response>) => run() };
     const load = (file: string, baseline = false, instrument = false): any => {
       const cache = new Map<string, any>();
       const evaluate = (relative: string): any => {

@@ -136,11 +136,9 @@ export default function AdminUsageClient({ viewerId, view, support, management }
         if (controller.signal.aborted || requestEpoch !== epoch.current || current.current.viewerId !== viewerId || current.current.search !== search) return;
         setResult({ account: viewerId, search: search!, report: payload });
         state.rememberValidScope(search!);
-        setExportMessage(message => message.replace('正在同步当前分析。', '当前分析已同步。'));
       } catch (failure) {
         if (!controller.signal.aborted && requestEpoch === epoch.current && current.current.viewerId === viewerId && current.current.search === search) {
           setError(failure instanceof Error ? failure.message : '报表未读到，请重试。');
-          setExportMessage(message => message.replace('正在同步当前分析。', '当前分析尚未同步，可重新读取。'));
         }
       } finally {
         if (!controller.signal.aborted && requestEpoch === epoch.current) setBusy(false);
@@ -184,7 +182,7 @@ export default function AdminUsageClient({ viewerId, view, support, management }
     try {
       const query = new URLSearchParams(search); query.set('type', exportType);
       const response = await fetch(`/api/admin/usage-analytics/export?${query}`, { cache: 'no-store', credentials: 'same-origin', signal: controller.signal });
-      if (!response.ok) throw new Error(response.status === 401 || response.status === 403 ? '当前权限不能导出报表，请重新确认登录。' : '导出未完成，可重试同一范围。');
+      if (!response.ok) throw new Error(response.status === 401 || response.status === 403 ? '当前权限不能导出报表，请重新确认登录。' : response.status === 429 ? '报表正在处理其他读取，请稍后重试导出当前范围。' : '导出未完成，可重试同一范围。');
       if (!response.headers.get('content-type')?.toLowerCase().includes('text/csv')) throw new Error('未收到可用的 CSV 文件，请稍后重试导出。');
       const blob = await response.blob();
       if (controller.signal.aborted || current.current.viewerId !== viewerId || current.current.search !== search) return;
@@ -197,13 +195,11 @@ export default function AdminUsageClient({ viewerId, view, support, management }
       requestAnimationFrame(() => URL.revokeObjectURL(url));
       setExportCutoff(validCutoff);
       setExportedSummary(exportSummary(response.headers));
-      setExportMessage(`完整${exportType === 'summary' ? '汇总' : '明细'}已交给浏览器下载${validCutoff ? '，正在同步当前分析。' : '，导出截至时间未返回，请以 CSV 内时间为准。'}`);
-      state.preserveLayout();
-      setReload(value => value + 1);
+      setExportMessage(`完整${exportType === 'summary' ? '汇总' : '明细'}已交给浏览器下载${validCutoff ? '，文件以本次导出截至时间为准。' : '，导出截至时间未返回，请以 CSV 内时间为准。'}`);
     } catch (failure) {
       if (!controller.signal.aborted) setExportMessage(failure instanceof Error ? failure.message : '导出未完成，可重试。');
     } finally { if (!controller.signal.aborted) setExporting(false); }
-  }, [exportType, exporting, search, viewerId, state.preserveLayout]);
+  }, [exportType, exporting, search, viewerId]);
 
   function selectRow(row: UsageDistribution) {
     directoryScroll.current = window.scrollY;
