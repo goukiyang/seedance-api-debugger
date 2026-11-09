@@ -1,3 +1,9 @@
+<!-- FUSION-MODEL01-MATERIALS-20261109 -->
+## 角色融合模型设置与原位清除（2026-11-09）
+
+v0.139.5 / 6326c2cc1b72fa6d3b39eca26d56114bff3b6a03 / BUILD AoNdyzGsO1MEBluVeppM3已部署，11:06:41Z健康，待用户手验。原6场景/差量UI检查、完整构建、保护备份、1516项guard原字节、35资源及健康证据保正式根私有docs/materials/2026-11-09-character-fusion-model-picker/；不公开配置、数据库或媒体。无真实文字/视频调用或旧待核重发。[原单](../../tasks/todo/2026-11-08-character-fusion.md#model01-页面设置选择api模型2026-11-09)。
+<!-- /FUSION-MODEL01-MATERIALS-20261109 -->
+
 <!-- WORKSPACE-SIDEBAR-PAGES-PUBLIC-20261105 -->
 ## 五组页面侧栏统一（v0.134.2）
 

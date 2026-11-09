@@ -1,3 +1,11 @@
+<!-- FUSION-MODEL01-RELEASE-20261109 -->
+## 2026-11-09 角色融合模型设置与原位清除
+
+实际6326c2cc1b72fa6d3b39eca26d56114bff3b6a03 / v0.139.5 / BUILD AoNdyzGsO1MEBluVeppM3，继承139.4/86e；10:59:34Z完整原生/计价/Next/types/lint通过，11:05:44Z切换、11:06:11Z公网/11:06:41Z健康。6启动门、7服务4timer、35资源及2匿名401有证，控制器退出0；功能用户手验，无真实文字/视频/模型调用、浏览器或旧待核重发。
+
+stage /data/video-api-debugger/release-staging/character-fusion-controls-20261109/attempt01，pair d8d6ddc3-f028-4792-b44a-ed14fc13a023；一致备份、配置保护和旧writer自然排尽，原价格全字段保持，137迁移只读继承，无DDL/回数据。67456579f8c0d41a7058ca7eec78224c4fb7e75a / qb5CShgt78X3naPgg_V4L原1516编译字节鲜核复用，不重编或改原时间。固定恢复为同stage program-recovery.sh release-input.json，只回程序/config指针；先核当前源及所有者，未演练生产回退。HD control保持active。详情/SSH包装原退出说明见[原单MODEL01](../tasks/todo/2026-11-08-character-fusion.md#model01-页面设置选择api模型2026-11-09)，原证保正式根私有材料目录。
+<!-- /FUSION-MODEL01-RELEASE-20261109 -->
+
 # Ubuntu 24 部署文档
 
 <!-- STUDIO-READ-LOCK01-RELEASE-20261108 -->
