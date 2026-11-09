@@ -1,5 +1,5 @@
 import type { Prisma } from '@prisma/client';
-import { prisma, retrySqliteBusy } from '@/lib/prisma';
+import { withSqlitePrismaReadSnapshot } from '@/lib/sqlite-prisma-read-snapshot';
 import { observeOperation } from '@/lib/performance/server-operations';
 import { traceMetadata } from '@/lib/performance/request-trace';
 
@@ -27,11 +27,11 @@ function busyError() {
   return error;
 }
 
-// Prisma's SQLite transactions use BEGIN IMMEDIATE even for reads. Queue these
-// snapshots before entering the engine so waiting readers cannot block its lock holder.
+// Preserve bounded process admission while reading a pinned DEFERRED snapshot
+// on the same SQLite file. These reads never enter the writer engine queue.
 export function readSharedStudioSnapshot<T>(read: (tx: Prisma.TransactionClient) => Promise<T>,
   operation: 'snapshot' | 'definition' | 'modules' | 'open-status' | 'catalog' | 'revision' | 'gallery'
-    | 'deletion-status' | 'sharing-status' | 'lifecycle-history' = 'snapshot'): Promise<T> {
+    | 'deletion-status' | 'sharing-status' | 'lifecycle-history' | 'quote' = 'snapshot'): Promise<T> {
   if (queue.pending >= 32) return Promise.reject(busyError());
   const requestedAt = Date.now();
   queue.pending++;
@@ -39,17 +39,17 @@ export function readSharedStudioSnapshot<T>(read: (tx: Prisma.TransactionClient)
     const startedAt = Date.now();
     if (startedAt - requestedAt > 5000) throw busyError();
     let attempt = 0;
-    return retrySqliteBusy(async () => {
+    return (async () => {
       const trace = { operation, requestedAt, startedAt: Date.now(), enteredAt: null as number | null,
         requestId: traceMetadata().requestId, txId: null as string | null };
       const observed = observeOperation(operation === 'gallery' ? 'studio.gallery' : 'studio.shared-read');
       queue.active = trace;
       let code: string | null = null;
       try {
-        return await prisma.$transaction(tx => {
+        return await withSqlitePrismaReadSnapshot(tx => {
           trace.enteredAt = Date.now(); trace.txId = traceMetadata().txId;
           return read(tx);
-        }, { timeout: 15000 });
+        }, { timeoutMs: 15000 });
       } catch (error) {
         const value = (error as { code?: unknown } | null)?.code;
         code = typeof value === 'string' && /^P\d{4}$/.test(value) ? value : 'READ_FAILED';
@@ -68,7 +68,7 @@ export function readSharedStudioSnapshot<T>(read: (tx: Prisma.TransactionClient)
         } catch { /* Diagnostics cannot change a snapshot or prevent queue release. */ }
         if (queue.active === trace) queue.active = null;
       }
-    });
+    })();
   });
   queue.tail = result.then(() => { queue.pending--; }, () => { queue.pending--; });
   return result;

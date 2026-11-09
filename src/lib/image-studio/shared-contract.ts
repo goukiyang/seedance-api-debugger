@@ -14,7 +14,7 @@ import { getImageStudioSettings } from './settings';
 import { MAX_REFERENCE_IMAGES } from './limits';
 import { studioTemplateAssetUrl } from './media';
 import { readSharedStudioSnapshot } from './read-snapshot';
-import { catalogReaderReady, readCatalogRevision } from './catalog-revision';
+import { catalogReaderReady, readCatalogRevision, readCatalogDependencyStamp, trackCatalogDependencies } from './catalog-revision';
 import { assertPresetCoverShareable, commitPreparedModuleCoverSnapshot, copyModuleCover, moduleCoverKey,
   prepareModuleCoverSnapshot, promoteModuleCover, studioFixedCoverDTO, type PreparedModuleCoverSnapshot } from './module-cover';
 import { readStudioModuleSharingPreference } from './module-sharing-preference';
@@ -1570,6 +1570,10 @@ export async function listSharedStudioCatalog(user: ImageStudioIdentity, options
   }));
   return { items, nextCursor: remaining.length > 100 ? page[page.length - 1].id : null, catalogRevision };
 }
+type ActiveRevision = Pick<SharedStudioRevision, 'activeDefinitionToken' | 'activeAvailable' | 'activeState'>;
+const activeRevisionCache = new Map<string, { actor: string; policy: string; scopes: Set<string>; stamp: string; active: ActiveRevision }>();
+const activeRevisionModels = ['PlatformSetting', 'Asset', 'ImageStudioPreset', 'ImageStudioModule', 'ImageStudioTask', 'User'].map(model => `${model}:*`);
+
 export async function sharedStudioRevision(user: ImageStudioIdentity, activePresetId?: string, activeModuleId?: string, lightweight = false): Promise<SharedStudioRevision> {
   const useMarker = lightweight && (!activePresetId || !!activeModuleId) && await catalogReaderReady(prisma) && !!await readCatalogRevision(prisma, 'templates');
   const read = async (tx: Prisma.TransactionClient) => {
@@ -1578,16 +1582,27 @@ export async function sharedStudioRevision(user: ImageStudioIdentity, activePres
     let activeDefinitionToken: string | null = null;
     let activeAvailable = false;
     let activeState: SharedStudioStateProjection | null = null;
-    if (activePresetId) {
-      const workspaces = await tx.imageStudioModule.findMany({ where: { owner_id: catalog.actor.id, source_preset_id: activePresetId,
+    const cacheKey = useMarker && activePresetId && activeModuleId ? JSON.stringify([user.id, activePresetId, activeModuleId]) : null;
+    const actor = digest(catalog.actor), policy = cacheKey ? digest(privatePromptPolicy()) : '';
+    const cached = cacheKey ? activeRevisionCache.get(cacheKey) : undefined;
+    const scopes = new Set<string>(['protection']);
+    const cachedStamp = cached && cached.actor === actor && cached.policy === policy ? await readCatalogDependencyStamp(tx, cached.scopes) : null;
+    const reuse = cached && cachedStamp === cached.stamp;
+    const before = cacheKey && !reuse ? await readCatalogDependencyStamp(tx, activeRevisionModels) : null;
+    if (reuse) ({ activeDefinitionToken, activeAvailable, activeState = null } = cached.active);
+    if (activePresetId && !reuse) {
+      const activeClient = cacheKey ? trackCatalogDependencies(tx, scopes) : tx;
+      // Keep the resolver's authorization and projection rules as the source of
+      // truth. Only its already authorized scalar revision projection is reused.
+      const workspaces = await activeClient.imageStudioModule.findMany({ where: { owner_id: catalog.actor.id, source_preset_id: activePresetId,
         ...(activeModuleId ? { id: activeModuleId } : {}) }, select: { id: true }, orderBy: { id: 'asc' } });
       let boundModuleId: string | undefined;
       for (const workspace of workspaces) {
-        const binding = await studioSharedBinding(catalog.actor.id, workspace.id, tx);
+        const binding = await studioSharedBinding(catalog.actor.id, workspace.id, activeClient);
         if (binding?.presetId === activePresetId) { boundModuleId = workspace.id; break; }
       }
       if (boundModuleId) {
-        const read = (await readSharedStudioModules(catalog.actor.id, [boundModuleId], tx)).get(boundModuleId)!;
+        const read = (await readSharedStudioModules(catalog.actor.id, [boundModuleId], activeClient)).get(boundModuleId)!;
         activeState = read.state ?? null;
         activeDefinitionToken = activeState?.definitionToken ?? null;
         activeAvailable = Boolean(read.resolved);
@@ -1595,10 +1610,10 @@ export async function sharedStudioRevision(user: ImageStudioIdentity, activePres
         // Without a verified owned binding, missing/private/archived arbitrary
         // ids produce the same empty active projection. Public active sources
         // remain readable through the existing catalog authorization.
-        const source = await tx.imageStudioPreset.findUnique({ where: { id: activePresetId }, select: { id: true, owner_id: true, scope: true, is_shared: true, updated_at: true } });
-        if (source && canViewStudioPreset(catalog.actor, source) && !(await studioPresetArchived(source.id, tx))) {
+        const source = await activeClient.imageStudioPreset.findUnique({ where: { id: activePresetId }, select: { id: true, owner_id: true, scope: true, is_shared: true, updated_at: true } });
+        if (source && canViewStudioPreset(catalog.actor, source) && !(await studioPresetArchived(source.id, activeClient))) {
           let reasonCode: SharedStudioStateProjection['reasonCode'] = null;
-          try { activeDefinitionToken = (await resolveSharedStudioDefinition(catalog.actor, activePresetId, tx)).definition.intent.definitionToken; activeAvailable = true; }
+          try { activeDefinitionToken = (await resolveSharedStudioDefinition(catalog.actor, activePresetId, activeClient)).definition.intent.definitionToken; activeAvailable = true; }
           catch (error) {
             if (!(error instanceof StudioSharingError) || ![403, 404, 409].includes(error.status)) throw error;
             reasonCode = error.reasonCode; activeDefinitionToken = error.intent?.definitionToken ?? null;
@@ -1614,8 +1629,17 @@ export async function sharedStudioRevision(user: ImageStudioIdentity, activePres
         }
       }
     }
+    const stamp = cacheKey ? await readCatalogDependencyStamp(tx, reuse ? cached.scopes : scopes) : null;
+    if (reuse && stamp !== cachedStamp || before && before !== await readCatalogDependencyStamp(tx, activeRevisionModels)) {
+      throw new StudioSharingError('共享依赖已变化，请重新读取', 409);
+    }
     if (useMarker && catalog.catalogRevision !== await readCatalogRevision(tx, 'templates')) throw new StudioSharingError('共享目录已变化，请重新读取', 409);
     if (useMarker && !await catalogReaderReady(tx)) throw new StudioSharingError('共享目录程序已切换，请重新读取', 409);
+    if (cacheKey && !reuse && stamp && !scopes.has('uncacheable')) {
+      activeRevisionCache.delete(cacheKey);
+      activeRevisionCache.set(cacheKey, { actor, policy, scopes, stamp, active: { activeDefinitionToken, activeAvailable, activeState } });
+      if (activeRevisionCache.size > 256) activeRevisionCache.delete(activeRevisionCache.keys().next().value!);
+    }
     return { catalogRevision: catalog.catalogRevision, activeDefinitionToken, activeAvailable, activeState };
   };
   return useMarker ? read(prisma) : readSharedStudioSnapshot(read, 'revision');

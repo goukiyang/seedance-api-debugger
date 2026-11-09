@@ -8,7 +8,6 @@ import { catalogDirectoryWrites } from './catalog-directory-writes';
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
-  prismaSqlitePragmasStarted: boolean | undefined;
 };
 
 export const prisma =
@@ -16,22 +15,6 @@ export const prisma =
   catalogDirectoryWrites(new PrismaClient({
     log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
   }));
-
-function configureSqlitePragmas(client: PrismaClient) {
-  if (globalForPrisma.prismaSqlitePragmasStarted) return;
-  if (!process.env.DATABASE_URL?.startsWith('file:')) return;
-  globalForPrisma.prismaSqlitePragmasStarted = true;
-
-  void (async () => {
-    await client.$queryRawUnsafe('PRAGMA busy_timeout = 10000');
-    await client.$queryRawUnsafe('PRAGMA journal_mode = WAL');
-    await client.$queryRawUnsafe('PRAGMA synchronous = NORMAL');
-  })().catch((error) => {
-    console.warn('[Prisma] Failed to configure SQLite pragmas:', error instanceof Error ? error.message : String(error));
-  });
-}
-
-configureSqlitePragmas(prisma);
 
 // Prisma's SQLite transactions start with BEGIN IMMEDIATE, so even reads queue on the single write lock.
 // A busy lock (P1008) rolls the whole transaction back, which makes a bounded retry safe.
@@ -45,4 +28,4 @@ export async function retrySqliteBusy<T>(run: () => Promise<T>, attempts = 3): P
   }
 }
 
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
+globalForPrisma.prisma = prisma;

@@ -1,3 +1,4 @@
+import { traceHttpRequest } from '@/lib/performance/request-trace';
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyFeedbackRelay, FEEDBACK_CARD_SOURCE } from '@/lib/feishu/feedback-relay';
 import { feedbackPrisma } from '@/lib/feedback/notification';
@@ -7,6 +8,9 @@ import { feedbackRequestText } from '@/lib/feedback/action-request';
 
 export const runtime = 'nodejs';
 export async function POST(request: NextRequest) {
+  return traceHttpRequest('feedback.ack', request.headers, () => postFeedbackRequest(request));
+}
+async function postFeedbackRequest(request: NextRequest) {
   let verified;
   try { verified = verifyFeedbackRelay(await feedbackRequestText(request, 32768), request.headers); }
   catch { return NextResponse.json({ error: 'callback_verification_failed' }, { status: 401 }); }

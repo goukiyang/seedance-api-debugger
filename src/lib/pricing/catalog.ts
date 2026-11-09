@@ -28,6 +28,10 @@ export type PricingCatalogBinding = {
   configFingerprint: string;
 };
 export type PricingCatalog = { rows: PricingAdminRow[]; bindings: Record<string, PricingCatalogBinding>; fingerprint: string };
+export type PricingCatalogCapability = 'image' | 'seedance' | 'ip' | 'enhance' | 'h3';
+export function pricingCatalogCapability(identity: PricingAdminIdentity): PricingCatalogCapability {
+  return identity.kind === 'video' ? identity.channelId === 'seedance' ? 'seedance' : 'ip' : identity.kind;
+}
 
 export function pricingCanonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(pricingCanonical).join(',')}]`;
@@ -184,80 +188,94 @@ function row(identity: PricingAdminIdentity, label: string, providerLabel: strin
     adoptionReason: actual ? '请确认汇率与费率；实际账单仍须沿原精确匹配及授权上限' : '请先补充独立人民币基价', updatedAt: null };
 }
 
-export async function getPricingCatalog(client: PricingClient = prisma, menu?: PricingMenuSources): Promise<PricingCatalog> {
-  const sources = await validateSources(client, undefined, menu);
+export async function getPricingCatalog(client: PricingClient = prisma, menu?: PricingMenuSources,
+  capability?: PricingCatalogCapability): Promise<PricingCatalog> {
+  // Full administration remains strict; a consumer reads only its own provider capability.
+  const sources = capability === 'seedance' ? new Map<string, string>() : await validateSources(client, capability, menu);
   const rows: PricingAdminRow[] = [], bindings: PricingCatalog['bindings'] = {};
   const add = (value: PricingAdminRow, source: PricingCatalogBinding) => { rows.push(value); bindings[value.id] = source; };
-  const seedance = getProviderConfig();
-  const seedanceBinding = binding('seedance', { base: seedance.baseUrl,
-    credential: pricingFingerprint(process.env.SEEDANCE_API_KEY || ''), models: seedance.model_options },
-  process.env.SEEDANCE_API_KEY, 'environment');
-  for (const model of SEEDANCE_VIDEO_MODEL_OPTIONS) {
-    for (const resolution of ['480p', '720p', '1080p']) {
-      add(row({ kind: 'video', channelId: 'seedance', modelId: model.id,
-        billingMode: 'fixed', unit: 'second', specifications: { resolution, referenceVideo: 'none', pricingPurpose: 'standard' } },
-      `${model.label} ${resolution}`, '视频接口', true, isApiKeyConfigured(), null, '尚未配置视频接口', ['普通生成', '无参考视频', resolution], model.id === seedance.model), seedanceBinding);
-      add(row({ kind: 'video', channelId: 'seedance', modelId: model.id,
-        billingMode: 'fixed', unit: 'second', specifications: { resolution } },
-      `${model.label} ${resolution} · 通用`, '视频接口', true, isApiKeyConfigured(), null, '尚未配置视频接口', ['样片', '带参考视频', 'Draft 升级', resolution], model.id === seedance.model), seedanceBinding);
+  if (!capability || capability === 'seedance') {
+    const seedance = getProviderConfig();
+    const seedanceBinding = binding('seedance', { base: seedance.baseUrl,
+      credential: pricingFingerprint(process.env.SEEDANCE_API_KEY || ''), models: seedance.model_options },
+    process.env.SEEDANCE_API_KEY, 'environment');
+    for (const model of SEEDANCE_VIDEO_MODEL_OPTIONS) {
+      for (const resolution of ['480p', '720p', '1080p']) {
+        add(row({ kind: 'video', channelId: 'seedance', modelId: model.id,
+          billingMode: 'fixed', unit: 'second', specifications: { resolution, referenceVideo: 'none', pricingPurpose: 'standard' } },
+        `${model.label} ${resolution}`, '视频接口', true, isApiKeyConfigured(), null, '尚未配置视频接口', ['普通生成', '无参考视频', resolution], model.id === seedance.model), seedanceBinding);
+        add(row({ kind: 'video', channelId: 'seedance', modelId: model.id,
+          billingMode: 'fixed', unit: 'second', specifications: { resolution } },
+        `${model.label} ${resolution} · 通用`, '视频接口', true, isApiKeyConfigured(), null, '尚未配置视频接口', ['样片', '带参考视频', 'Draft 升级', resolution], model.id === seedance.model), seedanceBinding);
+      }
     }
   }
-  const ip = await getVolcengineIpApiSettings(client, menu?.inputs.ip);
-  const ipModels = [...VOLCENGINE_IP_MODEL_OPTIONS];
-  if (ip.default_model && !ipModels.some(model => model.id === ip.default_model)) ipModels.push({ id: ip.default_model, label: ip.default_model, detail: '当前配置型号' });
-  const ipBinding = binding('volcengine_ark', ip, ip.api_key, sources.get(VOLCENGINE_IP_API_SETTING_KEY) || 'legacy-default');
-  for (const model of ipModels) for (const resolution of volcengineIpModelResolutions(model.id)) add(row({ kind: 'video', channelId: 'volcengine_ark', modelId: model.id,
-    billingMode: 'fixed', unit: 'second', specifications: { resolution } }, `${model.label} ${resolution}`, '火山 IP 视频', ip.enabled,
-  isVolcengineIpApiReady(ip), null, 'IP 视频接口未就绪', [model.detail, 'IP 视频', resolution], model.id === ip.default_model), ipBinding);
-  const enhance = await getAiMediaKitApiSettings(client, menu?.inputs.enhance);
-  const enhanceBinding = binding('volcengine_mediakit', enhance, enhance.api_key, sources.get(AIMEDIAKIT_API_SETTING_KEY) || 'legacy-default');
-  for (const resolution of ['480p', '720p', '1080p', '2k', '4k']) for (const toolVersion of ['standard', 'professional']) for (const fpsTier of ['lte30', 'gt30', 'gt60']) {
-    add(row({ kind: 'enhance', channelId: 'volcengine_mediakit', modelId: 'enhance-video', billingMode: 'fixed', unit: 'second',
-      specifications: { resolution, toolVersion, fpsTier } }, `视频增强 ${resolution} · ${toolVersion === 'professional' ? '专业' : '普通'} · ${fpsTier === 'gt60' ? '>60且≤120fps' : fpsTier === 'gt30' ? '>30且≤60fps' : '≤30fps'}`,
-    'AI MediaKit', enhance.enabled, isAiMediaKitApiReady(enhance), null, '增强视频接口未就绪', ['人民币规则按毫秒估算，旧合同保留原整秒计量',
-      ...(resolution === '480p' ? ['含原 240p / 360p / 540p 同价档，不改变请求输出尺寸'] : [])], true), enhanceBinding);
+  if (!capability || capability === 'ip') {
+    const ip = await getVolcengineIpApiSettings(client, menu?.inputs.ip);
+    const ipModels = [...VOLCENGINE_IP_MODEL_OPTIONS];
+    if (ip.default_model && !ipModels.some(model => model.id === ip.default_model)) ipModels.push({ id: ip.default_model, label: ip.default_model, detail: '当前配置型号' });
+    const ipBinding = binding('volcengine_ark', ip, ip.api_key, sources.get(VOLCENGINE_IP_API_SETTING_KEY) || 'legacy-default');
+    for (const model of ipModels) for (const resolution of volcengineIpModelResolutions(model.id)) add(row({ kind: 'video', channelId: 'volcengine_ark', modelId: model.id,
+      billingMode: 'fixed', unit: 'second', specifications: { resolution } }, `${model.label} ${resolution}`, '火山 IP 视频', ip.enabled,
+    isVolcengineIpApiReady(ip), null, 'IP 视频接口未就绪', [model.detail, 'IP 视频', resolution], model.id === ip.default_model), ipBinding);
   }
-  const h3 = await getH3ApiSettings(client, menu?.inputs.h3);
-  const h3Binding = binding('h3', { enabled: h3.enabled, base: h3.base_url }, h3.api_token, sources.get(H3_API_SETTING_KEY) || 'legacy-default');
-  for (const preset of H3_PRESET_OPTIONS) add(row({ kind: 'h3', channelId: 'h3', modelId: preset.id,
-    billingMode: 'fixed', unit: 'second', specifications: {} }, preset.label, 'H3 本地工作站', h3.enabled, isH3Operational(h3), 0,
-  'H3 服务未就绪', ['沿原本地免费合同'], preset.id === h3.default_preset_id), h3Binding);
-  const channels = menu ? menu.channels : await getImageGenerationChannels(client, true);
-  const options = menu ? menu.options : await getImageGenerationChannelOptions(client, true);
-  for (const channel of options.items) {
-    if (channel.id === 'original') continue;
-    for (const model of IMAGE_STUDIO_MODELS) {
-      const capability = channel.models[model];
-      if (!capability) continue;
-      const settings = resolveImageGenerationModelSettings(selectImageGenerationSettings(channels, model, channel.id), model);
-      const actual = capability.billingMode === 'actual';
-      const address = new URL(settings.base_url);
-      const scope = settings.api_key && address.protocol === 'https:' && !address.username && !address.password ? imageBillingScope(settings) : undefined;
-      const source = binding(channel.id, { provider: settings.provider, baseUrl: settings.base_url,
-        upstreamModel: settings.modelCapabilities[model]?.upstreamModel || model, protocol: capability,
-        credentials: pricingFingerprint(settings.api_key), billingIntent: actual ? await imageBillingIntent(client, menu?.inputs.image.intent) : null },
-      settings.api_key, settings.configRevision, scope);
-      const actualReady = capability.actualQuoteRequired && capability.ready;
-      const rawCapability = settings.modelCapabilities[model];
-      const transport = rawCapability ? validateImageGenerationChannel({ ...settings, modelCapabilities: { ...settings.modelCapabilities,
-        [model]: { ...rawCapability, billingMode: 'fixed', fixedPoints: 0 } } }, { model }) : null;
-      const value = row({ kind: 'image', channelId: channel.id, modelId: model, billingMode: actual ? 'actual' : 'fixed', unit: 'image', specifications: {} },
-        IMAGE_STUDIO_MODEL_LABELS[model], channel.supplierName || channel.label, channel.enabled,
-        actual ? actualReady : Boolean(transport?.ok), actual ? null : capability.fixedPoints,
-        capability.disabledReason || channel.disabledReason, [
-          `质量：${capability.qualities?.join(' / ') || '未知'}`, `分辨率：${capability.resolutions?.join(' / ') || '未知'}`,
-          `比例：${capability.ratios?.join(' / ') || '沿原比例合同'}`,
-        ], (options.defaultRoutes?.models[model] || (model.startsWith('gemini-') ? 'banana' : 'shared')) === channel.id);
-      value.enabled = channel.enabled && settings.modelCapabilities[model]?.enabled === true;
-      if (!value.enabled) value.availability = 'disabled';
-      add(value, source);
+  if (!capability || capability === 'enhance') {
+    const enhance = await getAiMediaKitApiSettings(client, menu?.inputs.enhance);
+    const enhanceBinding = binding('volcengine_mediakit', enhance, enhance.api_key, sources.get(AIMEDIAKIT_API_SETTING_KEY) || 'legacy-default');
+    for (const resolution of ['480p', '720p', '1080p', '2k', '4k']) for (const toolVersion of ['standard', 'professional']) for (const fpsTier of ['lte30', 'gt30', 'gt60']) {
+      add(row({ kind: 'enhance', channelId: 'volcengine_mediakit', modelId: 'enhance-video', billingMode: 'fixed', unit: 'second',
+        specifications: { resolution, toolVersion, fpsTier } }, `视频增强 ${resolution} · ${toolVersion === 'professional' ? '专业' : '普通'} · ${fpsTier === 'gt60' ? '>60且≤120fps' : fpsTier === 'gt30' ? '>30且≤60fps' : '≤30fps'}`,
+      'AI MediaKit', enhance.enabled, isAiMediaKitApiReady(enhance), null, '增强视频接口未就绪', ['人民币规则按毫秒估算，旧合同保留原整秒计量',
+        ...(resolution === '480p' ? ['含原 240p / 360p / 540p 同价档，不改变请求输出尺寸'] : [])], true), enhanceBinding);
     }
+  }
+  if (!capability || capability === 'h3') {
+    const h3 = await getH3ApiSettings(client, menu?.inputs.h3);
+    const h3Binding = binding('h3', { enabled: h3.enabled, base: h3.base_url }, h3.api_token, sources.get(H3_API_SETTING_KEY) || 'legacy-default');
+    for (const preset of H3_PRESET_OPTIONS) add(row({ kind: 'h3', channelId: 'h3', modelId: preset.id,
+      billingMode: 'fixed', unit: 'second', specifications: {} }, preset.label, 'H3 本地工作站', h3.enabled, isH3Operational(h3), 0,
+    'H3 服务未就绪', ['沿原本地免费合同'], preset.id === h3.default_preset_id), h3Binding);
+  }
+  let qualityRoutes: Parameters<typeof projectPricingDisplay>[1];
+  if (!capability || capability === 'image') {
+    const channels = menu ? menu.channels : await getImageGenerationChannels(client, true);
+    const options = menu ? menu.options : await getImageGenerationChannelOptions(client, true);
+    for (const channel of options.items) {
+      if (channel.id === 'original') continue;
+      for (const model of IMAGE_STUDIO_MODELS) {
+        const capability = channel.models[model];
+        if (!capability) continue;
+        const settings = resolveImageGenerationModelSettings(selectImageGenerationSettings(channels, model, channel.id), model);
+        const actual = capability.billingMode === 'actual';
+        const address = new URL(settings.base_url);
+        const scope = settings.api_key && address.protocol === 'https:' && !address.username && !address.password ? imageBillingScope(settings) : undefined;
+        const source = binding(channel.id, { provider: settings.provider, baseUrl: settings.base_url,
+          upstreamModel: settings.modelCapabilities[model]?.upstreamModel || model, protocol: capability,
+          credentials: pricingFingerprint(settings.api_key), billingIntent: actual ? await imageBillingIntent(client, menu?.inputs.image.intent) : null },
+        settings.api_key, settings.configRevision, scope);
+        const actualReady = capability.actualQuoteRequired && capability.ready;
+        const rawCapability = settings.modelCapabilities[model];
+        const transport = rawCapability ? validateImageGenerationChannel({ ...settings, modelCapabilities: { ...settings.modelCapabilities,
+          [model]: { ...rawCapability, billingMode: 'fixed', fixedPoints: 0 } } }, { model }) : null;
+        const value = row({ kind: 'image', channelId: channel.id, modelId: model, billingMode: actual ? 'actual' : 'fixed', unit: 'image', specifications: {} },
+          IMAGE_STUDIO_MODEL_LABELS[model], channel.supplierName || channel.label, channel.enabled,
+          actual ? actualReady : Boolean(transport?.ok), actual ? null : capability.fixedPoints,
+          capability.disabledReason || channel.disabledReason, [
+            `质量：${capability.qualities?.join(' / ') || '未知'}`, `分辨率：${capability.resolutions?.join(' / ') || '未知'}`,
+            `比例：${capability.ratios?.join(' / ') || '沿原比例合同'}`,
+          ], (options.defaultRoutes?.models[model] || (model.startsWith('gemini-') ? 'banana' : 'shared')) === channel.id);
+        value.enabled = channel.enabled && settings.modelCapabilities[model]?.enabled === true;
+        if (!value.enabled) value.availability = 'disabled';
+        add(value, source);
+      }
+    }
+    qualityRoutes = options.defaultRoutes?.qualityRoutes;
   }
   rows.sort((a, b) => a.identity.kind.localeCompare(b.identity.kind) || a.identity.channelId.localeCompare(b.identity.channelId) || a.id.localeCompare(b.id));
   if (new Set(rows.map(value => value.id)).size !== rows.length) throw new Error('收费目录存在重复作用域，已停止使用');
   // Display routing is not a pricing scope or source binding. Keep existing drafts and evidence valid.
   const fingerprint = pricingFingerprint({ rows, bindings, sources: Array.from(sources.entries()).sort() });
-  const displayedRows = rows.map(value => projectPricingDisplay(value, options.defaultRoutes?.qualityRoutes));
+  const displayedRows = rows.map(value => projectPricingDisplay(value, qualityRoutes));
   return { rows: displayedRows, bindings, fingerprint };
 }
 

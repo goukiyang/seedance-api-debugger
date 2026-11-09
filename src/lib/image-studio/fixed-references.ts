@@ -59,7 +59,7 @@ export async function repairStudioFixedReferences(actor: ImageStudioIdentity, pr
   const replacementIds = Array.from(new Set(Array.from(changes.values()).flatMap(item => item.replacementAssetId ? [item.replacementAssetId] : [])));
   if (replacementIds.length) {
     const readable = await client.asset.count({ where: { id: { in: replacementIds }, owner_id: actor.id,
-      status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(actor, client)] } });
+      status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(actor, client, replacementIds)] } });
     if (readable !== replacementIds.length) throw new StudioFixedReferenceError('替换图片已不可用或无权读取，固定参考未修改', 403);
   }
   // A slot has exactly one replacement or is removed. Untouched identities,

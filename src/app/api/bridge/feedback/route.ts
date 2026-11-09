@@ -1,3 +1,4 @@
+import { traceHttpRequest } from '@/lib/performance/request-trace';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { feedbackPrisma } from '@/lib/feedback/notification';
@@ -16,13 +17,16 @@ async function identity(expected: unknown) {
   return user;
 }
 export async function GET(request: NextRequest) {
+  return traceHttpRequest('feedback.bridge-read', request.headers, async () => {
   try {
     const query = request.nextUrl.searchParams, user = await identity(query.get('expectedUserId'));
     const receipt = await readFeedbackSubmission(feedbackPrisma, user.id, query.get('operationId'));
     return NextResponse.json(receipt ? { ...receipt.result, replayed: true, status: 'accepted' } : { success: true, status: 'not_found' }, { headers });
   } catch (error) { return failure(error); }
+  });
 }
 export async function POST(request: NextRequest) {
+  return traceHttpRequest('feedback.bridge-submit', request.headers, async () => {
   try {
     let body;
     try { body = await request.json(); } catch { throw new FeedbackSubmissionError('反馈内容格式无效'); }
@@ -31,4 +35,5 @@ export async function POST(request: NextRequest) {
     const result = await feedbackPrisma.$transaction(tx => submitFeedback(tx, user, body, { plugin: true, userAgent: request.headers.get('user-agent') }));
     return NextResponse.json(result, { status: result.replayed ? 200 : 201, headers });
   } catch (error) { return failure(error); }
+  });
 }

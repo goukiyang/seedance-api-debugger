@@ -9,11 +9,12 @@ import { isStoredPrivatePrompt, privateOrigin } from '@/lib/security/private-pro
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { compileCanvasPromptReferences, parseCanvasPromptMentions } from '@/lib/canvas-prompt-references';
-import { bindModuleContextVersion, MODULE_CONTEXT_VERSION_RULE, snapshotModuleContextVersion, withContextVersionRetry } from './context-version';
+import { bindModuleContextVersion, readExistingModuleContextVersion, MODULE_CONTEXT_VERSION_RULE, snapshotModuleContextVersion, withContextVersionRetry } from './context-version';
 import type { ImageStudioTask, Prisma } from '@prisma/client';
 import { studioDeliveryStatus } from './delivery';
 import { ACTIVE_IMAGE_TASK_STATUSES, QueueCapacityError, QueueMaintenanceError, reserveImageStudioQueueCapacity } from './queue-capacity';
 import { prisma } from '@/lib/prisma';
+import { readSharedStudioSnapshot } from './read-snapshot';
 import { readRetry, writeRetry, publicRetry, retryConfig } from '@/lib/generation-retry/store';
 import { RETRY_RULES } from '@/lib/generation-retry/contracts';
 import { historicalStudioStyles } from './style-history';
@@ -36,7 +37,7 @@ import { assertPricingImageConsumerReady } from '@/lib/pricing/runtime';
 import { imageBillingView, parseImageBillingContract, type ImageBillingContract } from './billing-contract';
 import { consumeImageQuote } from './billing-quote-store';
 import { imageBillingReady } from './billing-readiness';
-import { captureImageGenerationChannel, resolveImageGenerationChannelSnapshot, validateImageGenerationChannel, imageGenerationModelOutputSize, imageGenerationSupportsStudioFourToOne,
+import { deferImageChannelVersionWrites, captureImageGenerationChannel, resolveImageGenerationChannelSnapshot, validateImageGenerationChannel, imageGenerationModelOutputSize, imageGenerationSupportsStudioFourToOne,
   getImageGenerationSettingsForModel, isImageGenerationApiReady, isStudioImageGenerationProvider, isMuskImageGenerationChannel, ImageGenerationChannelError,
   type ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation';
 import { resolveImageGenerationRequestChannel, resolveImageGenerationRequestRoute } from '@/lib/integrations/image-generation-defaults';
@@ -452,7 +453,7 @@ function parseHistoricalFixedReferences(value: unknown): StudioFixedReference[] 
   catch { throw new StudioError('历史固定参考图快照无效', 409); }
 }
 
-export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void>; batchItem?: boolean; frozenContract?: ImageBillingContract; sizePolicyVersion?: StudioSizePolicyVersion; imageFeishuFrozen?: FrozenImageFeishuChoice | null }, canvasUse?: { user: SessionUser; referenceImageIds: string[]; projectId?: string | null; referenceInput?: Record<string, unknown> }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }, roleMedia?: RoleMediaSubmission, currentPricing?: StudioCurrentPricingSubmission, characterLabPlanId?: string) {
+export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { quoteOnly?: boolean; save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void>; batchItem?: boolean; frozenContract?: ImageBillingContract; sizePolicyVersion?: StudioSizePolicyVersion; imageFeishuFrozen?: FrozenImageFeishuChoice | null }, canvasUse?: { user: SessionUser; referenceImageIds: string[]; projectId?: string | null; referenceInput?: Record<string, unknown> }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }, roleMedia?: RoleMediaSubmission, currentPricing?: StudioCurrentPricingSubmission, characterLabPlanId?: string) {
   let submissionStage = 'accepted-lookup';
   try {
   if (typeof body?.requestId === 'string' && /^[a-zA-Z0-9-]{16,80}$/.test(body.requestId)) {
@@ -557,7 +558,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   submissionStage = 'settings';
   const settings = await getImageStudioSettings();
   if (settings.revision !== input.revision) throw new StudioError('生成规则或通用上下文已更新，请重新读取设置后确认提交', 409);
-  await withContextVersionRetry(() => prisma.$transaction(async tx => {
+  const prepare = async (tx: Prisma.TransactionClient) => {
     submissionStage = 'admission';
     currentPricing?.onPriceConfirmation(null);
     const duplicate = await tx.imageStudioTask.findFirst({ where: { batch_id: batchId, owner_id: ownerId } });
@@ -1089,7 +1090,11 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const resolution = normalizeImageResolution(generation.model, effectiveResolution, imageApi.provider);
     const outputSize = imageGenerationModelOutputSize(imageApi, generation.model, resolution, resolvedAspectRatio, sizePolicyVersion);
     submissionStage = 'context-version';
-    const moduleContextVersion = await bindModuleContextVersion(snapshotModuleContext, tx);
+    // A preview does not allocate a persistent display code. Acceptance binds it
+    // in the original task/credit transaction; the quote fingerprint uses the context itself.
+    const moduleContextVersion = preparation?.quoteOnly
+      ? await readExistingModuleContextVersion(snapshotModuleContext, tx)
+      : await bindModuleContextVersion(snapshotModuleContext, tx);
     if (!preparation && !billingQuoteId && actualBillingEligible) {
       throw new StudioError('当前模型需要确认有效报价，请重新报价后提交；尚未生成', 409);
     }
@@ -1275,7 +1280,13 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       } });
     }
     if (!preparation && avatar?.onQueued) await avatar.onQueued(tx, batchId);
-  }, { timeout: 15000 }));
+  };
+  if (preparation?.quoteOnly) {
+    const captured = await readSharedStudioSnapshot(tx => deferImageChannelVersionWrites(tx, () => prepare(tx)), 'quote');
+    if (captured.versions.length) await prisma.$transaction(async tx => {
+      for (const data of captured.versions) await tx.platformSetting.create({ data });
+    }, { timeout: 5000 });
+  } else await withContextVersionRetry(() => prisma.$transaction(prepare, { timeout: 15000 }));
   return batchId;
   } catch (error) {
     markStudioSubmitFailure(error, submissionStage);

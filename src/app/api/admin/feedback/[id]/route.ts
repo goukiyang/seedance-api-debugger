@@ -1,3 +1,4 @@
+import { traceHttpRequest } from '@/lib/performance/request-trace';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { errorJson, getAdminUser } from '@/lib/auth/api-helpers';
@@ -14,6 +15,9 @@ function text(value: unknown) {
 }
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+  return traceHttpRequest('feedback.admin-read', request.headers, () => getFeedbackRequest(request, { params }));
+}
+async function getFeedbackRequest(request: NextRequest, { params }: { params: { id: string } }) {
   let admin;
   try {
     admin = await getAdminUser(request);
@@ -43,6 +47,9 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 }
 
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+  return traceHttpRequest('feedback.admin-update', request.headers, () => patchFeedbackRequest(request, { params }));
+}
+async function patchFeedbackRequest(request: NextRequest, { params }: { params: { id: string } }) {
   let admin;
   try {
     admin = await getAdminUser(request);

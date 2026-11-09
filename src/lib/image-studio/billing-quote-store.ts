@@ -1,4 +1,5 @@
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { prisma } from '@/lib/prisma';
 import type { ImageGenerationChannelSnapshot } from '@/lib/integrations/image-generation-channel';
 import { parseImageBillingContract, type ImageBillingContract } from './billing-contract';
 import { imageBillingReady } from './billing-readiness';
@@ -8,6 +9,41 @@ import { CURRENT_STUDIO_SIZE_POLICY_VERSION, type StudioSizePolicyVersion } from
 
 export const imageQuoteKey = (owner: string, id: string) => `image_billing_quote_v1:${owner}:${id}`;
 export type StoredImageQuote = { owner: string; count: number; fingerprint: string; intentRevision: number; contract: ImageBillingContract; sizePolicyVersion?: StudioSizePolicyVersion; imageChannel?: ImageGenerationChannelSnapshot; sharedLive?: SharedStudioIntent };
+
+/** Preview rows are disposable; accepted tasks keep their own frozen contract and consume this row in the same transaction. */
+export async function cleanupExpiredImageQuotePreviews(owner: string,
+  client: Pick<Prisma.TransactionClient, '$queryRaw' | 'platformSetting'> = prisma,
+  options: { now?: number; limit?: number } = {}) {
+  const now = options.now ?? Date.now();
+  const limit = Math.min(100, Math.max(1, Math.trunc(options.limit ?? 32)));
+  const prefix = imageQuoteKey(owner, '');
+  const rows = await client.$queryRaw<Array<{ id: string; key: string; value_json: string }>>(Prisma.sql`
+    WITH previews AS (
+      SELECT id, key, value_json, CASE WHEN json_valid(value_json) THEN value_json ELSE '{}' END AS value
+      FROM PlatformSetting WHERE key >= ${prefix} AND key < ${`${prefix}\uffff`}
+    )
+    SELECT id, key, value_json FROM previews
+    WHERE json_type(value, '$.contract.expiresAt') = 'text'
+      AND julianday(json_extract(value, '$.contract.expiresAt')) <= julianday(${new Date(now).toISOString()})
+    ORDER BY julianday(json_extract(value, '$.contract.expiresAt')), key LIMIT ${limit}
+  `);
+  const expired = rows.filter(row => {
+    try {
+      const id = row.key.slice(prefix.length);
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) return false;
+      const value = JSON.parse(row.value_json) as StoredImageQuote;
+      const contract = parseImageBillingContract(JSON.stringify(value.contract));
+      return contract !== null && value.owner === owner && Number.isSafeInteger(value.count) && value.count > 0
+        && value.fingerprint === contract?.specification && Date.parse(contract.expiresAt) <= now;
+    } catch { return false; }
+  });
+  if (!expired.length) return { scanned: rows.length, deleted: 0 };
+  const removed = await client.platformSetting.deleteMany({ where: { OR: expired.map(row => ({
+    id: row.id, key: row.key, value_json: row.value_json,
+  })) } });
+  return { scanned: rows.length, deleted: removed.count };
+}
+
 export async function consumeImageQuote(tx: Prisma.TransactionClient, input: { owner: string; id: string;
   count: number; fingerprint: string; specification: string; scope: string; model: string; sizePolicyVersion?: StudioSizePolicyVersion; imageChannel?: ImageGenerationChannelSnapshot; sharedLive?: SharedStudioIntent }) {
   const row = await tx.platformSetting.findUnique({ where: { key: imageQuoteKey(input.owner, input.id) } });

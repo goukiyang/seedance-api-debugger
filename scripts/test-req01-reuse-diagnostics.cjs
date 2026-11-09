@@ -16,6 +16,8 @@ function moduleAt(relative, dependencies, globals = {}) {
     console: { info() {}, error() {} }, require(name) {
       if (Object.hasOwn(dependencies, name)) return dependencies[name];
       if (name === 'node:crypto') return require(name);
+      if (name === '@/lib/performance/server-operations') return { observeOperation: () => () => {} };
+      if (name === '@/lib/performance/request-trace') return { traceMetadata: () => ({ requestId: null, txId: null }) };
       throw new Error(`Unexpected dependency: ${name}`);
     }, ...globals }, { filename: relative });
   return exports;
@@ -36,6 +38,7 @@ function fixture(mode) {
   } };
   const dependencies = { 'server-only': {}, '@/lib/prisma': { prisma },
     '@/lib/auth/session': { AuthError: class AuthError extends Error {} },
+    '@/lib/video/prompt-groups-build-mode': { VIDEO_PROMPT_GROUP_WRITES_ENABLED: true },
     '@/lib/projects/permissions': {}, '@/lib/tasks/retention': {}, '@/lib/reference-albums/permissions': {},
     '@/lib/assets/workspace': {}, '@/lib/image-studio/read-snapshot': { sharedStudioReadDiagnostics: () => shared },
     './task-reuse-intent': {}, };
@@ -85,8 +88,8 @@ async function main() {
     const enter = new Promise(resolve => { releaseEnter = resolve; });
     const body = new Promise(resolve => { releaseBody = resolve; });
     const events = [];
-    const mod = moduleAt('src/lib/image-studio/read-snapshot.ts', { '@/lib/prisma': {
-      prisma: { $transaction: async run => { await enter; return run({}); } }, retrySqliteBusy: run => run(),
+    const mod = moduleAt('src/lib/image-studio/read-snapshot.ts', { '@/lib/sqlite-prisma-read-snapshot': {
+      withSqlitePrismaReadSnapshot: async run => { await enter; return run({}); },
     } }, { Date: { now: () => now }, console: { info: (label, value) => events.push({ label, ...JSON.parse(value) }) } });
     const first = mod.readSharedStudioSnapshot(async () => { await body; return 'same-value'; }, 'catalog');
     await flush();
@@ -104,9 +107,8 @@ async function main() {
     results.push('shared-read queue distinguishes waiting vs holding and drains without changing results');
   }
   {
-    const mod = moduleAt('src/lib/image-studio/read-snapshot.ts', { '@/lib/prisma': {
-      prisma: { $transaction: async () => { throw Object.assign(new Error('fixture'), { code: 'P1008' }); } },
-      retrySqliteBusy: run => run(),
+    const mod = moduleAt('src/lib/image-studio/read-snapshot.ts', { '@/lib/sqlite-prisma-read-snapshot': {
+      withSqlitePrismaReadSnapshot: async () => { throw Object.assign(new Error('fixture'), { code: 'P1008' }); },
     } });
     await assert.rejects(() => mod.readSharedStudioSnapshot(async () => {}, 'gallery'), { code: 'P1008' });
     await flush(); assert.equal(mod.sharedStudioReadDiagnostics().pending, 0); assert.equal(mod.sharedStudioReadDiagnostics().active, null);

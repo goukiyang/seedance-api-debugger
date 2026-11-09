@@ -10,13 +10,18 @@ import { execFileSync } from 'node:child_process';
 import { PrismaClient, Prisma } from '@prisma/client';
 import ts from 'typescript';
 import * as trace from '../src/lib/performance/request-trace';
+import * as reproductionKeys from '../src/lib/image-studio/reproduction-record-keys';
 import * as contract from '../src/lib/performance/trace-contract';
+import { sqliteClient } from '../src/lib/sqlite-client';
+import { withSqlitePrismaReadSnapshot } from '../src/lib/sqlite-prisma-read-snapshot';
 
 type Exports = Record<string, any>;
 type Log = { label: string; value: Record<string, any>; channel: 'stdout' | 'stderr' };
 const root = realpathSync(process.cwd()), require = createRequire(import.meta.url);
 const sources = ['src/lib/performance/request-trace.ts', 'src/lib/performance/trace-contract.ts', 'src/lib/catalog-directory-writes.ts',
-  'src/lib/performance/server-operations.ts', 'src/lib/image-studio/read-snapshot.ts', 'src/app/api/image-studio/gallery/query/route.ts',
+  'src/lib/sqlite-client.ts', 'src/lib/sqlite-prisma-read-snapshot.ts', 'src/lib/usage/sqlite-read-snapshot.ts',
+  'scripts/usage-sqlite-reader.py', 'src/lib/image-studio/catalog-revision.ts',
+  'src/lib/image-studio/reproduction-record-keys.ts', 'src/lib/platform-setting-prefix.ts', 'src/lib/performance/server-operations.ts', 'src/lib/image-studio/read-snapshot.ts', 'src/app/api/image-studio/gallery/query/route.ts',
   'src/lib/image-studio/gallery-page.ts', 'scripts/request-trace-engineering.ts'];
 
 async function main() {
@@ -55,9 +60,10 @@ async function main() {
     await db.$executeRawUnsafe('CREATE TABLE PlatformSetting (id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE, value_json TEXT NOT NULL, updated_by TEXT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)');
     return db;
   }
-  const revision = evaluate('src/lib/image-studio/catalog-revision.ts', { '@/lib/pricing/runtime': { assertPricingImageConsumerReady: () => forbidden('pricing-readiness') } });
+  const revision = evaluate('src/lib/image-studio/catalog-revision.ts', { './reproduction-record-keys': reproductionKeys, '@/lib/pricing/runtime': { assertPricingImageConsumerReady: () => forbidden('pricing-readiness') } });
   const loadWrapper = (baseline = false) => evaluate('src/lib/catalog-directory-writes.ts', {
     '@prisma/client': { Prisma }, './image-studio/catalog-revision': revision, './performance/request-trace': trace,
+    './sqlite-client': { sqliteClient },
   }, baseline ? execFileSync('git', ['show', '7513df5ce:src/lib/catalog-directory-writes.ts'], { cwd: root, encoding: 'utf8' }) : undefined).catalogDirectoryWrites as (client: PrismaClient) => PrismaClient;
   const headers = (id: string = randomUUID()) => new Headers({ [contract.TRACE_ID_HEADER]: id, [contract.TRACE_START_HEADER]: String(Date.now()) });
   const secret = 'SYNTHETIC_PROMPT_COOKIE_TOKEN_URL_DO_NOT_LOG';
@@ -178,13 +184,13 @@ async function main() {
     checks.push('http_response_identity_body_cache_status_preserved_and_ssr_thrown_values_unchanged');
 
     const capacity = evaluate('src/lib/performance/server-operations.ts', { './request-trace': trace });
-    const snapshot = evaluate('src/lib/image-studio/read-snapshot.ts', { '@/lib/prisma': { prisma: db, retrySqliteBusy: (run: () => Promise<unknown>) => run() },
+    const snapshot = evaluate('src/lib/image-studio/read-snapshot.ts', { '@/lib/sqlite-prisma-read-snapshot': { withSqlitePrismaReadSnapshot },
       '@/lib/performance/server-operations': capacity, '@/lib/performance/request-trace': trace });
     let release!: () => void, entered!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; }), active = new Promise<void>(resolve => { entered = resolve; });
     const first = trace.traceServerRequest('studio.modules', headers(one), () => snapshot.readSharedStudioSnapshot(async (tx: Prisma.TransactionClient) => {
       const holder = snapshot.sharedStudioReadDiagnostics().active;
-      assert.equal(holder.requestId, one); assert.equal(holder.txId, trace.traceMetadata().txId); assert.ok(holder.txId);
+      assert.equal(holder.requestId, one); assert.equal(holder.txId, null); assert.equal(trace.traceMetadata().txId, null);
       entered(); await gate; return tx.platformSetting.count();
     }, 'modules'));
     await active;
@@ -214,7 +220,7 @@ async function main() {
     assert.equal(contract.traceOperationForPath('/api/admin/costs/export'), 'admin.cost-ledger-export');
     const output = JSON.stringify(logs);
     assert.ok(!output.includes(secret)); assert.ok(!output.includes('NEXT_REDIRECT')); assert.ok(!output.includes('value_json'));
-    assert.ok(logs.every(log => ['[RequestTrace]', '[Capacity]', '[StudioSharedRead]'].includes(log.label)));
+    assert.ok(logs.every(log => ['[RequestTrace]', '[Capacity]', '[StudioSharedRead]', '[UsageReadSnapshot]'].includes(log.label)));
     assert.ok(logs.filter(log => log.label === '[RequestTrace]').every(log => log.channel === 'stderr'));
     assert.ok(logs.filter(log => log.label === '[RequestTrace]').every(log => log.value.at && typeof log.value.epochMs === 'number' && typeof log.value.mono === 'number' && log.value.pid === process.pid));
     assert.ok(logs.some(log => log.value.errorCode === 'P1008')); assert.ok(logs.some(log => log.value.errorCode === 'P2002'));
@@ -233,4 +239,4 @@ async function main() {
   }
   console.log('REQUEST_TRACE_ENGINEERING_RECEIPT=' + destination);
 }
-void main().catch(error => { console.error(error instanceof Error ? error.stack : 'Request trace engineering failed'); process.exitCode = 1; });
+void main().catch(error => { process.stderr.write((error instanceof Error ? error.stack : 'Request trace engineering failed') + '\n'); process.exitCode = 1; });

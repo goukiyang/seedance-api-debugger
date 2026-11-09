@@ -1,8 +1,12 @@
+import { traceHttpRequest } from '@/lib/performance/request-trace';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { errorJson, getAdminUser } from '@/lib/auth/api-helpers';
 
 export async function POST(request: NextRequest) {
+  return traceHttpRequest('feedback.admin-archive', request.headers, () => postFeedbackRequest(request));
+}
+async function postFeedbackRequest(request: NextRequest) {
   let admin;
   try {
     admin = await getAdminUser(request);

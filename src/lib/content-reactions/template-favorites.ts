@@ -40,6 +40,10 @@ export async function readTemplateFavoriteLibrary(ownerId: string, client: Reade
 
 export async function favoriteOrganization(library: Library, client: Reader = prisma): Promise<TemplateFavoriteOrganization> {
   const rows = await client.contentReaction.findMany({ where: { user_id: library.ownerId, category: 'template', OR: [{ liked: true }, { favorited: true }] }, select: { content_key: true } });
+  return projectFavoriteOrganization(library, rows);
+}
+
+export function projectFavoriteOrganization(library: Library, rows: Array<{ content_key: string }>): TemplateFavoriteOrganization {
   const counts = new Map<string, number>();
   let ungroupedCount = 0;
   for (const row of rows) {

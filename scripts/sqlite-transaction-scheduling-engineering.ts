@@ -6,9 +6,10 @@ import path from 'node:path';
 import ts from 'typescript';
 import type { PrismaClient } from '@prisma/client';
 import * as trace from '../src/lib/performance/request-trace';
+import * as reproductionKeys from '../src/lib/image-studio/reproduction-record-keys';
 
 const root = realpathSync(process.cwd()), require = createRequire(import.meta.url);
-const sources = ['src/lib/catalog-directory-writes.ts', 'src/lib/image-studio/catalog-revision.ts',
+const sources = ['src/lib/sqlite-client.ts', 'src/lib/prisma.ts', 'src/lib/feedback/notification.ts', 'src/lib/catalog-directory-writes.ts', 'src/lib/image-studio/catalog-revision.ts', 'src/lib/image-studio/reproduction-record-keys.ts', 'src/lib/platform-setting-prefix.ts',
   'src/lib/performance/request-trace.ts', 'src/lib/performance/trace-contract.ts'];
 const sha = (file: string) => createHash('sha256').update(readFileSync(path.join(root, file))).digest('hex');
 process.exitCode = 1;
@@ -18,6 +19,7 @@ async function main() {
   const directory = mkdtempSync(path.join(scratch, 'sqlite-transactions-'));
   // Match the production Works consumer's one-CPU quota before starting the real engine.
   process.env.TOKIO_WORKER_THREADS = '1';
+  Object.assign(process.env, { NODE_ENV: 'production' });
   const databaseUrl = `file:${directory}/synthetic.db`;
   process.env.DATABASE_URL = databaseUrl;
   const { PrismaClient, Prisma } = await import('@prisma/client');
@@ -34,11 +36,12 @@ async function main() {
     }, module, module.exports);
     return module.exports;
   }
-  const revision = evaluate('src/lib/image-studio/catalog-revision.ts', { '@/lib/pricing/runtime': {
+  const revision = evaluate('src/lib/image-studio/catalog-revision.ts', { './reproduction-record-keys': reproductionKeys, '@/lib/pricing/runtime': {
     assertPricingImageConsumerReady() { forbiddenCalls++; throw new Error('Fixture cannot read production readiness'); },
   } });
+  const admission = evaluate('src/lib/sqlite-client.ts', { '@prisma/client': { Prisma }, './performance/request-trace': trace });
   const wrap = evaluate('src/lib/catalog-directory-writes.ts', {
-    '@prisma/client': { Prisma }, './image-studio/catalog-revision': revision, './performance/request-trace': trace,
+    '@prisma/client': { Prisma }, './image-studio/catalog-revision': revision, './sqlite-client': admission,
   }).catalogDirectoryWrites as (client: PrismaClient) => PrismaClient;
   const raw = new PrismaClient({ datasources: { db: { url: databaseUrl } }, log: [],
     __internal: { configOverride: (config: Record<string, unknown>) => ({ ...config, relativeEnvPaths: { rootEnvPath: '', schemaEnvPath: '' } }) },
@@ -46,8 +49,13 @@ async function main() {
   const db = wrap(raw), checks: string[] = [], metrics: Record<string, number> = {};
   assert.equal(wrap(raw), db); assert.equal(wrap(db), db);
   try {
-    await raw.$queryRawUnsafe('PRAGMA journal_mode=WAL');
-    await raw.$queryRawUnsafe('PRAGMA busy_timeout=10000');
+    const pragmas = async (client: PrismaClient) => ({
+      busy: Number((await client.$queryRawUnsafe<Array<{ timeout: number }>>('PRAGMA busy_timeout'))[0].timeout),
+      journal: (await client.$queryRawUnsafe<Array<{ journal_mode: string }>>('PRAGMA journal_mode'))[0].journal_mode,
+      synchronous: Number((await client.$queryRawUnsafe<Array<{ synchronous: number }>>('PRAGMA synchronous'))[0].synchronous),
+    });
+    assert.deepEqual(await pragmas(db), { busy: 10000, journal: 'wal', synchronous: 1 });
+    checks.push('first_actual_client_initializes_before_first_query');
     await raw.$executeRawUnsafe('CREATE TABLE Probe (id INTEGER PRIMARY KEY, value INTEGER NOT NULL)');
     await raw.$executeRawUnsafe('INSERT INTO Probe VALUES (1,0)');
     await raw.$executeRawUnsafe('CREATE TABLE PlatformSetting (id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE, value_json TEXT NOT NULL, updated_by TEXT, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)');
@@ -67,9 +75,11 @@ async function main() {
       const timer = setTimeout(release, 50);
       const results = await Promise.allSettled([first, second]); clearTimeout(timer);
       metrics[name] = performance.now() - started;
-      assert.ok(results.every(result => result.status === 'fulfilled'), `${name}: a competing transaction blocked the lock holder: ${JSON.stringify(results)}`);
+      assert.ok(results.every(result => result.status === 'fulfilled'), `${name}: a competing transaction blocked the lock holder: ${results.map(result => result.status).join(',')}`);
       assert.ok(metrics[name] < 1500, `${name}: synchronous engine lock wait remains (${metrics[name]}ms)`);
     };
+    // Isolate competing entry/commit scheduling from the engine's first transaction startup.
+    await db.$transaction(tx => tx.$queryRawUnsafe('SELECT 1'));
     await overlap('callbackMs', () => db.$transaction(tx => tx.$executeRawUnsafe('UPDATE Probe SET value=value+1 WHERE id=1')));
     assert.equal(await value(), 2); checks.push('single_worker_callbacks_do_not_block_commit');
     await overlap('batchMs', () => db.$transaction([db.$executeRawUnsafe('UPDATE Probe SET value=value+1 WHERE id=1')]));
@@ -136,15 +146,46 @@ async function main() {
     const secondRaw = new PrismaClient({ datasources: { db: { url: databaseUrl } }, log: [],
       __internal: { configOverride: (config: Record<string, unknown>) => ({ ...config, relativeEnvPaths: { rootEnvPath: '', schemaEnvPath: '' } }) },
     } as ConstructorParameters<typeof PrismaClient>[0]);
+    const secondAdmission = evaluate('src/lib/sqlite-client.ts', { '@prisma/client': { Prisma }, './performance/request-trace': trace });
     const secondWrap = evaluate('src/lib/catalog-directory-writes.ts', {
-      '@prisma/client': { Prisma }, './image-studio/catalog-revision': revision, './performance/request-trace': trace,
+      '@prisma/client': { Prisma }, './image-studio/catalog-revision': revision, './sqlite-client': secondAdmission,
     }).catalogDirectoryWrites as (client: PrismaClient) => PrismaClient;
     const secondClient = secondWrap(secondRaw);
     try {
-      await secondClient.$queryRawUnsafe('SELECT 1');
+      assert.deepEqual(await pragmas(secondClient), { busy: 10000, journal: 'wal', synchronous: 1 });
+      checks.push('second_actual_client_has_its_own_pragma_initialization');
       await overlap('secondClientMs', () => secondClient.$transaction(async tx => { await tx.$queryRawUnsafe('SELECT 1'); }));
       checks.push('separate_clients_and_module_copies_share_process_queue');
     } finally { await secondRaw.$disconnect(); }
+    let applicationClients = 0;
+    const applicationImports = { '@prisma/client': { PrismaClient: class extends PrismaClient {
+      constructor(options: any) { applicationClients++; super({ ...options, datasources: { db: { url: databaseUrl } } }); }
+    } }, './catalog-directory-writes': { catalogDirectoryWrites: wrap } };
+    const application = evaluate('src/lib/prisma.ts', applicationImports).prisma as PrismaClient;
+    try {
+      assert.equal(evaluate('src/lib/prisma.ts', applicationImports).prisma, application);
+      assert.equal(applicationClients, 1);
+      assert.deepEqual(await pragmas(application), { busy: 10000, journal: 'wal', synchronous: 1 });
+      checks.push('production_application_module_copies_reuse_one_initialized_client');
+    } finally { await application.$disconnect(); delete (globalThis as any).prisma; }
+    const privacyOptions: unknown[] = [];
+    const feedbackImports = { '@prisma/client': { PrismaClient: class extends PrismaClient {
+      constructor(options: any) { privacyOptions.push(options); super({ ...options, datasources: { db: { url: databaseUrl } } }); }
+    } }, '@/lib/sqlite-client': admission, '@/lib/navigation': {}, './attachments': {}, './flow-state': {}, './source': {}, '@/lib/feishu/feedback-relay': {} };
+    const feedback = evaluate('src/lib/feedback/notification.ts', feedbackImports).feedbackPrisma as PrismaClient;
+    try {
+      assert.equal(evaluate('src/lib/feedback/notification.ts', feedbackImports).feedbackPrisma, feedback);
+      assert.deepEqual(privacyOptions, [{ log: [], errorFormat: 'minimal' }]);
+      assert.deepEqual(await pragmas(feedback), { busy: 10000, journal: 'wal', synchronous: 2 });
+      assert.deepEqual(await pragmas(db), { busy: 10000, journal: 'wal', synchronous: 1 });
+      checks.push('per_client_durability_keeps_application_normal_and_feedback_full');
+      await overlap('feedbackCallbackMs', () => feedback.$transaction(tx => tx.$queryRawUnsafe('SELECT 1')));
+      await overlap('feedbackBatchMs', () => feedback.$transaction([feedback.$queryRawUnsafe('SELECT 1')]));
+      await overlap('feedbackImplicitMs', () => feedback.platformSetting.upsert({ where: { key: 'private-feedback-fixture' },
+        create: { key: 'private-feedback-fixture', value_json: '{}' }, update: { value_json: '{}' } }));
+      checks.push('feedback_native_callback_batch_and_implicit_writes_share_admission');
+      checks.push('feedback_singleton_preserves_disabled_logs_and_minimal_errors');
+    } finally { await feedback.$disconnect(); delete (globalThis as any).feedbackPrisma; }
     assert.equal(forbiddenCalls, 0);
     const receipt = path.join(directory, 'receipt.json');
     writeFileSync(receipt, JSON.stringify({ schema: 'sqlite-transaction-scheduling-engineering.v1', synthetic: true, runId,

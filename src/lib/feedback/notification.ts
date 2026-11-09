@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { PrismaClient, type Prisma } from '@prisma/client';
+import { sqliteClient } from '@/lib/sqlite-client';
 import { adminNavItems, isNavItemActive, userNavItems } from '@/lib/navigation';
 import { feedbackAttachmentNotice, validFeedbackAttachments, type FeedbackAttachments } from './attachments';
 import { initializeFeedbackAcknowledgment } from './flow-state';
@@ -8,8 +9,8 @@ import { FEEDBACK_CARD_SOURCE } from '@/lib/feishu/feedback-relay';
 
 const feedbackGlobal = globalThis as unknown as { feedbackPrisma?: PrismaClient };
 // Feedback may contain pasted credentials. Never let database errors print it.
-export const feedbackPrisma = feedbackGlobal.feedbackPrisma ?? new PrismaClient({ log: [], errorFormat: 'minimal' });
-if (process.env.NODE_ENV !== 'production') feedbackGlobal.feedbackPrisma = feedbackPrisma;
+export const feedbackPrisma = feedbackGlobal.feedbackPrisma ?? sqliteClient(new PrismaClient({ log: [], errorFormat: 'minimal' }), { synchronous: 'FULL' });
+feedbackGlobal.feedbackPrisma = feedbackPrisma;
 
 export const FEEDBACK_NOTIFICATION_TYPE = 'feedback_feishu_v1';
 export const FEEDBACK_ACK_NOTIFICATION_TYPE = 'feedback_ack_feishu_v1';

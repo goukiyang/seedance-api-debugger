@@ -95,7 +95,8 @@ export function pricingRuntimeSourceFiles(root = process.cwd()) {
     'src/lib/integrations/image-generation.ts', 'src/lib/integrations/image-generation-channel.ts',
     'src/lib/integrations/image-generation-defaults.ts', 'src/lib/integrations/image-quality-routing.ts',
     'src/lib/assets/site-url.ts', 'src/lib/prisma.ts', 'src/lib/db.ts', 'src/lib/catalog-directory-writes.ts',
-    'src/lib/assets/catalog-visibility-sql.ts',
+    'src/lib/assets/catalog-visibility-sql.ts', 'src/lib/sqlite-client.ts', 'src/lib/sqlite-prisma-read-snapshot.ts',
+    'src/lib/platform-setting-prefix.ts', 'src/lib/usage/sqlite-read-snapshot.ts', 'scripts/usage-sqlite-reader.py', 'prisma/schema.prisma',
     'package.json', '.deployed-commit'].sort();
 }
 

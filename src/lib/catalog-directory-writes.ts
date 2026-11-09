@@ -1,8 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { bumpCatalogRevision, catalogRevisionKey, type CatalogDomain } from './image-studio/catalog-revision';
-import { observeTransaction } from './performance/request-trace';
+import { sqliteClient } from './sqlite-client';
+import { bumpCatalogRevision, catalogRevisionKey, catalogDependencyScopes, bumpCatalogDependencies, catalogDependencyMarkerData, type CatalogDomain } from './image-studio/catalog-revision';
 
 const operations = new Set(['create', 'createMany', 'update', 'updateMany', 'upsert', 'delete', 'deleteMany']);
 const both: CatalogDomain[] = ['templates', 'assets'];
@@ -19,7 +19,6 @@ const templatePrefixes = ['studio_shared_', 'studio_fixed_references_', 'studio_
 const assetPrefixes = ['asset-library-removal:', 'resource-library-removal:', 'multiview_'];
 const installed = new WeakMap<object, PrismaClient>();
 const marker = Symbol.for('sd2.catalog-directory-writes.v1');
-const processState = globalThis as typeof globalThis & { sd2SqliteTransactionQueue?: { tail: Promise<void> } };
 
 function settingKeys(value: unknown): string[] | null {
   if (typeof value === 'string') return [value];
@@ -47,7 +46,7 @@ function domains(model: string | undefined, operation: string, args: unknown): C
     const keys = settingKeys(input?.where?.key ?? input?.data?.key ?? input?.create?.key);
     if (!keys) return both;
     const relevant = keys.filter(key => key !== 'studio_shared_worker_v1' && !key.startsWith('studio_shared_request_v1:')
-      && !both.some(domain => key === catalogRevisionKey(domain)));
+      && !key.startsWith('catalog_dependency_revision_v1:') && !both.some(domain => key === catalogRevisionKey(domain)));
     if (!relevant.length) return [];
     return Array.from(new Set(relevant.flatMap(key => [
       ...(templatePrefixes.some(prefix => key.startsWith(prefix)) ? both : []),
@@ -63,63 +62,38 @@ function domains(model: string | undefined, operation: string, args: unknown): C
   return modelDomains[model] || [];
 }
 
-/** Directory invalidation and SQLite transaction entry. Business bodies and atomic markers stay unchanged. */
+/** Atomic directory invalidation; engine admission is shared by every application client. */
 export function catalogDirectoryWrites<T extends PrismaClient>(base: T): T {
   const alreadyTracked: unknown = Reflect.get(base, marker);
   if (alreadyTracked === true) return base;
   const existing = installed.get(base); if (existing) return existing as T;
   const context = new AsyncLocalStorage<Prisma.TransactionClient>();
   const promises = new WeakMap<object, CatalogDomain[]>();
-  const observedInputs = new WeakSet<object>();
-  const nativeTransaction = base.$transaction;
-  const sqlite = process.env.DATABASE_URL?.startsWith('file:');
-  const queue = processState.sd2SqliteTransactionQueue ??= { tail: Promise.resolve() };
-  // SQLite BEGIN waits occupy engine threads. Under a one-CPU service quota,
-  // a second BEGIN can prevent the lock holder's COMMIT from ever running.
-  // The engine runtime is shared by clients, so module copies must share this queue.
-  function schedule<R>(run: () => Promise<R>, maxWait?: number): Promise<R> {
-    if (!sqlite) return run();
-    let expired: Error | undefined, timer: ReturnType<typeof setTimeout> | undefined;
-    const pending = queue.tail.then(() => {
-      if (expired) throw expired;
-      if (timer) clearTimeout(timer);
-      return run();
-    });
-    queue.tail = pending.then(() => {}, () => {});
-    if (maxWait === undefined) return pending;
-    const waiting = new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(() => {
-        expired = new Prisma.PrismaClientKnownRequestError('Transaction API error: Unable to start a transaction in the given time.',
-          { code: 'P2028', clientVersion: Prisma.prismaVersion.client });
-        reject(expired);
-      }, maxWait);
-    });
-    return Promise.race([pending, waiting]).finally(() => { if (timer) clearTimeout(timer); });
-  }
-  // Queue at the original engine boundary. Observation/admission wrappers may
-  // legitimately perform another database action before invoking a captured transaction.
-  const serializedTransaction = function (this: object, input: unknown, options?: unknown) {
-    return schedule(() => Reflect.apply(nativeTransaction, this, [input, options]),
-      typeof input === 'function' ? (options as { maxWait?: number } | undefined)?.maxWait ?? 2000 : undefined);
-  };
-  Reflect.set(base, '$transaction', serializedTransaction);
-  const transaction = serializedTransaction.bind(base);
+  const dependencyPromises = new WeakMap<object, string[]>();
+  let transaction: PrismaClient['$transaction'];
   base.$use(async (params, next) => {
     const affected = domains(params.model, params.action, params.args);
-    if (!affected.length) return !params.runInTransaction && (operations.has(params.action) || params.action === 'executeRaw')
-      ? schedule(() => next(params)) : next(params);
+    const scopes = params.model && operations.has(params.action) ? catalogDependencyScopes(params.model, params.args) : [];
+    if (!affected.length && !scopes.length) return next(params);
     const tx = context.getStore();
     if (!params.runInTransaction) {
-      return observeTransaction('implicit', enter => transaction(async (current: Prisma.TransactionClient) => context.run(current, () => enter(async () => {
+      return transaction(async (current: Prisma.TransactionClient) => context.run(current, async () => {
         const name = params.model![0].toLowerCase() + params.model!.slice(1);
         const delegate = Reflect.get(current, name);
         return Reflect.apply(Reflect.get(delegate, params.action), delegate, [params.args]);
-      })), { maxWait: 5000, timeout: 15000 }));
+      }), { maxWait: 5000, timeout: 15000 });
     }
     const result = await next(params);
-    if (tx && !(result && typeof result === 'object' && 'count' in result && result.count === 0)) await bumpCatalogRevision(tx, affected);
+    if (tx && !(result && typeof result === 'object' && 'count' in result && result.count === 0)) {
+      await bumpCatalogRevision(tx, affected);
+      await bumpCatalogDependencies(tx, scopes);
+    }
     return result;
   });
+  // Register admission after the invalidation middleware: an implicit catalog
+  // write becomes one transaction before its engine entry is queued.
+  const admitted = sqliteClient(base);
+  transaction = admitted.$transaction.bind(admitted);
   const wrap = (client: object): T => new Proxy(client, { get(target, property) {
     if (property === marker) return true;
     if (property === '$transaction') {
@@ -127,12 +101,8 @@ export function catalogDirectoryWrites<T extends PrismaClient>(base: T): T {
       const targetTransaction = Reflect.get(target, '$transaction');
       return (input: unknown, options?: unknown) => {
         if (typeof input === 'function') {
-          const call = async (enter: <R>(body: () => Promise<R>) => Promise<R>) => {
-            const callback = (tx: Prisma.TransactionClient) => context.run(tx, () => enter(() => input(tx)));
-            observedInputs.add(callback);
-            return Reflect.apply(targetTransaction, target, [callback, options]);
-          };
-          return observedInputs.has(input) ? call(body => body()) : observeTransaction('callback', call);
+          const callback = (tx: Prisma.TransactionClient) => context.run(tx, () => input(tx));
+          return Reflect.apply(targetTransaction, target, [callback, options]);
         }
         if (!Array.isArray(input)) throw new Error('catalog_transaction_invalid');
         const affected = Array.from(new Set(input.flatMap(value => promises.get(value) || [])));
@@ -141,9 +111,11 @@ export function catalogDirectoryWrites<T extends PrismaClient>(base: T): T {
           const value_json = JSON.stringify({ version: 1, revision: randomBytes(32).toString('hex') });
           return base.platformSetting.upsert({ where: { key }, create: { key, value_json }, update: { value_json } });
         });
-        const batched = [...input, ...markers]; observedInputs.add(batched);
-        const call = () => Reflect.apply(targetTransaction, target, [batched, options]) as Promise<unknown[]>;
-        const pending = observedInputs.has(input) ? call() : observeTransaction('batch', call);
+        const scopes = Array.from(new Set(input.flatMap(value => dependencyPromises.get(value) || [])));
+        const dependencyMarkers = catalogDependencyMarkerData(scopes).map(({ key, value_json }) =>
+          base.platformSetting.upsert({ where: { key }, create: { key, value_json }, update: { value_json } }));
+        const batched = [...input, ...markers, ...dependencyMarkers];
+        const pending = Reflect.apply(targetTransaction, target, [batched, options]) as Promise<unknown[]>;
         return pending.then(values => values.slice(0, input.length));
       };
     }
@@ -156,10 +128,13 @@ export function catalogDirectoryWrites<T extends PrismaClient>(base: T): T {
       if (typeof method !== 'function') return method;
       return (...args: unknown[]) => {
         const promise = Reflect.apply(method, value, args), affected = domains(model, String(operation), args[0]);
-        if (affected.length && promise && typeof promise === 'object') promises.set(promise, affected);
+        if (promise && typeof promise === 'object') {
+          if (affected.length) promises.set(promise, affected);
+          if (operations.has(String(operation))) dependencyPromises.set(promise, catalogDependencyScopes(model, args[0]));
+        }
         return promise;
       };
     } });
   } }) as T;
-  const wrapped = wrap(base); installed.set(base, wrapped); installed.set(wrapped, wrapped); return wrapped;
+  const wrapped = wrap(admitted); installed.set(base, wrapped); installed.set(wrapped, wrapped); return wrapped;
 }

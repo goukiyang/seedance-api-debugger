@@ -12,7 +12,7 @@ import { assertPricingImageConsumerReady, pricingImageConsumerState } from './ru
 import { normalizeDecimal, multiplyDecimal, subtractDecimal, roundDecimal, roundFixedPricingCredits, compareDecimal, divideDecimal, PricingNumberError } from './math';
 import { selectPricingRule, assertNoRuleAmbiguity, PricingRuleConflict } from './resolve';
 import { getPricingCatalog, appendPricingCatalogScopes, pricingCatalogRowId, assertPricingCatalogIdentity, pricingCanonical, pricingFingerprint, type PricingCatalog,
-  type PricingCatalogBinding, type PricingClient } from './catalog';
+  type PricingCatalogBinding, type PricingClient, pricingCatalogCapability, type PricingCatalogCapability } from './catalog';
 import { PRICING_ADMIN_SCHEMA, PRICING_POLICY_KEY, PRICING_REVISION_PREFIX, PRICING_OPERATION_PREFIX,
   PRICING_UNCONFIGURED_REVISION, PRICING_ADMIN_LIMITS, RMB_INTEGER_ROUNDING,
   type PricingAdminActor, type PricingAdminBasis, type PricingAdminRow, type PricingAdminIdentity,
@@ -44,7 +44,7 @@ type Revision = { schemaVersion: 1; policy: Policy; authoring?: PricingAuthoring
   rows: PricingAdminRow[]; bindings: Record<string, PricingCatalogBinding> };
 type Receipt = { schemaVersion: 1; actorId: string; requestFingerprint: string; result: PricingAdminOperation };
 type State = { policy: Policy; raw: string | null; catalog: PricingCatalog; rows: PricingAdminRow[]; authoring: PricingAuthoring; authoringRaw: string | null };
-export type PricingMenuContext = PricingMenuSources & { policy?: Policy; state?: Promise<State> };
+export type PricingMenuContext = PricingMenuSources & { policy?: Policy; state?: Promise<State>; capabilityStates?: Map<PricingCatalogCapability, Promise<State>> };
 
 function menuPolicy(menu: PricingMenuContext) {
   return menu.policy ?? (menu.policy = menu.inputs.policy === null ? emptyPolicy() : parsePolicy(menu.inputs.policy));
@@ -326,7 +326,7 @@ function effectiveRow(original: PricingAdminRow, policy: Policy, binding: Pricin
 function signedDifferenceFromHundred(value: string): string {
   return compareDecimal(value, '100') < 0 ? `-${subtractDecimal('100', value)}` : subtractDecimal(value, '100');
 }
-async function readState(client: PricingClient, menu?: PricingMenuContext): Promise<State> {
+async function readState(client: PricingClient, menu?: PricingMenuContext, capability?: PricingCatalogCapability): Promise<State> {
   const stored = menu ? menu.inputs.policy === null ? null : { value_json: menu.inputs.policy }
     : await client.platformSetting.findUnique({ where: { key: PRICING_POLICY_KEY } });
   const policy = menu ? menuPolicy(menu) : stored ? parsePolicy(stored.value_json) : emptyPolicy();
@@ -340,8 +340,9 @@ async function readState(client: PricingClient, menu?: PricingMenuContext): Prom
       if (value.authoring && pricingCanonical(value.history?.authoringAfter) !== pricingCanonical(value.authoring)) corrupt();
     } catch { corrupt(); }
   }
-  const catalog = await getPricingCatalog(client, menu);
-  await appendPricingCatalogScopes(catalog, policy.rules.map(rule => rule.identity), client, false);
+  const catalog = await getPricingCatalog(client, menu, capability);
+  await appendPricingCatalogScopes(catalog, policy.rules.map(rule => rule.identity)
+    .filter(identity => !capability || pricingCatalogCapability(identity) === capability), client, false);
   const authoringStored = menu ? menu.inputs.authoring === null ? null : { value_json: menu.inputs.authoring }
     : await client.platformSetting.findUnique({ where: { key: PRICING_AUTHORING_KEY } });
   let authoring = emptyPricingAuthoring(policy.revision);
@@ -963,7 +964,14 @@ export async function resolvePricingCharge(identity: PricingAdminIdentity, clien
     throw new PricingAdminServiceError('该收费作用域已采用新策略，但当前规格没有唯一规则，未回退旧价', 409, 'pricing_scope_unmatched');
   }
   await assertPricingCatalogIdentity(identity, client, Boolean(adopted && ['follow', 'custom'].includes(adopted.mode) && adopted.baseCny && adopted.source), menu);
-  const state = await (menu ? menu.state ?? (menu.state = readState(client, menu)) : readState(client));
+  const capability = pricingCatalogCapability(identity);
+  let statePromise: Promise<State>;
+  if (menu) {
+    const states = menu.capabilityStates ?? (menu.capabilityStates = new Map());
+    statePromise = states.get(capability) ?? readState(client, menu, capability);
+    states.set(capability, statePromise);
+  } else statePromise = readState(client, undefined, capability);
+  const state = await statePromise;
   const catalogRow = selectPricingRule(state.catalog.rows, identity);
   if (!catalogRow) throw new PricingAdminServiceError('当前规格没有唯一且已确认的收费目录项，未回退旧价', 409, 'pricing_scope_unmatched');
   const row = state.rows.find(item => item.id === catalogRow.id)!;

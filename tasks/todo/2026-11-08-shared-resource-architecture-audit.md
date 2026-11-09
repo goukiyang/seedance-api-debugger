@@ -1,6 +1,6 @@
 # ARCH-AUDIT01 共享基础设施结构排查（2026-11-08）
 
-状态：排查和记录完成；以下新增项尚未修改、发布或完成功能验收。本轮不改业务逻辑、不升级版本、不清理生产数据。
+状态：排查完成；用户已授权本轮结构整改，A01–A10代码已实现并进入统一工程检查/同lead复核，A11由主控完成只读约束候选及发布接续。尚未部署，功能仍由用户手动验收；本轮没有清理生产数据。
 
 ## 1. 基线、范围与结论
 
@@ -142,3 +142,39 @@ v0.138.3 的真实依赖图原生事务隔离样本由约5020ms/P1008降为59.95
 隔离源副本在 `/data/video-api-debugger-engineering/studio-read-lock-20261108/source`。探针用实际依赖图初始化，须显式指向**新建的合成SQLite库**，使用 `NODE_ENV=production`、现有server-runtime/tsx及TOKIO_WORKER_THREADS=1或4；输出只能到上述私有审计目录。4线程样本额外参数8。不可把DATABASE_URL换成生产库、启动消费者或为对照发送真实反馈。归档的复跑参数、日志和JSON是复跑依据；相同等待时间不承诺每台机器一致。
 
 本轮生产取证仅SQLite mode=ro + query_only，未更改业务表、设置、余额、历史、文件、服务和供应商配置。仅本清单、固定待办/发现索引和私有证据归档有写入；功能仍按项目安排由用户手验。
+
+
+## 7. 整批整改实施与工程证据（2026-11-08）
+
+用户在审计后授权将已确认的结构整改一并落地，内部按不冲突范围修改，最终统一候选发布。实际工作树为 `video-api-debugger-worktrees/template-sharing-conflict-20261108`；保留原审计基线及失败原证。本节记录实现和工程检查，不代表功能验收或生产性能达标。
+
+| 范围 | 实际实现 | 保护与边界 |
+| --- | --- | --- |
+| A01/A02 | `sqlite-client.ts` 把进程共享SQLite准入从目录失效中抽出；主应用和反馈生产单例、每实际client独立初始化，反馈原生事务及隐式写接同一准入 | 反馈仍 `log: [] / errorFormat: minimal`，显式保FULL；主应用保持既定NORMAL，均busy_timeout=10000/WAL。不放宽回滚、等待超时或迟到执行规则 |
+| A03 | 显示主快照及明确内部 `quoteOnly` 准备沿现有Python同文件 `mode=ro/query_only/BEGIN DEFERRED`；共享原权限/输入/价格实现。旧通道捕获所需不可变加密版本只在该client的专用异步上下文暂存，读快照结束后短事务保存，再沿原鲜核和预览落库 | 只读adapter继续拒绝全部写，不变成通用写缓冲。真实受理及批次真实save保原鲜核/报价CAS/冻结收费事务。首次显示稳定5位context码仍有既有独立短初始化写，暖读无writer；报价首次不分配码，正常受理才绑定 |
+| A04 | 活动共享修订复用已判权投影前鲜核actor、私有策略和真实读取依赖marker；未知依赖不缓存。writer按相关模型/字段/命名空间原子更新对象依赖，保旧templates/assets marker | 无TTL、未改2秒周期或隐藏/离线门。固定参考、风格/提示词、来源/账号撤权立即失效。纯workspace/preset settings元数据不再扰动全局protection marker，仍保exact marker；无法定向的legacy保护仍可触发保守失效 |
+| A05/A06 | 已证server生成的固定ASCII命名空间用BINARY上下界，后缀ID原样保留；封面绑定/文件别名匹配和256预算按目标计算 | 未加表/索引/DDL。现代asset/pin既有定向路径不倒退；完全无法归属的坏legacy仍fail-closed，异常旧URL保原解析回退，不把坏绑定当公开 |
+| A07 | 请求内按目标批量读取实体/owner/授权，授权投影后统一搜索、排序、统计和分页；最终页再enrich封面/来源；点赞groupBy及私人组织复用原标记行 | 当前授权搜索及精确统计仍需O(N)候选投影，已减少逐项数据库往返；没有先分页漏授权项，也未为消除此成本新增通用投影表/合同 |
+| A08 | 固定/实际报价共用按owner、expiresAt和有界候选的预览清理，验证预览合同及原值CAS后删除 | 只在后续报价时整理该账号可丢弃预览，未执行生产清理；原提交回执、未知请求、任务冻结合同、账本及不可变通道版本均不纳入 |
+| A09 | 收费消费者按image/seedance/IP/enhance/H3 capability读取来源，管理及跨业务聚合目录仍严格全量 | 坏H3不再阻图片收费来源；真正共用policy/authoring损坏及原收费权限门继续拒绝，不补0、不换通道 |
+| A10 | quote成功/失败及准备/确认/供应商账单读取/落库接既有RequestTrace；网站、Bridge、后台处理/归档及飞书ack关联HTTP父请求和事务耗时 | 固定operation/phase，不记正文、配置值、凭据、私有素材或动态ID；后台独立worker没有HTTP父请求时不伪造 |
+| A11 | 主控已准备 `ops/sd2-preview-database-readonly.conf`，仅将预览service的数据库目录挂载为只读 | 旧Prisma URL的mode=ro不作为只读证明；合成systemd只读mount实际SELECT成功、INSERT拒绝，另一个合法writer提交后预览鲜读到新值。正式安装/唯一预览重启及健康验证由统一发布接续 |
+
+`pricingRuntimeSourceFiles` 已纳入新公共准入、只读TS/Python、prefix helper及schema，原能力协议和收费配置不改。新reader按原freshness门等待同源新worker；最终候选沿原 `preparePricingInputs` / startup guard再生证明，不手改价格、账本或已冻结合同。
+
+### 7.1 已取得的隔离工程证据
+
+- `scripts/catalog-object-permissions-fixture.ts`：最终15项通过，真实definition/shared modules/catalog/非lightweight revision/module暖显示/gallery穿同文件只读快照，组内无writer；首次显示码初始化单列验证。300条无关绑定/坏owner不影响目标，257只拒overflow目标；风格/素材/提示词撤权传播、旧URL别名和大小写后缀相容有证。真实Prisma范围SQL的EXPLAIN为 `SEARCH ... PlatformSetting_key_idx (key>? AND key<?)`。原证 `/tmp/catalog-object-permissions-fixture-final.json` 及同名log。
+- A07–A09真实模块/新合成SQLite：65私人标记在授权搜索后得到59项，跨cursor无漏/重，撤权/归档/私有文本和历史null/alias/group保持；每请求批量读取与公开likes隔离有证。固定/实际预览过期、owner、有界/CAS及非预览保留；坏H3能力隔离和共享policy坏拒绝有证。脚本 `/tmp/bounded-projections-fixture.cjs`，最终 `/tmp/bounded-projections-fixture-r3.log`。两次fixture前置/期望错误已纠正，原日志保留。
+- 只读delegate工程12项真实Prisma对照通过：scalar/日期/布尔/关系/select/include/count/groupBy/raw及同快照并发撤权，真实raw RETURNING及delegate写均拒绝。原receipt `.role-tests/sqlite-read-delegates-XsRKHF/receipt.json`；最新源已接原prebuild门，最终Linux候选需再核。
+- 真实quote首用→正常受理→历史恢复probe通过：首用quote不分配context码、不建任务、不动点数；受理沿原mapping成对写入，specification相同；已有历史code保持，原task/freeze各一次，无供应商请求。原证 `/tmp/architecture-quote-consumers-20261108.json`、`-r3.log`。此合成单任务受理总耗时13.3ms，精确事务body未由query event同步捕获，不能将它写为精确持锁时间。原pricing G11追加同组合及callback/body计时，待最终Linux候选工程。
+- `node scripts/test-req01-reuse-diagnostics.cjs` 通过（`/tmp/arch-audit-req01-20261108.log`）；最终新增依赖/标签的RequestTrace 8组同源复验已退出0，原证 `/tmp/arch-audit-request-trace-20261108-final-r3.json`。
+- `npx tsc --noEmit --incremental false` 第二轮退出0，修正了真实strict类型问题；随后必要通道版本暂存/后台trace差量的最终本地类型检查因外盘I/O仍未收口，未冒称通过，最新差量交统一Linux候选Next内置类型门。各责任范围ESLint和diff检查已通过，最终统一diff检查另留证。
+
+SQLite队列工程曾完整通过；补production单例断言后的本机复跑在原1500ms阈值得到1519ms，两事务均成功且无P1008，已停止同类盲重跑，未放宽阈值。反馈FULL及最终namespace依赖修正后，以统一Linux候选原生门为最终证据；不能拿旧receipt冒最新源码全过。
+
+### 7.2 发布与仍待观察项
+
+本节实现未提交/推送/部署；统一构建、同源服务/guard、备份/回退保护及A11正式只读mount由主控接续。上线后仍写“已部署，待用户手动验收”。没有浏览器操作、收费生成、真实反馈发送或生产数据清理。
+
+实际生成受理继续承担必要鲜核/费用原子段；本轮把重复报价准备及显示主快照退出writer，不声称全部受理都已缩短。B01报表、B02全站容量/资源、B03完整原件一秒交付及多人出口仍按原缺证口径，不因数据库整改冒完成。已知坏legacy不可归属时的fail-closed和首次显示码短初始化明确保留；本轮未新增任务外问题。

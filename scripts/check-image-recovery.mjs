@@ -132,8 +132,22 @@ fixtures.push({ file: 'scripts/sqlite-transaction-scheduling-engineering.ts', sc
     'implicit_directory_write_keeps_atomic_markers', 'bare_sql_write_does_not_starve_transaction_commit',
     'non_catalog_write_is_scheduled_without_new_markers', 'rollback_preserves_data_and_releases_queue',
     'extended_and_instrumented_clients_enter_transaction_queue_only_once', 'expired_wait_never_executes_late_callback',
-    'separate_clients_and_module_copies_share_process_queue'], sources: ['src/lib/catalog-directory-writes.ts',
-    'src/lib/image-studio/catalog-revision.ts', 'src/lib/performance/request-trace.ts', 'src/lib/performance/trace-contract.ts'] });
+    'separate_clients_and_module_copies_share_process_queue', 'second_actual_client_has_its_own_pragma_initialization',
+    'production_application_module_copies_reuse_one_initialized_client', 'per_client_durability_keeps_application_normal_and_feedback_full',
+    'feedback_native_callback_batch_and_implicit_writes_share_admission', 'feedback_singleton_preserves_disabled_logs_and_minimal_errors'], sources: ['src/lib/catalog-directory-writes.ts',
+    'src/lib/image-studio/catalog-revision.ts', 'src/lib/image-studio/reproduction-record-keys.ts',
+    'src/lib/platform-setting-prefix.ts', 'src/lib/sqlite-client.ts', 'src/lib/prisma.ts', 'src/lib/feedback/notification.ts', 'src/lib/performance/request-trace.ts', 'src/lib/performance/trace-contract.ts'] });
+fixtures.push({ file: 'scripts/sqlite-prisma-read-snapshot-engineering.ts', schema: 'sqlite-prisma-read-snapshot-engineering.v1',
+  marker: 'SQLite read delegate engineering receipt: ', checks: [
+    'scalars_dates_booleans_null_and_projection', 'namespace_like_semantics_match_prisma',
+    'nested_boolean_empty_in_and_null_filters', 'relation_some_and_nested_select',
+    'relation_every_none_and_parent_null', 'include_preserves_scalar_result_and_related_rows',
+    'count_and_grouped_counts_match_prisma', 'count_select_matches_prisma', 'raw_parameterized_sql_and_bigints',
+    'findUniqueOrThrow_and_Date_filter_match_prisma',
+    'writer_commits_during_pinned_snapshot_and_next_snapshot_observes_revocation',
+    'raw_returning_and_delegate_writes_are_rejected_without_data_change',
+  ], sources: ['src/lib/sqlite-prisma-read-snapshot.ts', 'src/lib/usage/sqlite-read-snapshot.ts',
+    'scripts/usage-sqlite-reader.py', 'src/lib/image-studio/read-snapshot.ts'] });
 fixtures.push({ file: 'scripts/hd-chain-engineering.mjs', schema: 'hd-chain-engineering.v1',
   marker: 'HD chain engineering receipt: ', checks: HD_CHAIN_CHECKS, sources: HD_CHAIN_FIXTURE_SOURCES });
 fixtures.push({ file: 'scripts/image-size-policy-engineering.ts', schema: 'image-size-policy-engineering.v1',

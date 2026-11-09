@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { CapturedPricingImageInputs } from '@/lib/pricing/image-menu-inputs';
 import type { PricingMenuContext } from '@/lib/pricing/policy';
 import { imageBillingIntent, imageBillingReady, imageBillingProofKey, type CapturedImageBillingInputs } from '@/lib/image-studio/billing-readiness';
@@ -1031,18 +1032,31 @@ function privateVersionKey(channelId: string, revision: string) {
   return `${IMAGE_GENERATION_CHANNEL_VERSION_PREFIX}${channelId}:${revision}`;
 }
 
+type DeferredChannelVersion = { key: string; value_json: string; updated_by: string };
+const deferredChannelVersions = new AsyncLocalStorage<{
+  client: Prisma.TransactionClient | typeof prisma; rows: Map<string, DeferredChannelVersion>;
+}>();
+
+/** Quote preparation captures immutable versions from its pinned configuration.
+ * Persist these existing encrypted records only after the read snapshot closes.
+ */
+export async function deferImageChannelVersionWrites<T>(client: Prisma.TransactionClient,
+  read: () => Promise<T>): Promise<{ result: T; versions: DeferredChannelVersion[] }> {
+  const rows = new Map<string, DeferredChannelVersion>();
+  const result = await deferredChannelVersions.run({ client, rows }, read);
+  return { result, versions: Array.from(rows.values()) };
+}
+
 async function writePrivateChannelVersion(
   client: Prisma.TransactionClient | typeof prisma,
   version: PrivateImageGenerationChannelVersion,
   updatedBy: string,
 ) {
-  await client.platformSetting.create({
-    data: {
-      key: privateVersionKey(version.channelId, version.configRevision),
-      value_json: stringifyPrivateCredentials(privateVersionKey(version.channelId, version.configRevision), version),
-      updated_by: updatedBy,
-    },
-  });
+  const key = privateVersionKey(version.channelId, version.configRevision);
+  const data = { key, value_json: stringifyPrivateCredentials(key, version), updated_by: updatedBy };
+  const deferred = deferredChannelVersions.getStore();
+  if (deferred?.client === client) { deferred.rows.set(key, data); return; }
+  await client.platformSetting.create({ data });
 }
 
 async function readPrivateChannelVersion(
@@ -1053,8 +1067,10 @@ async function readPrivateChannelVersion(
 ): Promise<PrivateImageGenerationChannelVersion> {
   const key = privateVersionKey(channelId, revision);
   const raw = inputs?.versions.get(key);
-  const row = inputs ? raw === undefined ? null : { key, value_json: raw }
-    : await client.platformSetting.findUnique({ where: { key } });
+  const deferred = deferredChannelVersions.getStore();
+  const pending = deferred?.client === client ? deferred.rows.get(key) : undefined;
+  const row = pending ?? (inputs ? raw === undefined ? null : { key, value_json: raw }
+    : await client.platformSetting.findUnique({ where: { key } }));
   if (!row) throw new ImageGenerationChannelError('图片供应商配置修订不存在，不能替换为当前配置', 404, 'image_channel_revision_not_found');
   let parsed: unknown;
   try { parsed = parsePrivateCredentials(row.key, row.value_json); } catch (error) { if (isPrivatePromptError(error)) throw error; throw new ImageGenerationChannelError('图片供应商配置修订损坏，不能继续执行', 500, 'image_channel_revision_invalid'); }

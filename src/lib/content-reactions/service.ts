@@ -9,10 +9,11 @@ import type { ContentCategory, ContentKey, ReactionListResponse, ReactionMutatio
 import { createCutoutContentContext, type CutoutContentContext } from './cutout-content';
 import { tryContentKeyParts } from './key';
 import { TEMPLATE_MARK_WRITES_ENABLED, isTemplateContentKey, templateMarkData } from './template-mark';
-import { favoriteEntry, favoriteOrganization, readTemplateFavoriteLibrary } from './template-favorites';
+import { favoriteEntry, projectFavoriteOrganization, readTemplateFavoriteLibrary } from './template-favorites';
+import { createReactionProjection, type ReactionProjection } from './projection-context';
 
-async function resolveReactionContent(user: SessionUser, key: ContentKey, context?: CutoutContentContext) {
-  try { return await resolveContent(user, key, context); }
+async function resolveReactionContent(user: SessionUser, key: ContentKey, context?: CutoutContentContext, projection?: ReactionProjection) {
+  try { return await resolveContent(user, key, context, projection); }
   catch (error) {
     // A temporarily unreadable cutout must not block other favorites or removal of the viewer's own mark.
     if (key.startsWith('cutout_result:') && error instanceof Error && error.message === 'cutout_result_read_unavailable') return null;
@@ -122,14 +123,18 @@ export async function listReactions(user: SessionUser, params: URLSearchParams):
   const requestedGroup = params.get('group') || 'all';
   if (organized && requestedGroup !== 'all' && requestedGroup !== 'ungrouped' && !/^[0-9a-f-]{36}$/i.test(requestedGroup)) throw new ReactionError('分组筛选无效');
   const selectedGroup = personal && requestedGroup !== 'all' && requestedGroup !== 'ungrouped' && !personal.library.groups.some(group => group.id === requestedGroup) ? 'all' : requestedGroup;
+  const candidates = rows.filter(row => {
+    if (!personal || selectedGroup === 'all') return true;
+    const groupId = favoriteEntry(personal.library, row.content_key).groupId;
+    return selectedGroup === 'ungrouped' ? groupId === null : groupId === selectedGroup;
+  });
+  const projection = await createReactionProjection(user, candidates.flatMap(row => {
+    const parsed = tryContentKeyParts(row.content_key); return parsed ? [parsed.key] : [];
+  }));
   // Search only current, authorized projections. Unavailable entries never retain searchable private text.
-  for (const row of rows) {
-    if (personal && selectedGroup !== 'all') {
-      const groupId = favoriteEntry(personal.library, row.content_key).groupId;
-      if (selectedGroup === 'ungrouped' ? groupId !== null : groupId !== selectedGroup) continue;
-    }
+  for (const row of candidates) {
     const parsed = tryContentKeyParts(row.content_key);
-    const resolved = parsed ? await resolveReactionContent(user, parsed.key, context) : null;
+    const resolved = parsed ? await resolveReactionContent(user, parsed.key, context, projection) : null;
     if (search && (!resolved || !(resolved.prompt || resolved.summary.title).toLocaleLowerCase().includes(search))) continue;
     const template = resolved?.summary || templateIdentity(row.content_key);
     if (category === 'template' && params.get('templateKind') && template?.templateKind !== params.get('templateKind')) continue;
@@ -147,14 +152,22 @@ export async function listReactions(user: SessionUser, params: URLSearchParams):
   }
   const after = matches.filter(({ row }) => !cursor || markedAt(row) < cursor.time || (markedAt(row) === cursor.time && row.id < cursor.id));
   const page = after.slice(0, limit);
+  projection.details = true;
+  for (const entry of page) if (entry.resolved) {
+    entry.resolved = await resolveReactionContent(user, entry.row.content_key as ContentKey, context, projection);
+  }
+  const publicLikes = page.length ? await prisma.contentReaction.groupBy({ by: ['content_key'],
+    where: { content_key: { in: page.filter(entry => entry.resolved).map(entry => entry.row.content_key) }, liked: true }, _count: { _all: true } }) : [];
+  const likeCounts = new Map(publicLikes.map(row => [row.content_key, row._count._all]));
   const usage = await templateUsageCounts(prisma, user.id, page.flatMap(({ resolved }) => resolved?.summary.category === 'template' ? [resolved.summary.key] : []));
   const items: ReactionListResponse['items'] = [];
   for (const { row, resolved } of page) {
     const entry = personal ? favoriteEntry(personal.library, row.content_key) : null;
-    items.push({ key: row.content_key as ContentKey, category: row.category as ContentCategory, markedAt: markedAt(row), state: await getReactionState(user, row.content_key as ContentKey, Boolean(resolved)), content: resolved ? { ...resolved.summary, ...(resolved.summary.category === 'template' ? { usageCount: usage.get(resolved.summary.key) ?? null } : {}) } : null,
+    items.push({ key: row.content_key as ContentKey, category: row.category as ContentCategory, markedAt: markedAt(row), state: { key: row.content_key as ContentKey, liked: row.liked, favorited: row.favorited, version: row.version,
+        available: Boolean(resolved), likeCount: resolved ? likeCounts.get(row.content_key) || 0 : null }, content: resolved ? { ...resolved.summary, ...(resolved.summary.category === 'template' ? { usageCount: usage.get(resolved.summary.key) ?? null } : {}) } : null,
       ...(entry ? { personalAlias: entry.alias, groupId: entry.groupId } : {}) });
   }
   const last = page.at(-1)?.row;
   return { items, total: matches.length, counts, nextCursor: after.length > limit && last ? Buffer.from(JSON.stringify({ time: markedAt(last), id: last.id })).toString('base64url') : null,
-    ...(personal ? { organization: await favoriteOrganization(personal.library), selectedGroup } : {}) };
+    ...(personal ? { organization: projectFavoriteOrganization(personal.library, rows), selectedGroup } : {}) };
 }

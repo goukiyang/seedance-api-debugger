@@ -1,3 +1,4 @@
+import { traceHttpRequest } from '@/lib/performance/request-trace';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { recordAssetUploadLog } from '@/lib/assets/upload-log';
@@ -11,14 +12,17 @@ function failure(error: unknown) {
   { status: error instanceof FeedbackSubmissionError ? error.status : 503, headers });
 }
 export async function GET(request: NextRequest) {
+  return traceHttpRequest('feedback.read', request.headers, async () => {
   try {
     const user = await getSession(), query = request.nextUrl.searchParams;
     assertFeedbackIdentity(query.get('expectedUserId') || null, user?.id ?? null);
     const receipt = await readFeedbackSubmission(prisma, user?.id ?? null, query.get('operationId'));
     return NextResponse.json(receipt ? { ...receipt.result, replayed: true, status: 'accepted' } : { success: true, status: 'not_found' }, { headers });
   } catch (error) { return failure(error); }
+  });
 }
 export async function POST(request: NextRequest) {
+  return traceHttpRequest('feedback.submit', request.headers, async () => {
   const startedAt = Date.now();
   let userId: string | null = null;
   try {
@@ -39,4 +43,5 @@ export async function POST(request: NextRequest) {
       errorCode: 'feedback_mount_failed', errorMessage: '提交结果待确认' }).catch(() => console.warn('feedback_auxiliary_log_failed'));
     return failure(error);
   }
+  });
 }

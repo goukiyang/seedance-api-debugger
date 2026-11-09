@@ -66,6 +66,11 @@ async function retryContextVersion<T>(operation: () => Promise<T>): Promise<T> {
   throw new ContextVersionError();
 }
 
+/** Read an existing display code without allocating a mapping for a preview. */
+export function readExistingModuleContextVersion(raw: string, tx: Pick<Prisma.TransactionClient, 'platformSetting'>): Promise<string | null> {
+  return readMapping(createHash('sha256').update(raw, 'utf8').digest('hex'), tx);
+}
+
 // Both unique reservations commit together; a losing concurrent transaction retries as a whole.
 export async function bindModuleContextVersion(raw: string, tx: Prisma.TransactionClient): Promise<string> {
   const hash = createHash('sha256').update(raw, 'utf8').digest('hex');

@@ -1,3 +1,4 @@
+import { traceHttpRequest } from '@/lib/performance/request-trace';
 import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -14,6 +15,9 @@ function numberParam(value: string | null, fallback: number, max: number) {
 }
 
 export async function GET(request: NextRequest) {
+  return traceHttpRequest('feedback.admin-read', request.headers, () => getFeedbackRequest(request));
+}
+async function getFeedbackRequest(request: NextRequest) {
   try {
     await getAdminUser(request);
   } catch {

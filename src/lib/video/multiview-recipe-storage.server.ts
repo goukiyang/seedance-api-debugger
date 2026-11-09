@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
+import { platformSettingPrefix } from '@/lib/platform-setting-prefix';
 import { prisma } from '@/lib/prisma';
 import { siteUploadBaseUrls, siteUploadPathFromUrl } from '@/lib/assets/site-url';
 
@@ -84,7 +85,7 @@ export async function readMultiviewSystemReference(binding: MultiviewSystemRefer
 /** Immutable versions keep old file aliases protected after an administrator changes the current recipe. */
 export async function multiviewSystemReferenceBindings(db: BindingDb = prisma): Promise<MultiviewSystemReferenceBinding[]> {
   const rows = await db.platformSetting.findMany({ where: { OR: [
-    { key: 'multiview_rotation_preset_v1:current' }, { key: { startsWith: 'multiview_rotation_preset_v1:version:' } },
+    { key: 'multiview_rotation_preset_v1:current' }, { key: platformSettingPrefix('multiview_rotation_preset_v1:version:') },
   ] }, select: { value_json: true } });
   const found = new Map<string, MultiviewSystemReferenceBinding>();
   for (const row of rows) {
@@ -106,7 +107,7 @@ export function multiviewFileAliases(url: string | null | undefined) {
 }
 
 async function durableProtectedFiles(db: BindingDb) {
-  const rows = await db.platformSetting.findMany({ where: { key: { startsWith: MULTIVIEW_PRIVATE_MEDIA_ACCESS_PREFIX } }, select: { key: true, value_json: true } });
+  const rows = await db.platformSetting.findMany({ where: { key: platformSettingPrefix(MULTIVIEW_PRIVATE_MEDIA_ACCESS_PREFIX) }, select: { key: true, value_json: true } });
   return rows.map(row => {
     let value: unknown;
     try { value = JSON.parse(row.value_json); } catch { throw unavailable(); }

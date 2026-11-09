@@ -273,10 +273,21 @@ async function main() {
   ] } });
   captured = runtime.capturePricingWorkerCapability(source); await runtime.renewPricingWorkerCapability(db, captured);
   const moduleId = randomUUID();
-  await db.imageStudioModule.create({ data: { id: moduleId, owner_id: user.id, name: 'Isolated pricing module', model: 'gpt-image-2', quality: 'auto', resolution: '1K' } });
+  await db.imageStudioModule.create({ data: { id: moduleId, owner_id: user.id, name: 'Isolated pricing module', context: `Fresh G11 synthetic context ${randomUUID()}`, model: 'gpt-image-2', quality: 'auto', resolution: '1K' } });
   const imageBody = { moduleId, prompt: 'isolated fixture prompt', model: 'gpt-image-2', count: 3, quality: 'auto', resolution: '1K', aspectRatio: '1:1',
     referenceIds: [], revision: 0, requestId: randomUUID() };
+  const previewContextMappings = await db.platformSetting.count({ where: { OR: [
+    { key: { startsWith: 'studio_context_hash_' } }, { key: { startsWith: 'studio_context_code_' } },
+  ] } });
+  const previewTasks = await db.imageStudioTask.count({ where: { owner_id: user.id } });
+  const previewBalance = await db.creditAccount.findUniqueOrThrow({ where: { user_id: user.id } });
   const quoted = await prepareImageBillingQuote(user.id, imageBody);
+  equal(await db.platformSetting.count({ where: { OR: [
+    { key: { startsWith: 'studio_context_hash_' } }, { key: { startsWith: 'studio_context_code_' } },
+  ] } }), previewContextMappings);
+  equal(await db.imageStudioTask.count({ where: { owner_id: user.id } }), previewTasks);
+  equal(await db.creditAccount.findUniqueOrThrow({ where: { user_id: user.id } }), previewBalance);
+  active.evidence.push('ARCH-A03: real quote preparation uses the same permission/pricing implementation on a pinned read-only snapshot; it allocates no context code, task or credits.');
   equal(quoted.unitCredits, 0.2); equal(quoted.pricingRevision, snapshot.revision); ok(quoted.billingQuoteId);
   equal(quoted.estimatedCredits, 0.6);
   ok(quoted.imageChannel); equal(quoted.imageChannel?.channelId, 'original');
@@ -295,10 +306,25 @@ async function main() {
   equal((await db.platformSetting.findUniqueOrThrow({ where: { key: quoteKey } })).value_json, storedQuote.value_json);
   equal(await db.imageStudioTask.count({ where: { owner_id: user.id } }), beforeTasks);
   equal(await db.creditAccount.findUniqueOrThrow({ where: { user_id: user.id } }), beforeAcceptance);
-  const accepted = await submitStudioBatch(user.id, { ...imageBody, billingQuoteId: quoted.billingQuoteId, pricingRevision: quoted.pricingRevision, imageChannel: quoted.imageChannel, maxEstimatedCost: quoted.estimatedCredits });
+  const acceptingStartedAt = performance.now(), acceptingBodyMs: number[] = [];
+  const originalAcceptingTransaction = db.$transaction;
+  Reflect.set(db, '$transaction', (input: unknown, options?: unknown) => Reflect.apply(originalAcceptingTransaction, db, [
+    typeof input === 'function' ? async (tx: Prisma.TransactionClient) => {
+      const enteredAt = performance.now();
+      try { return await input(tx); } finally { acceptingBodyMs.push(performance.now() - enteredAt); }
+    } : input, options,
+  ]));
+  let accepted: string;
+  try { accepted = await submitStudioBatch(user.id, { ...imageBody, billingQuoteId: quoted.billingQuoteId, pricingRevision: quoted.pricingRevision, imageChannel: quoted.imageChannel, maxEstimatedCost: quoted.estimatedCredits }); }
+  finally { Reflect.set(db, '$transaction', originalAcceptingTransaction); }
+  active.evidence.push(`ARCH-A03 synthetic acceptance timing: totalMs=${Math.round((performance.now() - acceptingStartedAt) * 10) / 10}, transactionBodyMs=${acceptingBodyMs.map(ms => Math.round(ms * 10) / 10).join(',') || 'unavailable'}; original fresh authorization/quote CAS/credit freeze remain atomic.`);
   equal(await db.platformSetting.count({ where: { key: quoteKey } }), 0);
   const acceptedImages = await db.imageStudioTask.findMany({ where: { batch_id: accepted, owner_id: user.id } });
   equal(acceptedImages.length, 3); equal(precision.sumCredits(acceptedImages.map(task => task.unit_credits)), 0.6);
+  equal(await db.platformSetting.count({ where: { OR: [
+    { key: { startsWith: 'studio_context_hash_' } }, { key: { startsWith: 'studio_context_code_' } },
+  ] } }), previewContextMappings + 2);
+  ok(JSON.parse(acceptedImages[0].snapshot_json || '{}').moduleContextVersion);
   const acceptedImage = await db.imageStudioTask.findFirstOrThrow({ where: { batch_id: accepted, owner_id: user.id } });
   equal(acceptedImage.status, 'sr_rate_queued'); equal(acceptedImage.unit_credits, 0.2);
   equal(parseImageBillingContract(acceptedImage.billing_contract_json)?.pricing?.revision, snapshot.revision);

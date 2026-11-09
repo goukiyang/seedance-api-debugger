@@ -4,14 +4,18 @@ import { canUseCompanyTemplates } from '@/lib/image-studio/access';
 import { prepareImageBillingQuote, logImagePricingFailure } from '@/lib/image-studio/billing-quote-service';
 import { studioBusinessErrorStatus } from '@/lib/image-studio/tasks';
 import { ImageGenerationChannelError } from '@/lib/integrations/image-generation';
+import { traceHttpRequest, tracePhase } from '@/lib/performance/request-trace';
 
 export const dynamic = 'force-dynamic';
 export async function POST(request: NextRequest) {
+  return traceHttpRequest('studio.quote', request.headers, () => quote(request));
+}
+async function quote(request: NextRequest) {
   const startedAt = Date.now();
-  const user = await getSession();
+  const user = await tracePhase('auth', () => getSession());
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
   if (user.status !== 'active' || !canUseCompanyTemplates(user)) return NextResponse.json({ error: '无图片生成权限' }, { status: 403 });
-  try { return NextResponse.json(await prepareImageBillingQuote(user.id, await request.json()), { headers: { 'Cache-Control': 'private, no-store' } }); }
+  try { return NextResponse.json(await prepareImageBillingQuote(user.id, await tracePhase('parse', () => request.json())), { headers: { 'Cache-Control': 'private, no-store' } }); }
   catch (error) {
     logImagePricingFailure('preview', error, startedAt);
     if (error instanceof ImageGenerationChannelError) return NextResponse.json({ error: error.message, code: error.code, submitted: false }, { status: error.status });

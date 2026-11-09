@@ -17,11 +17,13 @@ import { imageBillingScope } from './billing-scope';
 import { readImageSupplierBills } from './billing-provider';
 import { supplierHistoryEstimate } from './billing-quote';
 import { exactSpecificationEstimate, imageCostGroup } from './billing-calibration';
-import { imageQuoteKey, type StoredImageQuote } from './billing-quote-store';
+import { cleanupExpiredImageQuotePreviews, imageQuoteKey, type StoredImageQuote } from './billing-quote-store';
 import { frozenPricingReservation } from '@/lib/pricing/charge';
 import { sumCredits } from '@/lib/credits/precision';
 import { samePricingImageCharge, withImagePricing } from '@/lib/pricing/image';
 import { CURRENT_STUDIO_SIZE_POLICY_VERSION } from './ratios';
+import { readSharedStudioSnapshot } from './read-snapshot';
+import { tracePhase } from '@/lib/performance/request-trace';
 
 type PreparedImageQuoteResult = {
   billingMode: 'fixed' | 'actual';
@@ -139,8 +141,10 @@ async function resolveQuoteSettings(model: string, channel: ImageGenerationChann
 
 export async function prepareImageBillingQuote(owner: string, body: Record<string, unknown>, avatar?: Parameters<typeof submitStudioBatch>[2],
   canvasUse?: Parameters<typeof submitStudioBatch>[4], canvasPrompt?: Parameters<typeof submitStudioBatch>[5], additionalInputCharacters = 0, characterLabPlanId?: string): Promise<PreparedImageQuoteResult> {
-  let phase = 'prepare_tasks';
+  let phase = 'cleanup_previews';
   try {
+    await tracePhase('quote.store', () => cleanupExpiredImageQuotePreviews(owner));
+    phase = 'prepare_tasks';
     return await prepareImageBillingQuoteOnce(owner, body, avatar, canvasUse, canvasPrompt, additionalInputCharacters,
       next => { phase = next; }, characterLabPlanId);
   } catch (error) {
@@ -153,8 +157,8 @@ async function prepareImageBillingQuoteOnce(owner: string, body: Record<string, 
   canvasUse: Parameters<typeof submitStudioBatch>[4], canvasPrompt: Parameters<typeof submitStudioBatch>[5], additionalInputCharacters: number,
   phase: (value: string) => void, characterLabPlanId?: string): Promise<PreparedImageQuoteResult> {
   const prepared: Prisma.ImageStudioTaskUncheckedCreateInput[] = [];
-  await submitStudioBatch(owner, { ...body, billingQuoteId: undefined, maxEstimatedCost: undefined }, avatar,
-    { batchItem: additionalInputCharacters > 0, save: async (_tx, data) => { prepared.push(data); } }, canvasUse, canvasPrompt, undefined, undefined, characterLabPlanId);
+  await tracePhase('quote.prepare', () => submitStudioBatch(owner, { ...body, billingQuoteId: undefined, maxEstimatedCost: undefined }, avatar,
+    { quoteOnly: true, batchItem: additionalInputCharacters > 0, save: async (_tx, data) => { prepared.push(data); } }, canvasUse, canvasPrompt, undefined, undefined, characterLabPlanId));
   if (!prepared.length) throw new StudioError('本次提交已存在，请直接查询生成记录', 409);
 
   phase('prepared_snapshot');
@@ -171,9 +175,9 @@ async function prepareImageBillingQuoteOnce(owner: string, body: Record<string, 
   const sharedResult = sharedLive ? { sharedLive } : {};
   const confirmDefinition = async () => {
     phase('confirm_definition');
-    if (sharedLive || taskSnapshot.restoredSettings !== undefined) await prisma.$transaction(tx => resolveOwnedStudioTaskSharedUse(owner,
+    if (sharedLive || taskSnapshot.restoredSettings !== undefined) await tracePhase('quote.confirm', () => readSharedStudioSnapshot(tx => resolveOwnedStudioTaskSharedUse(owner,
       typeof body.moduleId === 'string' ? body.moduleId : undefined, sharedLive, tx,
-      taskSnapshot.restoredSettings !== undefined ? parseStudioRequest(body) : undefined));
+      taskSnapshot.restoredSettings !== undefined ? parseStudioRequest(body) : undefined), 'quote'));
   };
   phase('resolve_channel');
   const imageChannel = imageChannelFromPreparedTask(task)
@@ -186,11 +190,13 @@ async function prepareImageBillingQuoteOnce(owner: string, body: Record<string, 
     ratio: typeof taskSnapshot.aspectRatio === 'string' ? taskSnapshot.aspectRatio : undefined };
   const confirmPricing = async () => {
     phase('confirm_pricing');
-    const fresh = await withImagePricing(await resolveQuoteSettings(base.model, imageChannel, requestedChannelId),
-      base.model, prisma, undefined, quoteSpecifications);
-    if (!samePricingImageCharge(fresh.quote?.charge, base.pricing)) {
-      throw new StudioError('图片规格或收费规则在准备期间已变化，请重新报价；尚未生成', 409);
-    }
+    await tracePhase('quote.confirm', async () => {
+      const fresh = await withImagePricing(await resolveQuoteSettings(base.model, imageChannel, requestedChannelId),
+        base.model, prisma, undefined, quoteSpecifications);
+      if (!samePricingImageCharge(fresh.quote?.charge, base.pricing)) {
+        throw new StudioError('图片规格或收费规则在准备期间已变化，请重新报价；尚未生成', 409);
+      }
+    });
   };
   let scope: string;
   try { scope = imageBillingScope(settings); }
@@ -211,7 +217,7 @@ async function prepareImageBillingQuoteOnce(owner: string, body: Record<string, 
       const quote: StoredImageQuote = { owner, count: prepared.length, fingerprint: base.specification,
         sizePolicyVersion: CURRENT_STUDIO_SIZE_POLICY_VERSION,
         intentRevision: 0, contract: base, ...sharedResult, ...(imageChannel ? { imageChannel } : {}) };
-      await prisma.platformSetting.create({ data: { key: imageQuoteKey(owner, billingQuoteId), value_json: JSON.stringify(quote), updated_by: owner } });
+      await tracePhase('quote.store', () => prisma.platformSetting.create({ data: { key: imageQuoteKey(owner, billingQuoteId!), value_json: JSON.stringify(quote), updated_by: owner } }));
     }
     return { ...sharedResult, billingMode: 'fixed', billingQuoteId, unitCredits: base.authorizedCredits,
       estimatedCredits: sumCredits(prepared.map(() => base.authorizedCredits)), revision: body.revision,
@@ -270,7 +276,7 @@ async function prepareImageBillingQuoteOnce(owner: string, body: Record<string, 
   const referencePixels = references.reduce((sum, reference) => sum + (reference.width && reference.height
     ? reference.width * reference.height : 40_000_000), 0);
   phase('supplier_bill_read');
-  const rows = await readImageSupplierBills(settings, base.scope);
+  const rows = await tracePhase('quote.supplier-bills', () => readImageSupplierBills(settings, base.scope));
   const historicalEstimate = supplierHistoryEstimate(rows, base.model,
     { inputCharacters: Math.max(...prepared.map(item => String(item.context).length + String(item.prompt).length)) + additionalInputCharacters, referencePixels });
   const specifications = prepared.map(item => ({ model: base.model, quality: item.quality, output_size: item.output_size,
@@ -314,9 +320,7 @@ async function prepareImageBillingQuoteOnce(owner: string, body: Record<string, 
     intentRevision: state.intentRevision, contract, ...sharedResult, ...(imageChannel ? { imageChannel } : {}),
   };
   phase('store_actual_quote');
-  await prisma.platformSetting.deleteMany({ where: { key: { startsWith: `image_billing_quote_v1:${owner}:` },
-    created_at: { lt: new Date(now - 120000) } } });
-  await prisma.platformSetting.create({ data: { key: imageQuoteKey(owner, id), value_json: JSON.stringify(quote), updated_by: owner } });
+  await tracePhase('quote.store', () => prisma.platformSetting.create({ data: { key: imageQuoteKey(owner, id), value_json: JSON.stringify(quote), updated_by: owner } }));
   return { ...sharedResult, billingMode: 'actual', billingQuoteId: id, unitCredits: authorizedCredits,
     estimatedCredits: sumCredits(prepared.map(() => authorizedCredits)), expiresAt: contract.expiresAt, revision: body.revision,
     actualChargeEnabled: true, ...(imageChannel ? { imageChannel: publicImageChannel(imageChannel) } : {}),
