@@ -131,7 +131,7 @@ async function main() {
       `${quote(field.dbName || field.name)} ${field.type === 'DateTime' ? 'DATETIME' : ['Int', 'BigInt', 'Boolean'].includes(field.type) ? 'INTEGER' : ['Float', 'Decimal'].includes(field.type) ? 'DOUBLE' : 'TEXT'}${field.isId ? ' PRIMARY KEY' : ''}`).join(',')});`).join('\n')
       + indexed.map(column => `CREATE INDEX CostLedger_${column}_idx ON CostLedger(${column});`).join('\n');
     const setup = spawnSync('/usr/bin/python3', ['-c', `import json,sqlite3,sys\np=json.load(sys.stdin)\nc=sqlite3.connect(p['file'])\nc.executescript(p['ddl'])\nfor row in p['seed']:\n names=list(row)\n c.execute('INSERT INTO CostLedger ('+','.join('"'+n+'"' for n in names)+') VALUES ('+','.join('?' for n in names)+')',[row[n] for n in names])\nc.commit()\nc.close()\n`],
-      { input: JSON.stringify({ file: filename, ddl, seed }), encoding: 'utf8', env: { PATH: '/usr/bin:/bin' } as NodeJS.ProcessEnv });
+      { input: JSON.stringify({ file: filename, ddl, seed }), encoding: 'utf8', env: { PATH: '/usr/bin:/bin', NODE_ENV: 'test' } });
     assert.ifError(setup.error); assert.equal(setup.status, 0, setup.stderr);
     const run = async (impl: Consumer, ids?: string[]) => {
       const trace: Trace[] = [], projections: Projection[] = [];
@@ -202,7 +202,7 @@ async function main() {
     await mkdir(path.dirname(receipt), { recursive: true, mode: 0o700 });
     writeFileSync(receipt, json({ schema: 'usage-peer-lookup-engineering.v1', synthetic: true, completed: true, runId, startedAt,
       finishedAt: new Date().toISOString(), checks, results, sourceSha256, baselineFactsSha256: sha(baselineText),
-      fixtureSha256: sourceSha256['scripts/usage-peer-lookup-engineering.ts'], importedPureModules: [...imported].sort(),
+      fixtureSha256: sourceSha256['scripts/usage-peer-lookup-engineering.ts'], importedPureModules: Array.from(imported).sort(),
       actualConsumers: ['attachCash', 'iterateUsageCashBatches'], observationOnlyInjection: 'Capture the actual post-merge ledgers; no peer filtering or event formulas replaced',
       globalPrismaImportsBlocked: true, prismaClientConstructorExposed: false, globalPrismaCalls, forbiddenCalls,
       productionWrites: 0, paidRequests: 0, browserRuns: 0, isolatedDatabaseDeleted: !existsSync(directory),
