@@ -176,17 +176,17 @@ with sqlite3.connect(sys.argv[1]) as db:
     const owner = await actor('owner'), colleague = await actor('colleague'), external = await actor('external', 'external');
     const unapproved = await actor('unapproved', 'internal', false), admin = await actor('admin', 'internal', true, 'admin');
     const project = await database.project.create({ data: { id: 'ordinary', name: 'PRIVATE_PROJECT_LABEL', owner_user_id: owner.id, created_by: owner.id, type: 'team', work_audience: 'team' } });
-    const createImage = async (suffix: string, audience: 'source' | 'team' | 'project' | 'private' = 'team', completedAt = new Date(Date.now() - 60_000)) => {
-      const asset = await database.asset.create({ data: { id: `asset-${suffix}`, owner_id: owner.id, type: 'image', original_url: `/uploads/fixture-${suffix}.png`,
+    const createImage = async (suffix: string, audience: 'source' | 'team' | 'project' | 'private' = 'team', completedAt = new Date(Date.now() - 60_000), creator: { id: string } = owner) => {
+      const asset = await database.asset.create({ data: { id: `asset-${suffix}`, owner_id: creator.id, type: 'image', original_url: `/uploads/fixture-${suffix}.png`,
         thumbnail_url: `/uploads/fixture-${suffix}-640.webp`, file_name: 'fixture.png', mime_type: 'image/png', file_size: 64, width: 1200, height: 800, hash: hash(suffix) } });
-      const task = await database.imageStudioTask.create({ data: { id: `image-${suffix}`, batch_id: `batch-${suffix}`, owner_id: owner.id,
+      const task = await database.imageStudioTask.create({ data: { id: `image-${suffix}`, batch_id: `batch-${suffix}`, owner_id: creator.id,
         ordinal: 1, fingerprint: suffix, prompt: 'PRIVATE_PROMPT_DO_NOT_PROJECT', context: 'PRIVATE_RECIPE_DO_NOT_PROJECT', revision: 1,
         model: 'synthetic', reference_ids: '[]', unit_credits: 0, status: 'succeeded', asset_id: asset.id, finished_at: completedAt } });
-      await database.usageAttribution.create({ data: { source_kind: 'image_task', source_id: task.id, actor_user_id: owner.id, owner_user_id: owner.id,
+      await database.usageAttribution.create({ data: { source_kind: 'image_task', source_id: task.id, actor_user_id: creator.id, owner_user_id: creator.id,
         project_id: project.id, occurred_at: task.created_at, context_origin: 'synthetic' } });
       const policy = audience === 'source' ? null : await database.workSourcePolicy.create({ data: { source_kind: 'image_task', source_id: task.id,
-        owner_id: owner.id, project_id: project.id, audience } });
-      const work = await database.work.create({ data: { id: `work-${suffix}`, source_kind: 'image_task', source_id: task.id, author_id: owner.id,
+        owner_id: creator.id, project_id: project.id, audience } });
+      const work = await database.work.create({ data: { id: `work-${suffix}`, source_kind: 'image_task', source_id: task.id, author_id: creator.id,
         project_id: project.id, title: `作品${suffix}`, medium: 'image', audience, completed_at: completedAt } });
       const media = await database.workMediaVersion.create({ data: { work_id: work.id, source_revision: hash(JSON.stringify([asset.id, asset.hash, asset.original_url])),
         policy_id: policy?.id, asset_id: asset.id, source_url: asset.original_url, source_updated_at: completedAt, content_hash: asset.hash,

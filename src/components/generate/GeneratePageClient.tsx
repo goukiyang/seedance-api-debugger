@@ -3283,6 +3283,10 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       : '展开后可切换或创建视频卡';
   const showRecentTaskSurface = recentTasksLoadingInitial || recentTasks.length > 0 || Boolean(recentTasksError || unconfirmedGenerationRequest || submitting);
   const normalVideoRedesign = !studioHandoff && !imageResultHandoff;
+  const creationAvailability = <CreationAvailability controller={creation} hideSummary={normalVideoRedesign} onBaselineChange={(id) => {
+    setCreationBaselineId(id);
+    if (creation.intent && creationDraftBodyRef.current) void creation.prepare({ ...creationDraftBodyRef.current, baseline_task_id: id }, creation.intent.request_id, creation.intent).catch(cause => setError(cause.message));
+  }} />;
   const modeSwitchBlocker = unconfirmedGenerationRequest || generationOperation.current || creation.unconfirmedRequestId
     || creation.intent && !isResolvedCreationIntent(creation.intent) ? '原提交结果尚未确认，请先核对原请求'
     : reuseUiLocked ? '原复用尚未确认，请先完成原操作'
@@ -3694,6 +3698,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           onSubmit={handleSubmit}
           submitAccessory={surface === 'standard' ? <VideoFeishuToggle state={videoFeishu} disabled={submitting || reuseUiLocked} label={normalVideoRedesign ? '发到飞书' : undefined} /> : undefined}
           submitError={error}
+          creationRecovery={normalVideoRedesign ? creationAvailability : undefined}
+          creationRecoveryMessage={normalVideoRedesign ? creation.error || (creation.loading ? '正在确认保存位置' : null) : null}
           submitErrorDebug={errorDebug}
           isSubmitting={submitting}
           result={result}
@@ -3726,10 +3732,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           }}
         />}
 
-        <CreationAvailability controller={creation} hideSummary={normalVideoRedesign} onBaselineChange={(id) => {
-          setCreationBaselineId(id);
-          if (creation.intent && creationDraftBodyRef.current) void creation.prepare({ ...creationDraftBodyRef.current, baseline_task_id: id }, creation.intent.request_id, creation.intent).catch(cause => setError(cause.message));
-        }} />
+        {!normalVideoRedesign && creationAvailability}
 
         {/* 最近任务 */}
         {showRecentTaskSurface && (

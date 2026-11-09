@@ -449,6 +449,8 @@ interface Props {
   onCollectionNew: (name: string) => Promise<void>;
   require1080pApproval: boolean;
   submitAccessory?: React.ReactNode;
+  creationRecovery?: React.ReactNode;
+  creationRecoveryMessage?: string | null;
   settingsContent?: React.ReactNode;
   settingsOpen?: boolean;
   onSettingsOpenChange?: (open: boolean) => void;
@@ -545,6 +547,8 @@ export function GenerationComposer({
   onCollectionNew,
   onSubmit,
   submitAccessory,
+  creationRecovery,
+  creationRecoveryMessage,
   settingsContent,
   settingsOpen,
   onSettingsOpenChange,
@@ -1337,9 +1341,17 @@ export function GenerationComposer({
         asset.fileName,
         asset.referenceAlbumName ? `来自 ${asset.referenceAlbumName}` : null,
       ].filter(Boolean);
+      const contentKey: ContentKey | undefined = asset.referenceImageId
+        ? `reference_image:${asset.referenceImageId}` : asset.assetId ? `asset:${asset.assetId}` : undefined;
+      const mediaUrl = asset.referenceImageId
+        ? `/api/reference-images/${encodeURIComponent(asset.referenceImageId)}/content?`
+        : asset.assetId ? `/api/content-reactions/media?key=${encodeURIComponent(`asset:${asset.assetId}`)}&` : null;
       return {
         label,
         title: titleParts.join(' · '),
+        thumbnailUrl: mediaUrl ? `${mediaUrl}variant=thumbnail` : asset.thumbnailUrl || undefined,
+        previewUrl: mediaUrl ? `${mediaUrl}variant=preview` : undefined,
+        contentKey,
       };
     });
   }, [imageReferenceAssets]);
@@ -1990,6 +2002,13 @@ export function GenerationComposer({
     setPreviewMedia({ src, type, title: title || '参考素材', poster, contentKey });
   }, []);
 
+  const handleReferencePreview = useCallback((label: string) => {
+    const reference = referenceLabels.find(item => item.label === label);
+    if (reference?.previewUrl && reference.contentKey) {
+      handlePreview(reference.previewUrl, 'image', reference.title, reference.thumbnailUrl, reference.contentKey);
+    }
+  }, [handlePreview, referenceLabels]);
+
   const resolvePendingMentionRequest = useCallback((insertText: string | null) => {
     if (!pendingMentionRequestRef.current) return;
     pendingMentionRequestRef.current.resolve(insertText);
@@ -2601,6 +2620,7 @@ export function GenerationComposer({
               value={prompt}
               onChange={handlePromptChange}
               referenceLabels={referenceLabels}
+              onPreviewReference={handleReferencePreview}
               mentionCandidates={mentionCandidates}
               onMentionSelect={handleMentionSelect}
             />
@@ -2612,6 +2632,7 @@ export function GenerationComposer({
             value={prompt}
             onChange={handlePromptChange}
             referenceLabels={referenceLabels}
+            onPreviewReference={handleReferencePreview}
             mentionCandidates={mentionCandidates}
             onMentionSelect={handleMentionSelect}
           />
@@ -2621,7 +2642,7 @@ export function GenerationComposer({
           onChange={refs => { markReuseInputChanged(); setVideoPromptGroups(refs); }} onUploadFile={workspace.uploadAssetToHistory} />}
 
         {/* 状态行 */}
-        {(!videoRedesign || Boolean(composerStatus.message) && !submitError && composerStatus.message !== referenceMediaPreflightBlocker && !workspace.pendingWorkspaceAttach) && <ComposerStatusLine
+        {(!videoRedesign || Boolean(composerStatus.message) && !submitError && composerStatus.message !== referenceMediaPreflightBlocker && !workspace.pendingWorkspaceAttach && composerStatus.message !== creationRecoveryMessage) && <ComposerStatusLine
           message={composerStatus.message}
           tone={composerStatus.tone}
           usedRefs={usedRefs}
@@ -2713,6 +2734,7 @@ export function GenerationComposer({
         {!videoRedesign && !canPressSubmit && <p role="status" style={{ margin: '8px 0', color: isSubmitting || submitBlockerState?.tone === 'progress' ? '#a4f2df' : '#fbbf24', overflowWrap: 'anywhere' }}>{isSubmitting ? '正在提交，请等待结果，不要重复点击。' : submitBlocker || submitDisabledReason || (!videoPricing.quote ? videoPricing.error || '正在读取报价' : '请先确认1080p审批已通过。')}
           {videoPricing.error && <button type="button" className="btn-icon" title="重新报价" aria-label="重新报价" onClick={videoPricing.refresh}><RotateCcw size={16} aria-hidden="true" /></button>}
         </p>}
+        {creationRecovery}
         <ComposerActionBar
           videoRedesign={videoRedesign}
           generationMode={generationMode}

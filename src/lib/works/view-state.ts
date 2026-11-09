@@ -43,6 +43,6 @@ export function saveWorkView(viewerId: string, view: SavedWorkView) {
 export function savedWorkUrl(view: SavedWorkView, pathname = '/works') {
   const params = worksQueryString(view.query);
   if (view.query.work) params.set('work', view.query.work);
-  if (!params.size) params.set('scope', 'all');
+  if (!params.size) params.set('scope', 'recommended');
   return `${pathname}?${params}`;
 }

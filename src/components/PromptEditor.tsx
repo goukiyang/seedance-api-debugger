@@ -19,6 +19,7 @@ import {
 interface ReferenceLabel {
   label: string;
   title: string;
+  thumbnailUrl?: string;
 }
 
 interface Props {
@@ -29,6 +30,7 @@ interface Props {
   onFormat?: () => void;
   referenceLabels?: ReferenceLabel[];
   onInsertReferenceLabel?: (label: string) => void;
+  onPreviewReference?: (label: string) => void;
   mentionCandidates?: PromptMentionCandidate[];
   onMentionSelect?: (candidate: PromptMentionCandidate) => Promise<string | null | undefined> | string | null | undefined;
 }
@@ -55,12 +57,15 @@ function getPromptTextareaMaxHeight() {
 }
 
 function fitTextareaHeight(textarea: HTMLTextAreaElement) {
+  const { scrollTop, scrollLeft } = textarea;
   const cssMaxHeight = Number.parseFloat(window.getComputedStyle(textarea).maxHeight);
   const maxHeight = Math.min(getPromptTextareaMaxHeight(), Number.isFinite(cssMaxHeight) ? cssMaxHeight : Infinity);
   textarea.style.height = 'auto';
   const nextHeight = Math.min(textarea.scrollHeight, maxHeight);
   textarea.style.height = `${nextHeight}px`;
   textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  textarea.scrollTop = scrollTop;
+  textarea.scrollLeft = scrollLeft;
 }
 
 export function PromptEditor({
@@ -71,6 +76,7 @@ export function PromptEditor({
   onFormat,
   referenceLabels = [],
   onInsertReferenceLabel,
+  onPreviewReference,
   mentionCandidates = [],
   onMentionSelect,
 }: Props) {
@@ -151,11 +157,15 @@ export function PromptEditor({
   }, [updateMentionState]);
 
   const focusTextareaAt = useCallback((ref: React.RefObject<HTMLTextAreaElement>, cursor: number) => {
+    const textarea = ref.current;
+    if (!textarea) return;
+    const { scrollTop, scrollLeft } = textarea;
     window.requestAnimationFrame(() => {
-      const textarea = ref.current;
-      if (!textarea) return;
-      textarea.focus();
+      if (ref.current !== textarea) return;
+      textarea.focus({ preventScroll: true });
       textarea.setSelectionRange(cursor, cursor);
+      textarea.scrollTop = scrollTop;
+      textarea.scrollLeft = scrollLeft;
     });
   }, []);
 
@@ -360,6 +370,7 @@ export function PromptEditor({
         type="button"
         className="composer-reference-button"
         title={item.title}
+        onPointerDown={(event) => event.preventDefault()}
         onClick={() => insertMainReference(item.label)}
       >
         <ImagePlus size={13} aria-hidden="true" />
@@ -378,18 +389,31 @@ export function PromptEditor({
     }
 
     return referenceLabels.map((item) => (
-      <button
-        key={item.label}
-        type="button"
-        className="composer-reference-button"
-        title={item.title}
-        onClick={() => insertDraftReference(item.label)}
-      >
-        <ImagePlus size={13} aria-hidden="true" />
-        @{item.label}
-      </button>
+      <div key={item.label} className="composer-expanded-reference">
+        {item.thumbnailUrl && <button
+          type="button"
+          className="composer-expanded-reference-preview"
+          title={`预览${item.label}`}
+          aria-label={`预览${item.label}`}
+          disabled={!onPreviewReference}
+          onClick={() => onPreviewReference?.(item.label)}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={item.thumbnailUrl} alt={item.title} loading="lazy" draggable={false} />
+        </button>}
+        <button
+          type="button"
+          className="composer-reference-button"
+          title={`插入 @${item.label}`}
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={() => insertDraftReference(item.label)}
+        >
+          <ImagePlus size={13} aria-hidden="true" />
+          @{item.label}
+        </button>
+      </div>
     ));
-  }, [hasReferences, insertDraftReference, referenceLabels]);
+  }, [hasReferences, insertDraftReference, onPreviewReference, referenceLabels]);
 
   return (
     <div className="composer-prompt-editor">

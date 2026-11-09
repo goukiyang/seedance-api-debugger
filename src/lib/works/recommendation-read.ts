@@ -1,13 +1,14 @@
 import 'server-only';
 import { Prisma } from '@prisma/client';
-import { WORK_RECOMMENDATION_RULE } from './recommendation-score';
+import { WORK_COMMUNITY_RULE } from './recommendation-score';
 import type { workAccessSql } from './access';
 
 /** Each authorization predicate is expanded once, outside nested group queries. */
-export function recommendationReadCtes(viewerId: string, access: Awaited<ReturnType<typeof workAccessSql>>, upper: Date) {
+export function recommendationReadCtes(viewerId: string, access: Awaited<ReturnType<typeof workAccessSql>>, upper: Date, ready = true) {
   return Prisma.sql`recommendation_pool AS MATERIALIZED (
-    SELECT work_id,media_version_id,work_revision,evidence_json FROM WorkRecommendationResult
-    WHERE viewer_id=${viewerId} AND qualified=1 AND rule_version=${WORK_RECOMMENDATION_RULE} AND qualified_at<=${upper}
+    ${ready ? Prisma.sql`SELECT work_id,media_version_id,work_revision,evidence_json,score FROM WorkRecommendationResult
+    WHERE viewer_id=${viewerId} AND qualified=1 AND rule_version=${WORK_COMMUNITY_RULE} AND qualified_at<=${upper}`
+    : Prisma.sql`SELECT NULL AS work_id,NULL AS media_version_id,0 AS work_revision,'[]' AS evidence_json,0 AS score WHERE 0=1`}
   ), recommendation_evidence_ids AS MATERIALIZED (
     SELECT DISTINCT json_extract(dependency.value,'$.id') AS id FROM recommendation_pool
     JOIN json_each(recommendation_pool.evidence_json) dependency

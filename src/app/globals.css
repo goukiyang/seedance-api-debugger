@@ -12782,6 +12782,7 @@ body:has(.shell-root) {
   border-radius: 12px;
   box-shadow: 0 24px 70px rgba(2, 6, 23, 0.42);
   display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 12px;
   max-height: min(760px, calc(100vh - 48px));
   max-width: 960px;
@@ -12831,6 +12832,44 @@ body:has(.shell-root) {
 .composer-reference-buttons-expanded {
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   padding-bottom: 12px;
+  max-height: 126px;
+  overflow-y: auto;
+  align-items: flex-start;
+}
+
+.composer-expanded-reference {
+  display: grid;
+  gap: 4px;
+  width: 76px;
+  flex: 0 0 76px;
+}
+
+.composer-expanded-reference-preview {
+  width: 76px;
+  height: 64px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.24);
+  cursor: zoom-in;
+}
+
+.composer-expanded-reference-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.composer-expanded-reference .composer-reference-button {
+  justify-content: center;
+  min-width: 0;
+  padding-inline: 2px;
+}
+
+.composer-expanded-reference-preview:focus-visible {
+  outline: 2px solid rgba(110, 231, 183, 0.9);
+  outline-offset: 2px;
 }
 
 .composer-prompt-expanded-textarea {
@@ -12841,7 +12880,8 @@ body:has(.shell-root) {
   font-family: inherit;
   font-size: 14px;
   line-height: 1.75;
-  min-height: 340px;
+  min-height: 0;
+  height: 100%;
   outline: none;
   padding: 14px 16px;
   resize: none;
@@ -12849,7 +12889,7 @@ body:has(.shell-root) {
 }
 
 .composer-prompt-expanded-editor {
-  min-height: 340px;
+  min-height: 0;
   position: relative;
 }
 
@@ -13768,7 +13808,7 @@ body:has(.shell-root) {
   }
 
   .composer-prompt-expanded-textarea {
-    min-height: 280px;
+    min-height: 0;
   }
 
   .composer-task-card-link {

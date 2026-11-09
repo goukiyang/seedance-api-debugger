@@ -1,6 +1,6 @@
 .page {
   display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
+  grid-template-columns: max-content minmax(0, 1fr);
   min-height: calc(100dvh - var(--composer-topbar-height, 48px));
   color: var(--text-primary);
   background: var(--bg-input);
@@ -9,6 +9,7 @@
 }
 
 .sidebar {
+  width: 200px;
   position: sticky;
   top: var(--composer-topbar-height, 48px);
   align-self: start;
@@ -41,22 +42,57 @@
 }
 
 .workspaceLinks {
-  padding: 23px 13px 16px;
+  padding: 16px 13px 16px;
   overscroll-behavior-y: contain;
+  background: inherit;
 }
 
 .workspaceLinks h1 {
-  margin: 0 0 15px 8px;
+  margin: 0;
   color: var(--text-secondary);
   font-size: 13px;
   font-weight: 650;
   line-height: 1.4;
 }
 
+.sidebarHeader {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding-left: 8px;
+  background: inherit;
+}
+
+.collapseToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.collapseToggle:hover { background: var(--bg-hover); color: var(--text-primary); }
+.collapseToggle:disabled { cursor: default; opacity: 0.5; }
+.collapseToggle:focus-visible { outline: 2px solid var(--text-secondary); outline-offset: 2px; }
+
 .workspaceLinks nav {
   display: grid;
   gap: 4px;
 }
+
+.workspaceLinks .railAccountLinks { display: none; }
 
 .page > .workspaceContent {
   padding: var(--exp-edge);
@@ -649,6 +685,27 @@
   border: 0;
 }
 
+@media (min-width: 941px) {
+  .sidebar[data-collapsed='true'] { width: 64px; }
+  .sidebar[data-collapsed='true'] .workspaceLinks { padding-inline: 8px; }
+  .sidebar[data-collapsed='true'] .sidebarHeader { justify-content: center; padding-left: 0; }
+  .sidebar[data-collapsed='true'] h1,
+  .sidebar[data-collapsed='true'] .sideLink span,
+  .sidebar[data-collapsed='true'] .createLink span,
+  .sidebar[data-collapsed='true'] .reset span,
+  .sidebar[data-collapsed='true'] .sidebarMore { display: none; }
+  .sidebar[data-collapsed='true'] .sideLink,
+  .sidebar[data-collapsed='true'] .createLink,
+  .sidebar[data-collapsed='true'] .reset { justify-content: center; width: 100%; padding-inline: 0; }
+  .sidebar[data-collapsed='true'] .workspaceLinks .railAccountLinks {
+    display: grid;
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color);
+  }
+  .sidebar[data-collapsed='true'] .reset { margin-left: 0; }
+}
+
 @media (max-width: 940px) {
   .page > .workspaceContent { padding: 0; }
   .sidebar { z-index: 10; }
@@ -659,6 +716,7 @@
   }
 
   .sidebar {
+    width: auto;
     position: relative;
     z-index: 50;
     top: auto;
@@ -675,6 +733,9 @@
   .workspaceToggle {
     display: inline-flex;
   }
+
+  .collapseToggle { display: none; }
+  .sidebarHeader { padding-left: 0; }
 
   .workspaceLinks {
     display: none;

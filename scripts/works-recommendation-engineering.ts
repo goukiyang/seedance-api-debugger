@@ -7,17 +7,18 @@ import { processWorkRecommendations } from '../src/lib/works/recommendation-work
 import { readWorkPage } from '../src/lib/works/query';
 import { indexWorkContext } from '../src/lib/works/context-index';
 import { workVideoSourceRevision } from '../src/lib/works/source-revision';
+import { mutateWorkEditorial, WORK_EDITORIAL_PREFIX } from '../src/lib/works/editorial';
 
 type Image = { work: Work; media: WorkMediaVersion; task: ImageStudioTask; asset: Asset };
 
 /** Runs only in the existing isolated, network-blocked Works engineering database. */
 export async function runRecommendationEngineering(db: PrismaClient, owner: SessionUser, colleague: SessionUser, admin: SessionUser,
-  createImage: (suffix: string, audience?: 'source' | 'team' | 'project' | 'private', completedAt?: Date) => Promise<Image>,
+  createImage: (suffix: string, audience?: 'source' | 'team' | 'project' | 'private', completedAt?: Date, creator?: SessionUser) => Promise<Image>,
   statements: Array<{ query: string; params: string }>) {
   const started = performance.now();
   const feishuOwner: SessionUser = { ...owner, feishu: { user_id: 'fixture-owner', open_id: null, union_id: null,
     tenant_key: 'synthetic-tenant', employee_no: null, department_ids: [], last_sync_at: null } };
-  const source = await createImage('rec-real-source'), target = await createImage('rec-real-target');
+  const source = await createImage('rec-real-source'), target = await createImage('rec-real-target', 'team', undefined, admin);
   await db.imageStudioTask.update({ where: { id: target.task.id }, data: {
     reference_ids: JSON.stringify([source.asset.id]), snapshot_json: JSON.stringify({
       referencePolicy: { primaryIds: [source.asset.id] }, primaryReferenceImages: [{ id: source.asset.id }],
@@ -38,14 +39,14 @@ export async function runRecommendationEngineering(db: PrismaClient, owner: Sess
   }
   const result = (viewer = owner) => db.workRecommendationResult.findUnique({ where: { viewer_id_work_id: { viewer_id: viewer.id, work_id: source.work.id } } });
   await drain();
-  assert.equal((await result())?.score, 8, 'A real frozen primary input and successful outcome gives +8');
+  assert.equal((await result())?.score, 1, 'A successful frozen primary use by another colleague counts one person');
   await recordRecommendationEvidence(owner, source.work.id, { viewerId: owner.id, mediaVersion: source.media.id, kind: 'copy' });
   await recordRecommendationEvidence(owner, source.work.id, { viewerId: owner.id, mediaVersion: source.media.id, kind: 'copy' });
   await drain();
-  assert.equal((await result())?.score, 8, 'The same person taking and using this work is the highest tier, not 6+8');
+  assert.equal((await result())?.score, 1, 'Author copies do not change community endorsement');
   await recordRecommendationEvidence(admin, source.work.id, { viewerId: admin.id, mediaVersion: source.media.id, kind: 'copy' });
   await drain();
-  assert.equal((await result())?.score, 14); assert.equal((await result())?.qualified, true);
+  assert.equal((await result())?.score, 1); assert.equal((await result())?.qualified, true);
   assert.equal((await result(colleague))?.qualified, true, 'A second internal Feishu user receives a precomputed verdict without a trial ID');
   assert.equal(await db.workRecommendationResult.count({ where: { work_id: source.work.id, viewer_id: 'unapproved' } }), 0);
   const beforeRead = statements.length;
@@ -57,23 +58,23 @@ export async function runRecommendationEngineering(db: PrismaClient, owner: Sess
   assert.ok(!(await readWorkPage(colleague, new URLSearchParams({ scope: 'recommended' }), db)).items.some(work => work.id === source.work.id), 'Evidence withdrawal blocks the old recommendation immediately, without waiting for scoring');
   assert.deepEqual((await readWorkPage(colleague, new URLSearchParams({ scope: 'recommended', check: source.work.id }), db)).omittedIds, [source.work.id]);
   await enqueueWorkRecommendation(db, source.work.id); await drain();
-  assert.equal((await result())?.score, 12); assert.equal((await result())?.qualified, true, 'Both real independent take facts survive a withdrawn downstream use');
+  assert.equal((await result())?.score, 0); assert.equal((await result())?.qualified, false, 'Downloads alone cannot replace withdrawn successful-use evidence');
 
   const selected = await createImage('rec-slot-selected'), alternate = await createImage('rec-slot-alternate');
   const first = await createImage('rec-slot-first'), second = await createImage('rec-slot-second'), returned = await createImage('rec-slot-return');
   const purpose = `canvas:${owner.id}:document:node`, base = Date.now() - 30_000;
   const use = (image: Image, output: Image, order: number, signal: 'input' | 'retained' = 'input') => db.$transaction(tx => appendRecommendationEvent(tx, {
-    key: `rec-slot-${order}`, work: image.work.id, version: image.media.id, actor: owner.id, purpose, chain: purpose,
+    key: `rec-slot-${order}`, work: image.work.id, version: image.media.id, actor: admin.id, purpose, chain: purpose,
     fact: `rec-input-${order}`, slot: 'first', signal, evidence: { id: output.work.id, version: output.media.id }, at: new Date(base + order),
   }));
   await use(selected, first, 1, 'retained'); await drain();
   const selectedState = () => db.workRecommendationResult.findUnique({ where: { viewer_id_work_id: { viewer_id: owner.id, work_id: selected.work.id } } });
-  assert.equal((await selectedState())?.score, 12); assert.equal((await selectedState())?.qualified, true);
+  assert.equal((await selectedState())?.score, 1); assert.equal((await selectedState())?.qualified, true);
   await use(alternate, second, 2); await drain();
-  assert.equal((await selectedState())?.score, 6); assert.equal((await selectedState())?.qualified, false, 'A confirmed successful replacement deducts 6 and exits below 8');
+  assert.equal((await selectedState())?.score, 0); assert.equal((await selectedState())?.qualified, false, 'A confirmed replacement removes that active endorsement');
   await use(selected, returned, 3); await drain();
-  assert.equal((await selectedState())?.score, 12); assert.equal((await selectedState())?.qualified, true, 'Successful reselection retracts that slot penalty');
-  await use(selected, returned, 3); await drain(); assert.equal((await selectedState())?.score, 12);
+  assert.equal((await selectedState())?.score, 1); assert.equal((await selectedState())?.qualified, true, 'Successful reselection restores the active endorsement');
+  await use(selected, returned, 3); await drain(); assert.equal((await selectedState())?.score, 1);
 
   const nodeA = await createImage('rec-node-A'), nodeB = await createImage('rec-node-B');
   const document = await db.canvasDocument.create({ data: { owner_user_id: owner.id, project_id: nodeA.work.project_id,
@@ -107,28 +108,28 @@ export async function runRecommendationEngineering(db: PrismaClient, owner: Sess
   await sourcePass(firstVideo.work.id); await drain();
   await recordRecommendationEvidence(admin, nodeA.work.id, { viewerId: admin.id, mediaVersion: nodeA.media.id, kind: 'copy' }); await drain();
   const nodeState = () => db.workRecommendationResult.findUnique({ where: { viewer_id_work_id: { viewer_id: owner.id, work_id: nodeA.work.id } } });
-  assert.equal((await nodeState())?.score, 14);
+  assert.equal((await nodeState())?.score, 0);
   const swappedVideo = await videoOutcome('rec-node-video-2', nodeB);
   await sourcePass(swappedVideo.work.id); await drain();
-  assert.equal((await nodeState())?.score, 8, 'A real frozen first-frame replacement deducts 6 in the same actual canvas node');
+  assert.equal((await nodeState())?.score, 0, 'The author canvas workflow remains recorded but is not a community vote');
   const reselectedVideo = await videoOutcome('rec-node-video-3', nodeA);
   await sourcePass(reselectedVideo.work.id); await drain();
-  assert.equal((await nodeState())?.score, 14);
+  assert.equal((await nodeState())?.score, 0);
   await db.$transaction(tx => appendRecommendationEvent(tx, { key: 'rec-node-ambiguous-use', work: nodeA.work.id, version: nodeA.media.id,
     actor: owner.id, purpose: `actor:${owner.id}`, chain: `actor:${owner.id}`, fact: 'rec-node-ambiguous-use', signal: 'input',
     evidence: { id: returned.work.id, version: returned.media.id }, at: new Date() })); await drain();
-  assert.equal((await nodeState())?.score, 14, 'Moving between a known canvas and an unknown template purpose does not create another +8');
+  assert.equal((await nodeState())?.score, 0, 'Moving author workflows does not invent another supporter');
 
   const purposeVersion = `actor:${owner.id}`;
   const versionUse = async (entry: Awaited<ReturnType<typeof videoOutcome>>, proof: Image, key: string) => db.$transaction(tx => appendRecommendationEvent(tx, {
-    key, work: entry.work.id, version: entry.media.id, actor: owner.id, purpose: purposeVersion, chain: purposeVersion,
+    key, work: entry.work.id, version: entry.media.id, actor: admin.id, purpose: purposeVersion, chain: purposeVersion,
     fact: key, signal: 'retained', evidence: { id: proof.work.id, version: proof.media.id }, at: new Date(),
   }));
   await versionUse(firstVideo, first, 'rec-version-old'); await drain();
   const nextVersion = await videoOutcome('rec-node-video-version', nodeA, firstVideo.task.id);
   await sourcePass(nextVersion.work.id); await versionUse(nextVersion, second, 'rec-version-new'); await drain();
   const oldVersionState = await db.workRecommendationResult.findUnique({ where: { viewer_id_work_id: { viewer_id: owner.id, work_id: firstVideo.work.id } } });
-  assert.equal(oldVersionState?.score, 8); assert.equal(oldVersionState?.qualified, true, 'An explicitly related new video actually used downstream deducts 4; 8 retains the prior qualified state');
+  assert.equal(oldVersionState?.score, 0); assert.equal(oldVersionState?.qualified, false, 'A superseded use does not retain an old community qualification');
   await recordVideoTaskTake(feishuOwner, firstVideo.task.id, firstVideo.media.source_revision, false);
   assert.equal(await db.workRecommendationEvent.count({ where: { work_id: firstVideo.work.id, signal: 'take-intent' } }), 1);
   assert.equal(await db.workRecommendationEvent.count({ where: { work_id: firstVideo.work.id, signal: 'take' } }), 0, 'A native video redirect is not a completed download');
@@ -195,43 +196,47 @@ export async function runRecommendationEngineering(db: PrismaClient, owner: Sess
   const historical = await createImage('rec-trusted-history'), historyAlternate = await createImage('rec-trusted-alternate');
   const historyPurpose = `canvas:${owner.id}:history:node`;
   await db.$transaction(tx => appendRecommendationEvent(tx, { key: 'rec-history-entry', work: historical.work.id, version: historical.media.id,
-    actor: owner.id, purpose: historyPurpose, chain: historyPurpose, fact: 'rec-history-entry', slot: 'first', signal: 'retained',
+    actor: admin.id, purpose: historyPurpose, chain: historyPurpose, fact: 'rec-history-entry', slot: 'first', signal: 'retained',
     evidence: { id: first.work.id, version: first.media.id }, at: new Date(Date.now() - 1000) })); await drain();
   const historyState = () => db.workRecommendationResult.findUnique({ where: { viewer_id_work_id: { viewer_id: owner.id, work_id: historical.work.id } } });
   const admittedAt = (await historyState())!.history_from!; assert.ok(admittedAt);
   while (Date.now() <= admittedAt.getTime() + 3) await new Promise(resolve => setImmediate(resolve));
   await db.$transaction(tx => appendRecommendationEvent(tx, { key: 'rec-history-loss', work: historyAlternate.work.id, version: historyAlternate.media.id,
-    actor: owner.id, purpose: historyPurpose, chain: historyPurpose, fact: 'rec-history-loss', slot: 'first', signal: 'input',
+    actor: admin.id, purpose: historyPurpose, chain: historyPurpose, fact: 'rec-history-loss', slot: 'first', signal: 'input',
     evidence: { id: second.work.id, version: second.media.id }, at: new Date() })); await drain();
-  assert.equal((await historyState())?.score, 6); assert.equal((await historyState())?.qualified, false);
+  assert.equal((await historyState())?.score, 0); assert.equal((await historyState())?.qualified, false);
   for (let index = 0; index < 2; index++) await db.$transaction(tx => appendRecommendationEvent(tx, {
     key: `rec-history-late-${index}`, work: historical.work.id, version: historical.media.id, actor: owner.id, purpose: `actor:${owner.id}`,
     chain: `history-comparison-${index}`, fact: `history-comparison-${index}`, signal: 'revisit', at: new Date(admittedAt.getTime() + 1),
   })); await drain();
-  assert.equal((await historyState())?.score, 8); assert.equal((await historyState())?.qualified, true,
-    'Late evidence replays the original trusted qualification even after an earlier computed exit');
+  assert.equal((await historyState())?.score, 0); assert.equal((await historyState())?.qualified, false,
+    'Late revisits cannot revive a replaced community endorsement');
 
-  const privateSource = await createImage('rec-private-evidence-source'), privateTarget = await createImage('rec-private-evidence-target', 'private');
+  const privateSource = await createImage('rec-private-evidence-source'), privateTarget = await createImage('rec-private-evidence-target', 'private', undefined, admin);
   await db.$transaction(tx => appendRecommendationEvent(tx, { key: 'rec-private-use', work: privateSource.work.id, version: privateSource.media.id,
-    actor: owner.id, purpose: `actor:${owner.id}`, chain: `actor:${owner.id}`, fact: 'rec-private-use', signal: 'input',
+    actor: admin.id, purpose: `actor:${admin.id}`, chain: `actor:${admin.id}`, fact: 'rec-private-use', signal: 'input',
     evidence: { id: privateTarget.work.id, version: privateTarget.media.id }, at: new Date() }));
   await recordRecommendationEvidence(admin, privateSource.work.id, { viewerId: admin.id, mediaVersion: privateSource.media.id, kind: 'copy' });
   await drain();
   const privateState = (viewer: SessionUser) => db.workRecommendationResult.findUnique({ where: { viewer_id_work_id: { viewer_id: viewer.id, work_id: privateSource.work.id } } });
-  assert.equal((await privateState(owner))?.score, 14); assert.equal((await privateState(owner))?.qualified, true);
-  assert.equal((await privateState(colleague))?.score, 6); assert.equal((await privateState(colleague))?.qualified, false, 'A colleague cannot inherit private usage evidence');
+  assert.equal((await privateState(admin))?.score, 1); assert.equal((await privateState(admin))?.qualified, true);
+  assert.equal((await privateState(colleague))?.score, 0); assert.equal((await privateState(colleague))?.qualified, false, 'A colleague cannot inherit private usage evidence');
 
   const variantA = await createImage('rec-group-variant-A'), variantB = await createImage('rec-group-variant-B');
   for (const image of [variantA, variantB]) {
     await db.workContext.create({ data: { work_id: image.work.id, media_version_id: image.media.id, submission_key: 'rec-exact-batch' } });
-    for (const viewer of [owner, admin]) await recordRecommendationEvidence(viewer, image.work.id, { viewerId: viewer.id, mediaVersion: image.media.id, kind: 'copy' });
+    await db.$transaction(tx => appendRecommendationEvent(tx, { key: `rec-group-use-${image.work.id}`, work: image.work.id, version: image.media.id,
+      actor: admin.id, purpose: `group:${image.work.id}`, chain: 'input', fact: 'input', signal: 'input',
+      evidence: { id: returned.work.id, version: returned.media.id }, at: new Date() }));
   }
   await drain();
   assert.equal((await readWorkPage(colleague, new URLSearchParams({ scope: 'recommended', q: 'rec-group-variant' }), db)).items.length, 1);
   assert.deepEqual((await readWorkPage(colleague, new URLSearchParams({ scope: 'recommended', q: 'rec-group-variant-A' }), db)).items.map(work => work.id), [variantA.work.id], 'Filtering happens before selecting the group representative');
   const later = await createImage('rec-late-qualification');
   const beforeQualification = await readWorkPage(owner, new URLSearchParams({ scope: 'recommended', q: 'rec-late-qualification' }), db);
-  for (const viewer of [owner, admin]) await recordRecommendationEvidence(viewer, later.work.id, { viewerId: viewer.id, mediaVersion: later.media.id, kind: 'copy' });
+  const lateProof = await createImage('rec-late-proof', 'team', undefined, admin);
+  await db.$transaction(tx => appendRecommendationEvent(tx, { key: 'rec-late-proof', work: later.work.id, version: later.media.id,
+    actor: admin.id, purpose: 'late', chain: 'late', fact: 'late', signal: 'input', evidence: { id: lateProof.work.id, version: lateProof.media.id }, at: new Date() }));
   await drain();
   assert.equal((await readWorkPage(owner, new URLSearchParams({ scope: 'recommended', q: 'rec-late-qualification', window: beforeQualification.window }), db)).items.length, 0);
   assert.equal((await readWorkPage(owner, new URLSearchParams({ scope: 'recommended', q: 'rec-late-qualification' }), db)).items.length, 1, 'New qualification enters on refresh, not halfway through an older browse window');
@@ -241,6 +246,46 @@ export async function runRecommendationEngineering(db: PrismaClient, owner: Sess
   assert.ok(recommendedNext.items.length && recommendedNext.items.every(work => !recommendedFirst.items.some(first => first.id === work.id)));
   const recommendedBack = await readWorkPage(colleague, new URLSearchParams({ scope: 'recommended', limit: '2', before: recommendedNext.previousCursor!, window: recommendedFirst.window }), db);
   assert.deepEqual(recommendedBack.items.map(work => work.id), recommendedFirst.items.map(work => work.id));
+
+  const selectedWork = await createImage('rec-editorial-feature');
+  const featureInput = { viewerId: admin.id, requestId: 'rec-editorial-feature', action: 'feature' as const,
+    active: true, expectedVersion: 0, expectedMediaVersion: selectedWork.media.id };
+  await assert.rejects(mutateWorkEditorial(owner, selectedWork.work.id, { ...featureInput, viewerId: owner.id }), error => (error as { status: number }).status === 403);
+  const featured = await mutateWorkEditorial(admin, selectedWork.work.id, featureInput);
+  assert.deepEqual(await mutateWorkEditorial(admin, selectedWork.work.id, featureInput), featured, 'An uncertain retry replays the same editorial receipt');
+  assert.equal(await db.workOperation.count({ where: { owner_id: admin.id, request_id: featureInput.requestId } }), 1);
+  await assert.rejects(mutateWorkEditorial(admin, selectedWork.work.id, { ...featureInput, requestId: 'rec-editorial-conflict', active: false }), error => (error as { status: number }).status === 409);
+  const selectedPage = await readWorkPage(colleague, new URLSearchParams({ scope: 'recommended', q: 'rec-editorial-feature' }), db);
+  assert.equal(selectedPage.items[0]?.editorial?.featured, true);
+  assert.equal(selectedPage.items[0]?.editorial?.canFeature, false);
+  assert.equal(selectedPage.items[0]?.reuse, null, 'Selecting a preview-only work grants no original/reference permission');
+  assert.equal((await db.work.findUniqueOrThrow({ where: { id: selectedWork.work.id } })).audience, 'team');
+  await mutateWorkEditorial(admin, selectedWork.work.id, { ...featureInput, requestId: 'rec-editorial-remove', expectedVersion: 1, active: false });
+  assert.equal((await readWorkPage(colleague, new URLSearchParams({ scope: 'recommended', q: 'rec-editorial-feature' }), db)).items.length, 0);
+
+  const nominee = await createImage('rec-new-nominee');
+  const nomination = { viewerId: owner.id, requestId: 'rec-nominee-create', action: 'nominate' as const,
+    active: true, expectedVersion: 0, expectedMediaVersion: nominee.media.id };
+  await assert.rejects(mutateWorkEditorial(colleague, nominee.work.id, { ...nomination, viewerId: colleague.id }), error => (error as { status: number }).status === 403);
+  await mutateWorkEditorial(owner, nominee.work.id, nomination);
+  for (let index = 0; index < 5; index++) {
+    const image = await createImage(`rec-new-batch-${index}`);
+    await db.workContext.create({ data: { work_id: image.work.id, media_version_id: image.media.id, submission_key: 'rec-nomination-batch' } });
+    await mutateWorkEditorial(owner, image.work.id, { ...nomination, requestId: `rec-nominee-batch-${index}`, expectedMediaVersion: image.media.id });
+  }
+  const discovery = await readWorkPage(colleague, new URLSearchParams({ scope: 'discoveries' }), db);
+  assert.ok(discovery.items.length > 0 && discovery.items.length <= 4);
+  assert.equal(new Set(discovery.items.map(work => work.author.id)).size, discovery.items.length, 'One author cannot fill the new-work shelf');
+  const privateNominee = await createImage('rec-new-private', 'private');
+  await mutateWorkEditorial(owner, privateNominee.work.id, { ...nomination, requestId: 'rec-nominee-private', expectedMediaVersion: privateNominee.media.id });
+  assert.equal((await readWorkPage(colleague, new URLSearchParams({ scope: 'discoveries', q: 'rec-new-private' }), db)).items.length, 0);
+  const nominationRow = await db.platformSetting.findUniqueOrThrow({ where: { key: WORK_EDITORIAL_PREFIX + nominee.work.id } });
+  const aged = { ...JSON.parse(nominationRow.value_json), nominatedAt: Date.now() - 8 * 86400000 };
+  await db.platformSetting.update({ where: { id: nominationRow.id }, data: { value_json: JSON.stringify(aged) } });
+  assert.equal((await readWorkPage(colleague, new URLSearchParams({ scope: 'discoveries', q: 'rec-new-nominee' }), db)).items.length, 0);
+  await mutateWorkEditorial(owner, nominee.work.id, { ...nomination, requestId: 'rec-nominee-off', active: false, expectedVersion: 1 });
+  await assert.rejects(mutateWorkEditorial(owner, nominee.work.id, { ...nomination, requestId: 'rec-nominee-on', expectedVersion: 2 }), error => (error as { code: string }).code === 'WORKS_NOMINATION_EXPIRED');
+  assert.equal((await readWorkPage(colleague, new URLSearchParams({ scope: 'discoveries', q: 'rec-new-nominee' }), db)).items.length, 0, 'Toggling nomination cannot restart an expired exposure window');
 
   // Reproduce the observed catalog/user scale without any providers, browser or production data.
   await db.user.createMany({ data: Array.from({ length: 26 }, (_, index) => ({ id: `rec-new-colleague-${index}`, name: 'Synthetic colleague', username: `rec-new-${index}`,
@@ -253,7 +298,7 @@ export async function runRecommendationEngineering(db: PrismaClient, owner: Sess
   await drain();
   assert.ok(await db.workRecommendationResult.count({ where: { viewer_id: 'rec-new-colleague-0' } }), 'New Feishu colleagues are prepared in the background without opening a page');
   const firstLowState = await db.workRecommendationResult.findUnique({ where: { viewer_id_work_id: { viewer_id: 'rec-new-colleague-0', work_id: firstVideo.work.id } } });
-  assert.equal(firstLowState?.score, 8); assert.equal(firstLowState?.qualified, false, 'A first evaluation cannot invent a prior qualification from a historical high score');
+  assert.equal(firstLowState?.score, 0); assert.equal(firstLowState?.qualified, false, 'An old historical score cannot invent a current active colleague endorsement');
   const readStarted = performance.now(), statementStart = statements.length;
   await readWorkPage(colleague, new URLSearchParams({ scope: 'recommended' }), db);
   const readMs = Math.round(performance.now() - readStarted);
@@ -262,5 +307,6 @@ export async function runRecommendationEngineering(db: PrismaClient, owner: Sess
     multiFeishuAudience: true, duplicateAndReselection: true, immediateAclGate: true, pageOpenScoring: false,
     nativeStreamNoFullBuffer: true, earlyEvidencePreservedWithoutAdmission: true, pauseResume: true,
     privateEvidenceSeparated: true, filteredGroupRepresentative: true, stableQualificationWindow: true,
+    editorialAuthorityAndReceipt: true, nominationDoesNotExpandAudience: true, limitedDiscoveryAndNoToggleBump: true,
     scale: { catalog: await db.work.count(), eligibleAudience: 29, recommendationReadMs: readMs } };
 }

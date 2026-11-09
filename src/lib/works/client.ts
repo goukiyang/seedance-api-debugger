@@ -74,10 +74,10 @@ export function worksQueryString(query: WorkQuery) {
   return params;
 }
 export function parseWorksQuery(params: URLSearchParams): WorkQuery {
-  const query: WorkQuery = {};
+  const query: WorkQuery = { scope: 'recommended' };
   const medium = params.get('medium'), scope = params.get('scope');
   if (medium === 'image' || medium === 'video') query.medium = medium;
-  if (scope && ['recommended', 'mine', 'favorites', 'hidden', 'managed'].includes(scope)) query.scope = scope as WorkQuery['scope'];
+  if (scope && ['all', 'recommended', 'mine', 'favorites', 'hidden', 'managed'].includes(scope)) query.scope = scope as WorkQuery['scope'];
   for (const key of ['author', 'project', 'collection'] as const) { const value = params.get(key); if (value && /^[A-Za-z0-9_-]{1,100}$/.test(value)) query[key] = value; }
   const q = params.get('q')?.trim().slice(0, 120); if (q) query.q = q;
   return query;

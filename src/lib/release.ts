@@ -1,8 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '生图模块读取卡顿修复', outline: [
-  '补齐后台共享数据库入口的调度，减少长时间等待',
-  '保留图片处理并行与原有生成、恢复规则',
+const notice = { title: '视频编辑与原请求恢复优化', outline: [
+  '原准备请求的核对操作移到生成按钮旁',
+  '放大编辑可查看参考图片，插入引用保留输入位置',
+  '侧栏可收起为图标，保留更多创作空间',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
