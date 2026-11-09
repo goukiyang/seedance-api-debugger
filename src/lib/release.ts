@@ -3,6 +3,7 @@ import packageInfo from '../../package.json';
 const notice = { title: '作品广场自动发现与参考推荐', outline: [
   '新作品自动获得展示机会，无需逐件提交',
   '一键参考后成功产出，自动形成推荐依据',
+  '角色融合的译文和复制语言更清楚',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
