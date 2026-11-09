@@ -549,3 +549,5 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 
 [统一工单§9–10](../../tasks/todo/2026-11-08-capacity-report-hd-closure.md)保实际1394发布、1395继承、27张HD恢复、同备份报表CPU/全文等价、两种协议13条短波及缺测边界。原证/失败/独立复跑入口仅在正式根私有目录`2026-11-09-capacity-report-hd-closure/index.json`与其服务端原证根，数据库、成本原行、图像和会话凭据不上Git。旧高清同源证据沿11月3日资料引用；本批工程和发布检查有证，功能待用户手验，未关闭多人持续/增长成本/完整高清全量一秒目标。
 <!-- /CAP-REPORT-HD01-MATERIALS-20261109 -->
+
+- 2026-11-09 WORKS-AUTO01 自动曝光/参考成功归因：v0.140.0 已部署原证 [发布汇总](2026-11-02-team-works-research/auto-discovery-20261109/WORKS-AUTO01-release-summary.json)；原阶段服务器attempt02，原失败/通过时间保留，无真实用户模拟，功能待手验。
