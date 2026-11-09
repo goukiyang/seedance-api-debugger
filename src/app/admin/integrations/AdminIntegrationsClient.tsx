@@ -1558,7 +1558,7 @@ export default function AdminIntegrationsClient() {
             loading={muskModelsLoading}
             onRefresh={refreshMuskModels}
             refreshing={muskModelsRefreshing}
-            hint="白名单为空时只开放默认模型；刷新会从上游 /models 拉取最新列表"
+            hint="留空使用上游当前 GPT 文字目录；勾选后开放所选及有效默认型号，费率开关仍生效"
           />
 
           <div className="form-group">

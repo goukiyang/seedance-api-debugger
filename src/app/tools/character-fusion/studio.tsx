@@ -55,7 +55,7 @@ export default function CharacterFusionStudio({ ownerId }: { ownerId: string }) 
       if (!response.ok || !Array.isArray(data.models) || typeof data.default !== 'string') throw new Error(data.error || '读取模型列表失败，原选择已保留。');
       if (!controller.signal.aborted && activeRef.current) {
         setApiModels(data.models); setApiModel(current => current || data.default);
-        if (force) setNotice('模型列表已更新，当前选择保留。');
+        if (force) setNotice(data.models.length ? '模型列表已更新，请选择当前可用型号。' : '模型列表已更新，当前没有可选型号。');
       }
     } catch (e) { if (!controller.signal.aborted && activeRef.current) setModelError(e instanceof Error ? e.message : '模型列表更新失败，原选择已保留。'); }
     finally { if (!controller.signal.aborted && activeRef.current) setLoadingModels(false); }

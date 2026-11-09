@@ -1,3 +1,9 @@
+<!-- FUSION-MODEL01-TODO-20261109 -->
+## 角色融合模型设置与清单清除（v0.139.5已部署，待手验）
+
+页面设置增加API模型下拉/相邻更新，按账号记住并用于卡片对话和英文补齐，费率关闭项隐藏。清单清除首次原位变确认，二次清本次清单，失焦/Esc取消，规则/模型/对话/配方保留。实际6326c2cc1b72fa6d3b39eca26d56114bff3b6a03 / BUILD AoNdyzGsO1MEBluVeppM3继承139.4，11:06:41Z健康。原6场景及差量UI检查复用、完整原生/计价/Next/types/lint和7服务4timer/35资源/2匿名401通过，674原guard复用；无DDL/改价/数据还原、真实文字/视频/模型调用或旧待核重发，HD control仍active。界面及实际AI待用户手验。本轮未新增范围外问题。[原单MODEL01](todo/2026-11-08-character-fusion.md#model01-页面设置选择api模型2026-11-09)。
+<!-- /FUSION-MODEL01-TODO-20261109 -->
+
 <!-- CLAIM-SIDEBAR01-20261109 -->
 ## CLAIM-SIDEBAR01 领取积分页统一侧栏（本地检查通过，待构建发布）
 

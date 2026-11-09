@@ -188,10 +188,10 @@ export async function POST(request: NextRequest) {
     }
 
     let model = settings.default_model;
-    if (requestedModel && requestedModel !== settings.default_model) {
+    if (requestedModel) {
       const allowed = await resolveMuskChatModels(settings);
       if (!allowed.includes(requestedModel)) {
-        return NextResponse.json({ error: '模型不在可用名单内', ok: false, code: 'model_not_allowed' }, { status: 400 });
+        return NextResponse.json({ error: '所选模型已不在当前 API 目录，请更新模型列表后重新选择；当前输入已保留', ok: false, code: 'model_not_allowed' }, { status: 400 });
       }
       model = requestedModel;
     }

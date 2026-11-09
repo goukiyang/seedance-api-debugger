@@ -4,7 +4,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
 import { STUDIO_TEXT_MODELS } from '@/lib/template-studio/text-models';
-import { getMuskApiSettings } from '@/lib/integrations/musk';
+import { getMuskApiSettings, resolveMuskChatModels } from '@/lib/integrations/musk';
 import { MODEL_ACCESS_KEY, parseModelAccessSettings, supplementaryModelEnabled,
   type ModelAccessSettings, type SupplementaryModelKind } from './model-availability-contract';
 import { PricingAdminServiceError } from './policy';
@@ -16,10 +16,12 @@ type Operation = { requestId: string; state: 'succeeded' | 'rejected' | 'unknown
 const action = 'pricing_model_access_save';
 export const supplementaryModelChoices = [...STUDIO_TEXT_MODELS.map(model => ({ kind: 'text' as const, model: model.id, label: model.label })),
   { kind: 'cutout' as const, model: 'all', label: '智能抠图（所有模型）' }];
-export async function getSupplementaryModelChoices(db: Db | typeof prisma = prisma) {
+/** Supply discovered models when already inside a transaction; provider I/O stays outside the writer lock. */
+export async function getSupplementaryModelChoices(db: Db | typeof prisma = prisma, discoveredModels?: string[]) {
   const settings = await getMuskApiSettings(db);
   const stored = await readModelAccessSettings(db);
-  return [...supplementaryModelChoices, ...Array.from(new Set([settings.default_model, ...settings.allowed_models,
+  const liveModels = discoveredModels ?? await resolveMuskChatModels(settings);
+  return [...supplementaryModelChoices, ...Array.from(new Set([settings.default_model, ...settings.allowed_models, ...liveModels,
     ...stored.models.filter(item => item.kind === 'text').map(item => item.model)]))
     .filter(model => /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/.test(model)
       && !supplementaryModelChoices.some(choice => choice.kind === 'text' && choice.model === model))
@@ -73,6 +75,8 @@ export async function saveModelAccessSettings(actor: Actor, input: unknown) {
   const writeReceipt = (db: Db, operation: Operation) => db.operationLog.create({ data: { id: receiptId(actor, id),
     operator_id: actor.id, action, target_type: 'PlatformSetting', target_id: MODEL_ACCESS_KEY,
     detail: JSON.stringify({ fingerprint, operation }) } });
+  // An unavailable directory must not prevent looking up an existing durable save receipt.
+  const discoveredModels = await getMuskApiSettings().then(settings => resolveMuskChatModels(settings)).catch(() => []);
   try {
     return await prisma.$transaction(async db => {
       await freshAdmin(actor, db);
@@ -82,7 +86,7 @@ export async function saveModelAccessSettings(actor: Actor, input: unknown) {
       let settings: ModelAccessSettings;
       try { settings = parseModelAccessSettings(JSON.stringify(body.settings)); }
       catch { throw new PricingAdminServiceError('模型开关保存格式无效'); }
-      const choices = await getSupplementaryModelChoices(db);
+      const choices = await getSupplementaryModelChoices(db, discoveredModels);
       if (settings.models.some(item => !choices.some(choice => choice.kind === item.kind && choice.model === item.model))) {
         throw new PricingAdminServiceError('模型不在当前可管理目录');
       }
