@@ -1,6 +1,6 @@
 # ARCH-AUDIT01 共享基础设施结构排查（2026-11-08）
 
-状态：A01–A10整批实现及同lead Review完成，A11只读配置已准备；后继差量已整合，候选v0.139.2进入构建，尚未部署，功能待用户手验。原审计事实及失败证据保留。
+状态：A01–A11已整批部署v0.139.2 / 9784618d1，2026-11-09T07:26:09Z健康收口，待用户手动验收；发布及保留边界见§9。原审计事实、失败和未测项保留。
 
 ## 1. 基线、范围与结论
 
@@ -175,7 +175,7 @@ SQLite队列工程曾完整通过；补production单例断言后的本机复跑�
 
 ### 7.2 发布与仍待观察项
 
-本节实现未提交/推送/部署；统一构建、同源服务/guard、备份/回退保护及A11正式只读mount由主控接续。上线后仍写“已部署，待用户手动验收”。没有浏览器操作、收费生成、真实反馈发送或生产数据清理。
+本节为实现当时记录：尚未提交/推送/部署，后由主控统一接续构建、同源服务/guard、备份/回退及A11只读mount；最终已部署事实见§9。上线后仍写“已部署，待用户手动验收”。没有浏览器操作、收费生成、真实反馈发送或生产数据清理。
 
 实际生成受理继续承担必要鲜核/费用原子段；本轮把重复报价准备及显示主快照退出writer，不声称全部受理都已缩短。B01报表、B02全站容量/资源、B03完整原件一秒交付及多人出口仍按原缺证口径，不因数据库整改冒完成。已知坏legacy不可归属时的fail-closed和首次显示码短初始化明确保留；本轮未新增任务外问题。
 
@@ -198,3 +198,38 @@ SQLite队列工程曾完整通过；补production单例断言后的本机复跑�
 attempt02 / eb2af2b 的完整原生门在2026-11-09T06:24:21Z退出1，未执行Next或切版；原始失败报告保留 `.role-tests/image-recovery-gate-2nxGue/failure-report.json`，不改成通过。拦截8项：临时cwd缺schema/Python bootstrap、旧AST VM缺trace绑定、检查清单/回执字段未同步，以及原metadata/空库断言未区分新增精确依赖marker。实际SQLite并发各断言均成功、无P1008，readonly12项及写拒绝实际成功；不能用回执合同错误冒业务已过整门。
 
 集中修正仅11个scripts文件，生产src、数据库、费用与RO策略均不改。多视图GET前后完整配置行（含时间戳）严格相等，G30每GET全库/财务不变，G29只处理明确受控marker；不笼统忽略未知settings。restore22项、readonly12项及真实禁止网络计数0、scheduler15项回执精确对齐、语法/diff已过；本机其余复验停于原Prisma新库准备120秒超时，未进入业务断言，停止重试，余项交Linux最终整门。现有门只有完整run/verify，按其候选准入重新执行必要完整门，未新建恢复平台或跳过失败；既有通过原证保留。最终候选stage接续attempt03，版本仍139.2，应用源以新回执为准。
+
+
+## 9. 统一发布闭环（2026-11-08当地 / UTC 11月9日）
+
+**已部署v0.139.2，待用户手动验收。** 实际源码 `9784618d14106dcbe77c7e960b9d896f26234b95`，BUILD `2XhgF8s3POHaZvOTAlE6y`，发布run `797ece6d-f355-42bd-a183-bdb14346acec`；统一stage `/data/video-api-debugger/release-staging/shared-architecture-closure-20261108/attempt03`。Git已推送分支 `codex/template-sharing-conflict-20261108`。A01–A11以本单§7的实际修法一并发布，没有另拆待实施批次；源内同时保留前序Works、视频恢复和侧栏改动。
+
+### 9.1 工程检查与实际加载
+
+| 项目 | 本次实际结果 | 原始证据 |
+| --- | --- | --- |
+| 原生总门 | 16组核心、16组关联工程及既有报表/计价门全部通过；失败attempt02仍保留 | `main-native-prebuild.log`；新源码 `.role-tests/image-recovery-gate-FTLHO4/receipt.json` |
+| 计价合同 | 30项通过，原请求/报价/受理/历史、GET不改库、精确metadata及能力隔离均沿原门；禁止外部调用0、fixture生产写入0 | `.role-tests/pricing-policy-gate-u5LwZn/receipt.json` 及其fixtureReceipt |
+| SQLite共同入口 | 15项通过，反馈callback/batch/implicit、单例、每client初始化、FULL/NORMAL、超时不迟到及回滚均有证 | `.role-tests/sqlite-transactions-ZEr5D0/receipt.json`；本轮合成各型约53–60ms，反馈callback57.81ms，无P1008，不当生产吞吐或人数证明 |
+| 只读快照 | 12项通过；固定快照期间writer可提交，下一快照看到撤权；raw RETURNING及delegate写被拒绝，9个禁止网络入口调用0 | `.role-tests/sqlite-read-delegates-khuO2I/receipt.json` |
+| 应用构建 | 完整Next / types / lint通过，102静态页面，07:19:12Z完成；旧Browserslist/CSS及既有lint警告未冒错误或新缺陷 | `main-build-success.json`、`main-next-build.log` |
+| 启动及公网 | 6个main/guard原启动检查通过；7常驻服务同源、4timer恢复、58静态资源逐字节匹配，2保护资源307，6匿名接口401 | `startup-pair-checks.json`、`public-deployed.json`（07:25:28Z）、`service-health.json`（07:26:09Z） |
+| 运行能力 | 新image worker和父进程存活，170个实际加载模块摘要与新候选相符，能力未过期；7服务NRestarts均0 | `post-release-runtime-metadata.json`（07:27:37Z），只读元数据检查，不是收费生成验收 |
+
+本轮没有浏览器操作、收费生成测试或真实反馈/飞书外发。工程与健康通过不替代页面、共享、保存及生成的用户手验；未取得新的生产延迟分布，不用合成毫秒数承诺全流程秒开。
+
+### 9.2 A11实际只读约束与发布保护
+
+- `sd2-mj-dna-preview.service` 的 `20-production-database-readonly.conf` 已安装，仅该service的数据库目录内核mount为ro；旧源72f4保持，宿主及正式writer权限未改。实际namespace里的旧SDK对同device/inode生产库SELECT成功，原预览入口匿名307、API仍404；主站切换后仍ro。依据 `preview-readonly-applied.json`（07:24:12Z）及 `post-release-runtime-metadata.json`。没有生产写入探针。
+- 首次辅助核对使用相对require路径，namespace命令从根目录启动而报MODULE_NOT_FOUND；已先撤回本次drop-in并重启恢复原预览，没有查询/写生产库或切主站。绝对路径只读预检成功后再安装并通过；`preview-readonly-attempt01-failure.json` / `-recovered.json`保留，不冒首试成功。不是修改生产业务逻辑或放宽只读约束。
+- 主站切换前7个常驻角色及相关timer/oneshot自然排空，无强杀；07:25:11Z取得一致SQLite备份。只读核继承已完成Works迁移，本次未执行DDL、回填或覆盖旧业务数据。费用原2条配置全字段SHA仍为 `d03c539d74a31b5e2a6a0305724b1b9f193e0ade878370898c7632d1bdc96539`。
+- 相容恢复产物固定 `67456579f8c0d41a7058ca7eec78224c4fb7e75a` / `0.139.0+points-pricing-guard.1` / BUILD `qb5CShgt78X3naPgg_V4L`，复用其05:33:09Z完整原证，不伪造新构建。恢复入口为同stage `program-recovery.sh release-input.json`，仅回程序/配置，不回数据库、账本、媒体或回执；没有在线演练回退。预览若需恢复，只撤本任务精确drop-in并重启该预览，勿改宿主数据库权限。
+- 已核六个本任务合成G19 marker的规范路径/单链接/内容摘要，仅清除其immutable属性，未删文件，保留完整工程与失败证据；不处理生产drain标记。记录 `synthetic-marker-cleanup.json`。
+
+### 9.3 保留边界与接续
+
+1. 收藏已批量化数据库往返；当前授权搜索及精确统计仍O(N)候选，未因当前63条标记而新增投影表/迁移，后续按实际增长测量决定。
+2. 无法归属的损坏legacy仍fail-closed；首次显示稳定context码仍有必要的独立短初始化写；真实受理继续保费用/CAS原子事务。不能写成所有读取、受理均零写锁。
+3. 有界过期预览清理在后续报价自然运行，未手工删除现存601条固定预览或改旧合同。真正共用费率损坏依然拒绝收费；没有改便宜/更贵通道或放大图片。
+4. B01报表CPU/IPC、B02多人容量/资源、B03完整高清一秒及原件传输仍是缺证项，非本轮确认修复完的生产事故。原高清总纲继续有效；本轮无新测量，不冒达标。
+5. 本轮未新增任务范围外产品问题；接线失败和预览验证路径错误作为本任务失败接续保留。用户手验仍待完成。
