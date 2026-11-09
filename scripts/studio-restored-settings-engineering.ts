@@ -111,7 +111,7 @@ async function main() {
     platformSetting: { findUnique: async () => null },
   };
   const prisma = { ...tx, $transaction: async (run: (client: typeof tx) => unknown) => run(tx) };
-  let quoteSnapshotReads = 0, deferredVersionReads = 0, previewCleanups = 0;
+  let quoteSnapshotReads = 0, deferredVersionReads = 0, previewCleanups = 0, frozenMethodUses = 0;
   const quotePhases: string[] = [];
   // This restoration harness uses an already captured synthetic channel. All
   // quote SQL writes remain prohibited; real private-version staging has its own SQLite evidence.
@@ -152,6 +152,9 @@ async function main() {
     ...storageExports, ...privateFields, ...privatePrompts, normalizeImageFeishuChoice, historicalStudioStyles,
     freezeImageFeishuChoice: async (_tx: unknown, _owner: unknown, choice: unknown) => { assert.equal(choice, undefined); return null; },
     enqueueFrozenImageFeishuNotification: async (_tx: unknown, _task: unknown, choice: unknown) => { assert.equal(choice, null); },
+    freezeImageWorkMethodUse: async (client: unknown, task: { id: string }) => {
+      assert.equal(client, tx); assert.ok(created.some(row => row.id === task.id)); frozenMethodUses++;
+    },
     MAX_REFERENCE_IMAGES: 10, DEFAULT_STUDIO_PRIMARY_MAX: 1, MAX_STYLE_GROUP_NOTE_LENGTH: 8000,
     IMAGE_STUDIO_MODELS: ['gpt-image-1'], IMAGE_STUDIO_MODEL_QUALITY_OPTIONS: { 'gpt-image-1': ['medium'] },
     IMAGE_STUDIO_MODEL_COST_USD: { 'gpt-image-1': 0 }, IMAGE_RESOLUTION_OPTIONS: ['1K'], IMAGE_25_QUALITY_MODEL: 'synthetic-other-model',
@@ -348,6 +351,7 @@ async function main() {
   const noMarkerDraft = { ...body, restoredSettings: undefined, draft: { styleGroupIds: [styleId] } };
   await assert.rejects(() => prepare(noMarkerDraft));
   const readsBeforeAccepted = sourceReads;
+  assert.equal(frozenMethodUses, 0);
   accepted = { module_id: moduleId, snapshot_json: JSON.stringify({ sharedLive: intent }) };
   deleted = true;
   const acceptedId = await engine.submitStudioBatch(owner, { ...body, restoredSettings: { invalid: true }, revision: -1 });
@@ -355,7 +359,9 @@ async function main() {
   assert.equal(sourceReads, readsBeforeAccepted); accepted = null; deleted = false;
   await engine.submitStudioBatch(owner, body);
   assert.equal(created.length, 1); assert.equal(created[0].prompt, '');
+  assert.equal(frozenMethodUses, 1);
   checks.push('ordinary_shared_unsaved_definition_still_rejected', 'accepted_recovery_precedes_new_source_and_config_checks', 'creation_uses_same_empty_personal_input');
+  checks.push('work_method_binding_stays_after_acceptance_and_out_of_quotes');
 
   const currentInputs = { protocol: currentInputsContract.STUDIO_CURRENT_INPUT_PROTOCOL };
   assert.equal(Object.hasOwn(parse(old), 'currentInputs'), false);
