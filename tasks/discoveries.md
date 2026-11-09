@@ -10,6 +10,10 @@
 
 ## 待核线索
 
+<!-- D-20261109-WORKS-RELEASE-RESIDUAL -->
+**D-20261109-NEXT-INSTALL-WARNING｜既有依赖提示，影响待核。** WORKS-REC03沿锁文件安装时安装器提示Next14.2.5安全公告；本批未改变依赖版本，也未核具体漏洞、受影响入口或可利用性，不据此声称已证线上漏洞。后续沿依赖维护任务核官方公告和本项目影响，不为作品推荐扩改依赖。原范围与结果见[WORKS-REC03](todo/2026-11-02-team-works-implementation.md#works-rec03-精选与真实复用推荐2026-11-08-用户批准推进)。
+<!-- /D-20261109-WORKS-RELEASE-RESIDUAL -->
+
 <!-- D-20261107-PIN-MEDIA-SCOPE -->
 **D-20261107-PIN-MEDIA-SCOPE｜已证读取放大 / P3，非已证当前延迟根因。** resolveStudioPinnedAsset查单asset索引后仍读整root（上限200）；可见性又读全部私密绑定，列表前后各核。生产29同源码隔离SQLite顺序6组×7暖样本：1pin/0绑定p50=5.63ms、10次查询/6返回行；200pin/0绑定10.96ms/404行；1pin/1000绑定29.98ms/2006行；200pin/1000绑定42.61ms/2404行。计数是Prisma返回行，不是底层扫描行，非HTTP/并发SLO或改造收益。生产只读当次仅3pin（最大组2）、77相关绑定/23引用/20独立asset、格式异常0，另9metadata子记录按reader排除。另在合成库添加1个无关不兼容私密引用后，两个模板的同事媒体和普通feed失败、管理员读正常，证明全局parse的故障放大；生产坏行0，属已复现风险，不冒当前根因。定向catalog SQL同样有全局兼容检查，不能只传assetIds或忽略坏行就称修复。沿[原单§16.8.3](todo/2026-11-05-template-sharing-cutout-open-preflight.md)优先按原索引缩小任务/资产范围并复用权限投影，保撤权/文件别名/私密保护，不先建缓存、表或服务；无真实坏行时不加理论兜底。原始42样本、源码身份及故障注入见正式根私有pin-wide-gallery/architecture-audit-20261107。
 <!-- /D-20261107-PIN-MEDIA-SCOPE -->
@@ -37,6 +41,10 @@
 | D-20261101-01 | 待核线索 / P2 | 生产构建已确认共享 Prisma 类导入桥；实际客户端实例数、跨 Next 路由 bundle 的展示缓存是否共用仍未知。可能重复建连接或重算菜单，不能认定已发生。 | [窄拓扑证据](../docs/materials/2026-11-01-admin-usage-read-snapshot/built-cache-topology.md)、[初始化](/Volumes/Data/Projects/video-api-debugger-worktrees/admin-usage-read-snapshot-reader-20261101/src/lib/prisma.ts) | 待核；需要时映射实际初始化与缓存身份，不先改 singleton / TTL，不加生产探针。 |
 
 ## 已确认问题
+
+<!-- D-20261109-RELEASE-NOTICE-COPY -->
+**D-20261109-RELEASE-NOTICE-COPY｜已确认文案残留 / P3。** v0.139.0的 `src/lib/release.ts` 继承138.3“生图模块读取卡顿修复”摘要，版本/源码/实际作品推荐成品一致，但登录后的更新提示不准确；匿名release接口按原合同隐藏摘要，不代表已修文案。成品冻结后未为文案重编主/guard或修改发布工具。后继139.1已有独立正确摘要但本记录时未上线；随其正常发布接续，不影响当前推荐/权限/数据。详细[原单](todo/2026-11-02-team-works-implementation.md#实际工程git与发布结果2026-11-09-utc)。
+<!-- /D-20261109-RELEASE-NOTICE-COPY -->
 
 <!-- D-20261108-RELEASE-RECOVERY-ANCHOR -->
 **D-20261108-RELEASE-RECOVERY-ANCHOR｜已确认，相关入口已修正；未实际回退演练。** 复用135.0 stage发现program-recovery.sh仍断言旧pin-wide-gallery/attempt03及3516，与fusion真实stage/3654不符，事故时会在停服前拒绝；没有由本次切版触发现场故障。原作者4修其fusion stage、角色2修其role31入口，各保原脚本及SHA。本人最终135.4 stage pin-recovery-20261108/attempt02锚点为本stage/cbaf239基线，F0原构建1469文件验证；真实切版后marker/备份/contract齐备时第一段只读前置通过，实际恢复未执行。不能复制切版成功回执冒恢复入口可用，后继按实际源/目录接续；[原联合单§16.8.4](todo/2026-11-05-template-sharing-cutout-open-preflight.md)，私有recovery-readonly-preflight.json保存无业务写证据。
