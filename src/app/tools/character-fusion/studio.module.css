@@ -66,6 +66,7 @@
 .settings label, .swapForm label { display: flex; align-items: center; gap: 8px; font-size: 12px; min-width: 0; }
 .generateBar > button { min-height: 44px; padding-inline: 24px; }
 .results { margin-top: 30px; scroll-margin-top: 90px; }
+.clearButton { min-width: 8em; }
 .resultList { display: flex; flex-direction: column; gap: 14px; }
 .resultRow { min-width: 0; border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; background: var(--bg-panel); overflow-wrap: anywhere; }
 .resultRow.selected { border-color: var(--accent-color); }
