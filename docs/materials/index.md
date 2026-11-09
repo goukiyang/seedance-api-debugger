@@ -537,3 +537,9 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 
 [全链路审计与实际收口](../template-sharing-chain-audit-2026-11-08.md)；原联合单§16.13。应用88899/iyT，04成功，39专项与完整native/Next有证，功能待用户手验。正式根私有白名单元证：2026-11-07-pin-wide-gallery/recovery-20261108/sharing-chain-fix-138（44份逐SHA、700/600、Git忽略；保01/02/03原失败及04成功，不含DB/env/原费率/密钥/正文）。
 <!-- /SHARE-CHAIN-FIX01-138 -->
+
+<!-- CAP-REPORT-HD01-MATERIALS-20261109 -->
+## CAP-REPORT-HD01 容量、报表增长与高清一秒
+
+[统一工单§9–10](../../tasks/todo/2026-11-08-capacity-report-hd-closure.md)保实际1394发布、1395继承、27张HD恢复、同备份报表CPU/全文等价、两种协议13条短波及缺测边界。原证/失败/独立复跑入口仅在正式根私有目录`2026-11-09-capacity-report-hd-closure/index.json`与其服务端原证根，数据库、成本原行、图像和会话凭据不上Git。旧高清同源证据沿11月3日资料引用；本批工程和发布检查有证，功能待用户手验，未关闭多人持续/增长成本/完整高清全量一秒目标。
+<!-- /CAP-REPORT-HD01-MATERIALS-20261109 -->
