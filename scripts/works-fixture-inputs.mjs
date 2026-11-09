@@ -15,6 +15,7 @@ export const WORKS_CHECKS = [
 ];
 export const WORKS_SOURCES = [
   'src/lib/works/method-reference.ts', 'scripts/test-works-auto-reference.ts', 'src/lib/image-studio/pricing-state.ts',
+  'src/lib/works/previews.ts',
   'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/batches.ts', 'src/app/api/tasks/create/route.ts',
   'src/lib/works/editorial.ts', 'src/app/api/works/[id]/editorial/route.ts', 'src/components/works/WorkDiscoveries.tsx',
   'src/components/works/WorkActions.tsx', 'src/components/works/WorksMasonry.tsx', 'src/components/works/Works.module.css',
