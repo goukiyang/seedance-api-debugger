@@ -428,10 +428,13 @@ export async function fetchMuskUpstreamModels(
 export async function resolveMuskChatModels(settings: MuskApiSettings, upstream?: string[] | null): Promise<string[]> {
   const catalog = upstream === undefined ? await fetchMuskUpstreamModels(settings) : upstream;
   const configured = Array.from(new Set([settings.default_model, ...settings.allowed_models]));
-  if (catalog === null) return settings.allowed_models.length ? configured : [];
-  return catalog.filter(id => settings.allowed_models.length
+  const list = catalog === null ? (settings.allowed_models.length ? configured : []) : catalog.filter(id => settings.allowed_models.length
     ? configured.includes(id)
     : /^gpt-(?!image(?:-|$))/i.test(id));
+  return list.filter(model => {
+    try { assertPrivateMuskSend({ ...settings, default_model: model }, []); return true; }
+    catch (error) { if (isPrivatePromptError(error)) return false; throw error; }
+  });
 }
 
 /** 流式调用：返回上游 Response（SSE），调用方负责解析。 */

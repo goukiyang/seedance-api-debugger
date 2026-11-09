@@ -28,7 +28,7 @@ function loadModule(file, mocks, globals = {}) {
   const source = fs.readFileSync(path.resolve(file), 'utf8');
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const exports = {};
-  vm.runInNewContext(compiled, { exports, console, URL, AbortController, Response, setTimeout, clearTimeout,
+  vm.runInNewContext(compiled, { exports, console, URL, AbortController, Response, Buffer, setTimeout, clearTimeout,
     require: name => { assert.ok(Object.hasOwn(mocks, name), name); return mocks[name]; }, ...globals });
   return exports;
 }
@@ -47,12 +47,23 @@ const prisma = { platformSetting: { findUnique: async ({ where }) => {
   assert.fail(where.key);
 } } };
 let metadataCalls = 0, inTransaction = false, upstreamData = { data: rawIds.map(id => ({ id })) }, httpStatus = 200;
+class PrivatePromptError extends Error {}
+let approvedModels = [...chatIds];
+const privatePolicy = {
+  PrivatePromptError, isPrivatePromptError: error => error instanceof PrivatePromptError,
+  isStoredPrivatePrompt: () => false, privateOrigin: (kind, id) => ({ kind, id, ownerId: 'offline-admin' }),
+  assertPrivateOrigins: () => {}, privatePromptIndex: () => 'offline-credential-binding',
+  privatePromptPolicy: () => ({ destinations: [{ endpoint: 'https://catalog.invalid/v1/chat/completions',
+    provider: 'musk', credentialVersion: 'offline-credential-binding', models: approvedModels }] }),
+};
+const send = loadModule('src/lib/security/private-prompt-send.server.ts',
+  { 'server-only': {}, './private-prompts.server': privatePolicy });
 const musk = loadModule(process.argv[2] || 'src/lib/integrations/musk.ts', {
   'node:timers/promises': { setTimeout: async () => assert.fail('No generation retry') },
   '@/lib/prisma': { prisma },
   '@/lib/security/private-credentials.server': { readPrivateCredential: value => value },
-  '@/lib/security/private-prompts.server': { isStoredPrivatePrompt: () => false },
-  '@/lib/security/private-prompt-send.server': {},
+  '@/lib/security/private-prompts.server': privatePolicy,
+  '@/lib/security/private-prompt-send.server': send,
 }, { fetch: async (url, init) => {
   assert.equal(inTransaction, false, 'Provider metadata must never hold the fee writer transaction');
   assert.equal(url, 'https://catalog.invalid/v1/models');
@@ -61,6 +72,10 @@ const musk = loadModule(process.argv[2] || 'src/lib/integrations/musk.ts', {
   return Response.json(upstreamData, { status: httpStatus });
 } });
 assert.deepEqual([...await musk.resolveMuskChatModels(await musk.getMuskApiSettings())], chatIds);
+approvedModels = chatIds.slice(0, -1);
+assert.deepEqual([...await musk.resolveMuskChatModels(settings, rawIds)], chatIds.slice(0, -1),
+  'A discovered model must not appear callable before its existing outbound binding allows it');
+approvedModels = [...chatIds];
 assert.deepEqual([...await musk.resolveMuskChatModels(settings, [])], [], 'An empty real catalog must not reinsert the retired default');
 assert.deepEqual([...await musk.resolveMuskChatModels(settings, null)], [], 'An unknown automatic catalog must not invent the default');
 assert.deepEqual([...await musk.resolveMuskChatModels({ ...settings, allowed_models: ['gpt-6.1-sol', 'removed-model'] }, rawIds)],
@@ -114,6 +129,16 @@ const chatRequest = model => ({ json: async () => ({ model, messages: [{ role: '
 assert.equal((await chat.POST(chatRequest('gpt-5.5'))).status, 400, 'Explicit retired default must not bypass current catalog admission');
 assert.equal((await chat.POST(chatRequest('gpt-6.1-terra'))).status, 403, 'Current model still obeys the fee switch');
 assert.equal(generatedRequests, 0); assert.equal(preparedMessages, 0);
+let capturedProviderPayloads = 0;
+await musk.createMuskChatCompletion({ settings, model: 'gpt-6.1-sol', jsonMode: false,
+  messages: [{ role: 'user', content: 'Offline payload capture' }],
+  fetchImpl: async (url, init) => {
+    assert.equal(url, 'https://catalog.invalid/v1/chat/completions');
+    assert.equal(JSON.parse(init.body).model, 'gpt-6.1-sol');
+    capturedProviderPayloads++;
+    return Response.json({ model: 'gpt-6.1-sol', choices: [{ message: { content: 'offline' } }] });
+  } });
+assert.equal(capturedProviderPayloads, 1);
 
 const pricing = loadModule('src/lib/pricing/model-access.server.ts', {
   'server-only': {}, 'node:crypto': crypto, '@prisma/client': { Prisma: {} },
@@ -133,5 +158,5 @@ await pricing.getSupplementaryModelChoices(prisma, chatIds);
 inTransaction = false;
 assert.equal(metadataCalls, beforeTransaction, 'Discovered IDs are reused during transaction validation');
 console.log(JSON.stringify({ passed: true, realDirectoryShape: { total: rawIds.length, text: chatIds.length },
-  capturedLocalRequests: captured.length, capturedMetadataRequests: metadataCalls, generatedRequests,
+  capturedLocalRequests: captured.length, capturedMetadataRequests: metadataCalls, capturedProviderPayloads, generatedRequests,
   realProviderCalls: 0, realDatabaseCalls: 0, productionWrites: 0 }));
