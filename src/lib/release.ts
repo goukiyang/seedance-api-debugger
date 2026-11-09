@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '报表与高清制作稳定性优化', outline: [
-  '减少报表查询的重复扫描',
-  '修复高清制作偶发暂停',
+const notice = { title: '领取积分页导航统一', outline: [
+  '领取积分页使用作品广场侧栏',
+  '保留侧栏折叠和手机菜单习惯',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

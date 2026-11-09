@@ -1,7 +1,7 @@
 <!-- CLAIM-SIDEBAR01-20261109 -->
-## CLAIM-SIDEBAR01 领取积分页统一侧栏（已实现，工程检查中）
+## CLAIM-SIDEBAR01 领取积分页统一侧栏（本地检查通过，待构建发布）
 
-精确 `/points/claim` 接原广场 `WorkspaceSidebar/AppShell`，账户菜单补领取入口和当前项，保折叠/手机/账号记忆；未改领取/API/金额/截止/防重复/账本。项目AGENTS原导航章节补后续统一复用规则，不自动迁移无关旧页。先红后绿定向导航工程通过，完整类型/lint及统一候选构建发布接续；尚未部署，真实效果用户手验。详[原领取单](todo/2026-11-08-credit-claim-page.md#claim-sidebar01-领取页复用广场侧栏)，本轮未新增范围外问题。
+精确 `/points/claim` 接原广场 `WorkspaceSidebar/AppShell`，账户菜单补领取入口和当前项，保折叠/手机/账号记忆；未改领取/API/金额/截止/防重复/账本。项目AGENTS原导航章节补后续统一复用规则，不自动迁移无关旧页。先红后绿定向工程、完整tsc及两文件lint通过，本树CodeGraph同步/查询成功；已承接ed1/139.3，独立候选139.4等待前批健康后构建/发布。尚未部署，真实效果用户手验。详[原领取单](todo/2026-11-08-credit-claim-page.md#claim-sidebar01-领取页复用广场侧栏)，本轮未新增范围外问题。
 <!-- /CLAIM-SIDEBAR01-20261109 -->
 
 <!-- ARCH-AUDIT01-20261108 -->
