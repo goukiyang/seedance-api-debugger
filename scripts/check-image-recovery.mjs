@@ -180,6 +180,19 @@ fixtures.push({ file: 'scripts/image-provider-error-engineering.ts', schema: 'im
     'src/lib/image-studio/provider-error-diagnostics.ts', 'src/lib/image-studio/provider-error-evidence.ts',
     'src/lib/image-studio/provider.ts', 'src/lib/image-studio/worker.ts',
   ] });
+fixtures.push({ file: 'scripts/usage-report-admission-engineering.ts', schema: 'usage-report-admission-engineering.v1',
+  marker: 'Usage report admission engineering receipt: ', checks: [
+    'independent_next_bundle_modules_share_one_active_slot_one_fifo_waiter_and_429',
+    'queued_abort_removes_waiter_immediately_and_preserves_running_work',
+    'actual_ten_second_queue_timeout_removes_waiter_and_returns_explicit_busy',
+    'callback_failure_and_preaborted_request_release_without_poisoning_global_state',
+    'active_abort_holds_slot_until_actual_reader_and_spool_cleanup_settles',
+    'returned_snapshot_releases_compute_slot_before_slow_csv_delivery',
+    'three_actual_admin_routes_share_full_capture_fold_admission_and_csv_starts_after_snapshot',
+    'existing_first_page_uses_report_records_and_export_has_no_automatic_second_capture',
+  ], sources: ['src/lib/admin/usage-report-admission.ts', 'src/lib/admin/usage-analytics.ts',
+    'src/app/api/admin/usage-analytics/route.ts', 'src/app/api/admin/usage-analytics/records/route.ts',
+    'src/app/api/admin/usage-analytics/export/route.ts', 'src/components/admin-usage/AdminUsageClient.tsx'] });
 const pricingGate = 'scripts/check-pricing-policy.mjs';
 const usageGate = 'scripts/admin-usage-engineering.ts';
 const usageSources = [usageGate, 'scripts/admin-usage-migration-engineering.py', 'src/lib/admin/usage-query.ts', 'src/lib/admin/usage-money.ts', 'src/lib/admin/usage-types.ts',

@@ -1,3 +1,4 @@
+import { UsageReportBusyError } from '@/lib/admin/usage-report-admission';
 import { traceHttpRequest, tracePhase } from '@/lib/performance/request-trace';
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminUser } from '@/lib/auth/api-helpers';
@@ -16,6 +17,7 @@ export async function GET(request: NextRequest) {
     const query = parseUsageQuery(request.nextUrl.searchParams);
     return NextResponse.json(await getUsageAnalytics(query, request.signal), { headers });
   } catch (error) {
+    if (error instanceof UsageReportBusyError) return NextResponse.json({ error: error.message }, { status: error.status, headers: { ...headers, 'Retry-After': '3' } });
     if (error instanceof AuthError || error instanceof UsageQueryError) return NextResponse.json({ error: error.message }, { status: error.status, headers });
     return NextResponse.json({ error: '使用分析读取失败，当前条件已保留，请重试原查询' }, { status: 503, headers });
   }

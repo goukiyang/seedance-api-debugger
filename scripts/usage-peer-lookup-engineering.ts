@@ -30,6 +30,7 @@ const binary = (a: string, b: string) => Buffer.compare(Buffer.from(a), Buffer.f
 const fixedTime = Date.parse('2026-11-09T00:00:00.000Z');
 const sqlKind = (sql: string) => {
   const condition = sql.replace(/\s+/g, ' ').split(' WHERE (')[1] || '';
+  if (/^SELECT \"id\" FROM \"(?:VideoTask|ImageStudioTask|VideoStudioRun|AgentRunStep|CanvasRoleAttempt)\" WHERE \"id\" (?:=|IN)/.test(sql.replace(/\s+/g, ' '))) return 'external-source';
   if (condition.startsWith('"provider_task_id" IN (')) return 'task-peer';
   if (condition.startsWith('"provider_request_id" IN (')) return 'request-peer';
   if (condition.startsWith(' COALESCE(') || condition.startsWith('COALESCE(')) return 'legacy-peer';
@@ -120,18 +121,42 @@ async function main() {
     ...[...Array.from({ length: 510 }, (_, i) => String(i).padStart(4, '0')), '!', '0', 'A', 'Z', 'a', 'z', '~', 'À', 'Ω'].map(id =>
       ledger(`p-${id}`, { provider_account_id: 'wide-scope', provider_task_id: 'wide-ref', provider_request_id: 'wide-ref' })),
   ];
+  const sourceRows: Record<string, Array<Record<string, unknown>>> = {
+    VideoTask: [...Array.from({ length: 520 }, (_, i) => ({ id: `external-${i}`, created_at: fixedTime })),
+      { id: 'external:colon', created_at: '2025-01-01T00:00:00.000Z' }, { id: 'Case', created_at: fixedTime },
+      { id: 'empty-time', created_at: null }, { id: 'bad-time', created_at: 'invalid' }],
+    ImageStudioTask: [{ id: 'image', created_at: fixedTime }],
+    VideoStudioRun: [{ id: 'text', mode: 'llm', created_at: fixedTime }, { id: 'non-text', mode: 'video', created_at: fixedTime }],
+    AgentRun: [{ id: 'agent-parent' }],
+    AgentRunStep: [{ id: 'agent', agent_run_id: 'agent-parent', step_key: 'llm_generate', created_at: fixedTime },
+      { id: 'agent-orphan', agent_run_id: 'missing-parent', step_key: 'llm_generate', created_at: fixedTime },
+      { id: 'agent-non-text', agent_run_id: 'agent-parent', step_key: 'other', created_at: fixedTime }],
+    CanvasRoleAttempt: [{ id: 'role', started_at: fixedTime }, { id: 'role-invalid', started_at: 'invalid' }],
+    ProviderApiRequest: [{ id: 'mapped-request', task_id: 'external-0' }],
+  };
+  const sourceLedger = (id: string, extra: Record<string, string | number | null>) => ledger(`z-${id}`, { official_charge_id: `proof-${id}`, ...extra });
+  seed.push(...Array.from({ length: 520 }, (_, i) => sourceLedger(`wide-${i}`, { task_id: `external-${i}` })),
+    sourceLedger('duplicate', { task_id: 'external-0', event_type: 'refund' }),
+    sourceLedger('request', { provider_request_id: 'mapped-request' }),
+    sourceLedger('request-alias', { source_type: 'provider_request', source_id: 'mapped-request' }),
+    ...[['colon', 'video_task', 'external:colon'], ['case', 'task', 'Case'], ['wrong-case', 'task', 'case'],
+      ['empty-time', 'video_task', 'empty-time'], ['bad-time', 'video_task', 'bad-time'], ['missing', 'video_task', 'missing'],
+      ['image', 'image_studio_task', 'image'], ['text', 'video_studio_run', 'text'], ['non-text', 'video_studio_run', 'non-text'],
+      ['agent', 'agent_text_step', 'agent'], ['agent-orphan', 'agent_text_step', 'agent-orphan'], ['agent-non-text', 'agent_text_step', 'agent-non-text'],
+      ['role', 'role_attempt', 'role'], ['role-invalid', 'role_attempt', 'role-invalid'], ['unsupported', 'other', 'external-0']].map(([id, source_type, source_id]) => sourceLedger(id, { source_type, source_id })),
+    sourceLedger('ambiguous', { task_id: 'external-0', image_task_id: 'image' }));
   try {
     const schema = readFileSync(path.join(root, 'prisma/schema.prisma'), 'utf8');
     const costSchema = schema.match(/^model CostLedger \{([\s\S]*?)^\}/m)![1];
     const indexed = ['provider_task_id', 'provider_request_id'];
     for (const column of indexed) assert.ok(costSchema.includes(`@@index([${column}])`), `Index must already exist: ${column}`);
-    const tables = ['CostLedger', 'ProviderApiRequest', 'ImageStudioTask', 'CanvasRoleAttempt'];
+    const tables = ['CostLedger', ...Object.keys(sourceRows)];
     const quote = (name: string) => { assert.match(name, /^\w+$/); return `"${name}"`; };
     const ddl = Prisma.dmmf.datamodel.models.filter(model => tables.includes(model.name)).map(model => `CREATE TABLE ${quote(model.dbName || model.name)} (${model.fields.filter(field => field.kind !== 'object').map(field =>
       `${quote(field.dbName || field.name)} ${field.type === 'DateTime' ? 'DATETIME' : ['Int', 'BigInt', 'Boolean'].includes(field.type) ? 'INTEGER' : ['Float', 'Decimal'].includes(field.type) ? 'DOUBLE' : 'TEXT'}${field.isId ? ' PRIMARY KEY' : ''}`).join(',')});`).join('\n')
       + indexed.map(column => `CREATE INDEX CostLedger_${column}_idx ON CostLedger(${column});`).join('\n');
-    const setup = spawnSync('/usr/bin/python3', ['-c', `import json,sqlite3,sys\np=json.load(sys.stdin)\nc=sqlite3.connect(p['file'])\nc.executescript(p['ddl'])\nfor row in p['seed']:\n names=list(row)\n c.execute('INSERT INTO CostLedger ('+','.join('"'+n+'"' for n in names)+') VALUES ('+','.join('?' for n in names)+')',[row[n] for n in names])\nc.commit()\nc.close()\n`],
-      { input: JSON.stringify({ file: filename, ddl, seed }), encoding: 'utf8', env: { PATH: '/usr/bin:/bin', NODE_ENV: 'test' } });
+    const setup = spawnSync('/usr/bin/python3', ['-c', `import json,sqlite3,sys\np=json.load(sys.stdin)\nc=sqlite3.connect(p['file'])\nc.executescript(p['ddl'])\nfor row in p['seed']:\n names=list(row)\n c.execute('INSERT INTO CostLedger ('+','.join('"'+n+'"' for n in names)+') VALUES ('+','.join('?' for n in names)+')',[row[n] for n in names])\nfor table,rows in p['sourceRows'].items():\n for row in rows:\n  names=list(row)\n  c.execute('INSERT INTO '+table+' ('+','.join(chr(34)+n+chr(34) for n in names)+') VALUES ('+','.join('?' for n in names)+')',[row[n] for n in names])\nc.commit()\nc.close()\n`],
+      { input: JSON.stringify({ file: filename, ddl, seed, sourceRows }), encoding: 'utf8', env: { PATH: '/usr/bin:/bin', NODE_ENV: 'test' } });
     assert.ifError(setup.error); assert.equal(setup.status, 0, setup.stderr);
     const run = async (impl: Consumer, ids?: string[]) => {
       const trace: Trace[] = [], projections: Projection[] = [];
@@ -180,6 +205,24 @@ async function main() {
       assert.deepEqual(pages.map(t => t.rows), [500, wideIds.length - 500]);
       assert.deepEqual(pages.flatMap(t => t.ids), wideIds.slice().sort(binary), `${kind}: native BINARY cursor order`);
     }
+    const externalIds = seed.filter(row => row.id.startsWith('z-')).map(row => row.id);
+    const external = await compare('five_source_predicates_request_aliases_missing_and_ambiguous_links_keep_events', externalIds, externalIds);
+    const event = (id: string) => external.after.batches[0].find(row => row.id === `z-${id}`)!;
+    for (const id of ['wrong-case', 'empty-time', 'bad-time', 'missing', 'non-text', 'agent-orphan', 'agent-non-text', 'role-invalid', 'unsupported', 'ambiguous']) assert.equal(event(id).sourceKey, null, id);
+    assert.equal(event('colon').sourceKey, 'video_task:external:colon', 'valid out-of-cohort occurrence still links');
+    assert.equal(event('request').sourceKey, 'video_task:external-0');
+    assert.equal(event('request-alias').sourceKey, 'video_task:external-0');
+    assert.equal(event('duplicate').amountMicros, '-1000000', 'refund sign unchanged');
+    assert.equal(event('ambiguous').status, 'conflict');
+    for (const [id, key] of [['case', 'video_task:Case'], ['image', 'image_task:image'], ['text', 'video_studio_run:text'], ['agent', 'agent_text_step:agent'], ['role', 'role_attempt:role']]) assert.equal(event(id).sourceKey, key);
+    const beforeExistence = external.before.trace.filter(t => t.kind === 'external-source'), afterExistence = external.after.trace.filter(t => t.kind === 'external-source');
+    assert.equal(afterExistence.length, 6, 'five types, video >500 requires exactly two pages');
+    assert.ok(beforeExistence.length > 520);
+    assert.ok(afterExistence.every(t => t.sql.includes('"id" IN (') && !t.sql.includes('LIMIT 1') && t.parameters.length <= 500));
+    const videoLookups = afterExistence.filter(t => t.sql.includes('FROM "VideoTask"'));
+    assert.deepEqual(videoLookups.map(t => t.parameters.length), [500, 26]);
+    assert.equal(videoLookups.flatMap(t => t.parameters).filter(id => id === 'external-0').length, 1, 'repeated ledger/request source is confirmed once');
+    checks.push('unique_source_confirmation_batches_at_500_without_changing_time_mode_parent_or_order');
     const allBefore = await run(original), allAfter = await run(candidate);
     assert.deepEqual(allAfter.projections, allBefore.projections);
     assert.deepEqual(allAfter.batches, allBefore.batches);
@@ -189,7 +232,7 @@ async function main() {
     results.push({ name: checks.at(-1), batchSizes: allAfter.batches.map(batch => batch.length), eventCount: seed.length,
       projectionSha256: sha(json(allAfter.projections)), eventsSha256: sha(json(allAfter.batches)) });
     for (const record of [...identities.after.trace, ...wide.after.trace]) {
-      if (record.kind === 'legacy-peer') continue;
+      if (!['task-peer', 'request-peer'].includes(record.kind)) continue;
       const column = record.kind === 'task-peer' ? 'provider_task_id' : 'provider_request_id';
       assert.ok(record.plan?.some(row => 'detail' in row && String(row.detail).includes(`USING INDEX CostLedger_${column}_idx`)), 'Actual single-column index search required');
       const condition = record.sql.replace(/\s+/g, ' ').split(' WHERE (')[1];

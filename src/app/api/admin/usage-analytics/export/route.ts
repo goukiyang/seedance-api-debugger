@@ -1,3 +1,4 @@
+import { UsageReportBusyError } from '@/lib/admin/usage-report-admission';
 import { traceHttpRequest, tracePhase } from '@/lib/performance/request-trace';
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminUser } from '@/lib/auth/api-helpers';
@@ -32,6 +33,7 @@ export async function GET(request: NextRequest) {
       'X-Usage-Record-Count': String(snapshot.records.length),
     } });
   } catch (error) {
+    if (error instanceof UsageReportBusyError) return NextResponse.json({ error: error.message }, { status: error.status, headers: { ...privateHeaders, 'Retry-After': '3' } });
     if (error instanceof AuthError || error instanceof UsageQueryError) return NextResponse.json({ error: error.message }, { status: error.status, headers: privateHeaders });
     return NextResponse.json({ error: '使用分析导出失败，请保留条件重试；未生成不完整导出文件' }, { status: 503, headers: privateHeaders });
   }

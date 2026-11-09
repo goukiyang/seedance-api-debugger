@@ -19,6 +19,7 @@ type Options = { databasePath: string; runtimeRoot: string; source: string };
 type ProcEvidence = { pid: number; parentPid: number; start: string; state: string; uid: number; stat: string };
 type Result = {
   completed: true;
+  hashReuseCoverage?: { sameRoot: true; differentRoot: { exercised: boolean; reason: string } };
   checks: Array<{ id: 'G19'; assertions: number; evidence: string[] }>;
   processEvidence: { worker: ProcEvidence; parent: ProcEvidence; controller?: ProcEvidence; parentSignalZero: 'EPERM';
     capability: PricingWorkerCapability; reader: { workerId: string; source: string; expiresAt: string } };
@@ -226,11 +227,56 @@ export async function runPricingParentIdentityContractFixture(options: Options):
     assert.equal(ready.processEvidence.worker.start, spawned.start);
     assert.equal(ready.processEvidence.worker.parentPid, 1); assert.equal(ready.processEvidence.parent.pid, 1);
     assert.equal(ready.processEvidence.parentSignalZero, 'EPERM');
-    const accepted = await assertPricingImageConsumerReady(db);
+    const sourceFile = path.join(runtimeRoot, 'src/lib/image-studio/tasks.ts');
+    const sourceBytes = fs.readFileSync(sourceFile), sourceRead = fs.readFileSync;
+    let sameRootReads = 0, hashAssertions = 0;
+    const sameRootControl = mock.method(fs, 'readFileSync', (...args: any[]) => {
+      if (String(args[0]) === sourceFile) sameRootReads++;
+      return Reflect.apply(sourceRead, fs, args);
+    });
+    let accepted!: Awaited<ReturnType<typeof assertPricingImageConsumerReady>>;
+    try { accepted = await assertPricingImageConsumerReady(db); assert.equal(sameRootReads, 1); hashAssertions++; }
+    finally { sameRootControl.mock.restore(); }
     assert.equal(accepted.workerId, ready.processEvidence.capability.workerId);
+    fs.appendFileSync(sourceFile, '\n// isolated G19 source-change check\n');
+    try { await assert.rejects(() => assertPricingImageConsumerReady(db!)); hashAssertions++; }
+    finally { fs.writeFileSync(sourceFile, sourceBytes); }
+    const extraSource = path.join(runtimeRoot, 'src/lib/image-studio/g19-added-source.ts');
+    let addedDuringHash = false;
+    const rosterControl = mock.method(fs, 'readFileSync', (...args: any[]) => {
+      const bytes = Reflect.apply(sourceRead, fs, args);
+      if (String(args[0]) === sourceFile && !addedDuringHash) {
+        fs.writeFileSync(extraSource, '// isolated source roster mutation\n', { flag: 'wx' }); addedDuringHash = true;
+      }
+      return bytes;
+    });
+    try { await assert.rejects(() => assertPricingImageConsumerReady(db!)); hashAssertions++; assert.equal(addedDuringHash, true); hashAssertions++; }
+    finally { rosterControl.mock.restore(); if (addedDuringHash) fs.unlinkSync(extraSource); }
+    assert.equal((await assertPricingImageConsumerReady(db)).workerId, ready.processEvidence.capability.workerId); hashAssertions++;
+    const suppliedRoot = process.env.PRICING_CORE_RUNTIME_ROOT;
+    const otherRoot = suppliedRoot && fs.existsSync(suppliedRoot) ? fs.realpathSync(suppliedRoot) : null;
+    const differentRootCoverage = { exercised: false, reason: otherRoot === runtimeRoot ? 'same-canonical-root' : 'independent-root-not-supplied' };
+    if (otherRoot && otherRoot !== runtimeRoot && fs.lstatSync(otherRoot).isDirectory()) {
+      assert.notEqual(otherRoot, runtimeRoot, 'The actual controller must also exercise an independent canonical source root'); hashAssertions++;
+      assert.ok(inside(otherRoot, roleRoot)); hashAssertions++;
+      assertPricingWriterIsolation(otherRoot);
+      assert.deepEqual(pricingRuntimeModuleHashes(otherRoot), pricingRuntimeModuleHashes(runtimeRoot)); hashAssertions++;
+      const hashedFiles = [runtimeRoot, otherRoot].map(root => path.join(root, 'src/lib/image-studio/tasks.ts'));
+      const originalRead = fs.readFileSync, independentReads = new Map(hashedFiles.map(file => [file, 0]));
+      const readControl = mock.method(fs, 'readFileSync', (...args: any[]) => {
+        const file = String(args[0]); if (independentReads.has(file)) independentReads.set(file, independentReads.get(file)! + 1);
+        return Reflect.apply(originalRead, fs, args);
+      });
+      try {
+        process.chdir(otherRoot);
+        assert.equal((await assertPricingImageConsumerReady(db)).workerId, ready.processEvidence.capability.workerId); hashAssertions++;
+        assert.deepEqual(Array.from(independentReads.values()), [1, 1], 'Different actual reader/worker roots retain independent source hashing'); hashAssertions++;
+      } finally { process.chdir(runtimeRoot); readControl.mock.restore(); }
+      differentRootCoverage.exercised = true; differentRootCoverage.reason = 'distinct-real-canonical-roots';
+    }
     const row = await db.platformSetting.findUniqueOrThrow({ where: { key: PRICING_IMAGE_CAPABILITY_KEY } });
     const captured = ready.processEvidence.capability;
-    let assertions = 7;
+    let assertions = 7 + hashAssertions;
     const refuse = async (value: PricingWorkerCapability) => {
       await db!.platformSetting.update({ where: { id: row.id }, data: { value_json: JSON.stringify(value) } });
       try { await assert.rejects(() => assertPricingImageConsumerReady(db!)); assertions++; }
@@ -254,9 +300,12 @@ export async function runPricingParentIdentityContractFixture(options: Options):
     assert.equal(finished.completed, true);
     await assert.rejects(() => assertPricingImageConsumerReady(db!)); assertions += 2;
     completed = true;
-    return { completed: true, checks: [{ id: 'G19', assertions: assertions + finished.checks[0].assertions,
+    return { completed: true, hashReuseCoverage: { sameRoot: true, differentRoot: differentRootCoverage }, checks: [{ id: 'G19', assertions: assertions + finished.checks[0].assertions,
       evidence: [...finished.checks[0].evidence,
-        'A separate actual controller reader accepted the live PPID1 child; real parent PID/start, worker parent/start/cwd, module hash and TTL mutations all rejected; original receipt remained readable after restoration.',
+        'The same-root actual reader hashes each source once; changed bytes and a source file added during hashing reject, with original bytes/roster restored before continuing. Real parent PID/start, worker parent/start/cwd, loaded module hash, TTL and revocation checks remain enforced.',
+        differentRootCoverage.exercised
+          ? 'An actual controller in a second canonical source root accepted the real PPID1 child and independently hashed both real source trees exactly once.'
+          : `Independent-root coverage not exercised: ${differentRootCoverage.reason}; no synthetic root or unrun assertion was counted.`,
         'The real child revoked its receipt before exit; no fake uid/PPID/proc/stat/kill, network, provider generation, production DB or marker rewrite was used. Temporary child files are bounded to the supplied .role-tests runtime and removed after process cleanup.',
       ] }], processEvidence: { ...finished.processEvidence, controller, reader: accepted } };
   } finally {

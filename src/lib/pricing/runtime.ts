@@ -159,8 +159,13 @@ export async function assertPricingImageConsumerReady(client: Client, raw?: stri
       || current.parentPid !== value.instance.parentPid || current.parentPid !== value.parent.pid
       || fs.readFileSync(path.join(process.cwd(), '.deployed-commit'), 'utf8').trim() !== value.source
       || parentIdentity(value.parent.pid).start !== value.parent.start) throw new PricingRuntimeError();
-    const expected = pricingRuntimeModuleHashes();
-    const actual = pricingRuntimeModuleHashes(current.cwd);
+    const expectedRoot = fs.realpathSync(process.cwd());
+    const expected = pricingRuntimeModuleHashes(expectedRoot);
+    // A colocated reader and worker refer to the same freshly hashed files.
+    // Re-enumerate the roster; keep independent hashes for another root or set.
+    const actual = current.cwd === expectedRoot
+      && JSON.stringify(pricingRuntimeSourceFiles(current.cwd)) === JSON.stringify(Object.keys(expected))
+      ? expected : pricingRuntimeModuleHashes(current.cwd);
     if (JSON.stringify(expected) !== JSON.stringify(value.loadedModuleSha)
       || JSON.stringify(actual) !== JSON.stringify(value.loadedModuleSha)) throw new PricingRuntimeError();
     return { workerId: value.workerId, source: value.source, expiresAt: value.expiresAt };
