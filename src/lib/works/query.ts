@@ -9,9 +9,10 @@ import { projectWorkProvenance } from './provenance';
 import { readWorkActivity } from './activity';
 import { recommendationVisibleSql, recommendationReadCtes } from './recommendation-read';
 import { recommendationSchemaReady } from './recommendation-events';
+import { WORK_EDITORIAL_PREFIX, WORK_DISCOVERY_DAYS, WORK_DISCOVERY_LIMIT, readWorkEditorial, workEditorialCte } from './editorial';
 
-type PageKey = WorkPermissionRow & { completed_at: Date; project_visible: number | bigint };
-type Position = { time: string; id: string };
+type PageKey = WorkPermissionRow & { completed_at: Date; project_visible: number | bigint; feed_round?: number; feed_tier?: number; feed_score?: number };
+type Position = { time: string; id: string; rank?: [number, number, number] };
 type WindowToken = { v: 1; owner: string; query: string; upper: string; position?: Position };
 const secret = () => process.env.SESSION_SECRET || 'works-local-window-v1';
 const sign = (body: string) => createHmac('sha256', secret()).update(body).digest('base64url');
@@ -24,7 +25,8 @@ function decode(value: string, owner: string, query: string): WindowToken {
     if (extra !== undefined || expected.length !== actual.length || !timingSafeEqual(expected, actual)) throw new Error();
     const token = JSON.parse(Buffer.from(body, 'base64url').toString()) as WindowToken;
     if (token.v !== 1 || token.owner !== owner || token.query !== query || !Number.isFinite(Date.parse(token.upper))
-      || token.position && (typeof token.position.id !== 'string' || !Number.isFinite(Date.parse(token.position.time)))) throw new Error();
+      || token.position && (typeof token.position.id !== 'string' || !Number.isFinite(Date.parse(token.position.time))
+        || token.position.rank !== undefined && (!Array.isArray(token.position.rank) || token.position.rank.length !== 3 || !token.position.rank.every(Number.isSafeInteger)))) throw new Error();
     return token;
   } catch { throw new WorkError('浏览位置已失效，请刷新作品列表', 409, 'WORKS_WINDOW_CHANGED'); }
 }
@@ -35,13 +37,17 @@ const idValue = (value: string | null) => {
 };
 export function parseWorkQuery(params: URLSearchParams): WorkQuery {
   const medium = params.get('medium') || 'all', scope = params.get('scope') || 'all';
-  if (!['all', 'image', 'video'].includes(medium) || !['all', 'recommended', 'mine', 'favorites', 'hidden', 'managed'].includes(scope)) throw new WorkError('筛选条件无效');
+  if (!['all', 'image', 'video'].includes(medium) || !['all', 'recommended', 'discoveries', 'mine', 'favorites', 'hidden', 'managed'].includes(scope)) throw new WorkError('筛选条件无效');
   return { medium: medium as WorkQuery['medium'], scope: scope as WorkQuery['scope'], q: (params.get('q') || '').trim().slice(0, 120),
     author: idValue(params.get('author')), project: idValue(params.get('project')), collection: idValue(params.get('collection')) };
 }
-const point = (key: PageKey): Position => ({ time: new Date(key.completed_at).toISOString(), id: key.id });
+const point = (key: PageKey): Position => ({ time: new Date(key.completed_at).toISOString(), id: key.id,
+  ...(key.feed_round !== undefined ? { rank: [Number(key.feed_round), Number(key.feed_tier), Number(key.feed_score)] as [number, number, number] } : {}) });
 function boundary(position: Position, direction: 'older' | 'newer', inclusive = false) {
   const time = new Date(position.time);
+  if (position.rank) return Prisma.sql`(w.feed_round,w.feed_tier,w.feed_score,w.completed_at,w.id)
+    ${Prisma.raw(direction === 'older' ? inclusive ? '<=' : '<' : '>')}
+    (${position.rank[0]},${position.rank[1]},${position.rank[2]},${time},${position.id})`;
   return direction === 'older' ? Prisma.sql`(w.completed_at < ${time} OR (w.completed_at = ${time} AND w.id ${inclusive ? Prisma.raw('<=') : Prisma.raw('<')} ${position.id}))`
     : Prisma.sql`(w.completed_at > ${time} OR (w.completed_at = ${time} AND w.id > ${position.id}))`;
 }
@@ -54,7 +60,7 @@ export async function projectWorkCards(user: SessionUser, keys: PageKey[], db: P
   if (!keys.length) return [];
   const ids = keys.map(key => key.id);
   const mediaIds = keys.map(key => key.media_id);
-  const [works, versions, states, memberships, likes, activity] = await Promise.all([
+  const [works, versions, states, memberships, likes, activity, editorialRows] = await Promise.all([
     db.work.findMany({ where: { id: { in: ids } } }),
     db.workMediaVersion.findMany({ where: { id: { in: mediaIds } } }),
     db.workPersonalState.findMany({ where: { owner_id: user.id, work_id: { in: ids } } }),
@@ -62,6 +68,7 @@ export async function projectWorkCards(user: SessionUser, keys: PageKey[], db: P
     db.$queryRaw<Array<{ work_id: string; amount: bigint | number }>>(Prisma.sql`SELECT work_id, count(*) AS amount FROM WorkPersonalState
       WHERE work_id IN (${Prisma.join(ids)}) AND liked = 1 GROUP BY work_id`),
     readWorkActivity(db, keys.filter(key => key.can_preview).map(key => key.id)),
+    db.platformSetting.findMany({ where: { key: { in: ids.map(id => WORK_EDITORIAL_PREFIX + id) } }, select: { key: true, value_json: true } }),
   ]);
   const pending = versions.filter(version => version.preview_status === 'pending').map(version => version.id);
   const [authors, projects, provenance, jobs] = await Promise.all([
@@ -75,6 +82,7 @@ export async function projectWorkCards(user: SessionUser, keys: PageKey[], db: P
   const stateById = new Map(states.map(state => [state.work_id, state])), authorById = new Map(authors.map(author => [author.id, author]));
   const projectById = new Map(projects.map(project => [project.id, project])), countById = new Map(likes.map(row => [row.work_id, Number(row.amount)]));
   const preparing = new Set(jobs.map(job => job.source_id));
+  const editorialById = new Map(editorialRows.map(row => [row.key.slice(WORK_EDITORIAL_PREFIX.length), row]));
   return keys.flatMap(key => {
     const work = workById.get(key.id), media = versionById.get(key.media_id);
     // A concurrent replacement never pairs the old authorization result with a newer file.
@@ -87,6 +95,8 @@ export async function projectWorkCards(user: SessionUser, keys: PageKey[], db: P
     const name = author?.name?.trim();
     const safeName = name && !name.includes('@') && !/^\+?[\d\s-]{7,}$/.test(name) ? name : '同事';
     const reuse = key.can_reuse ? key.reference_id ? { referenceImageId: key.reference_id } : media.asset_id ? { assetId: media.asset_id } : null : null;
+    const editorial = readWorkEditorial(editorialById.get(work.id), media.id, work.author_id);
+    const canRecommend = canPreview && work.discoverable && !work.withdrawn_at;
     return [{ id: work.id, title: work.title, medium: work.medium as WorkCard['medium'], mediaVersion: media.id, revision: work.revision,
       width: media.width, height: media.height, duration: media.duration, completedAt: work.completed_at.toISOString(),
       author: { id: work.author_id, name: safeName, avatarUrl: author?.avatar_url || null }, provenance: provenance.get(work.id),
@@ -103,6 +113,9 @@ export async function projectWorkCards(user: SessionUser, keys: PageKey[], db: P
         : work.source_kind === 'multiview_work' && owned ? `/multiview?work=${encodeURIComponent(work.source_id)}`
           : media.asset_id ? `/assets?content=${encodeURIComponent(`asset:${media.asset_id}`)}` : null : null,
       audience: work.audience as WorkAudience, canManage: owned, discoverable: work.discoverable, withdrawn: Boolean(work.withdrawn_at),
+      editorial: { version: editorial.version, featured: editorial.featured, nominated: editorial.nominated,
+        nominationExpired: Boolean(editorial.nominatedAt && editorial.nominatedAt + WORK_DISCOVERY_DAYS * 86400000 <= Date.now()),
+        canFeature: canRecommend && user.role === 'admin' && user.account_type === 'internal', canNominate: canRecommend && owned },
       personal: { liked: state?.liked || false, favorited: state?.favorited || false, hidden: state?.hidden || false, version: state?.version || 0 },
       likeCount: countById.get(work.id) || 0, collectionIds: memberships.filter(item => item.work_id === work.id).map(item => item.collection_id),
       activity: canPreview ? activity.get(work.id) || { views: 0, reuses: 0 } : undefined,
@@ -112,20 +125,24 @@ export async function projectWorkCards(user: SessionUser, keys: PageKey[], db: P
 
 export async function readWorkPage(user: SessionUser, params: URLSearchParams, db: Prisma.TransactionClient = prisma): Promise<WorkPage> {
   const query = parseWorkQuery(params);
-  const queryHash = createHash('sha256').update(JSON.stringify(query)).digest('hex');
+  const discovery = query.scope === 'discoveries', ranked = query.scope === 'recommended' || discovery;
+  const queryHash = createHash('sha256').update(JSON.stringify(ranked ? { ...query, rankingRule: 3 } : query)).digest('hex');
   const after = params.get('after'), before = params.get('before'), requestedAnchor = idValue(params.get('anchor'));
   if (after && before || requestedAnchor && (after || before)) throw new WorkError('浏览位置参数无效');
   const cursor = after || before ? decode((after || before)!, user.id, queryHash) : null;
   const window = params.get('window') ? decode(params.get('window')!, user.id, queryHash) : cursor || { v: 1 as const, owner: user.id, query: queryHash, upper: new Date().toISOString() };
   if (cursor && (cursor.upper !== window.upper || !cursor.position)) throw new WorkError('浏览位置已变化，请刷新列表', 409);
   const requestedLimit = Number(params.get('limit'));
-  const limit = Number.isSafeInteger(requestedLimit) && requestedLimit > 0 ? Math.min(24, requestedLimit) : 24;
+  const limit = discovery ? WORK_DISCOVERY_LIMIT : Number.isSafeInteger(requestedLimit) && requestedLimit > 0 ? Math.min(24, requestedLimit) : 24;
   const access = await workAccessSql(db, user);
   if (query.collection && !await db.workCollection.findFirst({ where: { id: query.collection, owner_id: user.id, removed_at: null }, select: { id: true } })) throw new WorkError('收藏集不存在或不属于当前账号', 404);
-  const recommendedReady = query.scope === 'recommended' && await recommendationSchemaReady(db);
+  const recommendedReady = ranked && await recommendationSchemaReady(db);
   const filters: Prisma.Sql[] = [Prisma.sql`w.admitted_at <= ${new Date(window.upper)}`];
-  if (query.scope === 'recommended') filters.push(recommendedReady
-    ? recommendationVisibleSql() : Prisma.sql`0=1`);
+  if (ranked) filters.push(discovery
+    ? Prisma.sql`editorial.nominated=1 AND editorial.featured=0
+        AND editorial.nominated_at>=${Date.parse(window.upper) - WORK_DISCOVERY_DAYS * 86400000}
+        AND NOT (${recommendationVisibleSql()})`
+    : Prisma.sql`editorial.featured=1 OR (${recommendationVisibleSql()})`);
   filters.push(query.scope === 'managed' ? Prisma.sql`${access.owner}` : Prisma.sql`(${access.canPreview})`);
   if (query.scope !== 'managed' && query.scope !== 'favorites' && !query.collection) filters.push(Prisma.sql`w.discoverable = 1`);
   if (query.scope === 'mine') filters.push(access.owner);
@@ -144,20 +161,30 @@ export async function readWorkPage(user: SessionUser, params: URLSearchParams, d
     (${access.projectView(Prisma.sql`w.project_id`)}) AS project_visible`;
   const select = async (extra: Prisma.Sql, ascending = false, amount = limit + 1) => {
     const direction = ascending ? Prisma.raw('ASC') : Prisma.raw('DESC');
-    if (query.scope === 'recommended') {
-      if (!recommendedReady) return [] as PageKey[];
+    if (ranked) {
       return db.$queryRaw<PageKey[]>(Prisma.sql`WITH ${access.ctes},
-        ${recommendationReadCtes(user.id, access, new Date(window.upper))},
+        ${workEditorialCte(new Date(window.upper))},
+        ${recommendationReadCtes(user.id, access, new Date(window.upper), recommendedReady)},
+        admission_ids AS (SELECT work_id FROM editorial WHERE ${discovery ? Prisma.sql`nominated=1` : Prisma.sql`featured=1`}
+          ${discovery ? Prisma.empty : Prisma.sql`UNION SELECT work_id FROM recommendation_pool`}),
         eligible AS MATERIALIZED (
-          SELECT ${projection},COALESCE(context.submission_key,w.id) AS group_key
-          FROM recommendation_pool admission CROSS JOIN Work w ON w.id=admission.work_id ${access.joins}
+          SELECT ${projection},w.author_id,COALESCE(context.submission_key,w.id) AS group_key,
+            COALESCE(editorial.featured,0) AS feed_tier,COALESCE(admission.score,0) AS feed_score
+          FROM admission_ids requested CROSS JOIN Work w ON w.id=requested.work_id ${access.joins}
+          LEFT JOIN editorial ON editorial.work_id=w.id AND editorial.media_version=v.id AND editorial.author_id=w.author_id
+          LEFT JOIN recommendation_pool admission ON admission.work_id=w.id
           LEFT JOIN WorkPersonalState personal ON personal.work_id=w.id AND personal.owner_id=${user.id}
           LEFT JOIN WorkContext context ON context.work_id=w.id AND context.media_version_id=v.id AND context.schema_version=1
           WHERE ${where}
         ), representatives AS (
-          SELECT *,row_number() OVER (PARTITION BY group_key ORDER BY completed_at DESC,id DESC) AS group_position FROM eligible
-        ) SELECT * FROM representatives w WHERE group_position=1 ${extra}
-        ORDER BY w.completed_at ${direction},w.id ${direction} LIMIT ${amount}`);
+          SELECT *,row_number() OVER (PARTITION BY group_key ORDER BY feed_tier DESC,feed_score DESC,completed_at DESC,id DESC) AS group_position FROM eligible
+        ), authors AS (
+          SELECT *,row_number() OVER (PARTITION BY author_id ORDER BY feed_tier DESC,feed_score DESC,completed_at DESC,id DESC) AS author_position
+          FROM representatives WHERE group_position=1
+        ), spaced AS (
+          SELECT *,-CAST((author_position-1)/2 AS INTEGER) AS feed_round FROM authors
+        ) SELECT * FROM spaced w WHERE ${discovery ? Prisma.sql`author_position=1` : Prisma.sql`1=1`} ${extra}
+        ORDER BY w.feed_round ${direction},w.feed_tier ${direction},w.feed_score ${direction},w.completed_at ${direction},w.id ${direction} LIMIT ${amount}`);
     }
     return db.$queryRaw<PageKey[]>(Prisma.sql`WITH ${access.ctes}
       SELECT ${projection} FROM Work w ${access.joins}
@@ -194,7 +221,7 @@ export async function readWorkPage(user: SessionUser, params: URLSearchParams, d
   }
   return { protocol: WORKS_PROTOCOL, viewerId: user.id, items: await projectWorkCards(access.user, keys, db), window: encode(base),
     previousCursor: hasPrevious && keys.length ? encode({ ...base, position: point(keys[0]) }) : null,
-    nextCursor: hasNext && keys.length ? encode({ ...base, position: point(keys[keys.length - 1]) }) : null,
+    nextCursor: !discovery && hasNext && keys.length ? encode({ ...base, position: point(keys[keys.length - 1]) }) : null,
     anchorId, anchorUnavailable, ...(omittedIds ? { omittedIds } : {}) };
 }
 

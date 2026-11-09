@@ -6,7 +6,7 @@ import { workAccessSql } from './access';
 import { canUseWorksPreview } from './rollout.server';
 import { recommendationSchemaReady, bindPendingRecommendationTakes } from './recommendation-events';
 import { collectRecommendationSourcePass } from './recommendation-sources';
-import { replayWorkRecommendation, WORK_RECOMMENDATION_RULE, type RecommendationStep } from './recommendation-score';
+import { replayCommunityRecommendation, WORK_COMMUNITY_RULE as WORK_RECOMMENDATION_RULE, type RecommendationStep } from './recommendation-score';
 
 type Visible = { id: string; version: string; revision: number; project: string | null };
 type Evidence = Pick<Visible, 'id' | 'version' | 'revision'>;
@@ -107,15 +107,14 @@ async function evaluate(db: typeof prisma, user: SessionUser, input: NonNullable
         : { purpose: event.purpose_key, chain: event.chain_key, signal: 'superseded', ...attribution };
     }
     if (!Object.keys(changes).length) continue;
-    steps.push({ id: String(event.id), order, changes });
+    steps.push({ id: String(event.id), order, at: event.occurred_at.getTime(), changes });
     for (const id of [event.work_id, event.evidence_work_id]) if (id && id !== workId && visible.has(id)) {
       const { version, revision } = visible.get(id)!; dependencies.set(id, { id, version, revision });
     }
   }
-  const trustedOrder = historyFrom ? steps.find(step => valid[step.order].occurred_at >= historyFrom)?.order : undefined;
-  const verdict = replayWorkRecommendation(steps, trustedOrder);
+  const verdict = replayCommunityRecommendation(steps, source.author_id);
   return { source, score: verdict.score, qualified: verdict.qualified, evidence: Array.from(dependencies.values()),
-    historyFrom: historyFrom || (verdict.qualified ? new Date() : null) };
+    lastUsedAt: verdict.lastUsedAt, historyFrom: historyFrom || (verdict.qualified ? new Date() : null) };
 }
 
 /** A slow seek repair covers permission changes and newly eligible colleagues without a page-open job. */
