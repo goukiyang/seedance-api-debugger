@@ -1,5 +1,5 @@
 export const WORK_RECOMMENDATION_RULE = 2;
-export const WORK_COMMUNITY_RULE = 3;
+export const WORK_COMMUNITY_RULE = 4;
 
 const points = { revisit: 1, take: 6, input: 8, retained: 12, replaced: -6, superseded: -4 } as const;
 

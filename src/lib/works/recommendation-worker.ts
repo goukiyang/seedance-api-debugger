@@ -10,7 +10,7 @@ import { replayCommunityRecommendation, WORK_COMMUNITY_RULE as WORK_RECOMMENDATI
 
 type Visible = { id: string; version: string; revision: number; project: string | null };
 type Evidence = Pick<Visible, 'id' | 'version' | 'revision'>;
-const signals = new Set(['revisit', 'take', 'input', 'retained']);
+const signals = new Set(['revisit', 'take', 'input', 'retained', 'method']);
 
 async function viewers(db: typeof prisma, after: string) {
   const allowedTenant = process.env.FEISHU_ALLOWED_TENANT_KEY?.trim();
@@ -94,7 +94,8 @@ async function evaluate(db: typeof prisma, user: SessionUser, input: NonNullable
       family: event.evidence_work_id ? visible.get(event.evidence_work_id)?.project || undefined : undefined };
     const use = event.signal === 'input' || event.signal === 'retained';
     if (ownIds.has(event.id) && !(event.signal === 'take' && usingActors.has(event.actor_id))) changes[event.fact_key] = {
-      purpose: event.purpose_key, chain: event.chain_key, signal: event.signal as 'input' | 'retained' | 'take' | 'revisit', ...attribution,
+      purpose: event.purpose_key, chain: event.chain_key,
+      signal: event.signal === 'method' ? 'retained' : event.signal as 'input' | 'retained' | 'take' | 'revisit', ...attribution,
     };
     if (use && event.slot_key && slotKeys.some(slot => slot.actor_id === event.actor_id && slot.purpose_key === event.purpose_key && slot.slot_key === event.slot_key)) {
       changes[`replacement:${event.actor_id}:${event.purpose_key}:${event.slot_key}`] = event.work_id === workId

@@ -8,6 +8,7 @@ import { isTaskHiddenFromRegularUsers } from '@/lib/tasks/retention';
 import { worksRegistrationPaused, worksSchemaReady } from './source-policy';
 import { backfillWorkContexts, indexWorkContext, worksContextSchemaReady } from './context-index';
 import { workVideoSourceRevision } from './source-revision';
+import { ensureAutomaticWorkDiscovery } from './editorial';
 
 type SourceKind = 'image_task' | 'video_task' | 'multiview_work';
 const sourceKinds: SourceKind[] = ['image_task', 'video_task', 'multiview_work'];
@@ -173,6 +174,7 @@ async function registerClaimed(job: WorkRegistrationLease) {
     if (work.current_version_id !== version.id) await db.work.update({ where: { id: work.id }, data: {
       current_version_id: version.id, title: source.title, project_id: source.projectId, audience, completed_at: source.completedAt, revision: { increment: 1 } } });
     if (await worksContextSchemaReady(db)) await indexWorkContext(db, work, version.id);
+    await ensureAutomaticWorkDiscovery(db, { ...work, current_version_id: version.id, completed_at: source.completedAt });
     if (source.medium === 'video' && policy || source.medium === 'image' && !source.thumbnailUrl) await db.workRegistrationJob.upsert({
       where: { source_kind_source_id_source_revision: { source_kind: 'media_preview', source_id: version.id, source_revision: version.id } },
       create: { source_kind: 'media_preview', source_id: version.id, source_revision: version.id, source_updated_at: source.updatedAt }, update: {} });

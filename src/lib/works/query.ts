@@ -139,7 +139,7 @@ export async function readWorkPage(user: SessionUser, params: URLSearchParams, d
   const recommendedReady = ranked && await recommendationSchemaReady(db);
   const filters: Prisma.Sql[] = [Prisma.sql`w.admitted_at <= ${new Date(window.upper)}`];
   if (ranked) filters.push(discovery
-    ? Prisma.sql`editorial.nominated=1 AND editorial.featured=0
+    ? Prisma.sql`editorial.nominated=1 AND editorial.featured=0 AND v.preview_status='ready'
         AND editorial.nominated_at>=${Date.parse(window.upper) - WORK_DISCOVERY_DAYS * 86400000}
         AND NOT (${recommendationVisibleSql()})`
     : Prisma.sql`editorial.featured=1 OR (${recommendationVisibleSql()})`);

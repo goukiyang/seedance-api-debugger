@@ -14,6 +14,8 @@ export const WORKS_CHECKS = [
   'precomputed_multi_feishu_recommendation_real_facts_and_retractions',
 ];
 export const WORKS_SOURCES = [
+  'src/lib/works/method-reference.ts', 'scripts/test-works-auto-reference.ts', 'src/lib/image-studio/pricing-state.ts',
+  'src/lib/image-studio/tasks.ts', 'src/lib/image-studio/batches.ts', 'src/app/api/tasks/create/route.ts',
   'src/lib/works/editorial.ts', 'src/app/api/works/[id]/editorial/route.ts', 'src/components/works/WorkDiscoveries.tsx',
   'src/components/works/WorkActions.tsx', 'src/components/works/WorksMasonry.tsx', 'src/components/works/Works.module.css',
   'src/lib/works/types.ts', 'src/lib/works/client.ts',

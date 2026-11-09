@@ -15,7 +15,7 @@ import { workVideoSourceRevision } from './source-revision';
 
 export type RecommendationEvent = {
   key: string; work: string; version: string; actor: string; purpose: string; chain: string;
-  fact: string; signal: 'revisit' | 'take' | 'input' | 'retained'; slot?: string;
+  fact: string; signal: 'revisit' | 'take' | 'input' | 'retained' | 'method'; slot?: string;
   evidence?: { id: string; version: string }; at: Date;
 };
 export const recommendationKey = (...parts: unknown[]) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');

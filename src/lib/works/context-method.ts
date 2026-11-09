@@ -17,6 +17,7 @@ import { isSeedanceVideoModelId } from '@/lib/provider/seedance-models';
 import { isH3PresetId, isH3LoraId } from '@/lib/integrations/h3';
 import { getWorkAccess, type WorkAccess } from './access';
 import { runWorkOperation } from './operations';
+import { bindWorkMethodOrigin } from './method-reference';
 import { WorkError } from './types';
 import type { WorkMethod, WorkMethodSetting, WorkMethodTemplate } from './context-types';
 
@@ -147,11 +148,15 @@ export async function prepareWorkMethod(user: SessionUser, workId: string, input
     try {
       if (method.template.module === 'image-preset') {
         const moduleId = await prepareSharedStudioMethodWorkspace(actor, method.template.id, method.template.version, context.template_token, db, prepared.image!);
+        await bindWorkMethodOrigin(db, { ownerId: actor.id, kind: 'image', scopeId: moduleId, workId,
+          mediaVersion: access.media.id, templateId: method.template.id, templateVersion: method.template.version, templateToken: context.template_token });
         return { workId, href: `/template-studio?type=image&moduleId=${encodeURIComponent(moduleId)}`, kind: 'image-template', moduleId, draftId: null };
       }
       if (method.template.module === 'video-studio') {
         await getStudioTemplateUseAccess(actor, method.template.id, 'studio', db);
         const draftId = await prepareStudioTemplateMethodDraft(db, actor, method.template.id, method.template.version, prepared.video!);
+        await bindWorkMethodOrigin(db, { ownerId: actor.id, kind: 'video', scopeId: draftId, workId,
+          mediaVersion: access.media.id, templateId: method.template.id, templateVersion: method.template.version, templateToken: null });
         return { workId, href: `/template-studio?type=video&view=templates&draftId=${encodeURIComponent(draftId)}&moduleId=${encodeURIComponent(draftId)}`, kind: 'video-template', moduleId: null, draftId };
       }
     } catch (error) {

@@ -33,6 +33,7 @@ import { serverStudioPersonalPromptProjection } from './personal-prompt.server';
 import { samePricingImageCharge, withImagePricing } from '@/lib/pricing/image';
 import { creditCents, sumCredits } from '@/lib/credits/precision';
 import { studioTaskState, studioTaskStates, publicPricingTaskState, studioBillingState, isPricingImageTask } from './pricing-state';
+import { freezeImageWorkMethodUse } from '@/lib/works/method-reference';
 import { assertPricingImageConsumerReady } from '@/lib/pricing/runtime';
 import { imageBillingView, parseImageBillingContract, type ImageBillingContract } from './billing-contract';
 import { consumeImageQuote } from './billing-quote-store';
@@ -1259,6 +1260,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         submissionStage = 'task-insert';
         await assertStudioRequestWritable(tx, ownerId, input.requestId);
         const created = await tx.imageStudioTask.create({ data: protectedTaskData });
+        if (i === 0) await freezeImageWorkMethodUse(tx, created);
         await enqueueFrozenImageFeishuNotification(tx, created, imageFeishu);
         if (roleMedia && roleMedia.context && typeof roleMedia.context === 'object' && 'runId' in roleMedia.context) {
           await inheritUsageAttribution(tx, { sourceKind: 'image_task', sourceId: created.id,

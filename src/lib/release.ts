@@ -1,8 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: 'API 模型目录更新修复', outline: [
-  '读取 API 当前可用的 GPT 文字型号',
-  '移除失效默认型号，费率开关继续生效',
+const notice = { title: '作品广场自动发现与参考推荐', outline: [
+  '新作品自动获得展示机会，无需逐件提交',
+  '一键参考后成功产出，自动形成推荐依据',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
