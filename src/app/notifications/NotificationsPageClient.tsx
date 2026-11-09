@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useWorkspaceScroll } from '@/lib/hooks/use-workspace-scroll';
+import { useAppSession } from '@/lib/context/AppSessionContext';
 import { SystemAlerts } from '@/components/SystemAlerts';
 import { AlertTriangle, CheckCheck, ExternalLink, Inbox, RefreshCcw } from 'lucide-react';
 import {
@@ -51,6 +52,7 @@ function viewUrl(view: NotificationView) {
 }
 
 export default function NotificationsPageClient({ ownerId }: { ownerId: string }) {
+  const { user, sessionChanged } = useAppSession();
   const [view, setView] = useState<NotificationView>('all');
   const [viewReady, setViewReady] = useState(false);
   const [loadedView, setLoadedView] = useState<NotificationView | null>(null);
@@ -240,7 +242,7 @@ export default function NotificationsPageClient({ ownerId }: { ownerId: string }
         </div>
       )}
 
-      <SystemAlerts alerts={systemAlerts} />
+      <SystemAlerts alerts={!sessionChanged && user?.id === ownerId && user.role === 'admin' ? systemAlerts : []} />
       <section className="notifications-list" aria-busy={loading}>
         {loading && notifications.length === 0 ? (
           <div className="notifications-empty">正在加载通知...</div>
