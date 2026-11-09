@@ -13,20 +13,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: '未登录', ok: false }, { status: 401 });
     }
     const settings = await getMuskApiSettings();
-    if (request.nextUrl.searchParams.get('refresh') === '1') {
-      if (!isMuskApiReady(settings)) {
-        return NextResponse.json({ ok: false, error: '当前 API 尚未启用或配置，暂无法更新模型列表' }, { status: 503 });
-      }
-      if (await fetchMuskUpstreamModels(settings, { force: true }) === null) {
-        return NextResponse.json({ ok: false, error: '模型列表更新失败，原选择已保留，请稍后再更新' }, { status: 502 });
-      }
+    if (!isMuskApiReady(settings)) {
+      return NextResponse.json({ ok: false, error: '当前 API 尚未启用或配置，暂无法更新模型列表' }, { status: 503 });
+    }
+    const upstream = await fetchMuskUpstreamModels(settings, { force: request.nextUrl.searchParams.get('refresh') === '1' });
+    if (upstream === null) {
+      return NextResponse.json({ ok: false, error: '模型列表更新失败，原选择已保留，请稍后再更新' }, { status: 502 });
     }
     const access = await readModelAccessSettings();
-    const ids = (await resolveMuskChatModels(settings)).filter(model => supplementaryModelEnabled(access, 'text', model));
+    const ids = (await resolveMuskChatModels(settings, upstream)).filter(model => supplementaryModelEnabled(access, 'text', model));
     return NextResponse.json({
       ok: true,
       models: ids.map((id) => ({ id, label: id })),
-      default: settings.default_model,
+      default: ids.includes(settings.default_model) ? settings.default_model : '',
     });
   } catch (error) {
     console.error('[llm/models]', error);

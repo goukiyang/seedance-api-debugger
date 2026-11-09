@@ -12,7 +12,7 @@ export type MuskApiSettings = {
   base_url: string;
   default_model: string;
   api_key: string | null;
-  /** 对话可选模型白名单；为空时只开放 default_model。 */
+  /** 对话可选模型白名单；为空时使用上游当前 GPT 文字目录。 */
   allowed_models: string[];
 };
 
@@ -407,14 +407,14 @@ export async function fetchMuskUpstreamModels(
   const timeout = setTimeout(() => controller.abort(), 10000);
   try {
     const response = await fetch(buildModelsUrl(settings.base_url), {
+      cache: 'no-store',
       headers: { Authorization: `Bearer ${settings.api_key}` },
       signal: controller.signal,
     });
     if (!response.ok) return null;
     const data = await response.json() as { data?: Array<{ id?: unknown }> };
-    const ids = Array.isArray(data.data)
-      ? data.data.map((m) => (typeof m?.id === 'string' ? m.id : '')).filter(Boolean)
-      : [];
+    if (!Array.isArray(data?.data)) return null;
+    const ids = Array.from(new Set(data.data.map((m) => (typeof m?.id === 'string' ? m.id : '')).filter(Boolean)));
     upstreamModelsCache = { key, at: Date.now(), ids };
     return ids;
   } catch {
@@ -424,14 +424,14 @@ export async function fetchMuskUpstreamModels(
   }
 }
 
-/** 对话可用模型：白名单 ∩ 上游列表（上游不可达时信任白名单）；白名单为空只给 default_model。 */
-export async function resolveMuskChatModels(settings: MuskApiSettings): Promise<string[]> {
-  const allow = settings.allowed_models;
-  if (!allow.length) return [settings.default_model];
-  const upstream = await fetchMuskUpstreamModels(settings);
-  const list = upstream ? allow.filter((id) => upstream.includes(id)) : [...allow];
-  if (!list.includes(settings.default_model)) list.unshift(settings.default_model);
-  return list;
+/** 空白名单发现当前 GPT 文字模型；显式白名单仍限制范围，失效默认值不补回真实目录。 */
+export async function resolveMuskChatModels(settings: MuskApiSettings, upstream?: string[] | null): Promise<string[]> {
+  const catalog = upstream === undefined ? await fetchMuskUpstreamModels(settings) : upstream;
+  const configured = Array.from(new Set([settings.default_model, ...settings.allowed_models]));
+  if (catalog === null) return settings.allowed_models.length ? configured : [];
+  return catalog.filter(id => settings.allowed_models.length
+    ? configured.includes(id)
+    : /^gpt-(?!image(?:-|$))/i.test(id));
 }
 
 /** 流式调用：返回上游 Response（SSE），调用方负责解析。 */
