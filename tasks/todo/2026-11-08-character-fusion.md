@@ -241,3 +241,22 @@ stage /data/video-api-debugger/release-staging/fusion-model-catalog-20261109/att
 
 原图、前后目录、两次真实源码隔离验证、发送payload离线捕获、实际主/guard策略断言、29份原始发布日志/回执归正式根私有docs/materials/2026-11-09-character-fusion-model-picker/model02/。不公开数据库、环境、私有策略正文、Key或用户媒体。原verify01、verify02、初次准备输入未到即停止的记录均保留，未因收口重测。发布源和新策略状态已交15后继，后续仅文档提交推送，不占Next/切换。本轮未新增范围外问题。
 <!-- /FUSION-MODEL02-20261109 -->
+
+<!-- LLM-CONTROL-EXAMPLE01-20261109 -->
+<a id="llm-control-example01"></a>
+## LLM-CONTROL-EXAMPLE01 后续模块的模型选择与按键范例
+
+2026-11-09 用户确认：“后面这个 llm 下拉菜单和相关按键就作为模块范例，后面类似都同样处理或直接复用”。适用于本项目后续相似入口，已录入项目 AGENTS；沿用 MODEL01/CLEAR01 与 MODEL02 的实际实现和既有验证，本轮仅登记要求，不改应用、不追加生成或重跑检查。
+
+- 模型下拉和“更新”同排；更新期间显示真实忙碌状态并禁用重复点击。更新只读取模型目录和可用性，不触发生成。
+- 候选取当前 API 目录，结合已有发送许可与费率开关，关闭项不显示，服务端提交时仍校验；不写死当前型号数量，不把已下架默认型号补回，不把生图型号混入文字选择。
+- 选择按账号与模块保存；成功更新保留仍有效的选择，失效选择提示重新选择，不偷偷切换型号。更新失败保留已有目录、选择与输入，给出可重试的真实错误。实际 AI 操作显式传入该次选定型号，在途请求不因后来改选而改写或重发。
+- 同类清除动作按需要提供：首次点击在原位置变为“确认清除”，再次点击才执行，失焦或 Esc 取消。清楚标明当前清除对象，保留原权限与保存数据边界；不得顺带删除其它输入、配方、作品或原请求。
+
+复用入口：[页面与按钮](../../src/app/tools/character-fusion/studio.tsx)、[样式](../../src/app/tools/character-fusion/studio.module.css)、[模型目录接口](../../src/app/api/llm/models/route.ts)、[共用目录解析](../../src/lib/integrations/musk.ts)、[费率可用性](../../src/lib/pricing/use-model-availability.ts)、[显式模型传参](../../src/lib/character-fusion/assistant.ts)、[服务端校验](../../src/app/api/llm/chat/route.ts)。后续开发先核实际源码再复用；已有目录/费率能力直接共用，UI 目前仍在角色融合页内，出现实际复用需求时小范围提取，未声称已有独立通用组件。此次不批量改造其它页面；MODEL02 页面交互仍待用户手验，原未知请求只查原号。
+
+- [x] 范例要求、适用范围和源码入口已写入项目固定记录。
+- [x] 后续相似任务默认按此范例处理并优先复用；本轮无应用或线上状态变更。
+
+本轮未新增任务外线索或问题。
+<!-- /LLM-CONTROL-EXAMPLE01-20261109 -->
