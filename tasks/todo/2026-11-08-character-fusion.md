@@ -265,6 +265,8 @@ stage /data/video-api-debugger/release-staging/fusion-model-catalog-20261109/att
 <!-- FUSION-LANG01-20261109 -->
 ## LANG01 译文可见与复制语言明确（2026-11-09）
 
+**当前：已部署v0.140.0，待用户手动验收；最终结果见本节末尾。**
+
 用户反馈：补齐英文后看不到结果，复制中文/英文不明确，要求明确入口或选项。沿正常修复授权实施、聚焦提交推送与必要发布，实际交互由用户手验，不主动浏览器/真实AI或功能回归。
 
 实际基线139.6/ec3758865f0c1a82d0a4e84b6b1068106e1f4dad；原MODEL02工作区image-model-connectivity-20261106 /codex/fusion-model-catalog-fix-20261109接续，当前50de已包含ec375和既有记录，两个目标UI文件无脏改且与实发源相同。新建worktree长时逐文件停滞，已中断本人未完成创建（未改源码），不以它为发布源。正式根既有脏改及其它候选保护。6告知广场0.140.0未冻结，正与15协调139.7；本单只先准备精确局部UI差量，最终继承实际健康源，不从139.6覆盖后继、不并行Next或切版。
@@ -276,14 +278,37 @@ stage /data/video-api-debugger/release-staging/fusion-model-catalog-20261109/att
 日常场景：补齐自定义英文后就地看到固定要求/标签对应，清单选择英文即可看到英文并由明确按钮复制。异常场景：翻译失败保旧译文；英文仍缺时沿原拒绝复制，不把中文或缺失提示当英文成功。缺少MCP结构工具，已按当前Git源定向核studio→engine与两处clipboard/导出消费者，不冒结构查询成功。
 
 - [x] 完成上述两UI文件差量与必要工程检查。
-- [ ] 聚焦提交推送、继承后继健康基线后保护发布，记录实际版本/入口。
+- [x] 聚焦提交推送、继承后继健康基线后保护发布，记录实际版本/入口。
 - [ ] 用户手验译文展示、三语言切换与单条/批量复制、手机；不以工程检查冒功能验收。
 
 实现79b26ba68943581eedaa7d87c0a56941c3f5b5fa，严格2文件47增12删，无版本/后端/模型/数据变化。翻译只补英文时同步匹配的rulesAtGeneration，不误提示需重生成；真正规则/卡片已变仍保原提示。恢复已有译文也展开，英文要求关闭时明确不带入；失败/缺英沿原保护。整体变更已定向复核，未为低影响控件新增测试。
 
-工程16:16:49Z至16:18:54Z在精确ec375源的服务器隔离根执行完整tsc（noEmit、无增量）和studio单文件Next lint，均退出0，lint无警告。result.json的两文件SHA与当前Git源逐字绑定；只有隔离tsconfig由lint追加其临时dist类型路径，未拷回源码。原证 /data/video-api-debugger-engineering/fusion-translation-clarity-20261109/，未读生产DB/.env或调用真实模型。已给6精确提交与绿证申请其尚未冻结后继140候选继承，未占Next/生产写，当前尚未上线。不把代码完成或检查成功冒用户交互验收。
+工程16:16:49Z至16:18:54Z在精确ec375源的服务器隔离根执行完整tsc（noEmit、无增量）和studio单文件Next lint，均退出0，lint无警告。result.json的两文件SHA与当前Git源逐字绑定；只有隔离tsconfig由lint追加其临时dist类型路径，未拷回源码。原证 /data/video-api-debugger-engineering/fusion-translation-clarity-20261109/，未读生产DB/.env或调用真实模型。已给6精确提交与绿证申请其尚未冻结后继140候选继承，未占Next/生产写，该次交接时尚未上线，由下文最终交付接续。不把代码完成或检查成功冒用户交互验收。
 
 本轮未新增范围外业务问题。
 
 代码79b已推origin；16:22:31Z CLI索引2022源码、零pending/hash/missing/解析差异，指纹cc498766085f7d82145e409892332af3f0e3e937980777c79a6fa94602fe0f39。MCP结构入口本轮不可用，未冒查询成功；原类型/lint绿证仍匹配，未因补记录重跑。
+
+发布排队接续：6已把79b两SHA精确锁定到就绪140候选，13组/5000历史增长检查已绿。曾提议独立1398，但未创建候选/未启动Next；140就绪后本单主动取消独立发布，6已明确确认唯一顺序为1397实际健康及既定只读对照→140含LANG01→2的后继。15/2均已同步，不以交叉旧消息继续单开1398。18:00:14Z本单只读看到版本接口1397，这只是前序版本，不冒本次UI已上线；等待正式后继source/BUILD/健康回执。本单工程原时/两SHA继续复用，不因等待或补记录重测。
+
+### LANG01 最终交付与手验边界
+
+**已部署v0.140.0，待用户手动验收。** 入口：[角色融合提示词](https://sd2.youdooart.com/tools/character-fusion)。本节接续上文所有“尚未上线/等待”过程状态。
+
+1. “补齐英文”下方增加“英文补齐结果”，成功后自动展开；恢复已有译文也展开。可看/编辑英文固定要求并看自定义标签对应，固定要求关闭时明确不带入提示词。
+2. “查看英文提示词”直接切换到英文并到清单；清单操作旁使用现有lang选择中文、英文或中英双语，切换保原组合、行与选择，不重新生成；双语预览分开标注。
+3. 单条/全部复制与成功反馈明确所选语言。批量及所选送去出图只取同一textFor正文，选英文不混额外中文标题/元信息；TXT/CSV原格式保留。失败/缺英、账号隔离、请求快照/Abort及原模型选择/目录/费用保持。
+
+代码79b26ba68943581eedaa7d87c0a56941c3f5b5fa严格2文件47增12删，已推且核远端；最终实发两文件与79b逐字节相同。本单16:18:54Z隔离全量tsc/单文件lint均0且无lint警告，原时间保留；16:22:31Z CLI2022源码零差异/解析错误，MCP不可用未冒查询成功。未因记录、排队或交接重跑这些检查。
+
+主发布者6将两UI原字节并入真实1397/E91健康源后的140批次，非独立1398；140其余功能沿其原工单，不混说本单只有2文件的整站发布。实际执行前序e91b536a08dae5dd95f5925bde5f9f8f5b7a17c1 /1397 /qIU5W8D7umyumqp2Ir2VO；实发3c660ec24c75e6a51c338a115fd5fbf0a2c4733b /0.140.0 /nOkZjjM7FnbrDLJisYnEe，stage /data/video-api-debugger/release-staging/works-auto-discovery-20261109/attempt02。完整Next含全类型/lint18:36:38Z通过，30组计价通过；原17 native+15 linked以未变字节核对复用，只补1个失败夹具。首次失败为旧restored-settings VM缺1397真实freezeImageWorkMethodUse依赖，6以真实import/注入修复并同步fixture/gate指纹，未用noop压绿；原失败/source保留，本单未修改其工具。
+
+cutover-exit0；公网18:38:05Z、健康18:38:36Z，7服务同源、4timer、内外health200/控制器0有证。至18:40:43Z完成本单只读核实际sd2-gray进程cwd/包版本/BUILD及两UI实际SHA均匹配，并复用同次public-assets.json的49资源原证：按实际app-build-manifest派生本页1JS＋3CSS，均公网200且SHA等于当前成品，未重复拉取这些资源，未运行浏览器验收。
+
+- JS static/chunks/app/tools/character-fusion/page-b8d6bf6574a80138.js，SHA 4d72e40699ad2c5fec0e490f2a98abedc82a057baa1b91400d2621a2f687b750。
+- CSS 2fd8393dfe7f5253、7df940eef3c41cd6、b0626c0d317ef94b均与同stage公开原证/成品逐字匹配。
+
+价格、私有策略、环境/持久数据链接保持，原writer自然退出、一致备份和6启动门由主发布流程完成；本单不改schema、配置/政策、价格、账本、媒体或旧请求，不还原业务数据。相容guard继续67456579f8c0d41a7058ca7eec78224c4fb7e75a /0.139.0+points-pricing-guard.1 /qb5CShgt78X3naPgg_V4L；恢复沿主发布同stage原program-recovery.sh release-input.json，实际操作先核当前所有者/版本，本单未演练恢复或更改恢复工具。原证main-build-success.json、public-deployed.json、public-assets.json、service-health.json及source-pair-contract.json均在上述stage；未下载DB/.env/buildEnv/私有策略或价格原行。
+
+2已由6获得正式后继窗；本单此后仅本机文档收口，无Next/生产写。本轮未新增范围外业务问题；前序发布和旧夹具卡点已由原负责人处理，未在本单扩修。实际译文语义/自动展开、中文/英文/双语的单条和整批复制、刷新/本人配方及手机效果待用户手验；本单没有浏览器、真实模型、收费生成或功能回归验收，不以构建/HTTP/部署冒功能验收。
 <!-- /FUSION-LANG01-20261109 -->
