@@ -1,3 +1,9 @@
+<!-- CREDIT-CLAIM01-LIVE-20261108 -->
+## 积分领取现网实测
+
+[原单与验收结果](../../tasks/todo/2026-11-08-credit-claim-page.md#live-acceptance-20261108)：用户授权的真实1积分到账、防重复及自然到期三项通过；两个测试活动已关闭，真实账目保留。JSON/截图/SHA索引仅保正式根私有 `2026-11-08-credit-claim-acceptance/`，0700/0600且Git排除，不公开本人明细或截图，无代码/部署/DB拷贝。
+<!-- /CREDIT-CLAIM01-LIVE-20261108 -->
+
 <!-- WORKSPACE-SIDEBAR-PAGES-PUBLIC-20261105 -->
 ## 五组页面侧栏统一（v0.134.2）
 

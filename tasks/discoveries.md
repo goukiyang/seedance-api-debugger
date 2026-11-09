@@ -1,5 +1,9 @@
 # 项目任务外发现报告
 
+## D-20261108-CREDIT-BACKGROUND-TAB 管理背景页积分刷新（待核线索）
+
+领取实测中，p2已到账且余额/回执/只读DB正确，p1背景管理页顶部仍显示领取前整数。Ego标签操作未证明触发真实窗口focus，因此不能认定人手切换标签也失败，更不是账本入账缺陷。待后续普通浏览器手动切换对照；本轮不改缓存/共享会话或账务代码。原证及范围见[CREDIT-CLAIM01实测](todo/2026-11-08-credit-claim-page.md#live-acceptance-20261108)，本人金额与截图私有。
+
 项目全名：video-api-debugger（sd2 视频生成API调试平台）
 正式根：`/Volumes/Data/Projects/video-api-debugger`
 建立日期：2026-11-01
