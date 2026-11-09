@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Bell, BookImage, ChevronDown, CircleHelp, Coins, Folder, Image as ImageIcon, LayoutTemplate, ListTodo, Menu, Network, PanelLeftClose, PanelLeftOpen, Plus, ReceiptText, RotateCcw, UserRound } from 'lucide-react';
+import { Bell, BookImage, ChevronDown, CircleHelp, Coins, Folder, Gift, Image as ImageIcon, LayoutTemplate, ListTodo, Menu, Network, PanelLeftClose, PanelLeftOpen, Plus, ReceiptText, RotateCcw, UserRound } from 'lucide-react';
 import { workspaceSection, type WorkspaceSection } from '@/lib/navigation';
 import { useAppSession } from '@/lib/context/AppSessionContext';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
@@ -105,6 +105,7 @@ export default function WorkspaceSidebar({ accountId, internal, images, worksEna
   ];
   const accountLinks = [
     { title: '我的用量', href: '/usage', icon: Coins, visible: true, current: current === 'usage' },
+    { title: '领取积分', href: '/points/claim', icon: Gift, visible: true, current: current === 'points/claim' },
     { title: '费率说明', href: '/pricing', icon: ReceiptText, visible: internal, current: current === 'pricing' },
     { title: '个人资料', href: '/account', icon: UserRound, visible: true, current: current === 'account' },
     { title: '通知', href: '/notifications', icon: Bell, visible: true, current: current === 'notifications' },

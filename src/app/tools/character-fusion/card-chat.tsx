@@ -8,19 +8,19 @@ import styles from './studio.module.css';
 export type CardConversation = { messages: FusionMessage[]; input: string; draft: CardDraft | null };
 export const emptyConversation = (): CardConversation => ({ messages: [], input: '', draft: null });
 
-export default function CardChat({ value, onChange, onConfirm, onClose }: { value: CardConversation; onChange: (v: CardConversation) => void; onConfirm: (draft: CardDraft) => void; onClose: () => void }) {
+export default function CardChat({ value, onChange, onConfirm, onClose, model, modelReady }: { value: CardConversation; onChange: (v: CardConversation) => void; onConfirm: (draft: CardDraft) => void; onClose: () => void; model: string; modelReady: boolean }) {
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   const controller = useRef<AbortController | null>(null), bottom = useRef<HTMLDivElement>(null);
   useEffect(() => () => controller.current?.abort(), []);
   useEffect(() => { bottom.current?.scrollIntoView({ block: 'nearest' }); }, [value.messages.length, busy]);
   const send = async () => {
-    if (busy || !value.input.trim()) return;
+    if (busy || !modelReady || !value.input.trim()) return;
     const messages: FusionMessage[] = [...value.messages, { role: 'user', content: value.input.trim() }];
     const pending = { ...value, messages, input: '', draft: null };
     setBusy(true); setError('');
     const request = new AbortController(); controller.current = request;
     try {
-      const data = await fusionAssistant(CARD_CHAT_SYSTEM, messages, request.signal) as { reply?: unknown; draft?: unknown };
+      const data = await fusionAssistant(CARD_CHAT_SYSTEM, messages, request.signal, model) as { reply?: unknown; draft?: unknown };
       if (request.signal.aborted) return;
       if (!data || typeof data.reply !== 'string' || !data.reply.trim()) throw new Error('模型没有返回有效回复，当前卡片未加入。');
       const draft = data.draft ? parseCardDraft(data.draft) : null;
@@ -29,11 +29,12 @@ export default function CardChat({ value, onChange, onConfirm, onClose }: { valu
     finally { if (!request.signal.aborted) setBusy(false); }
   };
   return <section className={styles.chat} aria-labelledby="card-chat-title">
-    <div className={styles.sectionHead}><div><h3 id="card-chat-title"><MessageCircle size={17} />对话新增卡片</h3><p>描述一个想加入的维度，聊好后再确认。使用站内当前文字模型。</p></div><button aria-label="收起对话，保留草稿" onClick={onClose}><X size={17} /></button></div>
+    <div className={styles.sectionHead}><div><h3 id="card-chat-title"><MessageCircle size={17} />对话新增卡片</h3><p>描述一个想加入的维度，聊好后再确认。使用页面设置所选的 API 模型。</p></div><button aria-label="收起对话，保留草稿" onClick={onClose}><X size={17} /></button></div>
     <button disabled={busy} onClick={() => onChange({ ...emptyConversation(), draft: value.draft })}>开始新对话</button>
     <div className={styles.chatMessages} role="log" aria-label="卡片设计对话">{!value.messages.length && <p>例如：我想要一张“角色定位”卡片，包含主角、配角、伙伴、反派和 Boss。</p>}{value.messages.map((m, i) => <div key={i} className={m.role === 'user' ? styles.userMessage : styles.assistantMessage}><small>{m.role === 'user' ? '你' : '设计助手'}</small><p>{m.reply || m.content}</p></div>)}{busy && <p role="status">正在梳理卡片与中英标签…</p>}<div ref={bottom} /></div>
     {error && <p role="alert" className={styles.hint}>{error}</p>}
+    {!modelReady && <p role="status" className={styles.hint}>请先在页面设置选择已开放的 API 模型，当前输入保留。</p>}
     {value.draft && <div className={styles.cardPreview}><h4>{value.draft.title} <small>{value.draft.titleEn} · 待确认</small></h4><ul>{value.draft.tags.map(t => <li key={t.label}>{t.label}<small>{t.en}</small></li>)}</ul><button className={styles.primary} disabled={busy || Boolean(value.input.trim())} onClick={() => onConfirm(value.draft!)}><Plus size={16} />确认加入卡片</button><small>还想修改可继续聊；确认后加入本次规则，可随配方保存。</small></div>}
-    <form className={styles.chatInput} onSubmit={e => { e.preventDefault(); void send(); }}><textarea aria-label="描述或修改卡片" maxLength={2000} rows={2} disabled={busy} value={value.input} placeholder="想增加什么维度？有哪些选项和限制？" onChange={e => onChange({ ...value, input: e.target.value })} /><button disabled={busy || !value.input.trim()}><Send size={16} />{busy ? '思考中…' : '发送'}</button></form>
+    <form className={styles.chatInput} onSubmit={e => { e.preventDefault(); void send(); }}><textarea aria-label="描述或修改卡片" maxLength={2000} rows={2} disabled={busy} value={value.input} placeholder="想增加什么维度？有哪些选项和限制？" onChange={e => onChange({ ...value, input: e.target.value })} /><button disabled={busy || !modelReady || !value.input.trim()}><Send size={16} />{busy ? '思考中…' : '发送'}</button></form>
   </section>;
 }
