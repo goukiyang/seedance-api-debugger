@@ -817,7 +817,7 @@ async function attachCash(db: Db, items: InternalFact[], scoped = false, window?
     }
     // Resolve out-of-cohort links in the same pinned snapshot. Only the SQL
     // round trips change; the event loop below retains the original ledger order.
-    for (const [kind, ids] of idsByKind) {
+    for (const [kind, ids] of Array.from(idsByKind)) {
       const source = tables[kind], values = Array.from(ids);
       for (let offset = 0; offset < values.length; offset += CHUNK) {
         const found = await db.$queryRaw<Row[]>(Prisma.sql`SELECT "id" FROM ${Prisma.raw(`"${source.table}"`)}
