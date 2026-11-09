@@ -1,3 +1,9 @@
+<!-- FUSION-MODEL02-MATERIALS-20261109 -->
+## MODEL02 真实GPT目录与发送绑定（2026-11-09）
+
+v0.139.6 / ec3758865f0c1a82d0a4e84b6b1068106e1f4dad / BUILD GJrX2BZtzXJBJD8eCLeF4，14:25:15Z健康，14:31:56Z真实后端管线核14→8文字型号、无5.5。用户原截图、旧认证目录、红/绿实际源码测试、离线payload和主/674真实13项前后策略断言、29份发布原证归私有docs/materials/2026-11-09-character-fusion-model-picker/model02/；不公开数据库/环境/策略正文/Key/媒体。后续浏览器会话不可复用，页面交互仍用户手验，无真实文字/视频生成或旧待核重发。[原单MODEL02](../../tasks/todo/2026-11-08-character-fusion.md#model02-真实-api-目录更新修复2026-11-09)。
+<!-- /FUSION-MODEL02-MATERIALS-20261109 -->
+
 <!-- FUSION-MODEL01-MATERIALS-20261109 -->
 ## 角色融合模型设置与原位清除（2026-11-09）
 

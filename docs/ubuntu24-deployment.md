@@ -1,3 +1,13 @@
+<!-- FUSION-MODEL02-RELEASE-20261109 -->
+## 2026-11-09 API文字目录刷新修复
+
+实际ec3758865f0c1a82d0a4e84b6b1068106e1f4dad / v0.139.6 / BUILD GJrX2BZtzXJBJD8eCLeF4，继承1395/6326；14:08:36Z完整原生/计价/Next/types/lint通过，14:21:09Z切换、14:21:35Z公网/14:25:15Z健康，6启动门、7服务4timer、35资源及2匿名401通过，控制器0。
+
+stage /data/video-api-debugger/release-staging/fusion-model-catalog-20261109/attempt01，pair e75868a6-c200-4d00-b3ba-99ea026ff7a2。旧writer自然排尽、配置/一致数据备份齐，无DDL/业务数据还原，137迁移只读继承，价格全字段d03保持。新策略gpt-chat-catalog-20261109-01在原同Musk chat地址/同Key只补3个当前型号；主/674准备及应用各13实际断言、0transport，原Key/原文权/其它目的地保持。恢复沿本stage program-recovery.sh release-input.json仅回程序/config指针，兼容并保持新策略；精确策略应用失败有原三文件CAS恢复，未演练生产回退。
+
+guard67456579f8c0d41a7058ca7eec78224c4fb7e75a / qb5CShgt78X3naPgg_V4L原1516编译字节鲜核、不重编/改原时间。14:31:56Z真实线上后端目录管线8文字型号，非用户HTTP/浏览器后验，页面仍手验；无真实文字/视频生成或旧待核重发。详[原单MODEL02](../tasks/todo/2026-11-08-character-fusion.md#model02-真实-api-目录更新修复2026-11-09)，原证私有model02目录。
+<!-- /FUSION-MODEL02-RELEASE-20261109 -->
+
 <!-- FUSION-MODEL01-RELEASE-20261109 -->
 ## 2026-11-09 角色融合模型设置与原位清除
 
