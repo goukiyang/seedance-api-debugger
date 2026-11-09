@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import type { PrismaClient, Work, WorkMediaVersion, ImageStudioTask, Asset } from '@prisma/client';
+import { Prisma, type PrismaClient, type Work, type WorkMediaVersion, type ImageStudioTask, type Asset } from '@prisma/client';
 import type { SessionUser } from '../src/lib/auth/session';
 import { bindWorkMethodOrigin, freezeImageWorkMethodUse, freezeWorkMethodUse, workMethodOriginKey, workMethodUseKey } from '../src/lib/works/method-reference';
-import { ensureAutomaticWorkDiscovery, mutateWorkEditorial, WORK_EDITORIAL_PREFIX } from '../src/lib/works/editorial';
+import { ensureAutomaticWorkDiscovery, mutateWorkEditorial, WORK_EDITORIAL_PREFIX,
+  WORK_AUTOMATIC_DISCOVERY_PREFIX, workAutomaticDiscoveryKey, workEditorialCte } from '../src/lib/works/editorial';
 import { indexWorkContext } from '../src/lib/works/context-index';
 import { collectRecommendationSourcePass } from '../src/lib/works/recommendation-sources';
 import { processWorkRecommendations } from '../src/lib/works/recommendation-worker';
@@ -17,25 +18,37 @@ export async function runAutoReferenceEngineering(db: PrismaClient, owner: Sessi
   const fresh = await createImage('auto-exposure'), secret = await createImage('auto-exposure-secret', 'private');
   const old = await createImage('auto-exposure-old', 'team', new Date(Date.now() - 8 * 86400000));
   await readWorkPage(colleague, new URLSearchParams({ scope: 'discoveries', q: 'auto-exposure' }), db);
-  assert.equal(await db.platformSetting.count({ where: { key: WORK_EDITORIAL_PREFIX + fresh.work.id } }), 0,
+  assert.equal(await db.platformSetting.count({ where: { key: workAutomaticDiscoveryKey(fresh.work) } }), 0,
     'Opening the page must not prepare exposure state');
   for (const item of [fresh, secret, old]) await ensureAutomaticWorkDiscovery(db, { ...item.work, current_version_id: item.media.id });
-  assert.equal(await db.platformSetting.count({ where: { key: WORK_EDITORIAL_PREFIX + old.work.id } }), 0);
+  assert.equal(await db.platformSetting.count({ where: { key: workAutomaticDiscoveryKey(old.work) } }), 0);
   const discoveries = await readWorkPage(colleague, new URLSearchParams({ scope: 'discoveries', q: 'auto-exposure' }), db);
   assert.deepEqual(discoveries.items.map(item => item.id), [fresh.work.id], 'Automatic exposure preserves the private source boundary');
-  const automatic = await db.platformSetting.findUniqueOrThrow({ where: { key: WORK_EDITORIAL_PREFIX + fresh.work.id } });
+  const automatic = await db.platformSetting.findUniqueOrThrow({ where: { key: workAutomaticDiscoveryKey(fresh.work) } });
   assert.equal(JSON.parse(automatic.value_json).nominatedAt, fresh.work.completed_at.getTime(), 'Repair cannot reset a work to brand new');
   await mutateWorkEditorial(owner, fresh.work.id, { viewerId: owner.id, requestId: 'auto-exposure-withdrawal',
-    action: 'nominate', active: false, expectedVersion: 1, expectedMediaVersion: fresh.media.id });
+    action: 'nominate', active: false, expectedVersion: 0, expectedMediaVersion: fresh.media.id });
   await ensureAutomaticWorkDiscovery(db, { ...fresh.work, current_version_id: fresh.media.id });
-  assert.equal(JSON.parse((await db.platformSetting.findUniqueOrThrow({ where: { key: automatic.key } })).value_json).nominated, false);
+  assert.equal(JSON.parse((await db.platformSetting.findUniqueOrThrow({ where: { key: WORK_EDITORIAL_PREFIX + fresh.work.id } })).value_json).nominated, false);
+  assert.equal((await readWorkPage(colleague, new URLSearchParams({ scope: 'discoveries', q: 'auto-exposure' }), db)).items.length, 0);
   const pending = await createImage('automatic-preview-late');
   await db.workMediaVersion.update({ where: { id: pending.media.id }, data: { preview_status: 'pending' } });
   await ensureAutomaticWorkDiscovery(db, { ...pending.work, current_version_id: pending.media.id });
-  assert.equal(await db.platformSetting.count({ where: { key: WORK_EDITORIAL_PREFIX + pending.work.id } }), 0);
+  assert.equal(await db.platformSetting.count({ where: { key: workAutomaticDiscoveryKey(pending.work) } }), 0);
   await db.workMediaVersion.update({ where: { id: pending.media.id }, data: { preview_status: 'ready' } });
   await ensureAutomaticWorkDiscovery(db, { ...pending.work, current_version_id: pending.media.id });
-  assert.equal(await db.platformSetting.count({ where: { key: WORK_EDITORIAL_PREFIX + pending.work.id } }), 1);
+  assert.equal(await db.platformSetting.count({ where: { key: workAutomaticDiscoveryKey(pending.work) } }), 1);
+  await db.$executeRaw(Prisma.sql`WITH RECURSIVE n(value) AS (SELECT 1 UNION ALL SELECT value+1 FROM n WHERE value<5000)
+    INSERT INTO PlatformSetting(id,key,value_json,created_at,updated_at)
+    SELECT 'synthetic-expired-auto-'||value,${WORK_AUTOMATIC_DISCOVERY_PREFIX + '2020-01-01T00:00:00.000Z:old-'}||value,
+      ${automatic.value_json},${new Date()},${new Date()} FROM n`);
+  const plan = await db.$queryRaw<Array<{ detail: string }>>(Prisma.sql`EXPLAIN QUERY PLAN
+    WITH ${workEditorialCte(new Date(), true)} SELECT work_id FROM editorial`);
+  assert.ok(plan.filter(row => /SEARCH PlatformSetting.*key>\? AND key<\?/.test(row.detail)).length >= 2,
+    'Both explicit and recent automatic admissions must use indexed key ranges');
+  assert.ok(!plan.some(row => /SCAN PlatformSetting/.test(row.detail)), 'Expired automatic history must not become a full settings scan');
+  const afterHistory = await readWorkPage(colleague, new URLSearchParams({ scope: 'discoveries', q: 'automatic-preview-late' }), db);
+  assert.deepEqual(afterHistory.items.map(item => item.id), [pending.work.id]);
 
   const source = await createImage('method-learning-source'), output = await createImage('method-learning-output', 'team', undefined, colleague);
   const origin = { ownerId: colleague.id, kind: 'image' as const, scopeId: 'synthetic-method-workspace', workId: source.work.id,
@@ -136,5 +149,6 @@ export async function runAutoReferenceEngineering(db: PrismaClient, owner: Sessi
   return { automaticExposure: true, completionTimePreserved: true, withdrawalPreserved: true, sourceAclPreserved: true,
     atomicClaimRollback: true, imageAndVideoSuccessfulMethodUse: true, sameActorCountedOnce: true,
     noOriginalInputRequired: true, unknownRequestNotReassigned: true, failedRetryWithoutExtraClick: true, laterUnrelatedRequestExcluded: true,
-    preparedParentChildrenPreserved: true, changedTemplateNotAttributed: true, readyCoversOnly: true, pageOpenPrecomputation: false };
+    preparedParentChildrenPreserved: true, changedTemplateNotAttributed: true, readyCoversOnly: true, pageOpenPrecomputation: false,
+    expiredHistoryUsesKeyRange: true };
 }

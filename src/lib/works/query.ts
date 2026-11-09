@@ -9,7 +9,7 @@ import { projectWorkProvenance } from './provenance';
 import { readWorkActivity } from './activity';
 import { recommendationVisibleSql, recommendationReadCtes } from './recommendation-read';
 import { recommendationSchemaReady } from './recommendation-events';
-import { WORK_EDITORIAL_PREFIX, WORK_DISCOVERY_DAYS, WORK_DISCOVERY_LIMIT, readWorkEditorial, workEditorialCte } from './editorial';
+import { WORK_EDITORIAL_PREFIX, WORK_DISCOVERY_DAYS, WORK_DISCOVERY_LIMIT, readWorkEditorial, workEditorialCte, workAutomaticDiscoveryKey } from './editorial';
 
 type PageKey = WorkPermissionRow & { completed_at: Date; project_visible: number | bigint; feed_round?: number; feed_tier?: number; feed_score?: number };
 type Position = { time: string; id: string; rank?: [number, number, number] };
@@ -68,7 +68,8 @@ export async function projectWorkCards(user: SessionUser, keys: PageKey[], db: P
     db.$queryRaw<Array<{ work_id: string; amount: bigint | number }>>(Prisma.sql`SELECT work_id, count(*) AS amount FROM WorkPersonalState
       WHERE work_id IN (${Prisma.join(ids)}) AND liked = 1 GROUP BY work_id`),
     readWorkActivity(db, keys.filter(key => key.can_preview).map(key => key.id)),
-    db.platformSetting.findMany({ where: { key: { in: ids.map(id => WORK_EDITORIAL_PREFIX + id) } }, select: { key: true, value_json: true } }),
+    db.platformSetting.findMany({ where: { key: { in: keys.flatMap(key => [WORK_EDITORIAL_PREFIX + key.id,
+      workAutomaticDiscoveryKey({ id: key.id, completed_at: new Date(key.completed_at) })]) } }, select: { key: true, value_json: true } }),
   ]);
   const pending = versions.filter(version => version.preview_status === 'pending').map(version => version.id);
   const [authors, projects, provenance, jobs] = await Promise.all([
@@ -82,7 +83,7 @@ export async function projectWorkCards(user: SessionUser, keys: PageKey[], db: P
   const stateById = new Map(states.map(state => [state.work_id, state])), authorById = new Map(authors.map(author => [author.id, author]));
   const projectById = new Map(projects.map(project => [project.id, project])), countById = new Map(likes.map(row => [row.work_id, Number(row.amount)]));
   const preparing = new Set(jobs.map(job => job.source_id));
-  const editorialById = new Map(editorialRows.map(row => [row.key.slice(WORK_EDITORIAL_PREFIX.length), row]));
+  const editorialByKey = new Map(editorialRows.map(row => [row.key, row]));
   return keys.flatMap(key => {
     const work = workById.get(key.id), media = versionById.get(key.media_id);
     // A concurrent replacement never pairs the old authorization result with a newer file.
@@ -95,7 +96,8 @@ export async function projectWorkCards(user: SessionUser, keys: PageKey[], db: P
     const name = author?.name?.trim();
     const safeName = name && !name.includes('@') && !/^\+?[\d\s-]{7,}$/.test(name) ? name : '同事';
     const reuse = key.can_reuse ? key.reference_id ? { referenceImageId: key.reference_id } : media.asset_id ? { assetId: media.asset_id } : null : null;
-    const editorial = readWorkEditorial(editorialById.get(work.id), media.id, work.author_id);
+    const editorial = readWorkEditorial(editorialByKey.get(WORK_EDITORIAL_PREFIX + work.id), media.id, work.author_id,
+      editorialByKey.get(workAutomaticDiscoveryKey(work)));
     const canRecommend = canPreview && work.discoverable && !work.withdrawn_at;
     return [{ id: work.id, title: work.title, medium: work.medium as WorkCard['medium'], mediaVersion: media.id, revision: work.revision,
       width: media.width, height: media.height, duration: media.duration, completedAt: work.completed_at.toISOString(),
@@ -163,7 +165,7 @@ export async function readWorkPage(user: SessionUser, params: URLSearchParams, d
     const direction = ascending ? Prisma.raw('ASC') : Prisma.raw('DESC');
     if (ranked) {
       return db.$queryRaw<PageKey[]>(Prisma.sql`WITH ${access.ctes},
-        ${workEditorialCte(new Date(window.upper))},
+        ${workEditorialCte(new Date(window.upper), discovery)},
         ${recommendationReadCtes(user.id, access, new Date(window.upper), recommendedReady)},
         admission_ids AS (SELECT work_id FROM editorial WHERE ${discovery ? Prisma.sql`nominated=1` : Prisma.sql`featured=1`}
           ${discovery ? Prisma.empty : Prisma.sql`UNION SELECT work_id FROM recommendation_pool`}),

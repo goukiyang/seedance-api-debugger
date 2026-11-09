@@ -12,7 +12,7 @@ import styles from './Works.module.css';
 
 export function WorkDiscoveries({ viewerId, queryKey, revision, playback, onOpen, onLayout, operate, busyKeys, navigationEpoch }: {
   viewerId: string; queryKey: string; revision: number; playback: AssetPlaybackCoordinator; onOpen: (work: WorkCard) => void; onLayout: () => void;
-  operate: WorkOperate; busyKeys: Set<string>; navigationEpoch: MutableRefObject<number>;
+  operate: WorkOperate; busyKeys: string[]; navigationEpoch: MutableRefObject<number>;
 }) {
   const [items, setItems] = useState<WorkCard[]>([]), [error, setError] = useState(''), [retry, setRetry] = useState(0);
   const [loadedKey, setLoadedKey] = useState('');
@@ -59,7 +59,7 @@ export function WorkDiscoveries({ viewerId, queryKey, revision, playback, onOpen
         <WorkMedia work={work} playback={playback} contextKey={`${viewerId}:discoveries:${queryKey}`} detailOpen={false} />
       </button>
       {work.provenance?.template?.reuseVersion && <button type="button" className={styles.reuseButton}
-        disabled={busyKeys.has(`work:${work.id}`)} onClick={() => void reference(work)}><span>一键参考</span><ArrowUpRight size={15} aria-hidden="true" /></button>}
+        disabled={busyKeys.includes(`work:${work.id}`)} onClick={() => void reference(work)}><span>一键参考</span><ArrowUpRight size={15} aria-hidden="true" /></button>}
       </div>
       <div className={styles.cardInfo}>
         <div className={styles.cardSource}>{work.provenance && <a href={(work.provenance.template || work.provenance.tool).href}
