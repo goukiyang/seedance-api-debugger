@@ -1,9 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '领取积分页导航统一', outline: [
-  '领取积分页使用作品广场侧栏',
-  '保留侧栏折叠和手机菜单习惯',
-  '优化用量报表与高清制作稳定性',
+const notice = { title: '角色融合模型设置与清单清除', outline: [
+  '页面设置可选择和更新 API 模型',
+  '提示词清单支持原位确认后清除',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.

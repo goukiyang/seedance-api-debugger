@@ -19,6 +19,12 @@
 .header p { margin-top: 8px; color: var(--text-secondary); }
 .cost { color: var(--accent-color); font-size: 13px; white-space: nowrap; }
 .toolbar { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
+.pageSettings { margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color); }
+.pageSettings summary { width: fit-content; padding: 8px 0; color: var(--text-secondary); font-size: 13px; }
+.modelPicker { display: flex; align-items: center; gap: 8px; max-width: 520px; min-width: 0; padding: 8px 0; }
+.modelPicker label, .modelPicker button { flex-shrink: 0; }
+.modelPicker button { min-width: 86px; }
+.modelPicker select { flex: 1; width: 240px; min-width: 0; }
 .tabs { display: flex; gap: 6px; }
 .tabs button { border-color: transparent; background: transparent; }
 .tabs button[aria-pressed='true'] { background: var(--bg-hover); color: var(--accent-color); }
@@ -60,6 +66,7 @@
 .settings label, .swapForm label { display: flex; align-items: center; gap: 8px; font-size: 12px; min-width: 0; }
 .generateBar > button { min-height: 44px; padding-inline: 24px; }
 .results { margin-top: 30px; scroll-margin-top: 90px; }
+.clearButton { min-width: 8em; }
 .resultList { display: flex; flex-direction: column; gap: 14px; }
 .resultRow { min-width: 0; border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; background: var(--bg-panel); overflow-wrap: anywhere; }
 .resultRow.selected { border-color: var(--accent-color); }
