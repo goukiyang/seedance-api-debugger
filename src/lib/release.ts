@@ -1,9 +1,10 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '视频编辑与原请求恢复优化', outline: [
-  '原准备请求的核对操作移到生成按钮旁',
-  '放大编辑可查看参考图片，插入引用保留输入位置',
-  '侧栏可收起为图标，保留更多创作空间',
+const notice = { title: '模板读取与生成稳定性优化', outline: [
+  '优化模板目录与生成结果读取',
+  '减少报价和反馈处理的相互等待',
+  '优化共享内容同步与收藏查询',
+  '包含视频编辑、侧栏和作品广场改进',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
