@@ -100,7 +100,7 @@ let ownerReads: Array<{ table: string; kind: string; rows: number }> = [];
     await entered;
     const nativeRead = fs.readFile;
     let released = false, secondRan = false;
-    const read = mock.method(fs, 'readFile', async (file, ...args) => {
+    const read = mock.method(fs, 'readFile', async (file: Parameters<typeof fs.readFile>[0], ...args: unknown[]) => {
       if (!released && String(file) === path.join(lock, 'owner.json')) {
         released = true; release(); await first;
       }
