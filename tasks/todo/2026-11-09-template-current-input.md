@@ -1,7 +1,8 @@
 # TPL-CURRENT01 生图模板本次输入与默认设置分离
 
 日期：2026-11-09（用户时区 America/Los_Angeles）  
-状态：已授权实施、必要工程检查、提交推送和同项目正式部署；功能由用户手动验收。  
+状态：已部署 v0.140.1，工程及部署检查通过，待用户手动验收。
+
 入口：[固定 todo](../todo.md)、[生图模板](https://sd2.youdooart.com/template-studio?type=image)。
 
 ## 1. 目标与替代关系
@@ -27,7 +28,7 @@
 - [x] C03 历史只回填：恢复内容进入本次工作区；编辑/清空优先，来源只用于权限、追溯及明确的通用上下文模式。
 - [x] C04 单张/报价/批量一致：输入变更使旧报价失效，受理后冻结；已受理/未知原号与旧批次不重写。
 - [x] C05 保存和恢复一致：默认、个人命名设置、本次草稿分开；生成完成、刷新和重开保现场。
-- [ ] C06 必要工程检查、聚焦提交推送、相容恢复准备及正式部署，交用户手验。
+- [x] C06 必要工程检查、聚焦提交推送、相容恢复准备及正式部署，交用户手验。
 
 ## 4. Git 与工程验证
 
@@ -81,3 +82,38 @@ CodeGraph初始化在外置盘持续读取约50分钟仍未完成，已停止本
 v0.139.7实际健康源e91b536a已合入ba9e8e45，任务记录冲突保两边原条目；代码无冲突。作品版本拥有者已正式接发布窗口并冻结e91d2c2506891ce91d4868f774456c13c8f60a87 / v0.140.0，本地先行合入9d3d45bc作为候选，尚不声称该版本已健康上线。本轮候选0.140.1已准备，仍待140实际健康后才构建及切版。两个freezeImageWorkMethodUse事务绑定点保留；恢复工程夹具补齐该外部依赖并核对真实插入后调用、报价不调用。
 
 源码封存采用已验证ec375归档叠加本轮/1397差量，再对全部2570文件计算Git blob身份与本地合入提交ba9e8e45的tree逐一对应，同时生成SHA256源清单。未复制环境、数据库、node_modules或用户媒体；避免外置盘巨型Git pack整包读取阻塞，不以未提交工作树冒源提交。后继候选继续同一精确源检查。
+
+候选已封存并推远端：主版6ddda7bda058ac4e04ed71b66e5dc889f7158b45 / 0.140.1；新相容guard1886d2ff53347e08da5208e27c918bc462ae13e4 / 0.140.1+points-pricing-guard.1，ls-remote均核对一致。两套全部2572个Git源文件逐一blob核对通过；guard仅改既有六个版本/写开关文件，当前输入读器及继承逻辑保留。候选合入后32项隔离工程通过（报价无登记、真实插入后登记也已覆盖），无应用数据库/网络/付费/浏览器调用。正式stage为/data/video-api-debugger/release-staging/template-current-input-20261109/attempt01；现只准备源码、脚本和工程证据，主版/guard完整构建及生产切换尚未开始，等待140窗口健康交接。
+
+### 最终候选r02（未部署）
+
+继承作品版本对旧恢复VM夹具的3c660ec24修订：接真实freezeImageWorkMethodUse并保留本轮受理后/报价无写的计数断言；两侧源指纹都保留。最终主版e0b82e2d560c190235f54307615fe84a9070298e / 0.140.1，配套guard e6e82df1a6ff9c625f74f70c5760f7ca3bbdaa50 / 0.140.1+points-pricing-guard.1，均已推送并ls-remote核对。两套2572文件Git blob逐一相符，最终主版32项工程再过，无应用数据库/网络/付费/浏览器调用。
+
+正式准备stage改为/data/video-api-debugger/release-staging/template-current-input-20261109/attempt02，旧attempt01仅源准备，未执行完整构建或线上动作，保留并标明输入被替代；不是一次生产失败。待先行3c660ec24 / 0.140.0实际健康交窗后，连续进行本次主/guard完整构建及既有保护发布。guard不可回用旧674；配置和恢复入口均绑定本stage及新guard。
+
+本轮已正式接过140发布窗口：实际3c660ec24 / nOkZjjM7FnbrDLJisYnEe已健康，运行证据复制到attempt02/inherited-live-baseline.json。2026-11-09T18:41:29Z开始本轮唯一完整构建，controller PID138596；价策略全字段只读快照d03c539d...，未改价格或生产数据。主版/新guard依次构建，线上仍保持140，尚未进行本轮切换。
+
+发布接续注意：本轮两套完整构建及prepared-pair成功后，先对本stage运行check-runtime-links.py release-input.json --prepare，仅为候选链接现有.env/持久storage/uploads/videos并核既有登录配置；不复制或覆盖业务数据。不要单独预跑pre-cutover.py（其会创建configuration-before）；由release-controller内部一次完成鲜核和配置备份。cutover-exit0后再收service-health，并只执行program-recovery第一段的只读前置核定，不实际回退。构建期间不修改任何正在运行的发布工具。
+
+主版完整构建于2026-11-09T18:53:31.468376Z通过：e0b82e2d560c190235f54307615fe84a9070298e / v0.140.1 / BUILD f0SnA9FbSNYxPYAEqyIDX，含完整类型/代码检查、优化与页面打包；新鲜内置工程和计价前置亦通过，隔离构建库，无生产库复制或服务切换。恢复版继续同一流程；本轮仍未部署。
+
+<!-- TPL-CURRENT01-RELEASE-20261109 -->
+## 8. 最终交付回执
+
+C01–C06已完成实施、必要工程、聚焦提交推送及保护部署。实际效果仍待用户手验，不把构建/健康说成功能通过。
+
+- 主版：e0b82e2d560c190235f54307615fe84a9070298e，v0.140.1，BUILD f0SnA9FbSNYxPYAEqyIDX；分支codex/template-current-input-20261109已推并ls-remote核对。
+- 相容恢复：e6e82df1a6ff9c625f74f70c5760f7ca3bbdaa50，0.140.1+points-pricing-guard.1，BUILD q_Jb-iJjNq-ROe8asIOfv；分支codex/points-pricing-settings-guard-template-current-20261109-r02已推并核远端。两套均完整Next/type/lint及新鲜内置工程/计价通过，当前输入合同读器一致；不得回旧674。
+- 正式stage：/data/video-api-debugger/release-staging/template-current-input-20261109/attempt02，pair c65b290c-7bb4-4035-948f-08c824e76780，build-exit0 / cutover-exit0。2026-11-09T19:12:40.229517Z公网45资源与3匿名401通过，7服务同源；19:13:31.844300Z本机/公网健康200、控制器0、4timer运行。
+- 数据保护：旧writer自然排尽无强杀，一致SQLite备份595862108accc4e85046fdcb95accc39bd4bd715272ce730fd47ccb506e72550留服务器；继承迁移仅读，无DDL或数据恢复。价格全字段d03c539d...与私密策略未变；沿原.env/媒体/持久目录，不回数据库、账本、原请求、图片或回执。
+- 恢复入口：本stage的program-recovery.sh release-input.json；19:13:56.507159Z仅第一段只读前置核定通过，未执行实际回退。恢复前仍核当前所有者与实际运行源，不影响后继发布。
+- 最终32项隔离工程包含当前空值、历史后编辑、私密原请求回执、同模板/原文权限、报价/单张/批量和真实受理后归因衔接；不连接应用库、模型、浏览器。完整候选另用隔离构建库，未复制生产库。无收费生图或浏览器功能验收。
+
+入口：https://sd2.youdooart.com/template-studio?type=image。刷新后按§5手验角色卡及其他模板的编辑/清空、历史后编辑、刷新、默认保存和批量；六项均待用户实际操作验收。
+
+### 发布纠偏及残留
+
+首次后台包装器仍写旧1397 stage的ST，旧目录已有切版标记，保护条件在任何本轮切换前退出；本stage当时无cutover.log/started/configuration-before，原3c服务仍在。确认包装器已退出后，保原件并只修本stage入口路径，核全套活动切换/恢复入口，再次执行成功；无服务或业务数据影响，构建源与原完成时刻保持。原证controller-binding-correction.json与release-controller.original1397.sh保留。是一次发布准备错误，不掩盖为已执行切换。
+
+辅助CodeGraph索引未完成（外置盘约50分钟读取后停止），本轮结构依据定向源码和已封存Git源核对；未声称索引查询成功。此本机待核线索补记tasks/discoveries.md，非已确认网站缺陷；本轮未新增范围外的已确认应用缺陷。
+<!-- /TPL-CURRENT01-RELEASE-20261109 -->

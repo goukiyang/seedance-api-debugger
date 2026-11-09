@@ -500,3 +500,13 @@ sudo nginx -t
 
 完整记录沿共享审计§8及原联合单§16.13；私有44元证在正式根docs/materials/2026-11-07-pin-wide-gallery/recovery-20261108/sharing-chain-fix-138，700/600、Git忽略，不含DB/env/原价格/密钥/用户正文。费率全字段d03保持。通用编译页面预检固化作为任务外发现，未冒已做。
 <!-- /SHARE-CHAIN-FIX01-138 -->
+
+<!-- TPL-CURRENT01-DEPLOY-20261109 -->
+## 2026-11-09 生图模板当前输入 v0.140.1
+
+已部署，待用户手验。主源e0b82e2d560c190235f54307615fe84a9070298e / BUILD f0SnA9FbSNYxPYAEqyIDX；新guard e6e82df1a6ff9c625f74f70c5760f7ca3bbdaa50 / 0.140.1+points-pricing-guard.1 / BUILD q_Jb-iJjNq-ROe8asIOfv，均完整构建、类型、代码及新鲜内置门通过。继承实际3c/0.140.0，保Works真实受理归因及角色融合79b两UI。
+
+正式stage /data/video-api-debugger/release-staging/template-current-input-20261109/attempt02，pair c65b290c-7bb4-4035-948f-08c824e76780；cutover0，19:12:40Z公网45资源/3匿名401，19:13:31Z七服务同源与本机/公网健康、控制器0、4timer运行。旧writer自然排尽，一致备份及迁移仅读，无DDL、数据/媒体/账本恢复；价格全字段d03c539d...与私密策略不变。
+
+新studio-current-input-v1合同已生效，后继先继承实际源；恢复只用本stage program-recovery.sh release-input.json及新guard，先核所有者与运行版本，不能回旧674。恢复入口第一段只读核定通过，未实际回退。首次包装器旧ST引用在切换前被保护拦住，inactive后修正本stage路径并保原证，未重建未变产物。详细工程、失败保护、恢复证据与手验清单沿[原单§8](../tasks/todo/2026-11-09-template-current-input.md#8-最终交付回执)，无收费生图或浏览器功能验收。
+<!-- /TPL-CURRENT01-DEPLOY-20261109 -->
