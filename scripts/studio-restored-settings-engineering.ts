@@ -16,6 +16,7 @@ import { validStudioPresetId } from '../src/lib/image-studio/preset-id';
 import { CURRENT_STUDIO_SIZE_POLICY_VERSION } from '../src/lib/image-studio/ratios';
 import { normalizeImageFeishuChoice } from '../src/lib/image-studio/feishu-contract';
 import { historicalStudioStyles } from '../src/lib/image-studio/style-history';
+import { freezeImageWorkMethodUse } from '../src/lib/works/method-reference';
 
 // This fixture evaluates selected production declarations with synthetic dependencies.
 // It never imports the application database, provider, worker, or HTTP modules.
@@ -33,6 +34,7 @@ async function main() {
   files.push('src/lib/image-studio/feishu-contract.ts', 'src/lib/video/feishu-contract.ts', 'src/lib/image-studio/style-history.ts');
   files.push('src/lib/image-studio/personal-prompt.ts', 'src/lib/image-studio/personal-prompt.server.ts');
   files.push('src/lib/image-studio/current-inputs.ts', 'src/lib/image-studio/shared-contract.ts');
+  files.push('src/lib/works/method-reference.ts', 'src/lib/image-studio/pricing-state.ts');
   const sources = new Map(files.map(file => [file, readFileSync(path.join(root, file), 'utf8')]));
   const declarations = (file: string, names: string[]) => {
     const text = sources.get(file) ?? readFileSync(path.join(root, file), 'utf8');
@@ -152,8 +154,9 @@ async function main() {
     ...storageExports, ...privateFields, ...privatePrompts, normalizeImageFeishuChoice, historicalStudioStyles,
     freezeImageFeishuChoice: async (_tx: unknown, _owner: unknown, choice: unknown) => { assert.equal(choice, undefined); return null; },
     enqueueFrozenImageFeishuNotification: async (_tx: unknown, _task: unknown, choice: unknown) => { assert.equal(choice, null); },
-    freezeImageWorkMethodUse: async (client: unknown, task: { id: string }) => {
-      assert.equal(client, tx); assert.ok(created.some(row => row.id === task.id)); frozenMethodUses++;
+    freezeImageWorkMethodUse: async (client: Parameters<typeof freezeImageWorkMethodUse>[0], task: Parameters<typeof freezeImageWorkMethodUse>[1] & { id: string }) => {
+      assert.equal(client, tx); assert.ok(created.some(row => row.id === task.id));
+      await freezeImageWorkMethodUse(client, task); frozenMethodUses++;
     },
     MAX_REFERENCE_IMAGES: 10, DEFAULT_STUDIO_PRIMARY_MAX: 1, MAX_STYLE_GROUP_NOTE_LENGTH: 8000,
     IMAGE_STUDIO_MODELS: ['gpt-image-1'], IMAGE_STUDIO_MODEL_QUALITY_OPTIONS: { 'gpt-image-1': ['medium'] },
