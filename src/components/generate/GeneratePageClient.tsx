@@ -3732,7 +3732,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           }}
         />}
 
-        {!normalVideoRedesign && creationAvailability}
+        {(!normalVideoRedesign || imageResultRequested !== false && !imageResultHandoff) && creationAvailability}
 
         {/* 最近任务 */}
         {showRecentTaskSurface && (

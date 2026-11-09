@@ -91,9 +91,32 @@ check('redesigned creation recovery is inside the composer before generation con
   const recovery = composer.lastIndexOf('{creationRecovery}');
   assert.ok(recovery > composer.indexOf('<PromptEditor') && recovery < composer.indexOf('<ComposerActionBar'));
   assert.ok(page.includes('creationRecovery={normalVideoRedesign ? creationAvailability : undefined}'));
-  assert.ok(page.includes('{!normalVideoRedesign && creationAvailability}'));
+  assert.ok(page.includes('{(!normalVideoRedesign || imageResultRequested !== false && !imageResultHandoff) && creationAvailability}'));
   assert.equal((page.match(/<CreationAvailability\s/g) || []).length, 1);
   assert.ok(composer.includes('!submitDisabledReason'));
+});
+check('recovery remains available while an image handoff hides the composer', () => {
+  const source = read('src/components/generate/GeneratePageClient.tsx');
+  const ast = ts.createSourceFile('GeneratePageClient.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let condition;
+  function find(node) {
+    if (ts.isJsxExpression(node) && node.expression && ts.isBinaryExpression(node.expression)
+      && node.expression.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+      && node.expression.right.getText(ast) === 'creationAvailability') condition = node.expression.left.getText(ast);
+    ts.forEachChild(node, find);
+  }
+  find(ast);
+  assert.ok(condition);
+  for (const imageResultRequested of [null, false, true]) {
+    for (const handoff of [false, true]) {
+      for (const normalVideoRedesign of [false, true]) {
+        const composerVisible = imageResultRequested === false || handoff;
+        const external = Boolean(vm.runInNewContext(condition, { normalVideoRedesign, imageResultRequested, imageResultHandoff: handoff ? {} : null, Boolean }));
+        const inline = composerVisible && normalVideoRedesign;
+        assert.equal(Number(external) + Number(inline), 1, JSON.stringify({ imageResultRequested, handoff, normalVideoRedesign }));
+      }
+    }
+  }
 });
 check('reference thumbnails and preview use the same protected media identity', () => {
   const source = read('src/components/GenerationComposer.tsx');
