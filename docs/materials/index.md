@@ -1,3 +1,9 @@
+<!-- FUSION-UX05-MATERIALS-20261110 -->
+## 角色融合 UX05 层次方案预览 R01（2026-11-10）
+
+[方案及原图](../../tasks/todo/2026-11-08-character-fusion.md#ux05-层次与归属方案预览2026-11-10)：1391×1131概念预览、演示数据，已查看，未实施。原件/完整提示词/来源说明保正式根私有 `docs/materials/2026-11-08-character-fusion-prototype/implementation/ux05/`，不因整理升级应用或部署。旧标注图仅作参考，当前生成图不冒实页截图。
+<!-- /FUSION-UX05-MATERIALS-20261110 -->
+
 <!-- FUSION-UX04-MATERIALS-20261109 -->
 ## 角色融合 UX04 标注、源检查与发布元证（2026-11-09）
 
