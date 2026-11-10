@@ -510,3 +510,11 @@ sudo nginx -t
 
 新studio-current-input-v1合同已生效，后继先继承实际源；恢复只用本stage program-recovery.sh release-input.json及新guard，先核所有者与运行版本，不能回旧674。恢复入口第一段只读核定通过，未实际回退。首次包装器旧ST引用在切换前被保护拦住，inactive后修正本stage路径并保原证，未重建未变产物。详细工程、失败保护、恢复证据与手验清单沿[原单§8](../tasks/todo/2026-11-09-template-current-input.md#8-最终交付回执)，无收费生图或浏览器功能验收。
 <!-- /TPL-CURRENT01-DEPLOY-20261109 -->
+
+<!-- TPL-CURRENT02-20261109 -->
+## TPL-CURRENT02 模板恢复期间编辑保护（2026-11-09）
+
+已部署v0.140.3，待用户手验。主源f7ea045afaa08674eba5bad3dc10edd697abf371 / BUILD lmMZK3aEpEvKmgr1Z60eX；新相容guard a36d6dde3995f87f4acbf09e6fecd5e75ff47e41 / BUILD i5KO-MwNElJvEUkOdGtlE。stage `/data/video-api-debugger/release-staging/template-current-state-audit-20261109/attempt02`，pair79e5c225-e29f-4eb8-9cee-289c1e0746e5。两套完整构建/类型/代码及内置门通过，14项新增与32项原恢复工程通过；首轮ARCH03夹具遗漏实际helper已补齐，原失败证据保留。
+
+cutover0；03:12:30Z公网52资源/3匿名401，03:13:06Z七服务健康/控制器0/四timer。价格完整字段d03c及私密策略未变，一致备份SHA2850692d9891cbbd29e662037b1a0a77b01779da0db11dd731f774f435461a31；无DDL/回数据。恢复使用本stage `program-recovery.sh release-input.json` 的新guard，只读首段已核，未实际回退。恢复/套用期间保留新编辑，3D多视图规则保存中新输入保留窗口。功能及快速查看来源线索仍用户手验，详[原单§9](../tasks/todo/2026-11-09-template-current-input.md#9-tpl-current02-同类输入状态扩查2026-11-09)。
+<!-- /TPL-CURRENT02-20261109 -->

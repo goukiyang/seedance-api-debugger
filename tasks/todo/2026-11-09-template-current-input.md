@@ -127,7 +127,7 @@ C01–C06已完成实施、必要工程、聚焦提交推送及保护部署。�
 - [x] R2-01 共享生成入口及当前/默认/历史/旧客户端语义，查漏接路径。
 - [x] R2-02 保存/自动草稿/恢复/刷新期间继续编辑，含私密编辑器调用方和跨页签。
 - [x] R2-03 单张/报价/批量/复用/重试取值；保已受理和未知原号、权限、费用及冻结输入。
-- [ ] R2-04 写回确认问题、排除理由和证据缺口；无代码修复不为排查升级应用或部署。
+- [x] R2-04 写回确认问题、排除理由和证据缺口；无代码修复不为排查升级应用或部署。
 
 共享影响初判：字段有不同生命周期来源，异步回包可能重新写本次输入。应核实际读写者及正常操作重叠，不能按字段名全局替换、把历史冻结当错误覆盖或提前改权限/收费。当前仅建立调查记录，源代码尚未修改；后续有具体修法再补实际判断。保持用户手验，不执行浏览器、真实生图或收费回归。
 
@@ -148,3 +148,20 @@ CodeGraph准备入口返回READY，但独立checkout未命中只认原git-common
 R02主源0cdc8611ab88ad57bfc0dd3017f28a1db5c30d21与新guard06c08069fbdb676dfcbcfea11d000bbe1c0aad39均已推同仓并ls-remote一致；逐一校验2574个Git源blob，发布工具副本已在新stage绑定路径/固定guard并做语法检查，未修改运行中的工具。候选隔离工程14项再次通过，完整构建及现有内置检查进行中；当前正式仍v0.140.2/d8。
 
 R02首轮候选准备失败一次（未启动完整Next构建、未切服务）：ARCH03工程夹具只抽取restoreResultSettings单函数，遗漏其新复用的captureRestoreInputs/restoreInputsUnchanged，报ReferenceError。保留attempt01全部失败报告；其余native/linked及价格项成功，含原32项恢复工程，新14项同样通过。已修正原夹具抽取实际三函数并供应已有签名/私密编辑ref，保原目标/主图用例，补私密编辑与正常恢复；未削弱断言、未改应用行为。新源和新stage重新完成必要构建，原失败不抹除。
+
+当前R02候选已替换为主源f7ea045afaa08674eba5bad3dc10edd697abf371、guard a36d6dde3995f87f4acbf09e6fecd5e75ff47e41（0.140.3 / 0.140.3+points-pricing-guard.1），均已推并核ls-remote同头；2574个源blob逐一核验通过。attempt02路径/固定guard/控制器绑定集中核过，独立14项再次通过，现完整构建中。旧0cdc/06c及attempt01仅是未发布的失败准备证据，未被当作线上/恢复版。
+
+补充手验/待核线索：恢复历史详情还在读取时立即打开设置查看原文，核对其显示来源与恢复选择一致。源码读取scope未单独绑定sourceTaskId/currentDraft，但尚无实际界面错位证据，发生概率未测；本轮真实后续编辑已有14项工程保护，不因未证实的查看顺序线索再加防御或重构。记录tasks/discoveries.md的D-20261109-PRIVATE-EDITOR-READ-SCOPE；不把它写成已确认/已修复或验收通过。
+
+### R02 最终交付：已部署，待用户手动验收
+
+- 主源 f7ea045afaa08674eba5bad3dc10edd697abf371，v0.140.3，BUILD `lmMZK3aEpEvKmgr1Z60eX`。
+- 相容guard a36d6dde3995f87f4acbf09e6fecd5e75ff47e41，0.140.3+points-pricing-guard.1，BUILD `i5KO-MwNElJvEUkOdGtlE`。同仓主/guard均已推并核远端一致。
+- 正式stage `/data/video-api-debugger/release-staging/template-current-state-audit-20261109/attempt02`；pair `79e5c225-e29f-4eb8-9cee-289c1e0746e5`。主版02:54:34Z、guard03:07:59Z完整Next/类型/代码与全部现有内置门通过；14项新恢复工程、32项原输入工程通过。
+- 03:11:54Z切换开始，cutover退出0；03:12:30Z公网52资源与3匿名401通过，03:13:06Z七服务健康、发布控制器0、四timer运行。线上为上述主源，不以远端HEAD或构建成功冒上线。入口 https://sd2.youdooart.com/template-studio?type=image 。
+- 价格完整字段hash `d03c539d74a31b5e2a6a0305724b1b9f193e0ade878370898c7632d1bdc96539` 发布前后相同，私密策略未变。旧writer自然排尽，一致SQLite备份SHA `2850692d9891cbbd29e662037b1a0a77b01779da0db11dd731f774f435461a31`；无本轮DDL、业务数据覆盖或回数据。
+- 恢复仅用本stage `program-recovery.sh release-input.json` 指向本次新guard；03:13:06Z只读首段前置核对通过，未实际执行回退。旧未发布候选及首轮夹具失败报告保留，不混用旧guard。
+
+R2-01–R2-04工程与发布收口。最终源码复查：两类确认缺陷已修复；未证实的快速历史恢复后查看原文来源一致性、辅助索引不完整/过期均在discoveries保留，不能写成已修或全项目无问题。真实浏览器、出图、保存交互与最终效果仍用户手验；本轮模型/收费/浏览器调用0。手验重点增加：恢复/套用读取期间继续输入或清空；私密原文未自动保存前的新编辑；3D多视图规则保存中继续输入时窗口与新内容保留；以及上述快速查看来源待核场景。
+
+下一发布窗口按已协调顺序交给codex-9，codex-15后继；已给相同主源/BUILD/guard与stage，保本轮修复及Works钩子。此为现有发布协调，不派新审核或功能验收线程。

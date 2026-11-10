@@ -147,4 +147,12 @@ SHARE-CHAIN-FIX01收口：R1–R5及飞书命名交集已部署0.138.0，实际�
 TPL-CURRENT01的实际独立checkout初始化CodeGraph约50分钟仍未完成，进程处于读取等待，已停止本人索引；未取得可用查询，不声称覆盖当前源。日志 /Volumes/Data/Cache/template-current-input-20261109/codegraph-init.log，过程及安全源码替代见[原单](todo/2026-11-09-template-current-input.md#8-最终交付回执)。与既有D-20261101-06 worktree准备缓慢同属本机工具链线索，未核是否同根因，未证明仓库损坏或网站故障。应用以精确Git源、32项工程、两套完整构建和必要部署证据交付；本轮不扩为磁盘、Git存储或索引服务整治。
 
 R02扩查补证：准备入口虽返回READY，独立checkout的git-common-dir不符合适配器限定，实际SQLite缺少current-inputs/tasks/batches/shared-contract四个后端文件。studio.tsx和PrivateDefinitionEditor.tsx已有记录且与当时源SHA一致，前端结构查询可用；不能据此声称后端索引恢复。缺口按定向源码接续，未扩改全局工具。
+
+R02改码后再次只读核对：studio.tsx索引已旧，未改动的PrivateDefinitionEditor仍同SHA，tasks.ts仍无索引；此后未用旧结构图作当前源结论，按当前源码和候选工程补证。索引缺口继续保留，不冒更新成功。
 <!-- /TPL-CURRENT01-TOOL-20261109 -->
+
+<!-- TPL-CURRENT02-READ-SCOPE-20261109 -->
+## D-20261109-PRIVATE-EDITOR-READ-SCOPE 快速恢复后立即查看原文（待核线索）
+
+扩查源码时发现：PrivateDefinitionEditor 的读取范围绑定账号/模块/epoch及开关状态，未单独绑定 sourceTaskId/currentDraft 选择。可能需核对的条件是“恢复历史的详情尚在读取时，立即打开设置并查看原文”，两个读取返回交错后，原文显示与刚恢复的历史来源是否一致。本轮已保护实际后续编辑（含私密保存前）不被历史覆盖；这里仅涉及尚未编辑的快速查看顺序，未复现实际界面，不作为已确认缺陷或扩加防御的依据。发生概率暂无测量，保留原文/回执与读取权限，不为线索重构共享编辑器；沿项目用户手验边界加入原单§9补充场景，再依证据判断。
+<!-- /TPL-CURRENT02-READ-SCOPE-20261109 -->
