@@ -1,3 +1,11 @@
+<!-- FUSION-UX04-RELEASE-20261109 -->
+## 2026-11-09 角色融合视觉分组 v0.141.2（联合发布）
+
+已部署，待用户手动验收。主源ae8c3ab42374523dcb090bf55128823eaa291130 / BUILD _VfkjoUvLHnDSM1en0Dk8；本页be6两文件由73bddd96e无冲突承接，两SHA从服务器复核一致。stage `/data/video-api-debugger/release-staging/video-playback-start-20261109/attempt01`，pair3401e059-08df-4695-92a6-0d88be1f05a4；guard79abce5c6b06bd714261609678992a3161ba4bad / zxSxN0_ODrOhrA3gjUCPz原证复用，无重编或改原时间。完整Next/types/lint与计价、6启动门通过，build0/cutover0；06:42:37Z公网57资源/4匿名401（含本页13个JS/CSS），06:42:58Z七服务/四timer/controller0。
+
+价格d03c/私密策略/数据链接保持，一致备份SHA636289efd67f516082e461f578bd43df357eeba3eb120dc6f9b820369ecc088b；无新DDL/数据恢复/收费生成/浏览器验收。恢复仅本stage `program-recovery.sh release-input.json`，固定stage/79ab常量已核，未实际回退；发布窗4已交7，9不另开Next。源、分组和截图移位、材料及手验边界见[原单UX04](../tasks/todo/2026-11-08-character-fusion.md#ux04-视觉分组与截图位置修正2026-11-09)。
+<!-- /FUSION-UX04-RELEASE-20261109 -->
+
 <!-- FUSION-UX03-RELEASE-20261109 -->
 ## 2026-11-09 角色融合体验与结果保护 v0.141.0
 

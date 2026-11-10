@@ -1,6 +1,6 @@
 # 角色融合提示词
 
-日期：2026-11-08（洛杉矶）；状态：UX03已部署，待用户手动验收；版本：0.141.0。
+日期：2026-11-08（洛杉矶）；状态：UX04已部署，待用户手动验收；版本：0.141.2。
 
 ## 目标与来源
 
@@ -420,7 +420,19 @@ stage为/data/video-api-debugger/release-staging/fusion-ux03-20261109/attempt01�
 
 仅本工具studio.tsx及studio.module.css；CSS Module消费者为studio、rule-card、card-chat，无全站样式/导航改动，不改engine、API、recipe schema、费用和账号隔离。截图驱动的位置更改是本轮必要关联调整；原handler整体移动，唯一辅助逻辑为适应取消sticky的清单滚动。初始源为已健康02f/v0.141.0，其后文档头f7e3911ce；分支codex/fusion-ux04-visual-grouping-20261109。正式根其他脏改保留。
 
-受影响组件及全部导入依赖的定向TypeScript检查通过，Next lint通过；82个JSX事件handler与原HEAD逐个比较（仅归一化空白）完全保留，git diff --check通过。CodeGraph准备入口在实际工作区成功刷新，2035文件/34167节点/115977边、指纹20bfd583、无待同步或哈希差异；context返回其它模块，showResults局部箭头未命中，均未采用为本页关系证据，关系以源码及handler比对核对。冻结源be6d39d450b2f5b6630572d52c31b578a334e391仅2文件，已推送并核远端；studio SHA256 08e4f093b8fe107d4e03770aa588008dfde42540bec07efc0f43416fc838264c、CSS 5cdbd04e80ccf46729d756acd76c887686573e3b519fd493ae8cec8f3d864244。发布前继承15、4实际健康源。唯一窗15→4→9，未并开候选Next或生产切版；15已冻结a6d85且运行过正式controller，隔离TMPDIR输入失败后同源接续，不插入UX04。4已条件接受在继承15实际健康后、其首次正式候选冻结/启动前cherry-pick be6；无冲突则核两SHA并保原publicProof项追加/tools/character-fusion/page，一次构建切版；有冲突/需返修则保视频包原范围，UX04仍按后继9，不改运行run。未实际合入或健康前不冒已部署。真实桌面/手机、展开态与剪贴板效果仍用户手验，不自动浏览器、真实AI或出图。
+受影响组件及全部导入依赖的定向TypeScript检查通过，Next lint通过；82个JSX事件handler与原HEAD逐个比较（仅归一化空白）完全保留，git diff --check通过。CodeGraph准备入口在实际工作区成功刷新，2035文件/34167节点/115977边、指纹20bfd583、无待同步或哈希差异；context返回其它模块，showResults局部箭头未命中，均未采用为本页关系证据，关系以源码及handler比对核对。冻结源be6d39d450b2f5b6630572d52c31b578a334e391仅2文件，已推送并核远端；studio SHA256 08e4f093b8fe107d4e03770aa588008dfde42540bec07efc0f43416fc838264c、CSS 5cdbd04e80ccf46729d756acd76c887686573e3b519fd493ae8cec8f3d864244。
+
+### 最终发布与待验
+
+已随联合版v0.141.2部署，待用户手动验收。主源ae8c3ab42374523dcb090bf55128823eaa291130 / BUILD _VfkjoUvLHnDSM1en0Dk8；be6两文件由4无冲突承接为73bddd96e，继承15实际健康ea910/v0.141.1及本批视频/历史输入修复。排队时15已冻结并返修其候选，9未插改失败run或并开Next；4在其首次正式冻结前按已约定条件合入本页，不另做一轮重复构建。
+
+stage为/data/video-api-debugger/release-staging/video-playback-start-20261109/attempt01，pair3401e059-08df-4695-92a6-0d88be1f05a4。恢复源79abce5c6b06bd714261609678992a3161ba4bad / v0.141.0+points-pricing-guard.1 / BUILD zxSxN0_ODrOhrA3gjUCPz沿原有效构建复用，未重编或改写原时间；恢复仅用本stage program-recovery.sh release-input.json，固定stage/79ab首段常量已只读检查，未执行回退。发布窗现已4交7（仅超分后继），9不另开Next或变更冻结工具/当前运行指针。
+
+build0/cutover0；2026-11-10T06:42:37.438581Z公网57资源字节/4匿名401，06:42:58.417168Z七服务健康/四timer/发布控制器0。完整Next/types/lint和当次计价检查通过，6启动检查通过；联合发布沿用原02f与15补充工程原证，当轮12个受影响case新跑、22项原证复用，未为本页无变逻辑重复验收。9已直接读取服务器主源再核两SHA与be6完全一致，并核原public-assets/public-deployed/service-health/build/pair身份一致；角色融合真实manifest的13个JS/CSS依赖均已覆盖、HTTP200且公网站点字节有证。不把源码字段或代理回执独自当成公网证明。
+
+价格完整字段d03c及私密策略、存储/媒体链接保持，一致备份SHA256为636289efd67f516082e461f578bd43df357eeba3eb120dc6f9b820369ecc088b；无新DDL、数据恢复、生成收费或浏览器功能验收。发布元证与原标注图保正式根私有implementation/ux04/，资料索引可定位；只带回摘要与公有产物哈希，没有下载数据库、环境或媒体。
+
+原图两处移位和少框分组均已实施；真实桌面/手机的分组清晰度、展开拖动/新增对话，以及语言复制等往返仍待用户手验。源检查、构建、发布与健康不冒实际体验达标。
 
 本轮新发现的线索与问题：未新增范围外问题。
 <!-- /FUSION-UX04-20261109 -->

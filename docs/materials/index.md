@@ -1,7 +1,7 @@
 <!-- FUSION-UX04-MATERIALS-20261109 -->
-## 角色融合 UX04 用户标注与源检查（2026-11-09）
+## 角色融合 UX04 标注、源检查与发布元证（2026-11-09）
 
-[原单UX04](../../tasks/todo/2026-11-08-character-fusion.md#ux04-视觉分组与截图位置修正2026-11-09)对应的原标注图和两文件源检查保正式根私有 `docs/materials/2026-11-08-character-fusion-prototype/implementation/ux04/`。原图明确生成栏/规则操作位置；源be6d39d45已推送，类型、lint及82个原事件handler保持有证，真实视觉/手机效果待用户手验；无浏览器或收费请求。
+[原单UX04](../../tasks/todo/2026-11-08-character-fusion.md#ux04-视觉分组与截图位置修正2026-11-09)对应的原标注图、两文件源检查和v0.141.2发布摘要保正式根私有 `docs/materials/2026-11-08-character-fusion-prototype/implementation/ux04/`。主源ae8c3ab42 / BUILD _VfkjoUvLHnDSM1en0Dk8，06:42:58Z健康；两SHA与be6一致，本页13个JS/CSS/整批57资源字节有证。stage `/data/video-api-debugger/release-staging/video-playback-start-20261109/attempt01` 保联合构建、配对、启动与备份原证；未导出DB/环境/媒体。已部署，真实视觉/手机效果待用户手验；无浏览器或收费请求。
 <!-- /FUSION-UX04-MATERIALS-20261109 -->
 
 <!-- FUSION-UX03-MATERIALS-20261109 -->
