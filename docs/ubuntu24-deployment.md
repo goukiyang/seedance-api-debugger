@@ -1,3 +1,11 @@
+<!-- FUSION-UX03-RELEASE-20261109 -->
+## 2026-11-09 角色融合体验与结果保护 v0.141.0
+
+已部署，待用户手动验收。主源02f9797d4dc5b7cb838a25ee5acf87224c6d5b0f / BUILD 360Yio-7tzDThPsTtPuCq；新guard79abce5c6b06bd714261609678992a3161ba4bad / zxSxN0_ODrOhrA3gjUCPz。stage `/data/video-api-debugger/release-staging/fusion-ux03-20261109/attempt01`，pair877288fc-d4e0-4e85-95c5-2db0ca243d5f。两份完整Next/types/lint和新鲜原生/计价门通过，build0/cutover0；04:30:12Z公网32资源字节/3匿名401，04:31:19Z七服务健康/四timer/控制器0，6启动检查通过。完整继承已健康f7，其他文件哈希保持。
+
+价格全字段d03c/私密策略/数据链接保持，一致备份SHA7810fb97694cc03eb75c7b1ef93cc019ad1add0707f9c646d34e1cf343e86554；无DDL/回数据。恢复只用本stage `program-recovery.sh release-input.json` 及新79ab，实际脚本首段只读核定成功、未回退，不用旧a36/674替代当前合同。唯一窗已9→15，后继4。功能保留、信息精简、锁定/结果/英文与复制行为见[原单UX03](../tasks/todo/2026-11-08-character-fusion.md#ux03-综合审计落地与信息精简2026-11-09)。无浏览器/收费调用，功能待用户手验。
+<!-- /FUSION-UX03-RELEASE-20261109 -->
+
 <!-- FUSION-MODEL01-RELEASE-20261109 -->
 ## 2026-11-09 角色融合模型设置与原位清除
 

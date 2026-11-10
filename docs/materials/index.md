@@ -1,3 +1,9 @@
+<!-- FUSION-UX03-MATERIALS-20261109 -->
+## 角色融合 UX03 发布证据（2026-11-09）
+
+v0.141.0 / 02f9797d / BUILD 360Yio-7tzDThPsTtPuCq，2026-11-10T04:31:19Z健康，待用户手验。发布元证、完整f7保留差量、上线前页面资源核对归正式根私有 `docs/materials/2026-11-08-character-fusion-prototype/implementation/ux03/`；服务器原证位于 `/data/video-api-debugger/release-staging/fusion-ux03-20261109/attempt01`。仅带回元证，不含DB、环境、价格原行或媒体；两份新鲜完整构建/计价、32公网资源字节/3匿名401、七服务及恢复脚本只读首段有证，无实际回退、浏览器或收费请求。详情沿[原单UX03](../../tasks/todo/2026-11-08-character-fusion.md#ux03-综合审计落地与信息精简2026-11-09)。
+<!-- /FUSION-UX03-MATERIALS-20261109 -->
+
 <!-- FUSION-MODEL01-MATERIALS-20261109 -->
 ## 角色融合模型设置与原位清除（2026-11-09）
 
