@@ -289,7 +289,7 @@ export async function GET(request: NextRequest) {
         const usageParams = new URLSearchParams();
         const timeZone = params.get('time_zone');
         if (timeZone) usageParams.set('time_zone', timeZone);
-        const report = await getUsageReport(self, parseUsageQuery(usageParams, self));
+        const report = await getUsageReport(self, parseUsageQuery(usageParams, self), request.signal);
         usageSummary = { scope: report.scope, query: report.query, asOf: report.asOf, fingerprint: report.fingerprint,
           range: report.range, summary: report.summary, coverage: report.coverage, restricted: report.restricted };
       } catch {
