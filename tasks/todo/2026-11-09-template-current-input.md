@@ -197,3 +197,19 @@ Linux隔离源从封存f7的2574个blob逐一核验后仅覆盖本次文件；�
 本轮CodeGraph准备约26分钟、子sync约20分钟仍扫描；已终止本人84854/91823，保部分索引及已有前端查询证据，未影响网站或其他会话进程。后端关系仍按当前源核对；沿既有D-20261109-CODEGRAPH-IO保留工具缺口，不冒完整同步成功。
 
 15已明确确认：在其候选冻结前纳入ff65完整差量，沿9→15同批正式发布，不另起本单第三轮构建；复用仍匹配源码的9项/32项/TSC/lint证据，合并后仅补受影响输入，功能继续用户手验。尚无实际集成源/构建/切版回执，T3-03保持进行中，等待同批真实交付再核对source/BUILD/三个前端SHA。
+
+执行端补核：worker.ts两条提交分支均按task.reference_ids原顺序读取获准原图字节，并把task.context（含整体/逐图备注）与本次prompt组合传给generate；不是仅存快照而不进实际调用参数。主输入、私密原文输入没有复用风格组草稿busy禁用逻辑；本轮修复限定已确认的风格编辑输入与选用同步。
+
+### T3 必要配套最终冻结（待同批发布）
+
+收口复查补齐同一pending/applied边界的两个真实操作：保存并选用后的撤销基线须来自实际已生效选择，不能把外层未确认风格/提示词带入；按钮额度须按applied而非pending计算（实际满/待选空与反向都会错），外层待选若因新组保存而超额度则不得确认。仅在原三个前端范围内补额度prop/一行确认门及Undo基线，不改其他功能或后台合同。
+
+最终输入与选择工程12项通过：前6项运行真实React组件/提交观测，其余运行实际生产回调和按钮表达式，覆盖旧源的输入禁用、回执瞬间禁用、Undo带未确认项、额度错用pending、外层超额确认的红绿对照；最终完整TSC与受影响lint0。原32项准备工程及新增3断言未变、已通过，未重跑无变化链路。r05最终receipt为fixture-r01/.role-tests/style-input-r05.json、types-r05.log、lint-r05.log；红例另见negative-control-r04.log、negative-control-cap.log、negative-control-confirm.log。
+
+原始代码主链ff65→7f40→b54均已推。供发布方只取一次的归一提交为3d525d42c7d1f6fc2eb58c26c6b57c8bc8a79d8b（codex/template-style-undo-cap-20261109，直接父ff65，仅3文件完整Undo+cap），已推同仓；不能只取b54单提交。相对ff65完整patch与before/after/blob元数据在server engineering根style-undo-cap-final.patch/json；patch SHA c65593e8d01ae9df8591584f648870283f79fd0b3d15e7c5e45a19b8e5e47d68，封存r05三文件包SHA b1aabfd716e68aa954bd41c777be2015c5fcc03a5c3d85606d5541dee09ee200，避免遍历旧13GB历史。
+
+最终SHA：style-groups-view 0328424f3e4554e3de4fcc7922b4c5282ddfe62165c53ea1350e413c5acd8796；style-skill-selector 7e3f7e0be7a699b68f2f2e976f928e6bb083a317b8a967d10e6e6c85033b2d01；studio仍252ef497a31daa2bb78c8079a701693c2ed96e724f9fc7d17be95c3bf49f3e38；工程脚本0d6e6875e62174fb29f5464047ccba0ef611a1687122381c78e0855dedce9a07。
+
+前序UX03已实际健康0.141.0/02f9797/360Yio-7tzDThPsTtPuCq，guard79abce/zxSxN0_ODrOhrA3gjUCPz；15已接唯一窗，只有22184改前封包且尚未启native/Next/切版控制器，明确在此安全点接Undo+cap必要差量，改前包保留，不改运行run、不另升未发布141.1版本。最终源码与12项证据已交15，等待实际新候选/健康回执。对运行中的9合批机会不成立已排除，未中断其有效构建。
+
+任务外仅新增D-20261109-STYLE-EMPTY-HISTORY待核线索（整体备注为空时历史复制完整性标记），在discoveries另行记录，未混入本轮已冻结修复。
