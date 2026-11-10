@@ -343,7 +343,7 @@ function AccountWorks({ viewerId, account, embedded, layoutReady, layoutKey: out
         ...(query.collection ? [{ id: 'collection', label: directory.collections.find(item => item.id === query.collection)?.name || '已选集合',
           remove: () => updateQuery({ collection: undefined }) }] : []),
       ]} clear={clearFilters} />
-      {query.scope === 'recommended' && <WorkDiscoveries viewerId={viewerId} queryKey={queryKey} revision={detailRevision + refresh} playback={playback} onOpen={open} onLayout={discoveryResized} />}
+      {query.scope === 'recommended' && <WorkDiscoveries viewerId={viewerId} queryKey={queryKey} revision={detailRevision + refresh} playback={playback} onOpen={open} onLayout={discoveryResized} operate={operate} busyKeys={busyKeys} navigationEpoch={navigationEpoch} />}
       <section className={styles.feed} aria-label="作品内容">{first?.previousCursor && <div className={styles.pageControl}><button type="button" disabled={loading} onClick={() => void load('before')}>读取前面的作品</button></div>}
         {error && failedDirection !== 'after' && <OperationReceipt className={styles.readError} status={error}
           actions={<button type="button" disabled={loading} onClick={() => void load(failedDirection)}>重试读取</button>} />}

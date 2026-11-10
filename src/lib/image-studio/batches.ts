@@ -32,6 +32,7 @@ import { captureImageGenerationChannel, getImageGenerationSettingsForModel, isMu
   resolveImageGenerationChannelSnapshot, validateImageGenerationChannel, type ImageGenerationChannelSnapshot, type ImageGenerationResolvedSettings } from '@/lib/integrations/image-generation';
 import { QueueCapacityError, QueueMaintenanceError, reserveImageStudioQueueCapacity } from './queue-capacity';
 import { PRICING_BATCH_PREFIX, PRICING_BATCH_ITEM_PREFIX, publicPricingTaskState, studioTaskState, studioTaskStates } from './pricing-state';
+import { freezeImageWorkMethodUse } from '@/lib/works/method-reference';
 import { assertPricingImageConsumerReady } from '@/lib/pricing/runtime';
 import { samePricingImageCharge, withImagePricing } from '@/lib/pricing/image';
 import { normalizeImageResolution } from '@/lib/image-generation/resolution';
@@ -167,7 +168,7 @@ export function continuationInput(batch: BatchRecord, body: Record<string, unkno
   const pending = batch.items.filter(item => !item.taskId && !item.cancelled);
   if (!pending.length) throw new StudioError('本批没有未受理条目，请查看原任务', 409);
   const changes = Object.fromEntries(['prompt', 'personalPrompt', 'personalOverrides', 'model', 'quality', 'resolution', 'count', 'aspectRatio',
-    'revision', 'moduleRevision', 'sharedLive', 'restoredSettings', 'taskSettings', 'draft', 'referenceIds', 'imageChannel', 'channelId', 'batchQuoteId', 'pricingRevision', 'budget']
+    'revision', 'moduleRevision', 'sharedLive', 'restoredSettings', 'taskSettings', 'currentInputs', 'draft', 'referenceIds', 'imageChannel', 'channelId', 'batchQuoteId', 'pricingRevision', 'budget']
     .filter(field => Object.prototype.hasOwnProperty.call(body, field)).map(field => [field, body[field]]));
   const previous = { ...batch.input };
   delete previous.imageChannel;
@@ -679,7 +680,7 @@ export async function dispatchStudioBatches() {
         const transientIds = (snapshot.transientReferenceImages || []).map((reference: { id: string }) => reference.id);
         const visibleReferences = await tx.asset.count({ where: { id: { in: transientIds }, owner_id: batch.ownerId, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(user, tx)] } });
         if (visibleReferences !== new Set(transientIds).size) throw new StudioError('本批参考图已不可用，未派发新任务');
-        if (snapshot.restoredSettings && snapshot.templateReferenceImages?.length) {
+        if ((snapshot.restoredSettings || snapshot.currentInputs) && snapshot.templateReferenceImages?.length) {
           const templateIds = snapshot.templateReferenceImages.map((reference: { id: string }) => reference.id);
           const readable = await tx.asset.count({ where: { id: { in: templateIds }, status: 'active', type: 'image',
             AND: [await studioVisibleAssetWhere(user, tx)] } });
@@ -744,6 +745,7 @@ export async function dispatchStudioBatches() {
         const freeze = Number(data.unit_credits) > 0 ? await allocateTaskCredits(tx, user, Number(data.unit_credits), taskId) : null;
         await assertUsageProject(tx, user, batch.usageContext?.projectId ?? null);
         const created = await tx.imageStudioTask.create({ data: { ...data, id: taskId, status: channelStatus, freeze_snapshot: freeze?.snapshot } });
+        await freezeImageWorkMethodUse(tx, created, batch.id);
         await enqueueFrozenImageFeishuNotification(tx, created, batch.imageFeishu);
         await recordUsageAttribution(tx, { sourceKind: 'image_task', sourceId: taskId,
           actorUserId: batch.ownerId, ownerUserId: batch.ownerId, billingSubjectType: 'user', billingSubjectId: batch.ownerId,

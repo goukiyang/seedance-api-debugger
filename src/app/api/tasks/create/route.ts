@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { freezeWorkMethodUse } from '@/lib/works/method-reference';
 import { freezeVideoRetry, dispatchFrozenVideoRetry, SafeVideoPending } from '@/lib/generation-retry/video';
 import { readRetry, finishRetry } from '@/lib/generation-retry/store';
 import { privateMultiviewOrigins } from '@/lib/video/private-storage.server';
@@ -2413,6 +2414,14 @@ export async function POST(request: NextRequest) {
         }, ['prompt', 'final_prompt_snapshot'], true, Boolean(multiviewGeneration)), multiviewAction?.action || null), videoGroups.origins),
       });
 
+      if (studioHandoff) {
+        const run = await tx.videoStudioRun.findUnique({ where: { id: studioHandoff.runId }, select: { draft_id: true, owner_user_id: true } });
+        const template = studioHandoff.snapshot.templateVersion;
+        if (run?.owner_user_id === user.id && template?.templateSource === 'studio') await freezeWorkMethodUse(tx, {
+          ownerId: user.id, kind: 'video', scopeId: run.draft_id, requestId: task.id,
+          templateId: template.templateId, templateVersion: template.versionId || template.sourceRevision || null,
+        });
+      }
       await enqueueVideoFeishuNotification(tx, user.id, task, creationBody.video_feishu);
       await acceptVideoCreationIntent(tx, user, creationBody, { taskId: task.id, cost: estimatedCost,
         pricingRevision: priceQuote.revision,

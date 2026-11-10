@@ -8,6 +8,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import ts from 'typescript';
 import * as restoredContract from '../src/lib/image-studio/restored-settings';
+import * as currentInputsContract from '../src/lib/image-studio/current-inputs';
 import { isEncryptedStudioPersonalPrompt } from '../src/lib/image-studio/personal-prompt';
 import { serverStudioPersonalPromptProjection } from '../src/lib/image-studio/personal-prompt.server';
 import * as taskSettingsContract from '../src/lib/image-studio/task-settings';
@@ -15,6 +16,7 @@ import { validStudioPresetId } from '../src/lib/image-studio/preset-id';
 import { CURRENT_STUDIO_SIZE_POLICY_VERSION } from '../src/lib/image-studio/ratios';
 import { normalizeImageFeishuChoice } from '../src/lib/image-studio/feishu-contract';
 import { historicalStudioStyles } from '../src/lib/image-studio/style-history';
+import { freezeImageWorkMethodUse } from '../src/lib/works/method-reference';
 
 // This fixture evaluates selected production declarations with synthetic dependencies.
 // It never imports the application database, provider, worker, or HTTP modules.
@@ -31,6 +33,8 @@ async function main() {
     'src/lib/image-studio/batches.ts', 'src/lib/image-studio/ratios.ts', 'scripts/studio-restored-settings-engineering.ts'];
   files.push('src/lib/image-studio/feishu-contract.ts', 'src/lib/video/feishu-contract.ts', 'src/lib/image-studio/style-history.ts');
   files.push('src/lib/image-studio/personal-prompt.ts', 'src/lib/image-studio/personal-prompt.server.ts');
+  files.push('src/lib/image-studio/current-inputs.ts', 'src/lib/image-studio/shared-contract.ts');
+  files.push('src/lib/works/method-reference.ts', 'src/lib/image-studio/pricing-state.ts');
   const sources = new Map(files.map(file => [file, readFileSync(path.join(root, file), 'utf8')]));
   const declarations = (file: string, names: string[]) => {
     const text = sources.get(file) ?? readFileSync(path.join(root, file), 'utf8');
@@ -109,7 +113,7 @@ async function main() {
     platformSetting: { findUnique: async () => null },
   };
   const prisma = { ...tx, $transaction: async (run: (client: typeof tx) => unknown) => run(tx) };
-  let quoteSnapshotReads = 0, deferredVersionReads = 0, previewCleanups = 0;
+  let quoteSnapshotReads = 0, deferredVersionReads = 0, previewCleanups = 0, frozenMethodUses = 0;
   const quotePhases: string[] = [];
   // This restoration harness uses an already captured synthetic channel. All
   // quote SQL writes remain prohibited; real private-version staging has its own SQLite evidence.
@@ -140,12 +144,20 @@ async function main() {
   { exports: storageExports, require: (name: string) => {
     assert.ok(Object.hasOwn(storageImports, name), `Unexpected private storage dependency: ${name}`); return storageImports[name];
   } });
-  const sandbox: Record<string, any> = { exports: {}, createHash, randomUUID, ...restoredContract, ...taskSettingsContract, CURRENT_STUDIO_SIZE_POLICY_VERSION,
+  const sandbox: Record<string, any> = { exports: {}, createHash, randomUUID, ...restoredContract, ...taskSettingsContract, ...currentInputsContract, CURRENT_STUDIO_SIZE_POLICY_VERSION,
+    readPrivateStudioGenerationDraft: async (_actor: unknown, requestedModule: string, reference: { revision: number; sourceRevision: string }) => {
+      assert.equal(requestedModule, moduleId); assert.deepEqual(plain(reference), { revision: 9, sourceRevision: 'synthetic-private-source' });
+      return { values: { prompt: '', context: '' }, origins: [] };
+    },
     isEncryptedStudioPersonalPrompt, serverStudioPersonalPromptProjection, validStudioPresetId,
     assertStudioRequestWritable: async () => {}, markStudioSubmitFailure: () => {},
     ...storageExports, ...privateFields, ...privatePrompts, normalizeImageFeishuChoice, historicalStudioStyles,
     freezeImageFeishuChoice: async (_tx: unknown, _owner: unknown, choice: unknown) => { assert.equal(choice, undefined); return null; },
     enqueueFrozenImageFeishuNotification: async (_tx: unknown, _task: unknown, choice: unknown) => { assert.equal(choice, null); },
+    freezeImageWorkMethodUse: async (client: Parameters<typeof freezeImageWorkMethodUse>[0], task: Parameters<typeof freezeImageWorkMethodUse>[1] & { id: string }) => {
+      assert.equal(client, tx); assert.ok(created.some(row => row.id === task.id));
+      await freezeImageWorkMethodUse(client, task); frozenMethodUses++;
+    },
     MAX_REFERENCE_IMAGES: 10, DEFAULT_STUDIO_PRIMARY_MAX: 1, MAX_STYLE_GROUP_NOTE_LENGTH: 8000,
     IMAGE_STUDIO_MODELS: ['gpt-image-1'], IMAGE_STUDIO_MODEL_QUALITY_OPTIONS: { 'gpt-image-1': ['medium'] },
     IMAGE_STUDIO_MODEL_COST_USD: { 'gpt-image-1': 0 }, IMAGE_RESOLUTION_OPTIONS: ['1K'], IMAGE_25_QUALITY_MODEL: 'synthetic-other-model',
@@ -342,6 +354,7 @@ async function main() {
   const noMarkerDraft = { ...body, restoredSettings: undefined, draft: { styleGroupIds: [styleId] } };
   await assert.rejects(() => prepare(noMarkerDraft));
   const readsBeforeAccepted = sourceReads;
+  assert.equal(frozenMethodUses, 0);
   accepted = { module_id: moduleId, snapshot_json: JSON.stringify({ sharedLive: intent }) };
   deleted = true;
   const acceptedId = await engine.submitStudioBatch(owner, { ...body, restoredSettings: { invalid: true }, revision: -1 });
@@ -349,7 +362,104 @@ async function main() {
   assert.equal(sourceReads, readsBeforeAccepted); accepted = null; deleted = false;
   await engine.submitStudioBatch(owner, body);
   assert.equal(created.length, 1); assert.equal(created[0].prompt, '');
+  assert.equal(frozenMethodUses, 1);
   checks.push('ordinary_shared_unsaved_definition_still_rejected', 'accepted_recovery_precedes_new_source_and_config_checks', 'creation_uses_same_empty_personal_input');
+  checks.push('work_method_binding_stays_after_acceptance_and_out_of_quotes');
+
+  const currentInputs = { protocol: currentInputsContract.STUDIO_CURRENT_INPUT_PROTOCOL };
+  assert.equal(Object.hasOwn(parse(old), 'currentInputs'), false);
+  assert.throws(() => parse({ ...body, currentInputs: { protocol: 'unknown' } }));
+  assert.throws(() => parse({ ...old, currentInputs: { ...currentInputs, restoredDefinition: true } }));
+  const currentDraft = { referencePolicy: policy, moduleContext: '', templatePrompt: '', templateReferenceIds: [],
+    fixedReferences: [], styleGroupIds: [], styleGroupVersions: {}, skillIds: [], skillVersions: {} };
+  for (const moduleContext of ['', 'synthetic-current-module-edit']) {
+    const result = await prepare({ ...body, currentInputs, draft: { ...currentDraft, moduleContext } });
+    assert.equal(result.snapshot.moduleContext, moduleContext);
+    assert.equal(result.snapshot.personalPrompt, ''); assert.equal(result.snapshot.templatePrompt, '');
+    assert.deepEqual(result.snapshot.styleGroups, []); assert.deepEqual(result.snapshot.skills, []);
+    assert.deepEqual(result.snapshot.fixedReferenceImages, []); assert.deepEqual(result.snapshot.templateReferenceImages, []);
+    assert.deepEqual(JSON.parse(result.task.reference_ids), ['current-main']);
+    assert.ok(!result.task.context.includes('synthetic-historical-module'));
+  }
+  const defaultAfterOldRestore = await prepare({ ...body, currentInputs });
+  assert.equal(defaultAfterOldRestore.snapshot.moduleContext, shared.definition.context);
+  const explicitRestore = { ...body, currentInputs: { ...currentInputs, restoredDefinition: true } };
+  assert.equal((await prepare(explicitRestore)).snapshot.moduleContext, sourceSnapshot.moduleContext);
+  assert.equal((await prepare({ ...explicitRestore, draft: currentDraft })).snapshot.moduleContext, '');
+  const privateInput = { ...body, currentInputs: { ...currentInputs,
+    privateDraft: { revision: 9, sourceRevision: 'synthetic-private-source' } } };
+  assert.equal((await prepare(privateInput)).snapshot.moduleContext, '');
+  assert.equal((await prepare(privateInput)).snapshot.templatePrompt, '');
+  assert.notEqual(engine.batchQuoteFingerprint(privateInput), engine.batchQuoteFingerprint({ ...privateInput,
+    currentInputs: { ...privateInput.currentInputs, privateDraft: { ...privateInput.currentInputs.privateDraft, revision: 10 } } }));
+  const currentBody = { ...body, currentInputs, draft: currentDraft };
+  const currentPrepared = await prepare(currentBody);
+  const currentQuoteAt = specificationInputs.length;
+  await engine.prepareImageBillingQuote(owner, currentBody);
+  assert.equal(JSON.stringify(specificationInputs[currentQuoteAt]), JSON.parse(currentPrepared.task.billing_contract_json).specification);
+  assert.equal((await prepare(currentBody, true)).task.billing_contract_json, currentPrepared.task.billing_contract_json);
+  const mode = shared.binding.mode;
+  shared.binding.mode = 'live';
+  await assert.rejects(() => prepare(currentBody), /原模板作者/);
+  await assert.rejects(() => prepare(privateInput), /原模板作者/);
+  shared.binding.mode = mode;
+  checks.push('current_input_empty_text_and_all_removed_selections_override_history',
+    'old_restore_metadata_does_not_override_current_saved_definition', 'explicit_restore_only_initializes_editable_current_values',
+    'private_draft_revision_drives_generation_without_publishing_defaults',
+    'current_quote_single_and_batch_preparation_share_inputs', 'current_input_does_not_grant_colleague_definition_permissions');
+
+  // Exercise the real draft-reference resolver, keeping identity/session and
+  // encrypted storage as explicit external boundaries of this fixture.
+  let draftOwner = owner, latestDraftRevision = 9;
+  const referenceScope: Record<string, any> = { exports: {}, StudioSharingError: engine.StudioError,
+    privateEditorTarget: async () => ({ source: { owner_id: draftOwner }, row: { id: presetId },
+      kind: 'image-preset', origins: [] }),
+    readPrivatePromptDraft: async () => ({ revision: latestDraftRevision, sourceRevision: 'synthetic-private-source', values: { prompt: 'latest-other-page', context: 'latest-other-page' } }),
+    readPrivatePromptDraftReceipt: async (_actor: string, _target: unknown, requestId: string) => {
+      assert.equal(requestId, 'exact-request-9');
+      return { revision: 9, sourceRevision: 'synthetic-private-source', values: { prompt: '', context: '' } };
+    } };
+  vm.runInNewContext(ts.transpileModule(declarations('src/lib/image-studio/shared-contract.ts', ['readPrivateStudioGenerationDraft']), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText, referenceScope);
+  const resolveDraft = referenceScope.exports.readPrivateStudioGenerationDraft;
+  assert.deepEqual(plain((await resolveDraft(user, moduleId, privateInput.currentInputs.privateDraft, tx)).values), { prompt: 'latest-other-page', context: 'latest-other-page' });
+  await assert.rejects(() => resolveDraft(user, moduleId, { revision: 8, sourceRevision: 'synthetic-private-source' }, tx));
+  await assert.rejects(() => resolveDraft(user, moduleId, { revision: 9, sourceRevision: 'other-source' }, tx));
+  draftOwner = 'another-author';
+  await assert.rejects(() => resolveDraft(user, moduleId, privateInput.currentInputs.privateDraft, tx));
+  checks.push('private_current_reference_checks_exact_revision_source_and_author');
+  draftOwner = owner; latestDraftRevision = 10;
+  const immutableReference = { ...privateInput.currentInputs.privateDraft, requestId: 'exact-request-9' };
+  assert.deepEqual(plain((await resolveDraft(user, moduleId, immutableReference, tx)).values), { prompt: '', context: '' });
+  await assert.rejects(() => resolveDraft(user, moduleId, privateInput.currentInputs.privateDraft, tx));
+  checks.push('current_immutable_receipt_survives_another_page_draft_head_advance');
+
+  let historyPreset = presetId, originalTextAllowed = true;
+  const editorScope: Record<string, any> = { exports: {}, ...restoredContract, StudioSharingError: engine.StudioError,
+    assertStudioActor: async () => user,
+    privateEditorTarget: async () => ({ source: { id: presetId, owner_id: owner }, workspace: { revision: 7 },
+      row: { id: presetId, prompt: 'saved', context: 'saved' }, sourceRevision: 'source-revision', kind: 'image-preset', origins: [] }),
+    readPrivatePromptDraft: async () => ({ revision: 10, sourceRevision: 'source-revision', values: { prompt: 'other-page', context: 'other-page' } }),
+    readPrivatePromptDraftReceipt: referenceScope.readPrivatePromptDraftReceipt,
+    prisma: { imageStudioTask: { findFirst: async ({ where }: { where: { owner_id: string; deleted_at: unknown } }) => {
+      assert.equal(where.owner_id, owner); assert.equal(where.deleted_at, null);
+      return { module_id: 'previous-workspace', source_preset_id: historyPreset };
+    } } },
+    readPrivateImageTaskSnapshot: () => ({ moduleId: 'previous-workspace', sourcePresetId: historyPreset,
+      sharedLive: { ...intent, presetId: historyPreset }, templatePrompt: 'history-template', moduleContext: 'history-context' }),
+    privateFieldOrigins: () => [{ kind: 'image-preset', id: historyPreset, ownerId: owner }],
+    requirePrivatePromptRequest: async () => { if (!originalTextAllowed) throw new Error('synthetic original text denied'); },
+  };
+  vm.runInNewContext(ts.transpileModule(declarations('src/lib/image-studio/shared-contract.ts', ['readPrivateStudioEditor']), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText, editorScope);
+  const readEditor = editorScope.exports.readPrivateStudioEditor;
+  assert.equal((await readEditor(user, moduleId, marker.sourceTaskId)).context, 'history-context');
+  const reopened = await readEditor(user, moduleId, undefined, 'exact-request-9');
+  assert.equal(reopened.draftHeadRevision, 10); assert.equal(reopened.draft.revision, 9);
+  assert.deepEqual(plain(reopened.draft.values), { prompt: '', context: '' });
+  historyPreset = 'another-template'; await assert.rejects(() => readEditor(user, moduleId, marker.sourceTaskId)); historyPreset = presetId;
+  originalTextAllowed = false; await assert.rejects(() => readEditor(user, moduleId, marker.sourceTaskId), /original text denied/);
+  checks.push('historical_editor_checks_real_preset_relation_and_original_text_permission');
 
   assert.equal(forbiddenCalls, 0);
   writeFileSync(destination, JSON.stringify({ schema: 'studio-restored-settings-engineering.v1', synthetic: true, completed: true,

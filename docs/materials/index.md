@@ -552,3 +552,5 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 
 边界补查追加原单§13及私有r3-architecture-boundary-review.json：实际140.2、项目列表/完整个人报表/写准入与取消链、发布只读封存前提及资源预算。源码机制与真实延迟分开，未作新负载/业务修改。
 <!-- /CAP-REPORT-HD01-MATERIALS-20261109 -->
+
+- 2026-11-09 WORKS-AUTO01 自动曝光/参考成功归因：v0.140.0 已部署原证 [发布汇总](2026-11-02-team-works-research/auto-discovery-20261109/WORKS-AUTO01-release-summary.json)；原阶段服务器attempt02，原失败/通过时间保留，无真实用户模拟，功能待手验。

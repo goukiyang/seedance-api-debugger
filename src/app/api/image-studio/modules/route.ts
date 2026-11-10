@@ -65,7 +65,8 @@ export async function GET(request: NextRequest) {
     if (mode === 'private-save-status' || mode === 'private-draft-status') return NextResponse.json(await tracePhase('resolve', () => privateStudioEditorStatus(user,
       request.nextUrl.searchParams.get('id') || '', request.nextUrl.searchParams.get('requestId') || '', mode === 'private-draft-status')), { headers: privateHeaders });
     if (mode === 'private-editor') return NextResponse.json(await tracePhase('resolve', () => readPrivateStudioEditor(user,
-      request.nextUrl.searchParams.get('id') || '')), { headers: privateHeaders });
+      request.nextUrl.searchParams.get('id') || '', request.nextUrl.searchParams.get('sourceTaskId') || undefined,
+      request.nextUrl.searchParams.get('draftRequestId') || undefined)), { headers: privateHeaders });
     if (mode === 'private-definition') return NextResponse.json(await tracePhase('resolve', () => readStudioModulePrivateDefinition(user,
       request.nextUrl.searchParams.get('id') || '')), { headers: privateHeaders });
     if (mode === 'open-status') return NextResponse.json(await tracePhase('resolve', () => studioSharedOpenStatus(user,

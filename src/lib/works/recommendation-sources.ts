@@ -3,6 +3,8 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { appendRecommendationEvent, recommendationKey, type RecommendationEvent } from './recommendation-events';
 import { canUseWorksPreview } from './rollout.server';
+import { ensureAutomaticWorkDiscovery, WORK_DISCOVERY_DAYS } from './editorial';
+import { readSuccessfulWorkMethodUse } from './method-reference';
 
 const object = (text: string | null) => {
   try { const value: unknown = JSON.parse(text || '{}'); return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
@@ -40,6 +42,16 @@ async function collectInputs(workId: string, db: typeof prisma) {
   const parents = await db.work.findMany({ where: { OR: links.filter(link => finishing && link.source_kind !== 'asset' && link.relation === 'post-process')
     .map(link => ({ source_kind: link.source_kind, source_id: link.source_id })) }, select: { id: true } });
   const events: RecommendationEvent[] = [];
+  const image = target.source_kind === 'image_task'
+    ? await db.imageStudioTask.findUnique({ where: { id: target.source_id }, select: { batch_id: true } }) : null;
+  const method = image || video ? await readSuccessfulWorkMethodUse(db, { ownerId: target.author_id,
+    kind: image ? 'image' : 'video', requestId: image?.batch_id || video!.id }) : null;
+  if (method && method.workId !== target.id && context.template_id === method.templateId) {
+    const key = recommendationKey('method', method.workId, method.mediaVersion, target.id, target.current_version_id);
+    events.push({ key, work: method.workId, version: method.mediaVersion, actor: target.author_id,
+      purpose: `method:${method.workId}`, chain: `method:${method.scopeId}`, fact: key, signal: 'method',
+      evidence: { id: target.id, version: target.current_version_id }, at: target.completed_at });
+  }
   for (const link of links) {
     let slot: string | undefined;
     if (link.relation === 'direct-input' && link.source_kind === 'asset') {
@@ -82,6 +94,23 @@ async function collectInputs(workId: string, db: typeof prisma) {
 
 /** Durable seek recovery also covers sources created before this consumer existed. */
 export async function collectRecommendationSourcePass(shouldStop: () => boolean, db = prisma) {
+  const discoveryKey = 'automatic-work-discovery:v1';
+  const since = new Date(Date.now() - WORK_DISCOVERY_DAYS * 86400000);
+  const discovery = await db.workDiscoveryCheckpoint.upsert({ where: { source_kind: discoveryKey },
+    create: { source_kind: discoveryKey, cursor_at: since, cursor_id: '' }, update: {} });
+  const repairDue = discovery.cursor_id !== '' || !discovery.cycles || Date.now() - discovery.updated_at.getTime() >= 60_000;
+  const candidates = repairDue ? await db.work.findMany({ where: { completed_at: { gte: since },
+    current_version_id: { not: null }, discoverable: true, withdrawn_at: null,
+    OR: [{ admitted_at: { gt: discovery.cursor_at || since } }, { admitted_at: discovery.cursor_at || since, id: { gt: discovery.cursor_id || '' } }],
+  }, orderBy: [{ admitted_at: 'asc' }, { id: 'asc' }], take: 12 }) : [];
+  for (const work of candidates) {
+    if (shouldStop()) return;
+    await ensureAutomaticWorkDiscovery(db, work);
+    await db.workDiscoveryCheckpoint.update({ where: { source_kind: discoveryKey }, data: { cursor_at: work.admitted_at, cursor_id: work.id } });
+  }
+  if (repairDue && candidates.length < 12) await db.workDiscoveryCheckpoint.update({ where: { source_kind: discoveryKey },
+    data: { cursor_at: since, cursor_id: '', cycles: { increment: 1 } } });
+  if (shouldStop()) return;
   // New completions have their own high-water mark, ahead of the bounded historical repair.
   const liveKey = 'recommendation-live-sources:v1';
   const live = await db.workDiscoveryCheckpoint.upsert({ where: { source_kind: liveKey },

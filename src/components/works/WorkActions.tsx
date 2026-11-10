@@ -41,7 +41,7 @@ export function WorkActions({ work, labels = false, cover = false, busy, operate
       ...(work.personal.favorited ? [{ id: 'classify', label: '归类到集合', onSelect: () => onClassify(work) }] : []),
       { id: 'hide', label: work.personal.hidden ? '恢复对我显示' : '对我隐藏', onSelect: () => state('hide', !work.personal.hidden) },
       ...(work.editorial?.canFeature ? [{ id: 'feature', label: work.editorial.featured ? '取消精选' : '设为精选', onSelect: () => editorial('feature', !work.editorial?.featured) }] : []),
-      ...(work.editorial?.canNominate ? [{ id: 'nominate', label: work.editorial.nominated ? '撤下新作候选' : work.editorial.nominationExpired ? '新作展示已结束' : '提交新作候选', disabled: !work.editorial.nominated && work.editorial.nominationExpired, onSelect: () => editorial('nominate', !work.editorial?.nominated) }] : []),
+      ...(work.editorial?.canNominate ? [{ id: 'nominate', label: work.editorial.nominated ? '停止新作展示' : work.editorial.nominationExpired ? '新作展示已结束' : '恢复新作展示', disabled: !work.editorial.nominated && work.editorial.nominationExpired, onSelect: () => editorial('nominate', !work.editorial?.nominated) }] : []),
       ...(work.canManage ? [
         ...(!work.withdrawn ? [{ id: 'discovery', label: work.discoverable ? '移出广场' : '恢复到广场', onSelect: () => lifecycle(work.discoverable ? 'exclude' : 'restore-discovery') }] : []),
         { id: 'sharing', label: work.withdrawn ? '恢复分享' : '撤回分享', onSelect: () => lifecycle(work.withdrawn ? 'restore-sharing' : 'withdraw') },
