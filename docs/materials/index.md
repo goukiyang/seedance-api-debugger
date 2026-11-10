@@ -1,3 +1,9 @@
+<!-- FUSION-UX07-MATERIALS-20261110 -->
+## 角色融合UX07锁头与移出（2026-11-10）
+
+v0.141.7／3d32f549a／kZ9Q8IQHJzXgm99agJDVN已部署，13:10:12Z健康；用户手验待完成。锁头紧邻类别名，启用后独立×移出并保留规则。[原单UX07](../../tasks/todo/2026-11-08-character-fusion.md#ux07-锁头紧邻类别与独立移出按钮2026-11-10)及正式根私有 `docs/materials/2026-11-08-character-fusion-prototype/implementation/ux07/release-summary.json` 定位工程／构建／公开资源／健康摘要；不导出环境、DB或媒体，无收费／自动功能验收。
+<!-- /FUSION-UX07-MATERIALS-20261110 -->
+
 <!-- FUSION-UX06-MATERIALS-20261110 -->
 ## 角色融合 UX06 R03落地与按需操作（2026-11-10）
 

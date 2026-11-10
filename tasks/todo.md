@@ -1301,5 +1301,5 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 <!-- /FUSION-UX06-TODO-20261110 -->
 
 <!-- FUSION-UX07-TODO-20261110 -->
-- 角色融合UX07实施中：锁头紧邻类别名，启用卡片增加独立×移出组合，勾选只示状态，保卡片规则及再次加入；沿原hover/focus/touch与onJoin，无engine/API变更。当前健康0.141.6/e0c216，拟0.141.7，工程／部署后用户手验。详见[原单UX07](todo/2026-11-08-character-fusion.md#ux07-锁头紧邻类别与独立移出按钮2026-11-10)。
+- 角色融合UX07已部署，待用户手动验收：v0.141.7／3d32f549a／kZ9Q8IQHJzXgm99agJDVN。锁头紧邻类别名，启用卡片独立×移出，保规则与再次加入，沿原hover/focus/touch。目标lint及完整Next/types通过；13:10:12Z七服务四timer、58资源/4匿名401、controller0。guard79ab/数据/policy/价格保持，无收费／自动功能验收。详见[原单UX07](todo/2026-11-08-character-fusion.md#ux07-锁头紧邻类别与独立移出按钮2026-11-10)。
 <!-- /FUSION-UX07-TODO-20261110 -->

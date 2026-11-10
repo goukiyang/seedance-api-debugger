@@ -518,3 +518,9 @@ sudo nginx -t
 
 12:40:10Z公网、12:40:55Z健康：7服务4timer、58资源/4匿名401、融合页13资源字节匹配、controller0；同数据/环境链接、私有policy和价格保持，既有迁移只读核，无DDL/数据还原/收费调用。相同stage的configuration-before、database-before.sqlite和program-recovery.sh仅保服务器，不导出；程序恢复不回数据。本次融合页按R03合并卡片与按需操作并复用广场色板，已部署，待用户手验，无自动浏览器功能验收。完整范围及原证入口见[原单UX06](../tasks/todo/2026-11-08-character-fusion.md#ux06-r03方案落地与按需图标2026-11-10)。
 <!-- /FUSION-UX06-RELEASE-20261110 -->
+
+<!-- FUSION-UX07-RELEASE-20261110 -->
+## 角色融合UX07／v0.141.7（2026-11-10）
+
+实际健康3d32f549a086ee51bbd332f56e58a5fdcc7cc879，BUILD kZ9Q8IQHJzXgm99agJDVN；完整继承e0c216／0.141.6。stage `/data/video-api-debugger/release-staging/fusion-ux07-20261110/attempt01`，pair ce668db9-410e-4d48-a59d-4f69276ed562。单main完整Next/types/lint通过，17原生及16关联复用、1关联刷新和fresh pricing有证，guard79ab／zxSxN0_ODrOhrA3gjUCPz沿既有健康产物。13:09:30Z公网、13:10:12Z七服务四timer/controller0、58资源/4匿名401及13融合资源字节匹配。价格、私有policy和同数据/环境链接保持；无DDL/数据还原/收费/自动浏览器验收。相同stage保configuration-before、database-before.sqlite和program-recovery.sh，仅服务器留存。锁头/独立×交互待用户手验，后续源码继承本实际健康源；9发布窗已释放。详见[原单UX07](../tasks/todo/2026-11-08-character-fusion.md#ux07-锁头紧邻类别与独立移出按钮2026-11-10)。
+<!-- /FUSION-UX07-RELEASE-20261110 -->
