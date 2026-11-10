@@ -300,13 +300,15 @@ async function main() {
     checks.push(ARCH03_CHECKS[10]);
 
     const file = ts.createSourceFile('studio.tsx', readFileSync(path.join(root, 'src/app/image-studio/studio.tsx'), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-    let restore: ts.FunctionDeclaration | undefined;
-    const visit = (node: ts.Node) => { if (ts.isFunctionDeclaration(node) && node.name?.text === 'restoreResultSettings') restore = node; ts.forEachChild(node, visit); }; visit(file);
-    assert.ok(restore);
-    const compiled = ts.transpileModule(`${restore!.getText(file)}; exports.run = restoreResultSettings;`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+    const restoreNames = ['captureRestoreInputs', 'restoreInputsUnchanged', 'restoreResultSettings'];
+    const restoreFunctions = new Map<string, ts.FunctionDeclaration>();
+    const visit = (node: ts.Node) => { if (ts.isFunctionDeclaration(node) && node.name && restoreNames.includes(node.name.text)) restoreFunctions.set(node.name.text, node); ts.forEachChild(node, visit); }; visit(file);
+    assert.equal(restoreFunctions.size, restoreNames.length);
+    const compiled = ts.transpileModule(`${restoreNames.map(name => restoreFunctions.get(name)!.getText(file)).join('\n')}; exports.run = restoreResultSettings;`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
     let resolveDetail: (value: unknown) => void = () => {}, restored = 0;
     const context = { taskReadScope: 'owner:module', currentView: { current: { token: 1, active: true } }, liveGenerationSignature: { current: 'initial' },
-      currentInputRevision: { current: 1 }, detailReadSequence: { current: 0 }, taskReadScopeRef: { current: 'owner:module' },
+      currentInputRevision: { current: 1 }, privateEditorEditVersion: { current: 0 }, latestSettingsDraft: { current: 'initial' },
+      detailReadSequence: { current: 0 }, taskReadScopeRef: { current: 'owner:module' },
       isClientSessionBlocked: () => false, readTaskDetail: () => new Promise(resolve => { resolveDetail = resolve; }),
       restoreTask: () => { restored++; return null; }, setError: () => {} };
     const factory = new Function(...Object.keys(context), 'exports', compiled);
@@ -315,6 +317,11 @@ async function main() {
     assert.equal(restored, 0);
     const next = exports.run!({ id: 'task' }); context.taskReadScopeRef.current = 'another:module'; resolveDetail({ snapshot: {} }); await next;
     assert.equal(restored, 0);
+    context.taskReadScopeRef.current = 'owner:module';
+    const privateEdit = exports.run!({ id: 'task' }); context.privateEditorEditVersion.current++; resolveDetail({ snapshot: {} }); await privateEdit;
+    assert.equal(restored, 0);
+    const unchanged = exports.run!({ id: 'task' }); resolveDetail({ snapshot: {} }); await unchanged;
+    assert.equal(restored, 1);
     checks.push(ARCH03_CHECKS[5]);
 
     const { verifyPagedGroupDeletion } = await import('./arch03-group-consumer');
