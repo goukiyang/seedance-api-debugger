@@ -175,9 +175,10 @@ export async function writeResponseToFile(
   }
   const body = response.body;
   if (!body) throw new Error('VIDEO_RESPONSE_BODY_MISSING');
-  const stream = createWriteStream(tempPath, { flags: options.resume && tempPath === options.resume.path
-    ? constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW | (offset > 0 ? constants.O_APPEND : constants.O_TRUNC)
-    : 'wx', mode: 0o600 });
+  const stream = options.resume && tempPath === options.resume.path
+    ? (await open(tempPath, constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW
+      | (offset > 0 ? constants.O_APPEND : constants.O_TRUNC), 0o600)).createWriteStream()
+    : createWriteStream(tempPath, { flags: 'wx', mode: 0o600 });
   const reader = body.getReader();
   let receivedBytes = offset;
   const startedAt = Date.now();
