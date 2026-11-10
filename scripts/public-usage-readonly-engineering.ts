@@ -28,7 +28,7 @@ async function main() {
   const database = path.join(directory, 'fixture.sqlite'), spoolRoot = path.join(directory, 'spools');
   await mkdir(spoolRoot);
   const prior = { database: process.env.DATABASE_URL, tmp: process.env.TMPDIR, node: process.env.NODE_ENV };
-  process.env.DATABASE_URL = 'file:' + database; process.env.TMPDIR = spoolRoot; process.env.NODE_ENV = 'test';
+  process.env.DATABASE_URL = 'file:' + database; process.env.TMPDIR = spoolRoot; (process.env as Record<string, string | undefined>).NODE_ENV = 'test';
   let phase = 'setup', forbiddenCalls = 0, lateAbort: AbortController | null = null;
   const previousFetch = globalThis.fetch, previousError = console.error;
   const logs: Array<Record<string, any>> = [];
@@ -176,7 +176,7 @@ async function main() {
     phase = 'baseline'; await base.$disconnect();
     globalThis.fetch = previousFetch; console.error = previousError;
     for (const [key, value] of [['DATABASE_URL', prior.database], ['TMPDIR', prior.tmp], ['NODE_ENV', prior.node]] as const) {
-      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+      if (value === undefined) delete (process.env as Record<string, string | undefined>)[key]; else (process.env as Record<string, string | undefined>)[key] = value;
     }
     await rm(directory, { recursive: true, force: true });
   }
