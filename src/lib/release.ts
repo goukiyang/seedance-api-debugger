@@ -1,10 +1,13 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '模板恢复保留最新编辑', outline: [
-  '恢复历史、草稿或快捷设置时保留期间的新输入',
-  '私密原文的新编辑及时识别，保存默认仍独立处理',
-  '3D多视图规则保存期间继续输入时保留编辑窗口',
-] };
+const notice = {
+  "title": "角色融合体验与结果保护",
+  "outline": [
+    "锁定项用于批量组合，保留已选并支持撤销",
+    "英文补齐、复制与导出入口更清楚",
+    "常用操作前移，低频功能按需展开"
+  ]
+};
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
   summary: notice.title };

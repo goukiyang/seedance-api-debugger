@@ -18,7 +18,7 @@
 .header { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 22px; }
 .header p { margin-top: 8px; color: var(--text-secondary); }
 .toolbar { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
-.pageSettings { margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color); }
+.pageSettings { margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color); scroll-margin-top: 80px; }
 .pageSettings summary { width: fit-content; padding: 8px 0; color: var(--text-secondary); font-size: 13px; }
 .modelPicker { display: flex; align-items: center; gap: 8px; max-width: 520px; min-width: 0; padding: 8px 0; }
 .modelPicker label, .modelPicker button { flex-shrink: 0; }
@@ -220,7 +220,7 @@
   .ruleGrid { gap: 8px; }
   .ruleHead { padding-block: 8px; }
   .ruleSummary { padding-bottom: 8px; }
-  .tags select { min-height: 44px; }
+  .tags select { min-height: 44px; font-size: 16px; }
   .results { scroll-margin-top: 250px; }
   .results > .sectionHead { gap: 10px; }
   .results > .sectionHead > .actions { width: 100%; }
