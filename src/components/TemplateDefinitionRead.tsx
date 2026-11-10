@@ -8,7 +8,7 @@ import { TemplateAuthorCard } from './TemplateAuthorCard';
 import { RelativeTime } from './RelativeTime';
 import { useDialogDismiss } from './useDialogDismiss';
 import styles from './TemplateRead.module.css';
-export function TemplateDefinitionRead({ target, scopeKey, onClose, attributes }: { target: { presetId?: string; moduleId?: string }; scopeKey: string; onClose: () => void; attributes?: ReactNode }) {
+export function TemplateDefinitionRead({ target, scopeKey, onClose, attributes, needsIdentity = false }: { target: { presetId?: string; moduleId?: string }; scopeKey: string; onClose: () => void; attributes?: ReactNode; needsIdentity?: boolean }) {
   const { user, sessionChanged } = useAppSession();
   const [data, setData] = useState<StudioTemplateDefinitionRead | null>(null), [error, setError] = useState(''), [retry, setRetry] = useState(0);
   const dialog = useRef<HTMLDialogElement>(null), sequence = useRef(0), owner = useRef(user?.id);
@@ -27,7 +27,9 @@ export function TemplateDefinitionRead({ target, scopeKey, onClose, attributes }
   }, [scopeKey, target.presetId, target.moduleId, user?.id, sessionChanged, retry]);
   return createPortal(<dialog ref={dialog} className={styles.definitionDialog} aria-labelledby="template-definition-heading"><header><h2 id="template-definition-heading">模板上下文</h2><button type="button" aria-label="关闭上下文" onClick={onClose}>关闭</button></header>
     {attributes}
-    {error ? <p role="status">{error}<button type="button" onClick={() => setRetry(value => value + 1)}>重新读取</button></p> : !data ? <p role="status">正在读取模板上下文</p> : <>
+    {error ? <p role="status">{error}{needsIdentity && <button type="button" onClick={() => {
+      window.location.assign(`/api/auth/feishu/authorize?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+    }}>验证身份后查看</button>}<button type="button" onClick={() => setRetry(value => value + 1)}>重新读取</button></p> : !data ? <p role="status">正在读取模板上下文</p> : <>
       <h3>{data.definition.name}</h3><TemplateAuthorCard templateRead={data.templateRead} name={data.definition.name} scopeKey={scopeKey} />
       <p>{data.lifecycle === 'archived' ? '已归档' : '现存模板'} · {data.generation.available === true ? '当前可生成' : data.generation.available === false ? '当前不可生成' : '生成条件待确认'}</p>
       <dl><dt>模板提示词</dt><dd>{data.definition.templatePrompt || '未设置'}</dd><dt>模板上下文</dt><dd>{data.definition.context || '未设置'}</dd></dl>

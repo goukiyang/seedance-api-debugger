@@ -1,11 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '角色融合类目与选项统一整理',
+  title: '修复模板上下文与封面入口',
   outline: [
-    '母体、职业、主题和身形分开设置，支持具体选项锁定与抽卡',
-    '中英文对应同一套设定，支持多部位夸张及多角色组合',
-    '原有卡片、选项、配方和功能继续保留'
+    '复用草稿正确打开模板上下文查看弹窗',
+    '本人模板可从复用草稿设置原模板封面',
+    '保留当前输入及原有模板权限'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

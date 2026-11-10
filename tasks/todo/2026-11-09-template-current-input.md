@@ -1,7 +1,7 @@
 # TPL-CURRENT01 生图模板本次输入与默认设置分离
 
 日期：2026-11-09（用户时区 America/Los_Angeles）  
-状态：已部署 v0.140.1，工程及部署检查通过，待用户手动验收。
+状态：已部署 v0.141.2（含追加输入、风格与生成阻断修复），工程及部署检查通过，待用户手动验收。
 
 入口：[固定 todo](../todo.md)、[生图模板](https://sd2.youdooart.com/template-studio?type=image)。
 
@@ -127,7 +127,7 @@ C01–C06已完成实施、必要工程、聚焦提交推送及保护部署。�
 - [x] R2-01 共享生成入口及当前/默认/历史/旧客户端语义，查漏接路径。
 - [x] R2-02 保存/自动草稿/恢复/刷新期间继续编辑，含私密编辑器调用方和跨页签。
 - [x] R2-03 单张/报价/批量/复用/重试取值；保已受理和未知原号、权限、费用及冻结输入。
-- [ ] R2-04 写回确认问题、排除理由和证据缺口；无代码修复不为排查升级应用或部署。
+- [x] R2-04 写回确认问题、排除理由和证据缺口；无代码修复不为排查升级应用或部署。
 
 共享影响初判：字段有不同生命周期来源，异步回包可能重新写本次输入。应核实际读写者及正常操作重叠，不能按字段名全局替换、把历史冻结当错误覆盖或提前改权限/收费。当前仅建立调查记录，源代码尚未修改；后续有具体修法再补实际判断。保持用户手验，不执行浏览器、真实生图或收费回归。
 
@@ -148,3 +148,147 @@ CodeGraph准备入口返回READY，但独立checkout未命中只认原git-common
 R02主源0cdc8611ab88ad57bfc0dd3017f28a1db5c30d21与新guard06c08069fbdb676dfcbcfea11d000bbe1c0aad39均已推同仓并ls-remote一致；逐一校验2574个Git源blob，发布工具副本已在新stage绑定路径/固定guard并做语法检查，未修改运行中的工具。候选隔离工程14项再次通过，完整构建及现有内置检查进行中；当前正式仍v0.140.2/d8。
 
 R02首轮候选准备失败一次（未启动完整Next构建、未切服务）：ARCH03工程夹具只抽取restoreResultSettings单函数，遗漏其新复用的captureRestoreInputs/restoreInputsUnchanged，报ReferenceError。保留attempt01全部失败报告；其余native/linked及价格项成功，含原32项恢复工程，新14项同样通过。已修正原夹具抽取实际三函数并供应已有签名/私密编辑ref，保原目标/主图用例，补私密编辑与正常恢复；未削弱断言、未改应用行为。新源和新stage重新完成必要构建，原失败不抹除。
+
+当前R02候选已替换为主源f7ea045afaa08674eba5bad3dc10edd697abf371、guard a36d6dde3995f87f4acbf09e6fecd5e75ff47e41（0.140.3 / 0.140.3+points-pricing-guard.1），均已推并核ls-remote同头；2574个源blob逐一核验通过。attempt02路径/固定guard/控制器绑定集中核过，独立14项再次通过，现完整构建中。旧0cdc/06c及attempt01仅是未发布的失败准备证据，未被当作线上/恢复版。
+
+补充手验/待核线索：恢复历史详情还在读取时立即打开设置查看原文，核对其显示来源与恢复选择一致。源码读取scope未单独绑定sourceTaskId/currentDraft，但尚无实际界面错位证据，发生概率未测；本轮真实后续编辑已有14项工程保护，不因未证实的查看顺序线索再加防御或重构。记录tasks/discoveries.md的D-20261109-PRIVATE-EDITOR-READ-SCOPE；不把它写成已确认/已修复或验收通过。
+
+### R02 最终交付：已部署，待用户手动验收
+
+- 主源 f7ea045afaa08674eba5bad3dc10edd697abf371，v0.140.3，BUILD `lmMZK3aEpEvKmgr1Z60eX`。
+- 相容guard a36d6dde3995f87f4acbf09e6fecd5e75ff47e41，0.140.3+points-pricing-guard.1，BUILD `i5KO-MwNElJvEUkOdGtlE`。同仓主/guard均已推并核远端一致。
+- 正式stage `/data/video-api-debugger/release-staging/template-current-state-audit-20261109/attempt02`；pair `79e5c225-e29f-4eb8-9cee-289c1e0746e5`。主版02:54:34Z、guard03:07:59Z完整Next/类型/代码与全部现有内置门通过；14项新恢复工程、32项原输入工程通过。
+- 03:11:54Z切换开始，cutover退出0；03:12:30Z公网52资源与3匿名401通过，03:13:06Z七服务健康、发布控制器0、四timer运行。线上为上述主源，不以远端HEAD或构建成功冒上线。入口 https://sd2.youdooart.com/template-studio?type=image 。
+- 价格完整字段hash `d03c539d74a31b5e2a6a0305724b1b9f193e0ade878370898c7632d1bdc96539` 发布前后相同，私密策略未变。旧writer自然排尽，一致SQLite备份SHA `2850692d9891cbbd29e662037b1a0a77b01779da0db11dd731f774f435461a31`；无本轮DDL、业务数据覆盖或回数据。
+- 恢复仅用本stage `program-recovery.sh release-input.json` 指向本次新guard；03:13:06Z只读首段前置核对通过，未实际执行回退。旧未发布候选及首轮夹具失败报告保留，不混用旧guard。
+
+R2-01–R2-04工程与发布收口。最终源码复查：两类确认缺陷已修复；未证实的快速历史恢复后查看原文来源一致性、辅助索引不完整/过期均在discoveries保留，不能写成已修或全项目无问题。真实浏览器、出图、保存交互与最终效果仍用户手验；本轮模型/收费/浏览器调用0。手验重点增加：恢复/套用读取期间继续输入或清空；私密原文未自动保存前的新编辑；3D多视图规则保存中继续输入时窗口与新内容保留；以及上述快速查看来源待核场景。
+
+下一发布窗口按已协调顺序交给codex-9，codex-15后继；已给相同主源/BUILD/guard与stage，保本轮修复及Works钩子。此为现有发布协调，不派新审核或功能验收线程。
+
+## 10. TPL-STYLE03 风格编辑输入稳定与选用生效（2026-11-09）
+
+用户反馈：打字中页面闪跳并打断输入，要求核查风格组是否真正生效；截图为“角色卡”风格组的整体备注输入。沿已有常规修复/上线授权，实际操作与出图仍用户手验，不执行浏览器或收费生成。
+
+当前鲜核线上仍v0.140.3/f7ea045/lmMZ，独立工作目录沿本单，分支codex/template-style-input-stability-20261109，保护正式根脏改。结构助手准备/sync慢，两个风格前端文件SQLite SHA与当前源相同，并取得前端context查询；后端无索引，定向读实际源，不拿旧图冒完整关系。
+
+- [x] T3-01 原因及局部修复：风格组700ms自动存草稿使用busy并禁用当前输入/参考备注，会打断中文输入法与焦点。后台草稿保留原700ms、CAS、原requestId及耐久回执，不锁字段；输入法组合期间暂缓排草稿；自动保存时保持原页脚，未知结果仍核原号，显式保存保持操作保护。
+- [x] T3-02 使用链路：普通保存未刷新applied/pending已选风格revision；保存并选用只更新外层临时选择，取消后未用于本次。保存同步当前选中版本，显式选用直接作用当前本次，不带入其它尚未确认选择；历史冻结组仅显式选用才切换。确认保存通知既有共享目录refresh，取得包含新风格内容的generationIntent。权限/CAS/原请求/费用不放宽。
+- [x] T3-03 工程与发布：真实React输入状态/中文组合/迟到草稿回执/未知不重发，实际选用回调；原32项准备链加证图片、整体备注、逐图备注传入最终context且无被替换旧备注。必要检查、提交推送、继承最终正式健康源并保护发布。
+
+- [x] T3-04 用户追加生成误挡：当前模式不查无关历史来源；1288源码、34项工程及类型/lint通过，已随v0.141.2完成保护部署，待用户手验。
+
+生成后端已有完整链路：共享定义鲜读组及版本，prepare按组/图顺序登记参考角色，将整体备注与单图备注接最终上下文，报价/创建沿同一prepare；当前输入变更使报价签名失效，已受理历史与批次继续冻结。没有用静态代码承诺模型视觉遵循度，最终出图留手验。
+
+架构判断：共因在前端草稿生命周期与已选元数据刷新，局部三文件修复及工程配套，不改共享弹层底层、不加新表、媒体/权限/费用策略或定时器系统。额外核对重开时清输入法状态、当前/临时/历史选择区分、清空备注及保存失败不冒生效。
+
+发布沿9→15→本单串行，未并开Next或切版。已提出若15尚未冻结候选工具，可合并已验证聚焦差量节省重复构建；实际结果后补，不拿提议冒已集成/上线。
+
+### T3 工程收口与待发布
+
+应用+工程聚焦提交ff65d150d8d83b72ff074e88cc368a731c45ec40（3个前端文件、1新React工程、原32项工程补3断言）已推origin/codex/template-style-input-stability-20261109。未改应用版本或发布工具。
+
+Linux隔离源从封存f7的2574个blob逐一核验后仅覆盖本次文件；复用只读依赖，未连.env/应用数据。最终9项真实React工程通过；逐次React提交观测不仅保护保存中，还保护成功回执前后每一瞬间：独立draftSaving状态按先标记、再请求、先解busy、再结束草稿的顺序，避免pending清除时临时禁用输入；页脚全程保原按钮。已用修前源码复现禁用，用首版pending推断方案再复现回执瞬间禁用；原错误与最终成功证据均保留。中文组合输入、迟到回包保新内容、CAS头正确接续、未知只核原号、当前/临时/历史选择与显式选用均覆盖。
+
+原32项准备工程及新增图片/整体备注/逐图备注/旧备注不残留断言通过；完整TypeScript和受影响Next lint最终退出0。未执行浏览器/真实模型/收费调用；界面与出图效果仍用户手验。证据目录 `/data/video-api-debugger-engineering/template-style-input-20261109/fixture-r01/.role-tests/` 的style-input-r03.json、restored-settings.json、types-r03.log、lint-r03.log、negative-control.log及negative-control-r02.log。
+
+前端最终SHA：style-groups-view bfc0e44f748359d1936b51793a9bcad25eab0bf560c1e2b08726266145683558；style-skill-selector 4ca7f844dbd998bc88ba74a2096b8e676d6e198170e77780a1f36456d009645a；studio 252ef497a31daa2bb78c8079a701693c2ed96e724f9fc7d17be95c3bf49f3e38；React工程afc61f45e5a106f3c1c9adaf1f32cb3de3a7e987104f29d4a584da26dcfe5fe2。
+
+9持当前发布窗，15明确下一窗且尚未冻结候选，已把上述完整聚焦提交/源hash/工程路径交15供冻结前同批继承，避免多一轮完整构建。15尚未回集成结果，不以交件冒上线；若未赶上其冻结则本单继续后继发布。
+
+本轮CodeGraph准备约26分钟、子sync约20分钟仍扫描；已终止本人84854/91823，保部分索引及已有前端查询证据，未影响网站或其他会话进程。后端关系仍按当前源核对；沿既有D-20261109-CODEGRAPH-IO保留工具缺口，不冒完整同步成功。
+
+15已明确确认：在其候选冻结前纳入ff65完整差量，沿9→15同批正式发布，不另起本单第三轮构建；复用仍匹配源码的9项/32项/TSC/lint证据，合并后仅补受影响输入，功能继续用户手验。尚无实际集成源/构建/切版回执，T3-03保持进行中，等待同批真实交付再核对source/BUILD/三个前端SHA。
+
+执行端补核：worker.ts两条提交分支均按task.reference_ids原顺序读取获准原图字节，并把task.context（含整体/逐图备注）与本次prompt组合传给generate；不是仅存快照而不进实际调用参数。主输入、私密原文输入没有复用风格组草稿busy禁用逻辑；本轮修复限定已确认的风格编辑输入与选用同步。
+
+### T3 必要配套最终冻结（待同批发布）
+
+收口复查补齐同一pending/applied边界的两个真实操作：保存并选用后的撤销基线须来自实际已生效选择，不能把外层未确认风格/提示词带入；按钮额度须按applied而非pending计算（实际满/待选空与反向都会错），外层待选若因新组保存而超额度则不得确认。仅在原三个前端范围内补额度prop/一行确认门及Undo基线，不改其他功能或后台合同。
+
+最终输入与选择工程12项通过：前6项运行真实React组件/提交观测，其余运行实际生产回调和按钮表达式，覆盖旧源的输入禁用、回执瞬间禁用、Undo带未确认项、额度错用pending、外层超额确认的红绿对照；最终完整TSC与受影响lint0。原32项准备工程及新增3断言未变、已通过，未重跑无变化链路。r05最终receipt为fixture-r01/.role-tests/style-input-r05.json、types-r05.log、lint-r05.log；红例另见negative-control-r04.log、negative-control-cap.log、negative-control-confirm.log。
+
+原始代码主链ff65→7f40→b54均已推。供发布方只取一次的归一提交为3d525d42c7d1f6fc2eb58c26c6b57c8bc8a79d8b（codex/template-style-undo-cap-20261109，直接父ff65，仅3文件完整Undo+cap），已推同仓；不能只取b54单提交。相对ff65完整patch与before/after/blob元数据在server engineering根style-undo-cap-final.patch/json；patch SHA c65593e8d01ae9df8591584f648870283f79fd0b3d15e7c5e45a19b8e5e47d68，封存r05三文件包SHA b1aabfd716e68aa954bd41c777be2015c5fcc03a5c3d85606d5541dee09ee200，避免遍历旧13GB历史。
+
+最终SHA：style-groups-view 0328424f3e4554e3de4fcc7922b4c5282ddfe62165c53ea1350e413c5acd8796；style-skill-selector 7e3f7e0be7a699b68f2f2e976f928e6bb083a317b8a967d10e6e6c85033b2d01；studio仍252ef497a31daa2bb78c8079a701693c2ed96e724f9fc7d17be95c3bf49f3e38；工程脚本0d6e6875e62174fb29f5464047ccba0ef611a1687122381c78e0855dedce9a07。
+
+前序UX03已实际健康0.141.0/02f9797/360Yio-7tzDThPsTtPuCq，guard79abce/zxSxN0_ODrOhrA3gjUCPz；15已接唯一窗，只有22184改前封包且尚未启native/Next/切版控制器，明确在此安全点接Undo+cap必要差量，改前包保留，不改运行run、不另升未发布141.1版本。最终源码与12项证据已交15，等待实际新候选/健康回执。对运行中的9合批机会不成立已排除，未中断其有效构建。
+
+任务外仅新增D-20261109-STYLE-EMPTY-HISTORY待核线索（整体备注为空时历史复制完整性标记），在discoveries另行记录，未混入本轮已冻结修复。
+
+<!-- TPL-STYLE03-INTEGRATED-20261110 -->
+### T3 同批候选核对（尚未部署）
+
+发布方确认已集成ff65及完整3d525至a6d85c2a96dbe56e61c37b7a60a8e4a73d6534ae（v0.141.1）；本单只读核对attempt05的main-source.json与源码归档，三个前端及最终React脚本SHA均与r05完全一致。未启动额外Next或切版，也未修改发布方运行工具。
+
+attempt05在生成客户端前遇到临时目录权限，未切服务；原失败保留，attempt06换独立工程目录并以实际运行账号完成预检。a6d85的新鲜17原生/17关联工程和计价准备通过；完整Next已编译，但在另一工程脚本NODE_ENV赋值的类型阶段退出，仍未切版。仅相关工程类型修正不会使未变的风格输入12项/准备32项证据失效；最终源码、BUILD、实际健康源及回退入口以成功发布回执为准。
+<!-- /TPL-STYLE03-INTEGRATED-20261110 -->
+
+<!-- TPL-STYLE03-GENERATION-BLOCK-20261110 -->
+### T3 用户追加：当前设置被历史来源误拦截
+
+用户追加截图显示“历史设置来源已不可用，当前输入保留”，明确生成已被阻断。唯一同文错误来自task-settings-storage.ts的studioSettingsSourceContext；tasks.ts共用prepare只要taskSettings.sourceTaskId存在就无条件读取，即使mode=current，其返回内容也不会使用。当前全局设置不应依赖旧编号仍存在。最小修法：只有historical才读取原历史通用上下文；当前模式仍使用服务器鲜读当前设置，并保留来源元数据。实际显式恢复模板定义/素材继续走原独立来源与权限检查，不绕过历史模式、未知请求或费用保护。
+
+截图尚不能区分该用户旧来源是删除、缺快照还是归属不符，不伪称已查实该条生产记录。补隔离prepare红绿及quote/单张/batch项同值，候选在原发布安全点协调，功能仍用户手验。
+<!-- /TPL-STYLE03-GENERATION-BLOCK-20261110 -->
+
+T3阻断修复聚焦提交1288a097b5c4e574b1b08b6234a752d3ab75b00f（tasks.ts与原恢复工程2文件）已推同仓并核远端同头。实际prepare+真实studioSettingsSourceContext函数在修前复现截图同文409，修后34项（原32+2）全绿、完整TSC/两文件lint0。当前模式含失效provenance时，报价/单张/batch项同规格且不查询无关历史；当前全局上下文、空模块上下文、主图、来源元数据保留。historical缺失/他人source继续拒绝，合法历史仍使用原global；显式恢复定义即使current仍核来源权限，旧受理/未知原号原检查继续通过。
+
+线上定向元数据另确认：现网角色卡精确名称查询仅1个工作区，其mode=current且taskSettings来源指向deleted任务。连接沿现有配置mode=ro/query_only，LIMIT30，只输出聚合，未返回账号/原号/提示词或财务内容，无写库；因此不再仅凭截图推断该工作区条件。原单前述“尚不能区分”是查询前证据状态，不改写历史。
+
+最终patch SHA e77a5fe46a66e94759b2d6df32b07f76c208c5386b81bbef0f9410069d7e83e1，服务器engineering根current-global-source-final.patch/json；tasks.ts最终b8056eecaaa69b9b59f0413c35f4c032e105430ef7516656c15debdd3e64c208，工程9d63abade7aa2c61ee60e255206fbd6ded44654bd488179927c809a23850e31a。证据fixture-r01/.role-tests/current-global-negative.log、current-global-final.json/log、current-global-types.log、current-global-lint.log；应用DB/网络/付费/浏览器均0（上述独立线上纯元数据读取单列）。
+
+15的ea910/attempt07已冻结运行，不插业务差量；4明确在首次正式封包安全点接这2文件、完整继承15实际健康源，与其视频/UX04同批。未开新线程或争抢发布窗，阻断补丁尚待实际部署及用户手验。
+
+<!-- TPL-STYLE03-FIRST-RELEASE-20261110 -->
+### T3 输入与风格修复已部署，新增阻断待下一批
+
+输入/风格修复已随v0.141.1实际部署：主源ea910bed8c26c8a5bfa64d1afe94f7ecf7b90e80，BUILD lHO0S8k8-A0XAml_bJzLu；相容guard79abce5c6b06bd714261609678992a3161ba4bad / zxSxN0_ODrOhrA3gjUCPz沿原成品核验复用。stage /data/video-api-debugger/release-staging/capacity-report-hd-closure-20261109/attempt07，pair da0e5a12-790d-4b68-8172-3ded21bd61e7。最终完整Next/types/lint及17原生/17关联、计价门通过；build0/cutover0，05:56:06Z公网49资源及3匿名401，05:57:20Z七服务健康、四timer、控制器0、六启动门通过。实际恢复沿该stage现有program-recovery.sh release-input.json，只回程序，不回业务数据；功能/出图仍用户手验。
+
+本单06:06:14Z独立只读核sd2-gray/image-studio真实PID cwd均为ea910，package0.141.1与两份BUILD_ID同lHO0；三个风格前端文件SHA逐一匹配本单r05最终源。未浏览器/收费生图。新增生成阻断1288尚不在141.1，T3-04继续跟到4同批实际上线，不把第一批当全部完成。
+
+发布准备原证保持：attempt05临时目录访问失败、06另一工程脚本Next类型失败均未切版；最终ea910只修该fixture两行类型断言，实际发射JS逐字相同，过新的Next环境类型检查及完整构建。未为失败重抬未发布141.1版本，未修改运行中的工具；原未运行22184封包及a6失败报告保留。
+<!-- /TPL-STYLE03-FIRST-RELEASE-20261110 -->
+
+4的首次正式候选已封为ae8c3ab42374523dcb090bf55128823eaa291130 / v0.141.2，stage /data/video-api-debugger/release-staging/video-playback-start-20261109/attempt01；本单只读核main-source.json，阻断修复两文件及已部署风格三个前端的SHA全部匹配最终源。候选仍构建中，尚不冒线上已141.2。
+
+追加排除：刷新初始化只用workspace元数据根sourceTaskId触发完整历史恢复，不使用taskSettings.sourceTaskId。线上角色卡该根字段为空、仅current通用设置的provenance有旧号；因此不会在刷新时因这条旧号自动变成显式历史恢复。仅查元数据布尔量，不读/返回用户原文或原号；没有扩改已有默认保存、草稿/历史恢复合同。
+
+<!-- TPL-STYLE03-FINAL-20261110 -->
+### T3 最终交付：已部署v0.141.2，待用户手动验收
+
+T3-01–T3-04实施、必要工程、聚焦提交推送及保护发布全部完成；实际浏览器输入与出图效果仍待用户手验，不用构建/健康替代功能验收。
+
+- 最终主源ae8c3ab42374523dcb090bf55128823eaa291130，v0.141.2，BUILD `_VfkjoUvLHnDSM1en0Dk8`；完整继承141.1已上线的风格/输入修复，并纳入1288生成阻断两文件。源、工程和记录沿同一origin任务分支推送，实际运行源为此同批集成源，不把本单文档HEAD冒线上源。
+- stage `/data/video-api-debugger/release-staging/video-playback-start-20261109/attempt01`，pair3401e059-08df-4695-92a6-0d88be1f05a4。17原生/17关联入口的有效证据中，本批12受影响入口新跑、22未变入口按源字节复用；本单34项恢复准备工程在受影响项中重跑。完整Next/types/lint及计价门通过，build0/cutover0、六启动检查通过。
+- 06:42:37Z公网57资源字节及4匿名401通过，06:42:58Z七服务/四timer/控制器0。06:45:53Z本单独立只读核web/image真实PID cwd均为ae8，package版本/BUILD和公网release/health 200一致；三个风格前端、tasks.ts及34项工程文件五个SHA逐一与最终源相同。私有最小回执在本机cache的style03-final-runtime.json；未启动浏览器、模型、收费生成或功能回归验收。
+- 原价格全字段hash d03c539d74a31b5e2a6a0305724b1b9f193e0ade878370898c7632d1bdc96539、私密policy及持久目录保持；一致SQLite备份SHA636289efd67f516082e461f578bd43df357eeba3eb120dc6f9b820369ecc088b留本stage。继承迁移仅读，无本轮DDL、业务数据覆盖或还原。旧受理/未知原号/费用回执不重写、不重发。
+- 相容恢复仍为79abce5c6b06bd714261609678992a3161ba4bad / 0.141.0+points-pricing-guard.1 / BUILD zxSxN0_ODrOhrA3gjUCPz，原完整成品按字节核验复用。入口为本stage `program-recovery.sh release-input.json`；只读核CFG绑定本stage、main/guard及固定成品，未执行实际回退。恢复只回程序，不回数据库、账本、图片或回执；执行前仍核届时实际源/所有者，不套用到后继版本。
+
+入口 https://sd2.youdooart.com/template-studio?type=image 。用户刷新后按原§5手验，重点追加：角色卡当前模式即使带旧来源也能正常主动生成；连续中文输入与草稿回执不打断；风格整体/逐图备注保存更新，保存并选用直接作用当前选择，撤销和参考上限一致。真正历史内容失效/失权仍如实拒绝，当前主图和后续编辑保留。模型对具体风格与画幅的视觉遵循程度留实际出图验收，未用代码连通冒视觉达标。
+
+本轮新发现的线索与问题：本次当前模式误挡已从源码线索核为实际元数据条件并修复上线；额外D-20261109-STYLE-EMPTY-HISTORY（空整体备注的历史复制完整性）仍待核，沿discoveries保留。既有私密编辑器快速来源读取与CodeGraph部分索引缺口继续按原记录，不冒全项目无问题。后继发布窗已由4交7，本单此后只收文档，不并开构建或切版。
+<!-- /TPL-STYLE03-FINAL-20261110 -->
+
+
+## 11. TPL-EDITOR04 原模板、复用草稿及装备设计排查（2026-11-10）
+
+用户反馈：真人头像复用草稿没有封面设置入口，上下文按钮只剩说明；装备设计新结果近似参考图，需定位原因。继续修复、必要工程和保护上线，实际操作由用户手验，无新生图或浏览器功能验收。
+
+- [x] E04-01 核对原模板和草稿来源，修正私密只读分支及本人原模板封面入口。
+- [x] E04-02 对照装备设计既有新旧输入/输出、任务快照和实际发送链，不擅自覆盖生产模板。
+- [ ] E04-03 必要工程、聚焦提交推送、继承最新健康源并保护部署，写回手验入口和证据缺口。
+
+共享判断：统一模板头部误把privateDefinition当作可编辑资格，方法草稿进入编辑壳但定义编辑器被definitionEditable挡住。改用真实编辑能力决定编辑/只读弹窗；沿既有只读接口和身份验证，不改原文权限。本人方法草稿增加“设置原模板封面”，复用openSharedPreset的publisher解析和封面CAS，草稿仍无直接原件写权；原模板导航保留当前已挂载输入。适用于同类模板，不扩独立头像生成器或做数据迁移。
+
+装备设计初证：最新context包含本次source moduleContext；结果与参考字节不同但视觉为近似角色扩图，旧成功结果是四组装备方案。新旧快照定义不同，不能以字数差断言根因，继续核约束及provider字段。只读核现有记录/已授权媒体，无新生成/扣费/生产写入。私密文本只在现有运行身份和策略下做内存摘要，不提交原文或媒体。
+
+基线实际v0.141.7/3d32f549；后继角色融合已交回v0.142.0/08a49383和stage，发布将继承该源码。CodeGraph准备入口Git枚举30秒超时，定点真实源码接续，未冒称结构查询成功。既有§9/10记录从本任务已推901e14ef恢复，防止后继版本整合代码却遗漏记录。
+
+### E04 根因与工程
+
+真人头像为本人原模板的live方法草稿，原publisher及既有19条任务保持，未迁移/删除/重绑定。统一头部已修正编辑/只读分支，本人草稿仅通过原publisher打开原模板封面。只读查看器需要既有身份验证时提供同一路径验证入口，未放宽服务器原文或封面权限。6项真实JSX及handler隔离工程通过：私密草稿/可编辑publisher、本人源封面/他人拒绝、独立模块/新模块先保存；未开数据库/浏览器/模型，网络0。首轮工程夹具缺VM exports，修正夹具后通过，应用无关。
+
+装备设计已确认：本轮最新task.context包含当前保存moduleContext，worker解密后把context作为prompt随参考图提交到原edits接口，非只传图片。旧成功任务2026-10-12 08:47:10（用户时区）有四组及多套方案要求；08:58:39起可查后续任务已用当前669字版本，缺少这些具体交付要求。该两条旧任务模型/质量/供应商配置修订相同，变化早于本轮当前输入修复；当前保存版与最新快照摘要一致。最新结果是近似参考角色的横向扩图，旧成功结果是四组装备设计，原图字节并不相同。该证据支持有效模板内容变化是关键原因，不以字数本身或一次模型结果断言唯一因果。现存生命周期日志未提供这次文字变更记录，无法确认操作者或具体保存动作；source.updated_at不等于此次内容修改时刻。没有覆盖生产模板，没有恢复旧定义，没有真实新请求或收费测试。
+
+装备设计若要恢复四组交付，需要作者在可编辑原模板里明确采用相应版式/多套要求；这是业务定义选择，当前故障修复不擅自用旧1937字覆盖669字保存版。旧成功记录及现有定义保持，用户可手动选择恢复并继续编辑；实际出图效果仍待用户手验。
