@@ -24,6 +24,10 @@ type EnhanceVideoActionTask = {
 
 type EnhanceVideoActionProps = {
   task: EnhanceVideoActionTask;
+  defaultOpen?: boolean;
+  resolutions?: readonly ('720p' | '1080p' | '2k' | '4k')[];
+  returnTo?: string;
+  requestOrigin?: 'asset';
 };
 
 type ConfigResponse = {
@@ -36,17 +40,17 @@ type ConfigResponse = {
 
 const RESOLUTION_OPTIONS = ['720p', '1080p', '2k'] as const;
 
-export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
+export default function EnhanceVideoAction({ task, defaultOpen = false, resolutions = RESOLUTION_OPTIONS, returnTo, requestOrigin }: EnhanceVideoActionProps) {
   const projectCatalogRevision = useProjectCatalogRevision();
   const router = useRouter();
   const [toolVersion, setToolVersion] = useState<'standard' | 'professional'>('standard');
-  const [resolution, setResolution] = useState<typeof RESOLUTION_OPTIONS[number]>('1080p');
+  const [resolution, setResolution] = useState<'720p' | '1080p' | '2k' | '4k'>('1080p');
   const [fps, setFps] = useState<'none' | '30' | '60'>('none');
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const [hasExpanded, setHasExpanded] = useState(false);
+  const [hasExpanded, setHasExpanded] = useState(defaultOpen);
 
   const shouldRender = task.local_status === 'succeeded'
     && Boolean(task.local_video_path || task.result_video_url)
@@ -98,13 +102,16 @@ export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
     setError('');
     try {
       const selectedFps = fps === 'none' ? null : Number(fps);
-      const key = ['enhance', task.id, toolVersion, resolution, selectedFps || 'source_fps'].join(':');
+      // Keep the original asset key so existing or uncertain submissions resolve to the same task.
+      const key = requestOrigin === 'asset' && toolVersion === 'standard'
+        ? ['asset-enhance', task.id, resolution, selectedFps || 'source_fps'].join(':')
+        : ['enhance', task.id, toolVersion, resolution, selectedFps || 'source_fps'].join(':');
       const pendingKey = `sd2-enhance-acceptance:${pricing.actorId}:${key}`;
       if (sessionStorage.getItem(pendingKey)) {
         const response = await fetch(`/api/tasks/request-status?idempotency_key=${encodeURIComponent(key)}`, { cache: 'no-store' });
         const original = await response.json();
         if (!creation.isCurrent()) return;
-        if (response.ok && original.task?.id) { await creation.acceptTask(key, original.task.id); sessionStorage.removeItem(pendingKey); router.push(taskDetailHref(original.task.id, `/tasks/${task.id}`)); return; }
+        if (response.ok && original.task?.id) { await creation.acceptTask(key, original.task.id); sessionStorage.removeItem(pendingKey); router.push(taskDetailHref(original.task.id, returnTo || `/tasks/${task.id}`)); return; }
         throw new Error('原超分提交待确认，请查询原任务；不会再次发送');
       }
       const body = { provider: 'volcengine_mediakit', model: 'enhance-video', action: 'enhance', entry: 'enhance',
@@ -130,7 +137,7 @@ export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
       await creation.acceptTask(key, data.id);
       if (!creation.isCurrent()) return;
       setMessage('已创建超分任务');
-      router.push(taskDetailHref(data.id, `/tasks/${task.id}`));
+      router.push(taskDetailHref(data.id, returnTo || `/tasks/${task.id}`));
     } catch (err) {
       if (!creation.isCurrent()) return;
       setError(err instanceof Error ? err.message : '创建超分任务失败');
@@ -140,7 +147,7 @@ export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
   };
 
   return (
-    <details className="enhance-video-action" onToggle={(event) => { if (event.currentTarget.open) setHasExpanded(true); }}>
+    <details className="enhance-video-action" open={defaultOpen || undefined} onToggle={(event) => { if (event.currentTarget.open) setHasExpanded(true); }}>
       <summary>
         <span>
           <Sparkles size={16} aria-hidden="true" />
@@ -162,8 +169,8 @@ export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
 
         <label>
           <span>目标分辨率</span>
-          <select value={resolution} onChange={(event) => setResolution(event.target.value as typeof RESOLUTION_OPTIONS[number])}>
-            {RESOLUTION_OPTIONS.map((item) => (
+          <select value={resolution} onChange={(event) => setResolution(event.target.value as '720p' | '1080p' | '2k' | '4k')}>
+            {resolutions.map((item) => (
               <option key={item} value={item}>{item}</option>
             ))}
           </select>
@@ -192,7 +199,7 @@ export default function EnhanceVideoAction({ task }: EnhanceVideoActionProps) {
       {message && <div className="enhance-video-action-success">{message}</div>}
 
       <div className="enhance-video-action-footer">
-        <span>提交后会创建新的任务记录，沿用当前项目和视频卡。</span>
+        <span>提交后会创建新的任务记录，沿用当前项目{task.video_card_id ? '和视频卡' : ''}。</span>
         <button
           type="button"
           className="btn btn-primary"

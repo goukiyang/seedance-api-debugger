@@ -312,7 +312,7 @@ async function serializeTask(task: {
       ? estimateNormalVideoCharge(task, normalRates) : null,
     videoCardId: task.video_card_id,
     isEnhanceTask,
-    canEnhanceVideo: task.local_status === 'succeeded' && hasVideo && Boolean(task.duration && task.video_card_id) && !isEnhanceTask,
+    canEnhanceVideo: task.local_status === 'succeeded' && hasVideo && Boolean(task.duration) && !isEnhanceTask,
     enhanceSourceTaskId,
     status: task.local_status,
     deliveryStage,
