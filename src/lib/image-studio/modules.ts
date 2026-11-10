@@ -234,7 +234,9 @@ async function sharedModuleDTO(row: StudioModuleRow, ownerId: string, settings: 
     canViewDefinition: templateRead.canViewTemplateContext,
     reasonCode: resolved ? null : sharedRead.unavailable?.reasonCode });
   const viewState = { ...state, capabilities: { ...state.capabilities, viewDefinition: { allowed: templateRead.canViewTemplateContext, reasonCode: templateRead.canViewTemplateContext ? null : 'access-revoked' as const, reason: templateRead.canViewTemplateContext ? null : '无权读取模板上下文' } } };
-  const sharedLive: SharedStudioLiveDTO = { ...viewState, templateRead, ...intent, intent, ...(dto?.generationIntent ? { generationIntent: dto.generationIntent } : {}), mode: binding.mode, available: Boolean(resolved), methodDraft: resolved?.methodDraft ?? false,
+  const methodDraft = resolved?.methodDraft ?? Boolean(await prisma.platformSetting.findUnique({
+    where: { key: `studio_works_method_pin_v1:${row.id}` }, select: { key: true } }));
+  const sharedLive: SharedStudioLiveDTO = { ...viewState, templateRead, ...intent, intent, ...(dto?.generationIntent ? { generationIntent: dto.generationIntent } : {}), mode: binding.mode, available: Boolean(resolved), methodDraft,
     ...(unavailableReason ? { unavailableReason } : {}), overriddenFields: Object.keys(overrides) as SharedStudioLiveDTO['overriddenFields'],
     ...(defaults ? { defaults } : {}), ...(repairDefinition ? { repairDefinition } : {}) };
   const fixedCover = dto?.fixedCover ?? await studioFixedCoverDTO(actor, { kind: 'preset', id: binding.presetId });

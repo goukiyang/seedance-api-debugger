@@ -1,11 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '修复模板上下文与封面入口',
+  title: '修复复用草稿的原模板操作',
   outline: [
-    '复用草稿正确打开模板上下文查看弹窗',
-    '本人模板可从复用草稿设置原模板封面',
-    '保留当前输入及原有模板权限'
+    '封面操作准确打开原模板，加载和失败即时可见',
+    '本人复用草稿可打开原模板完整设置',
+    '保留旧草稿、历史及原模板权限'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

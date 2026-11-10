@@ -176,7 +176,7 @@ type ResultInputMain = StudioInputMainResponse;
 type ResultInputChoice = ResultInputMain & { scope: string; viewToken: number; generationSignature: string; sequence: number; selectedIds: string[] };
 type RatioPreferences = { custom: string[]; busy: boolean; error: string; onRetry: () => void; onCustom: (ratio: string, remove: boolean) => Promise<boolean> };
 type ModuleScrollRequest = { target: 'module' | 'header'; id: string; group: string; token: number; behavior: ScrollBehavior; markViewed: boolean; recordUse?: boolean; expansionRevision?: number };
-type ModuleNavigationOptions = { ensureLoaded?: boolean; markViewed?: boolean; behavior?: ScrollBehavior; expandParents?: boolean; recordUse?: boolean; forCoverEditor?: boolean; explicitSelection?: boolean };
+type ModuleNavigationOptions = { ensureLoaded?: boolean; markViewed?: boolean; behavior?: ScrollBehavior; expandParents?: boolean; recordUse?: boolean; forCoverEditor?: boolean; forContextEditor?: boolean; explicitSelection?: boolean };
 type PersonalStudioOverrides = Partial<Pick<StudioModule, 'prompt' | 'model' | 'quality' | 'resolution' | 'count' | 'aspectRatio'>>;
 type SharedStudioView = SharedStudioLiveDTO;
 type StudioNavigationEntry = Pick<StudioModule, 'id' | 'name' | 'groupName' | 'sourcePresetId' | 'sourcePresetShared'> & { deletion?: StudioDeletionTarget; sharedLive?: Pick<SharedStudioView, 'intent' | 'mode' | 'methodDraft' | 'available' | 'sourceRevision' | 'reasonCode' | 'capabilities'> | null; objectKind?: SharedStudioStateProjection['objectKind']; canManageGroup?: boolean; coverEditable?: boolean; presetId?: string; banner?: UploadedAssetPayload | null; fixedCover?: ModuleCoverDTO | null; shared?: boolean };
@@ -452,10 +452,11 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       .catch(() => undefined); // Ordering falls back to this browser's own record.
     return () => controller.abort();
   }, [templateWorkbench, userId]);
+  const [requestedContext, setRequestedContext] = useState<{ moduleId: string; token: number } | null>(null);
   const [galleryCoverTarget, setGalleryCoverTarget] = useState<{ moduleId: string; moduleName: string; initialFixedCover?: ModuleCoverDTO | null } | null>(null);
   const [galleryReadErrors, setGalleryReadErrors] = useState<Set<string>>(new Set());
   const coverReconnectAttempts = useRef(new Map<string, number>());
-  useEffect(() => { setGalleryReadErrors(new Set()); setGalleryCoverTarget(null); }, [userId]);
+  useEffect(() => { setGalleryReadErrors(new Set()); setGalleryCoverTarget(null); setRequestedContext(null); }, [userId]);
   const [sharedOpening, setSharedOpening] = useState(false);
   const sharedOpenLock = useRef(false);
   const sharedOpenSequence = useRef(0);
@@ -761,15 +762,23 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
     if (options.ensureLoaded !== false && !modules.some(module => module.id === id)) void hydrateModules([id]);
   }, [hydrateModules, modules, templateWorkbench, userId, navigationVisibility.ready, hiddenNavigationIds]);
   async function openSharedPreset(presetId: string, options: ModuleNavigationOptions = {}) {
-    const canonical = directory.find(item => item.sharedLive?.intent.presetId === presetId && item.sharedLive.mode === 'publisher')
-      || directory.find(item => item.sharedLive?.intent.presetId === presetId && !item.sharedLive.methodDraft && !item.id.startsWith('shared:'));
-    const installed = canonical ? modules.find(item => item.id === canonical.id) : modules.find(item => item.sharedLive?.intent.presetId === presetId && !item.sharedLive.methodDraft);
-    if (canonical && !installed && !options.forCoverEditor) { navigateToModule(canonical.groupName || '未分组', canonical.id, options); return true; }
-    if (installed) {
+    const managesSource = options.forCoverEditor || options.forContextEditor;
+    const matchesSource = (item: Pick<StudioNavigationEntry, 'sourcePresetId' | 'sharedLive'>) => item.sourcePresetId === presetId || item.sharedLive?.intent?.presetId === presetId;
+    const canonical = directory.find(item => matchesSource(item) && item.sharedLive?.mode === 'publisher')
+      || (!managesSource ? directory.find(item => matchesSource(item) && !item.sharedLive?.methodDraft && !item.id.startsWith('shared:')) : undefined);
+    const installed = canonical ? modules.find(item => item.id === canonical.id) : modules.find(item => matchesSource(item)
+      && (item.sharedLive?.mode === 'publisher' || !managesSource && item.sharedLive?.available === true && !item.sharedLive.methodDraft));
+    const openContext = (item: StudioModule) => {
+      navigateToModule(item.groupName || '未分组', item.id, { ...options, ensureLoaded: false });
+      setRequestedContext(current => ({ moduleId: item.id, token: (current?.token || 0) + 1 }));
+    };
+    if (canonical && !installed && !options.forCoverEditor && !options.forContextEditor) { navigateToModule(canonical.groupName || '未分组', canonical.id, options); return true; }
+    if (installed && (!options.forCoverEditor || installed.coverEditable === true)
+      && (!options.forContextEditor || installed.sharedLive?.capabilities?.editDefinition.allowed === true)) {
       if (options.forCoverEditor) {
-        if (installed.coverEditable !== true) { setError('当前模板封面不可编辑，请重新读取权限'); return false; }
         setGalleryCoverTarget({ moduleId: installed.id, moduleName: installed.name });
-      } else {
+      } else if (options.forContextEditor) openContext(installed);
+      else {
         const metadata = installed.sharedLive?.available === false ? navigationMemory.get({ moduleId: installed.id, presetId, name: installed.name, groupName: installed.groupName }) : installed;
         navigateToModule(metadata.groupName || '未分组', installed.id, options);
       }
@@ -833,6 +842,9 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       if (options.forCoverEditor) {
         if (opened.coverEditable !== true) throw new Error('当前模板封面不可编辑，请重新读取权限');
         setGalleryCoverTarget({ moduleId: opened.id, moduleName: opened.name });
+      } else if (options.forContextEditor) {
+        if (opened.sharedLive.capabilities?.editDefinition.allowed !== true) throw new Error('当前原模板暂不能编辑，复用草稿仍保留。');
+        openContext(opened);
       } else navigateToModule(opened.groupName || '未分组', opened.id, { ...options, ensureLoaded: false });
       shared.refresh();
       return true;
@@ -1588,7 +1600,8 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       sharingMessage={module.sourcePresetId ? sharing.pending[module.sourcePresetId]?.error : undefined}
       onQuerySharing={async () => { if (module.sourcePresetId) { const result = await sharing.query(module.sourcePresetId); if (result.status !== 'completed') setError(result.error || '共享结果仍待确认'); } }}
       onLifecycleHistory={anchor => { if (module.sourcePresetId) setLifecycleHistory({ presetId: module.sourcePresetId, name: module.name, anchor }); }}
-      onOpenOriginal={forCoverEditor => { if (module.sourcePresetId) void openSharedPreset(module.sourcePresetId, { explicitSelection: true, forCoverEditor, recordUse: !forCoverEditor }); }}
+      onOpenOriginal={async action => Boolean(module.sourcePresetId && await openSharedPreset(module.sourcePresetId, { explicitSelection: true, forCoverEditor: action === 'cover', forContextEditor: action === 'context', recordUse: action !== 'cover' }))}
+      openContextRequest={requestedContext?.moduleId === module.id ? requestedContext.token : 0}
       onModuleDelete={(item, anchor) => { const entry = directory.find(value => value.id === item.id);
         const target = entry?.deletion || (item as StudioModule & { deletion?: StudioDeletionTarget }).deletion;
         if (!target) { setError('删除权限尚未读取，请重新读取工作区'); return Promise.resolve(); }
@@ -1652,9 +1665,10 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   </main>)}</>;
 }
 
-function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, onMetadataChange, onModuleDelete, moduleDeletionPending, groups, protectedGroups, onDeleteGroup, groupDeleting, onToggleSharing, onChooseSharing, preferenceSharingId, preferenceSharingPending, sharingId, sharingPending, sharingMessage, onQuerySharing, onLifecycleHistory, onOpenOriginal, settings, imageChannels, imageChannelId, imageChannelReady, imageChannelMessage, onImageChannelChange, globalSettingsSaving, settingsError, active, onActivate, onModuleChange, onParameterCopySaved, onReloadSettings, ratios, templateWorkbench, quickPresetVersion, viewToken, onResultsViewed, onTemplateEntered, onResultsAvailable, onGenerationAccepted, onManagePresets, onPresetSaved, registerPresetSource, registerResolutionDirty, resolutionDelta }: {
+function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, onMetadataChange, onModuleDelete, moduleDeletionPending, groups, protectedGroups, onDeleteGroup, groupDeleting, onToggleSharing, onChooseSharing, preferenceSharingId, preferenceSharingPending, sharingId, sharingPending, sharingMessage, onQuerySharing, onLifecycleHistory, onOpenOriginal, openContextRequest, settings, imageChannels, imageChannelId, imageChannelReady, imageChannelMessage, onImageChannelChange, globalSettingsSaving, settingsError, active, onActivate, onModuleChange, onParameterCopySaved, onReloadSettings, ratios, templateWorkbench, quickPresetVersion, viewToken, onResultsViewed, onTemplateEntered, onResultsAvailable, onGenerationAccepted, onManagePresets, onPresetSaved, registerPresetSource, registerResolutionDirty, resolutionDelta }: {
   onSharedRefresh: () => void;
-  onOpenOriginal: (forCoverEditor?: boolean) => void;
+  onOpenOriginal: (action?: 'cover' | 'context') => Promise<boolean>;
+  openContextRequest: number;
   protectedGroups: string[];
   groupDeleting: boolean;
   onManagePresets: () => void;
@@ -1691,7 +1705,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const repairDefinition = sharedLive?.repairDefinition;
   const definitionEditable = (!module.sourcePresetId || module.sourcePresetOwnedByViewer === true) && (!sharedLive || (sharedLive.capabilities ? sharedLive.capabilities.editDefinition.allowed : sharedLive.mode === 'publisher' && sharedReady));
   const definitionReady = !sharedLive || definitionEditable && (sharedReady || Boolean(repairDefinition));
-  const sourceCoverEditable = sharedLive?.mode === 'live' && module.sourcePresetOwnedByViewer === true && !module.coverEditable;
+  const sourceEditable = sharedLive?.mode === 'live' && module.sourcePresetOwnedByViewer === true;
+  const sourceCoverEditable = sourceEditable && !module.coverEditable;
+  const [sourceAction, setSourceAction] = useState<'cover' | 'context' | 'open' | null>(null);
+  const [sourceActionError, setSourceActionError] = useState('');
+  const handledContextRequest = useRef(0);
   const contextEditable = !module.privateDefinition && definitionEditable && module.contextEditable !== false && definitionReady;
   const fixedEditable = definitionEditable && isAdmin && module.fixedReferencesEditable !== false && definitionReady;
   const fixedRepairAllowed = !isAdmin && definitionReady && repairDefinition?.fixedReferenceRepairAllowed === true;
@@ -2232,6 +2250,19 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       moduleDialog.current?.close();
     }
   }
+  async function openOriginal(action?: 'cover' | 'context') {
+    if (sourceAction) return;
+    setSourceAction(action || 'open'); setSourceActionError('');
+    try {
+      if (!await onOpenOriginal(action)) setSourceActionError('原模板暂未打开，请重试；当前复用草稿保留。');
+    } catch (cause) { setSourceActionError(cause instanceof Error ? cause.message : '原模板暂未打开，当前复用草稿保留。'); }
+    finally { setSourceAction(null); }
+  }
+  useEffect(() => {
+    if (!openContextRequest || handledContextRequest.current === openContextRequest || hidden || !active || !draftLoaded || draftRestoring || !definitionEditable) return;
+    handledContextRequest.current = openContextRequest;
+    setPersonalSettingsOpen(false); moduleDialog.current?.showModal();
+  }, [openContextRequest, hidden, active, draftLoaded, draftRestoring, definitionEditable]);
   function openModuleDialog(personal = false) {
     if (!draftLoaded || draftRestoring) return;
     setPersonalSettingsOpen(personal); moduleDialog.current?.showModal();
@@ -4471,9 +4502,9 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     onPointerDownCapture={activateDraft} onFocusCapture={activateDraft}>
     {!draftLoaded && <p role="status">正在恢复工作区…</p>}
     <div hidden={!draftLoaded}>
-    {sharedLive?.methodDraft && <p className={styles.sharedOrigin} role="status">复用草稿 · 本次设置单独保存。<a href={`/template-studio?type=image&presetId=${encodeURIComponent(sharedLive.intent.presetId)}`} onClick={event => {
+    {sharedLive?.methodDraft && <p className={styles.sharedOrigin} role="status">复用草稿 · {sharedLive.reasonCode === 'state-conflict' ? '原模板版本已变化，请打开原模板继续编辑。' : '本次设置单独保存。'}<a href={`/template-studio?type=image&presetId=${encodeURIComponent(sharedLive.intent.presetId)}`} onClick={event => {
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-      event.preventDefault(); onOpenOriginal();
+      event.preventDefault(); void openOriginal();
     }}>打开原模板</a></p>}
     <header className={styles.header}>
       <TemplateFavoriteTitle className={styles.moduleTitleRow} contentKey={sharedLive?.available ? `image_template:${sharedLive.intent.presetId}` : module.saved && !sharedLive ? `image_module:${module.id}` : undefined}>
@@ -4485,13 +4516,14 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         {templateWorkbench ? <VideoFeishuToggle state={imageFeishu} label="完成后发飞书" disabled={!draftLoaded || draftRestoring || submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} /> : sharingControls}
         <ModuleGroupPicker value={groupName} groups={groups} protectedGroups={protectedGroups} disabled={!definitionReady || !draftLoaded || draftRestoring || moduleSaving || !sharedLive && automaticDirty || moduleDeleting || submitting || uploading || Boolean(pendingSubmission)} deleting={groupDeleting}
           onChange={value => void changeGroup(value)} onDelete={onDeleteGroup} />
-        {(canViewTemplateContext || templateWorkbench && (canManageTemplateSharing || sharingPending)) && <span className={styles.contextEntry}><button type="button" disabled={!draftLoaded || draftRestoring} aria-label={moduleSaveError ? '模板上下文，保存失败，打开查看并重试' : undefined} onClick={() => definitionEditable ? openModuleDialog() : setReadingDefinition(true)}><Settings size={17} />{definitionEditable ? '模板上下文' : '查看模板上下文'}</button></span>}
+        {(sourceEditable || canViewTemplateContext || templateWorkbench && (canManageTemplateSharing || sharingPending)) && <span className={styles.contextEntry}><button type="button" disabled={!draftLoaded || draftRestoring || Boolean(sourceAction)} title={sourceEditable ? '打开原模板完整设置，当前复用草稿保留' : undefined} aria-label={moduleSaveError ? '模板上下文，保存失败，打开查看并重试' : undefined} onClick={() => sourceEditable ? void openOriginal('context') : definitionEditable ? openModuleDialog() : setReadingDefinition(true)}><Settings size={17} />{sourceAction === 'context' ? '正在打开原模板…' : sourceEditable ? '原模板设置' : definitionEditable ? '模板上下文' : '查看模板上下文'}</button></span>}
         <button type="button" disabled={!draftLoaded || draftRestoring} onClick={() => openModuleDialog(true)}>本次生成设置</button>
-        {(module.coverEditable || sourceCoverEditable || !module.saved && !sharedLive) && <button type="button" disabled={!draftLoaded || draftRestoring || moduleSaving || moduleDeleting || bannerUploading} onClick={() => void (async () => {
-          if (sourceCoverEditable) { onOpenOriginal(true); return; }
+        {(module.coverEditable || sourceCoverEditable || !module.saved && !sharedLive) && <button type="button" disabled={!draftLoaded || draftRestoring || moduleSaving || moduleDeleting || bannerUploading || Boolean(sourceAction)} onClick={() => void (async () => {
+          if (sourceCoverEditable) { await openOriginal('cover'); return; }
           if (!module.saved && !await saveModule(reproduceSourceTaskId, revisionRef.current, false)) return;
           setCoverEditorOpen(true);
-        })()}><ImagePlus size={17} />{sourceCoverEditable ? '设置原模板封面' : '设置封面'}</button>}
+        })()}><ImagePlus size={17} />{sourceAction === 'cover' ? '正在打开封面…' : sourceCoverEditable ? '设置原模板封面' : '设置封面'}</button>
+        {sourceActionError && <span role="status" className={styles.error}>{sourceActionError}</span>}}
         <button type="button" className={templateWorkbench ? styles.moduleDeleteIcon : undefined} title={module.id === `default-${userId}` ? (templateWorkbench ? '默认模块需要保留' : '默认模板需要保留') : (templateWorkbench ? '删除模块' : '删除模板')} aria-label={moduleDeleting ? '正在删除模块' : `删除${templateWorkbench ? '模块' : '模板'}：${name}`} aria-busy={moduleDeleting || undefined}
           disabled={module.id === `default-${userId}` || moduleDeleting || moduleSaving || submitting || uploading || bannerUploading || Boolean(pendingSubmission)}
           onClick={event => void deleteModule(event.currentTarget)}>{moduleDeleting ? <LoaderCircle size={17} className={styles.spinner} /> : <Trash2 size={17} />}{!templateWorkbench && (moduleDeleting ? '删除中' : '删除模板')}</button>
