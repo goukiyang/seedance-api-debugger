@@ -1,11 +1,10 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  "title": "角色融合体验与结果保护",
+  "title": "用量读取与风格编辑优化",
   "outline": [
-    "锁定项用于批量组合，保留已选并支持撤销",
-    "英文补齐、复制与导出入口更清楚",
-    "常用操作前移，低频功能按需展开"
+    "查看用量时减少对其他操作的阻塞",
+    "风格编辑输入不中断，保存后选用立即生效"
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
