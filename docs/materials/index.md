@@ -1,3 +1,9 @@
+<!-- FUSION-UX09-MATERIALS-20261110 -->
+## 角色融合整工具优化预览（2026-11-10）
+
+[整体方案UX09](../../tasks/todo/2026-11-08-character-fusion.md#ux09-整工具优化与整合方案2026-11-10)：完整工作台V2为推荐，V1保历史；两图、完整提示词、尺寸/hash/来源保正式根私有 `docs/materials/2026-11-08-character-fusion-prototype/implementation/ux09/`。展示配置分组、四行身形、生成、独立保留/批量选择、明确语言复制及配方/方案分工。“保存方案／已存方案”等属新增建议；概念图非实页，未改应用/构建/部署或自动功能验收。
+<!-- /FUSION-UX09-MATERIALS-20261110 -->
+
 <!-- FUSION-UX08-DESIGN-MATERIALS-20261110 -->
 ## 角色融合身形比例设计预览（2026-11-10）
 
