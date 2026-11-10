@@ -1,3 +1,9 @@
+<!-- IMG26-FAIL01-MATERIALS-20261110 -->
+## 两个2.6近期失败的原号与账本诊断（2026-11-10）
+
+[原单IMG26-FAIL01](../../tasks/todo/2026-11-06-all-model-connectivity.md#img26-fail01-最近两个26生成失败排查2026-11-10)；[私有脱敏只读快照](2026-11-06-image-model-connectivity/diagnosis-20261110/original-task-diagnosis.json)保存实际运行3d32/v0.141.7、历史2.6任务简表、三原供应商编号和安全错误、两笔退款/一笔预留及五源SHA。最新明确生成阶段service_http_403，具体内部原因未证；无提示词/Key/媒体或完整私有配置，私有原证不提交Git。未新生成、重发旧待核或修改生产数据。
+<!-- /IMG26-FAIL01-MATERIALS-20261110 -->
+
 <!-- FUSION-UX06-MATERIALS-20261110 -->
 ## 角色融合 UX06 R03落地与按需操作（2026-11-10）
 
