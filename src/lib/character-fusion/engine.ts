@@ -291,5 +291,7 @@ export function txtFor(rows: FusionRow[], s: FusionSettings) {
 }
 export function csvFor(rows: FusionRow[], s: FusionSettings) {
   const quote = (v: string) => '"' + (/^[=+\-@\t\r]/.test(v) ? "'" : '') + v.replace(/"/g, '""') + '"';
-  return [['名字', '性格', '母体', '跨界概念', '连接点', '机制', ...ADDONS.map(c => c.title), '完整提示词'], ...rows.map(r => [r.name, r.category.personality, r.source.name, r.concept.name, r.bridge, r.category.mechanism, ...ADDONS.map(c => r.category[c.id]), textFor(r, s)])].map(row => row.map(quote).join(',')).join('\r\n');
+  const addons = ADDONS.filter(c => c.id !== 'mechanism' && c.id !== 'personality');
+  const traits = TRAITS.filter(t => rows.some(row => row.design?.traits[t.id]));
+  return [['名字', '性格', '母体', '跨界概念', '连接点', '机制', ...addons.map(c => c.title), ...traits.map(t => t.title), '完整提示词'], ...rows.map(r => [r.name, r.category.personality, r.source.name, r.concept.name, r.bridge, r.category.mechanism, ...addons.map(c => r.category[c.id]), ...traits.map(t => r.design?.traits[t.id]?.map(v => v.zh).join('、') || ''), textFor(r, s)])].map(row => row.map(quote).join(',')).join('\r\n');
 }
