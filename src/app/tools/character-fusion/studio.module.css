@@ -17,7 +17,6 @@
 .page .primary:hover:not(:disabled) { background: var(--accent-hover, var(--accent-color)); }
 .header { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 22px; }
 .header p { margin-top: 8px; color: var(--text-secondary); }
-.cost { color: var(--accent-color); font-size: 13px; white-space: nowrap; }
 .toolbar { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
 .pageSettings { margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color); }
 .pageSettings summary { width: fit-content; padding: 8px 0; color: var(--text-secondary); font-size: 13px; }
@@ -61,10 +60,7 @@
 .requirements { display: block; font-weight: 600; }
 .requirements small { margin-left: 8px; }
 .requirements textarea { display: block; margin-top: 10px; font-size: 14px; font-weight: 400; }
-.generateBar { display: flex; justify-content: space-between; align-items: end; gap: 16px; flex-wrap: wrap; margin-top: 16px; }
-.settings { display: flex; gap: 16px; flex-wrap: wrap; }
-.settings label, .swapForm label { display: flex; align-items: center; gap: 8px; font-size: 12px; min-width: 0; }
-.generateBar > button { min-height: 44px; padding-inline: 24px; }
+.swapForm label { display: flex; align-items: center; gap: 8px; font-size: 12px; min-width: 0; }
 .results { margin-top: 30px; scroll-margin-top: 90px; }
 .clearButton { min-width: 8em; }
 .resultList { display: flex; flex-direction: column; gap: 14px; }
@@ -92,9 +88,6 @@
 .advanced { flex: 1; min-width: 160px; }
 .advanced summary { padding: 10px 12px; width: fit-content; }
 .advanced p { color: var(--text-secondary); font-size: 12px; margin: 6px 0 12px; }
-.scores { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
-.scores span { display: flex; flex-direction: column; gap: 3px; color: var(--text-secondary); font-size: 11px; }
-.scores b { font-size: 19px; color: var(--text-primary); font-weight: 600; }
 .swapForm { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-color); }
 .swapForm select { max-width: 100%; }
 .sendBar { display: flex; justify-content: space-between; align-items: start; gap: 16px; margin-bottom: 18px; font-size: 12px; }
@@ -116,7 +109,6 @@
 .empty { padding: 48px 16px; text-align: center; color: var(--text-secondary); }
 .empty h3 { font-size: 17px; color: var(--text-primary); margin-bottom: 8px; }
 .notice, .error, .hint { padding: 10px 0; margin-bottom: 16px !important; font-size: 13px; }
-.notice, .error { position: sticky; top: 12px; z-index: 4; background: var(--bg-primary); border-bottom: 1px solid var(--border-color); }
 .notice { color: var(--accent-color); }
 .error { color: oklch(.7 .15 25); }
 .error button { margin-left: 12px; }
@@ -137,10 +129,6 @@
   .bossFooter > button { width: 100%; }
   .ruleGrid { grid-template-columns: minmax(0, 1fr); }
   .tags button { min-height: 40px; }
-  .settings { width: 100%; gap: 10px; }
-  .settings label { flex: 1; flex-wrap: wrap; }
-  .settings select { width: 100%; }
-  .generateBar > button { width: 100%; }
   .resultRow { padding: 15px 12px; }
   .metadata { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   .metadata .bridge { grid-column: 1 / -1; }
@@ -186,6 +174,62 @@
 .translatedTags dt { color: var(--text-secondary); font-size: 12px; }
 .translatedTags dd { margin: 0; overflow-wrap: anywhere; }
 .languageNote { color: var(--text-secondary); font-size: 12px; margin-top: 12px !important; max-width: 75ch; }
+.batchBar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; position: sticky; top: 60px; z-index: 8; padding: 12px 0; margin-bottom: 20px; border-block: 1px solid var(--border-color); background: var(--bg-primary); }
+.batchBar > label { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--text-secondary); font-size: 12px; }
+.batchBar select { min-height: 40px; }
+.batchBar > .primary { min-height: 42px; padding-inline: 22px; }
+.batchSummary { margin-left: auto; color: var(--text-secondary); font-size: 12px; }
+.page .quietButton { background: transparent; border-color: transparent; font-size: 12px; }
+.batchFeedback { flex-basis: 100%; font-size: 12px; padding: 0; margin: 0 !important; max-height: 88px; overflow-y: auto; }
+.batchFeedback button { margin-left: 8px; }
+.utilities { min-width: 0; }
+.utilities > summary { width: fit-content; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 12px; }
+.utilities[open] { flex-basis: 100%; }
+.utilities > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; padding: 12px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-panel); max-width: 600px; }
+.utilities small { flex-basis: 100%; color: var(--text-secondary); font-size: 12px; max-width: 70ch; }
+.utilities button { font-size: 12px; }
+.ruleSummary { padding: 0 12px 10px; color: var(--text-secondary); font-size: 11px; }
+.cardToggle small { margin-left: 5px; font-size: 10px; font-weight: 400; color: var(--text-secondary); }
+.tags select { font-size: 12px; min-height: 36px; padding: 6px 8px; }
+.translationNeeded { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 10px 0; font-size: 12px; color: var(--text-secondary); }
+.englishEditor { margin-bottom: 16px; }
+.englishEditor .requirements { margin-top: 12px; }
+.advanced[open] { flex-basis: 100%; }
+.ruleChecks { display: flex; gap: 12px 24px; flex-wrap: wrap; margin: 16px 0 8px; font-size: 12px; }
+.ruleChecks > div { display: flex; gap: 8px; }
+.ruleChecks dt, .dimensionSummary { color: var(--text-secondary); }
+.ruleChecks dd { margin: 0; }
+.dimensionSummary { font-size: 12px; line-height: 1.7; }
+@media (max-width: 760px) {
+  .header { margin-bottom: 12px; }
+  .toolbar { gap: 6px; margin-bottom: 10px; }
+  .toolbar button { font-size: 12px; padding-inline: 9px; }
+  .pageSettings { margin-bottom: 12px; padding-bottom: 4px; }
+  .batchBar { top: 54px; gap: 8px; padding: 10px 0; }
+  .batchBar > label:first-child { flex: 1; }
+  .batchBar > label:first-child select { flex: 1; }
+  .batchBar > .primary { flex: 1; }
+  .batchBar .batchMode { order: 2; flex-basis: 100%; }
+  .batchMode select { flex: 1; }
+  .batchBar > .quietButton { order: 3; min-height: 36px; padding: 5px; }
+  .batchSummary { order: 4; flex-basis: 100%; margin: 0; font-size: 11px; }
+  .batchFeedback { order: 5; }
+  .modelPicker { flex-wrap: wrap; }
+  .modelPicker label { flex-basis: 100%; }
+  .modelPicker select { width: 0; }
+  .ruleGrid { gap: 8px; }
+  .ruleHead { padding-block: 8px; }
+  .ruleSummary { padding-bottom: 8px; }
+  .tags select { min-height: 44px; }
+  .results { scroll-margin-top: 250px; }
+  .results > .sectionHead { gap: 10px; }
+  .results > .sectionHead > .actions { width: 100%; }
+  .outputLanguage { flex: 1; }
+  .outputLanguage select { flex: 1; }
+  .results .utilities { flex-basis: 100%; }
+  .utilities > div { width: 100%; }
+  .ruleChecks { gap: 8px; flex-direction: column; }
+}
 .chat { border: 1px solid var(--border-color); background: var(--bg-panel); border-radius: 8px; padding: 18px; margin-bottom: 18px; }
 .chat h3 { display: flex; align-items: center; gap: 7px; }
 .chatMessages { max-height: 340px; overflow-y: auto; overscroll-behavior: contain; padding: 4px 4px 8px; }

@@ -95,12 +95,16 @@ export function refreshBoss(s: FusionSettings, rnd = Math.random, only?: Dimensi
 export function validateGeneration(s: FusionSettings) {
   for (const c of s.cards.filter(c => c.joined)) {
     if (!c.tags.some(t => t.status !== 'exclude')) return `${c.title}已全部排除，请保留一个选项。`;
-    if (c.tags.filter(t => t.status === 'must').length > s.count) return `${c.title}的必须项超过生成数量。`;
+    const must = c.tags.filter(t => t.status === 'must');
+    if (must.length > s.count) return `${c.title}的本批必出项超过生成数量。`;
+    if (c.locked && (!c.tags.some(t => t.label === c.value && t.status !== 'exclude') || must.some(t => t.label !== c.value))) return `${c.title}的固定项与规则冲突，请解锁或调整本批必出项。`;
   }
   for (const c of CONFIG) {
     if (!s.bossDimensions.includes(c.id)) { if (optional(c.id)) continue; return `请将${c.title}加入角色组合。`; }
     if (!optional(c.id) && !allowed(s, c.id).length) return `${c.title}已全部排除，请至少保留一个选项。`;
-    if (required(s, c.id).length > s.count) return `${c.title}的必须项超过本轮 ${s.count} 条，请增加数量或减少必须项。`;
+    const must = required(s, c.id);
+    if (must.length > s.count) return `${c.title}的本批必出项超过本轮 ${s.count} 条，请增加数量或减少必出项。`;
+    if (s.bossLocks[c.id] && (!allowed(s, c.id).includes(s.boss[c.id]) && !(optional(c.id) && s.boss[c.id] === '') || must.some(label => label !== s.boss[c.id]))) return `${c.title}的固定项与规则冲突，请解锁或调整本批必出项。`;
   }
   return null;
 }
@@ -108,6 +112,7 @@ export function chooseCategories(s: FusionSettings, rnd: () => number): Categori
   const rows = Array.from({ length: s.count }, () => ({} as Categories));
   for (const c of CONFIG) {
     if (optional(c.id) && !s.bossDimensions.includes(c.id)) { rows.forEach(row => { row[c.id] = ''; }); continue; }
+    if (s.bossLocks[c.id]) { rows.forEach(row => { row[c.id] = s.boss[c.id]; }); continue; }
     const pool = allowed(s, c.id), must = shuffled(required(s, c.id), rnd);
     // Cycle source domains before repeating; required tags retain their own slots.
     const sourceCycle = shuffled(pool.filter(v => !must.includes(v)), rnd);
@@ -160,7 +165,7 @@ function translationsFor(s: Pick<FusionSettings, 'rules'>, category: Categories,
 function cardChoices(s: FusionSettings, index: number, rnd: () => number, manual = false): NonNullable<FusionRow['cards']> {
   return s.cards.filter(c => c.joined).map(c => {
     const must = c.tags.filter(t => t.status === 'must');
-    const tag = manual ? c.tags.find(t => t.label === c.value)! : must[index] || pick(c.tags.filter(t => t.status !== 'exclude'), rnd);
+    const tag = manual || c.locked ? c.tags.find(t => t.label === c.value)! : must[index] || pick(c.tags.filter(t => t.status !== 'exclude'), rnd);
     return { id: c.id, title: c.title, titleEn: c.titleEn, label: tag.label, en: tag.en };
   });
 }
@@ -174,15 +179,23 @@ export function changeRow(s: FusionSettings, rows: FusionRow[], id: string, chan
   const others = rows.filter(r => r.id !== id), category = { ...old.category }, rnd = seeded(seed);
   for (const c of CONFIG) {
     if (change && change.dimension !== c.id) continue;
+    if (s.bossDimensions.includes(c.id) && s.bossLocks[c.id]) {
+      if (change && change.value !== s.boss[c.id]) throw new Error(`${c.title}已固定，请先解锁再替换。`);
+      category[c.id] = s.boss[c.id]; continue;
+    }
     const soleRequired = required(s, c.id).includes(old.category[c.id]) && !others.some(r => r.category[c.id] === old.category[c.id]);
     if (change) {
       if (!allowed(s, c.id).includes(change.value) && !(optional(c.id) && change.value === '')) throw new Error('该标签已排除。');
-      if (soleRequired && old.category[c.id] !== change.value) throw new Error(`「${old.category[c.id]}」是清单中唯一的必须项，请先在另一条使用它。`);
+      if (soleRequired && old.category[c.id] !== change.value) throw new Error(`「${old.category[c.id]}」是本批唯一的必出项，请先在另一条使用它。`);
       category[c.id] = change.value;
     } else if (!soleRequired) category[c.id] = optional(c.id) && rnd() > .43 ? '' : pick(allowed(s, c.id), rnd) || '';
   }
   const row = uniqueName(makeRow(category, seed, change ? old : undefined, change?.dimension), others);
-  return rows.map(r => r.id === id ? { ...row, id, advanced: old.advanced, isBoss: old.isBoss, role: old.role, cards: old.cards, translations: translationsFor(s, category, old.translations) } : r);
+  const cards = change ? old.cards : old.cards?.map(value => {
+    const card = s.cards.find(c => c.id === value.id && c.joined && c.locked), tag = card?.tags.find(t => t.label === card.value);
+    return tag ? { ...value, label: tag.label, en: tag.en } : value;
+  });
+  return rows.map(r => r.id === id ? { ...row, id, advanced: old.advanced, isBoss: old.isBoss, role: old.role, cards, translations: translationsFor(s, category, old.translations) } : r);
 }
 export function textFor(row: FusionRow, settings: Pick<FusionSettings, 'requirements' | 'lang'> & Partial<Pick<FusionSettings, 'requirementsEnabled' | 'requirementsEn' | 'rules'>>) {
   const c = row.category;
