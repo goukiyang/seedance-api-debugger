@@ -291,3 +291,27 @@
   .ruleCard { padding: 10px 12px; }
   .settingsPanel { position: static; width: min(520px, calc(100vw - 28px)); margin-top: 8px; }
 }
+
+.catalogue { margin: 12px 0 24px; background: var(--bg-panel); border-radius: 10px; padding: 18px 24px; }
+.catalogue > .tabs { margin-bottom: 20px; }
+.catalogueRow { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 14px; padding: 15px 0; }
+.catalogueLabel { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 4px; }
+.catalogueLabel strong { padding-top: 8px; font-size: 13px; }
+.catalogueLabel small { width: 100%; padding-left: 0; }
+.catalogueValues { min-width: 0; }
+.pills { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.page .pills button { background: var(--bg-input); min-height: 34px; padding: 7px 12px; border-radius: 18px; font-size: 13px; }
+.page .pills button[aria-pressed='true'] { background: var(--text-primary); color: var(--bg-primary); font-weight: 600; }
+.concretePicker { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; font-size: 12px; color: var(--text-secondary); }
+.concretePicker select { font-size: 13px; min-width: 180px; }
+.facetRules { margin-top: 8px; }
+.facetRules summary { font-size: 12px; color: var(--text-secondary); width: fit-content; }
+.facetRules:not([open]) { opacity: 0; }
+.catalogueRow:hover .facetRules, .catalogueRow:focus-within .facetRules { opacity: 1; }
+.catalogueReveal { opacity: 0; }
+.catalogueRow:hover .catalogueReveal, .catalogueRow:focus-within .catalogueReveal { opacity: 1; }
+.catalogueMore { margin-top: 16px; }
+.catalogueMore > summary, .legacyRules > summary { padding: 12px 0; color: var(--text-secondary); width: fit-content; font-size: 13px; }
+.legacyRules { margin-bottom: 18px; }
+@media (max-width: 700px) { .catalogue { padding: 14px; } .catalogueRow { grid-template-columns: 1fr; gap: 8px; } .catalogueLabel { align-items: center; } .catalogueLabel strong { padding-top: 0; } .catalogueLabel small { width: auto; margin-left: 8px; } }
+@media (hover: none), (pointer: coarse) { .catalogueReveal, .facetRules:not([open]) { opacity: 1; } }

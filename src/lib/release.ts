@@ -1,11 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  "title": "角色融合新增身形比例选项",
-  "outline": [
-    "头身比、基础体型、结构比例和夸张部位，四组35项可选",
-    "支持中英提示词、锁定规则与配方保存",
-    "组合菜单可单独复制当前身形组合"
+  title: '角色融合类目与选项统一整理',
+  outline: [
+    '母体、职业、主题和身形分开设置，支持具体选项锁定与抽卡',
+    '中英文对应同一套设定，支持多部位夸张及多角色组合',
+    '原有卡片、选项、配方和功能继续保留'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

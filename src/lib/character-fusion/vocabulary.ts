@@ -41,6 +41,7 @@ export const CONFIG = [
   {
     "id": "mechanism",
     "title": "机制",
+    "optional": true,
     "english": "MECHANISM",
     "tags": [
       "形态变化类",
@@ -54,12 +55,15 @@ export const CONFIG = [
       "状态切换类",
       "牵引联动类",
       "旋转结构类",
-      "磁力吸附类"
+      "磁力吸附类",
+      "不强调机制",
+      "无外置机关"
     ]
   },
   {
     "id": "personality",
     "title": "性格",
+    "optional": true,
     "english": "PERSONALITY",
     "tags": [
       "开朗乐观型",
@@ -190,7 +194,7 @@ export const SOURCES = {
       "name": "水豚",
       "shape": "方圆结合的躯干与平静面部",
       "anchor": "大体块背部",
-      "root": "河豚"
+      "root": "水豚"
     },
     {
       "name": "螃蟹",
@@ -463,7 +467,7 @@ export const SOURCES = {
     {
       "name": "小行星",
       "shape": "多面圆角石块与发光裂隙",
-      "anchor": "环状轨道",
+      "anchor": "岩石裂隙",
       "root": "星砾"
     },
     {
@@ -659,6 +663,8 @@ export const CONCEPTS = {
 };
 
 export const MECHANISMS = {
+  "不强调机制": { "cn": "以角色自然姿态与行为表现为主，不强调机关", "en": "focus on natural posture and behavior without emphasizing mechanisms" },
+  "无外置机关": { "cn": "通过自身组织与内部结构表达作用，不添加外置机关", "en": "express function through natural tissue and internal structures without external mechanisms" },
   "变形结构": {
     "cn": "背部折叠机构分为三节，动作时从收纳形切换为工作形",
     "en": "a three-stage folding assembly switches from compact to working form"
@@ -773,7 +779,9 @@ export const LEGACY_TAGS = {
     "形态切换",
     "牵引绳",
     "旋转关节",
-    "磁吸组合"
+    "磁吸组合",
+    "不强调机制",
+    "无外置机关"
   ],
   "personality": [
     "乐天",
@@ -923,7 +931,7 @@ export const EN_LABEL = {
   "街头文化": "Street culture",
   "海洋探索": "Ocean exploration",
   "节庆民俗": "Festive folklore",
-  "蒸汽科技": "Steampunk technology",
+  "蒸汽科技": "Steam technology",
   "梦境": "Dreamworld",
   "童话": "Fairy tale",
   "美食文化": "Culinary culture",
@@ -969,7 +977,7 @@ export const SOURCE_EN = {
   "拱桥": "arch bridge",
   "钟楼": "clock tower",
   "牛角面包": "croissant",
-  "糯米团": "rice dumpling",
+  "糯米团": "glutinous rice ball",
   "爆米花": "popcorn",
   "甜甜圈": "doughnut",
   "手风琴": "accordion",
@@ -982,7 +990,7 @@ export const SOURCE_EN = {
   "复古电车": "vintage tram",
   "小行星": "asteroid",
   "彗星": "comet",
-  "土星环": "Saturn ring",
+  "土星环": "Saturn-inspired ringed planet",
   "月牙": "crescent moon"
 };
 
@@ -999,7 +1007,7 @@ export const CONCEPT_EN = {
   "发条巡检员": "clockwork inspector",
   "梦境收集员": "dream collector",
   "午夜寻梦者": "midnight dream seeker",
-  "森林故事管理员": "forest storyteller",
+  "森林故事管理员": "forest story curator",
   "魔法邮局学徒": "magic post-office apprentice",
   "风味调配师": "flavor alchemist",
   "流动甜品师": "traveling pastry chef",
@@ -1017,9 +1025,9 @@ export const PROP_EN = {
   "石刻罗盘": "stone-engraved compass",
   "可拼接星图": "modular star chart",
   "喷绘式信号徽记": "graffiti signal emblem",
-  "折叠滑行板": "folding hoverboard",
+  "折叠滑行板": "folding glide board",
   "发光航海罗盘": "glowing nautical compass",
-  "浮力邮包": "buoyant mail carrier",
+  "浮力邮包": "buoyant mailbag",
   "层层展开的灯彩": "multi-layer unfolding festival lantern",
   "节奏鼓槌": "rhythm drumsticks",
   "压力刻度盘": "pressure gauge",
@@ -1028,7 +1036,7 @@ export const PROP_EN = {
   "可旋转睡梦星图": "rotating dream star map",
   "会翻页的故事盒": "self-turning story box",
   "封蜡印章": "wax seal stamper",
-  "分层调味盘": "tiered seasoning carousel",
+  "分层调味盘": "tiered seasoning tray",
   "可折叠甜品架": "folding dessert rack",
   "悬浮计分环": "floating score ring",
   "多段接力棒": "segmented relay baton",

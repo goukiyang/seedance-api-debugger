@@ -1,5 +1,7 @@
 import { englishDetail } from './english';
 import { parseCardDraft, type FusionCard } from './cards';
+import { TRAITS, parseCatalogue, concreteOptions, type CatalogueSettings } from './catalogue';
+import { chooseConcrete, decorateRow, type Design } from './design';
 import { BODY_HEAD_RATIO_ID } from './body-cards';
 import { CONFIG, DEFAULT_REQUIREMENTS, SOURCES, CONCEPTS, MECHANISMS, PERSONALITIES, LEGACY_TAGS, DETAIL_ALTS, EN_LABEL, SOURCE_EN, CONCEPT_EN, PROP_EN } from './vocabulary';
 
@@ -10,7 +12,7 @@ export type Categories = Record<Dimension, string>;
 export type FusionSettings = {
   rules: Record<Dimension, Tag[]>; requirements: string; count: number; lang: 'zh' | 'en' | 'both';
   boss: Categories; bossLocks: Record<Dimension, boolean>; bossDimensions: Dimension[];
-  requirementsEnabled: boolean; requirementsEn: string; cards: FusionCard[]; role: string;
+  requirementsEnabled: boolean; requirementsEn: string; cards: FusionCard[]; role: string; catalogue?: CatalogueSettings;
 };
 type Source = { name: string; shape: string; anchor: string; root: string };
 type Concept = { name: string; prop: string; mood: string; suffix: string };
@@ -18,6 +20,7 @@ export type FusionRow = {
   id: string; name: string; category: Categories; source: Source; concept: Concept; bridge: string;
   mechanism: { cn: string; en: string }; personality: { pose: string; en: string };
   detail: Partial<Record<Dimension, string>>; advanced: boolean; isBoss?: boolean;
+  design?: Design;
   translations?: Array<{ dimension: Dimension; label: string; en: string }>;
   role?: string; cards?: Array<{ id: string; title: string; titleEn: string; label: string; en: string }>;
 };
@@ -26,8 +29,8 @@ export const CORE = CONFIG.filter(c => !('optional' in c));
 export const ADDONS = CONFIG.filter(c => 'optional' in c);
 export const optional = (id: Dimension) => ADDONS.some(c => c.id === id);
 export function defaults(): FusionSettings {
-  return { rules: Object.fromEntries(CONFIG.map(c => [c.id, c.tags.map(label => ({ label, status: 'default' }))])) as FusionSettings['rules'],
-    requirements: DEFAULT_REQUIREMENTS, requirementsEnabled: false, requirementsEn: '', cards: [], role: '', count: 16, lang: 'zh',
+  return { rules: Object.fromEntries(CONFIG.map(c => [c.id, c.tags.map(label => ({ label, status: c.id === 'source' && label === '职业' ? 'exclude' : 'default' }))])) as FusionSettings['rules'],
+    requirements: DEFAULT_REQUIREMENTS, requirementsEnabled: false, requirementsEn: '', cards: [], role: '', catalogue: { details: {}, traits: { primaryPersonality: { enabled: true, locked: false, values: [], excluded: [], must: [] } } }, count: 16, lang: 'zh',
     boss: { source: '动物', concept: '海洋探索', mechanism: '展开折叠类', personality: '聪明机敏型', equipment: '', signature: '', entity: '', physique: '' },
     bossLocks: Object.fromEntries(CONFIG.map(c => [c.id, false])) as FusionSettings['bossLocks'], bossDimensions: CORE.map(c => c.id) };
 }
@@ -62,7 +65,7 @@ export function parseSettings(input: unknown): FusionSettings {
   });
   if (new Set(cards.map(c => c.id)).size !== cards.length) throw new Error('扩展卡片重复。');
   return reconcile({ rules, boss, bossLocks, bossDimensions: [...s.bossDimensions], requirements: s.requirements, count: s.count, lang: s.lang,
-    requirementsEnabled: s.requirementsEnabled === true, requirementsEn: s.requirementsEn || '', role: s.role || '', cards });
+    requirementsEnabled: s.requirementsEnabled === true, requirementsEn: s.requirementsEn || '', role: s.role || '', cards, catalogue: parseCatalogue(s.catalogue) });
 }
 export const allowed = (s: FusionSettings, id: Dimension) => s.rules[id].filter(t => t.status !== 'exclude').map(t => t.label);
 export const required = (s: FusionSettings, id: Dimension) => s.rules[id].filter(t => t.status === 'must').map(t => t.label);
@@ -91,9 +94,29 @@ export function refreshBoss(s: FusionSettings, rnd = Math.random, only?: Dimensi
     const pool = allowed(s, id).filter(v => v !== boss[id]);
     boss[id] = pool.length ? pick(pool, rnd) : allowed(s, id)[0] || '';
   }
-  return { ...s, boss, cards: s.cards.map(c => c.joined && !c.locked && !only ? { ...c, value: pick(c.tags.filter(t => t.status !== 'exclude'), rnd)?.label || c.value } : c) };
+  const catalogue = parseCatalogue(s.catalogue);
+  if (!only) for (const t of TRAITS) {
+    const state = catalogue.traits[t.id]; if (!state?.enabled || state.locked) continue;
+    const pool = t.options.filter(o => !state.excluded.includes(o.zh));
+    catalogue.traits[t.id] = { ...state, values: pool.length ? [pick(pool, rnd).zh] : [] };
+  }
+  for (const [id, detail] of Object.entries(catalogue.details)) if (detail && !detail.locked && (!only || only === id)) {
+    const pool = concreteOptions(id, boss[id as Dimension]);
+    if (pool.length) catalogue.details[id] = { value: pick(pool, rnd).zh, locked: false };
+  }
+  return { ...s, boss, catalogue, cards: s.cards.map(c => c.joined && !c.locked && !only ? { ...c, value: pick(c.tags.filter(t => t.status !== 'exclude'), rnd)?.label || c.value } : c) };
 }
 export function validateGeneration(s: FusionSettings) {
+  for (const definition of TRAITS) {
+    const state = s.catalogue?.traits[definition.id]; if (!state?.enabled) continue;
+    if (!definition.options.some(o => !state.excluded.includes(o.zh))) return `${definition.title}已全部排除。`;
+    if (state.must.length > s.count) return `${definition.title}必出项超过本批数量。`;
+    if (state.locked && (!state.values.length || state.values.some(v => state.excluded.includes(v)) || state.must.some(v => !state.values.includes(v)))) return `${definition.title}固定项与规则冲突。`;
+  }
+  for (const [id, detail] of Object.entries(s.catalogue?.details || {})) if (detail?.locked) {
+    const category = CONFIG.find(c => c.id === id)?.tags.find(label => concreteOptions(id, label).some(o => o.zh === detail.value));
+    if (!category || !allowed(s, id as Dimension).includes(category) || required(s, id as Dimension).some(v => v !== category)) return `具体选项「${detail.value}」与类别规则冲突，请解锁或调整规则。`;
+  }
   for (const c of s.cards.filter(c => c.joined)) {
     if (!c.tags.some(t => t.status !== 'exclude')) return `${c.title}已全部排除，请保留一个选项。`;
     const must = c.tags.filter(t => t.status === 'must');
@@ -113,6 +136,9 @@ export function chooseCategories(s: FusionSettings, rnd: () => number): Categori
   const rows = Array.from({ length: s.count }, () => ({} as Categories));
   for (const c of CONFIG) {
     if (optional(c.id) && !s.bossDimensions.includes(c.id)) { rows.forEach(row => { row[c.id] = ''; }); continue; }
+    const concrete = s.catalogue?.details[c.id];
+    const fixedCategory = concrete?.locked ? c.tags.find(label => concreteOptions(c.id, label).some(o => o.zh === concrete.value)) : undefined;
+    if (fixedCategory) { rows.forEach(row => { row[c.id] = fixedCategory; }); continue; }
     if (s.bossLocks[c.id]) { rows.forEach(row => { row[c.id] = s.boss[c.id]; }); continue; }
     const pool = allowed(s, c.id), must = shuffled(required(s, c.id), rnd);
     // Cycle source domains before repeating; required tags retain their own slots.
@@ -120,7 +146,7 @@ export function chooseCategories(s: FusionSettings, rnd: () => number): Categori
     const values = Array.from({ length: s.count }, (_, i) => {
       if (i < must.length) return must[i];
       if (c.id === 'source') return sourceCycle[i - must.length] || pool[(i - must.length) % pool.length];
-      return pool.length && (!optional(c.id) || rnd() < .43) ? pick(pool, rnd) : '';
+      return pool.length ? pick(pool, rnd) : '';
     });
     shuffled(values, rnd).forEach((value, i) => { rows[i][c.id] = value; });
   }
@@ -134,7 +160,7 @@ export function makeRow(category: Categories, seed: number, prior?: FusionRow, c
   const mechanism = prior && changed !== 'mechanism' ? prior.mechanism : lookup<FusionRow['mechanism']>(MECHANISMS, legacy('mechanism')) || { cn: `采用${category.mechanism}范围内的原创可视化交互，连接结构完整可读`, en: `an original functional system within ${category.mechanism}, with visible connections` };
   const personality = prior && changed !== 'personality' ? prior.personality : lookup<FusionRow['personality']>(PERSONALITIES, legacy('personality')) || { pose: `体现${category.personality}的清晰肢体语言`, en: `a readable pose expressing ${category.personality}` };
   const detail: FusionRow['detail'] = prior ? { ...prior.detail } : {};
-  for (const c of ADDONS) {
+  for (const c of ADDONS.filter(c => c.id !== 'mechanism' && c.id !== 'personality')) {
     if (prior && changed !== c.id) continue;
     if (category[c.id]) { const i = (c.tags as readonly string[]).indexOf(category[c.id]); detail[c.id] = i < 0 ? `围绕「${category[c.id]}」延展的具体原创结构` : pick([(LEGACY_TAGS as Record<string, string[]>)[c.id][i], (DETAIL_ALTS as Record<string, string[]>)[c.id][i]], rnd); }
     else delete detail[c.id];
@@ -145,20 +171,25 @@ export function makeRow(category: Categories, seed: number, prior?: FusionRow, c
 function uniqueName(row: FusionRow, others: FusionRow[]) {
   const names = new Set(others.map(r => r.name)), base = row.name;
   let n = 2; while (names.has(row.name)) row = { ...row, name: `${base} ${n++}` };
+  if (row.design && row.name !== base) row = { ...row, design: { ...row.design, sections: row.design.sections.map((p, i) => i === 0 ? { ...p, zh: p.zh.replace(`「${base}」`, `「${row.name}」`) } : p) } };
   return row;
 }
 export function generateBatch(s: FusionSettings, seed = Date.now()) {
   const error = validateGeneration(s); if (error) throw new Error(error);
   const result: FusionRow[] = [];
-  chooseCategories(s, seeded(seed)).forEach((category, i) => result.push({ ...uniqueName(makeRow(category, seed + i * 257), result), role: s.role, translations: translationsFor(s, category), cards: cardChoices(s, i, seeded(seed + i)) }));
+  chooseCategories(s, seeded(seed)).forEach((category, i) => {
+    const base = chooseConcrete({ ...makeRow(category, seed + i * 257), role: s.role, translations: translationsFor(s, category), cards: cardChoices(s, i, seeded(seed + i)) }, s);
+    result.push(uniqueName(decorateRow(base, s, seeded(seed + i * 397), i), result));
+  });
   return result;
 }
 export function bossRow(s: FusionSettings, others: FusionRow[], seed = Date.now()) {
+  const error = validateGeneration(s); if (error) throw new Error(error);
   for (const c of CORE) if (!s.bossDimensions.includes(c.id) || !allowed(s, c.id).includes(s.boss[c.id])) throw new Error(`角色组合需要加入并选择${c.title}。`);
   const category = { ...s.boss };
   for (const c of ADDONS) if (!s.bossDimensions.includes(c.id)) category[c.id] = '';
   for (const c of s.cards.filter(c => c.joined)) if (!c.tags.some(t => t.label === c.value && t.status !== 'exclude')) throw new Error(`请为${c.title}选择可用标签。`);
-  return { ...uniqueName(makeRow(category, seed), others), role: s.role, translations: translationsFor(s, category), cards: cardChoices(s, 0, seeded(seed), true) };
+  return uniqueName(decorateRow(chooseConcrete({ ...makeRow(category, seed), role: s.role, translations: translationsFor(s, category), cards: cardChoices(s, 0, seeded(seed), true) }, s, true), s, seeded(seed), 0, true), others);
 }
 function translationsFor(s: Pick<FusionSettings, 'rules'>, category: Categories, prior: FusionRow['translations'] = []): NonNullable<FusionRow['translations']> {
   return CONFIG.flatMap(c => { const label = category[c.id], en = s.rules[c.id].find(t => t.label === label)?.en || prior.find(t => t.dimension === c.id && t.label === label)?.en; return en ? [{ dimension: c.id, label, en }] : []; });
@@ -171,7 +202,7 @@ function cardChoices(s: FusionSettings, index: number, rnd: () => number, manual
   });
 }
 export function missingRequired(s: FusionSettings, rows: FusionRow[]) {
-  return [...CONFIG.filter(c => !optional(c.id) || s.bossDimensions.includes(c.id)).flatMap(c => required(s, c.id).filter(label => !rows.some(r => r.category[c.id] === label)).map(label => `${c.title}：${label}`)),
+  return [...TRAITS.flatMap(t => s.catalogue?.traits[t.id]?.enabled ? s.catalogue.traits[t.id].must.filter(label => !rows.some(row => row.design?.traits[t.id]?.some(v => v.zh === label))).map(label => `${t.title}：${label}`) : []), ...CONFIG.filter(c => !optional(c.id) || s.bossDimensions.includes(c.id)).flatMap(c => required(s, c.id).filter(label => !rows.some(r => r.category[c.id] === label)).map(label => `${c.title}：${label}`)),
     ...s.cards.filter(c => c.joined).flatMap(c => c.tags.filter(t => t.status === 'must' && !rows.some(r => r.cards?.some(v => v.id === c.id && v.label === t.label))).map(t => `${c.title}：${t.label}`))];
 }
 export function changeRow(s: FusionSettings, rows: FusionRow[], id: string, change?: { dimension: Dimension; value: string }, seed = Date.now()) {
@@ -180,23 +211,43 @@ export function changeRow(s: FusionSettings, rows: FusionRow[], id: string, chan
   const others = rows.filter(r => r.id !== id), category = { ...old.category }, rnd = seeded(seed);
   for (const c of CONFIG) {
     if (change && change.dimension !== c.id) continue;
+    if (!change && !s.bossDimensions.includes(c.id)) { category[c.id] = ''; continue; }
     if (s.bossDimensions.includes(c.id) && s.bossLocks[c.id]) {
       if (change && change.value !== s.boss[c.id]) throw new Error(`${c.title}已固定，请先解锁再替换。`);
       category[c.id] = s.boss[c.id]; continue;
     }
     const soleRequired = required(s, c.id).includes(old.category[c.id]) && !others.some(r => r.category[c.id] === old.category[c.id]);
     if (change) {
+      const concrete = s.catalogue?.details[c.id];
+      if (concrete?.locked && !concreteOptions(c.id, change.value).some(o => o.zh === concrete.value)) throw new Error(`具体选项「${concrete.value}」已固定，请先解锁。`);
       if (!allowed(s, c.id).includes(change.value) && !(optional(c.id) && change.value === '')) throw new Error('该标签已排除。');
       if (soleRequired && old.category[c.id] !== change.value) throw new Error(`「${old.category[c.id]}」是本批唯一的必出项，请先在另一条使用它。`);
       category[c.id] = change.value;
-    } else if (!soleRequired) category[c.id] = optional(c.id) && rnd() > .43 ? '' : pick(allowed(s, c.id), rnd) || '';
+    } else if (!soleRequired) category[c.id] = pick(allowed(s, c.id), rnd) || '';
   }
-  const row = uniqueName(makeRow(category, seed, change ? old : undefined, change?.dimension), others);
+  const row = uniqueName(chooseConcrete(makeRow(category, seed, change ? old : undefined, change?.dimension), s), others);
   const cards = change ? old.cards : old.cards?.map(value => {
-    const card = s.cards.find(c => c.id === value.id && c.joined && c.locked), tag = card?.tags.find(t => t.label === card.value);
+    const card = s.cards.find(c => c.id === value.id && c.joined);
+    const tag = card?.locked ? card.tags.find(t => t.label === card.value) : card ? pick(card.tags.filter(t => t.status !== 'exclude'), rnd) : undefined;
     return tag ? { ...value, label: tag.label, en: tag.en } : value;
   });
-  return rows.map(r => r.id === id ? { ...row, id, advanced: old.advanced, isBoss: old.isBoss, role: old.role, cards, translations: translationsFor(s, category, old.translations) } : r);
+  return rows.map(r => r.id === id ? uniqueName(decorateRow({ ...row, id, advanced: old.advanced, isBoss: old.isBoss, role: old.role, cards, translations: translationsFor(s, category, old.translations) }, s, seeded(seed), 0, false, change ? old.design : undefined), others) : r);
+}
+export function settingsForRow(s: FusionSettings, row: FusionRow): FusionSettings {
+  const catalogue = parseCatalogue(s.catalogue);
+  catalogue.traits = Object.fromEntries(TRAITS.map(t => [t.id, { enabled: Boolean((row.design?.chosen || row.design?.traits)?.[t.id]), locked: true, values: (row.design?.chosen || row.design?.traits)?.[t.id]?.map(v => v.zh).filter(label => t.options.some(o => o.zh === label)) || [], excluded: [], must: [] }]));
+  catalogue.details = {};
+  for (const id of ['source', 'concept', 'equipment', 'signature', 'entity', 'physique'] as Dimension[]) {
+    const value = id === 'source' ? row.source.name : id === 'concept' ? row.concept.name : row.detail[id];
+    if (value && concreteOptions(id, row.category[id]).some(o => o.zh === value)) catalogue.details[id] = { value, locked: true };
+  }
+  return { ...s, boss: { ...row.category }, bossLocks: Object.fromEntries(CONFIG.map(c => [c.id, true])) as FusionSettings['bossLocks'], bossDimensions: CONFIG.filter(c => row.category[c.id]).map(c => c.id), catalogue, cards: (row.cards || []).map(v => { const prior = s.cards.find(c => c.id === v.id); return { ...(prior || { id: v.id, title: v.title, titleEn: v.titleEn, tags: [{ label: v.label, en: v.en, status: 'default' as const }] }), value: v.label, joined: true, locked: true }; }), role: row.role || '', requirements: row.design?.requirements.zh ?? s.requirements, requirementsEn: row.design?.requirements.en ?? s.requirementsEn, requirementsEnabled: row.design ? Boolean(row.design.requirements.zh) : s.requirementsEnabled };
+}
+export function reviseRow(s: FusionSettings, rows: FusionRow[], id: string) {
+  const error = validateGeneration(s); if (error) throw new Error(error);
+  const old = rows.find(row => row.id === id); if (!old) throw new Error('这条提示词已不存在。');
+  const next = bossRow(s, rows.filter(row => row.id !== id));
+  return rows.map(row => row.id === id ? { ...next, id, advanced: old.advanced, isBoss: old.isBoss } : row);
 }
 export function textFor(row: FusionRow, settings: Pick<FusionSettings, 'requirements' | 'lang'> & Partial<Pick<FusionSettings, 'requirementsEnabled' | 'requirementsEn' | 'rules'>>) {
   const c = row.category;
@@ -213,7 +264,7 @@ export function textFor(row: FusionRow, settings: Pick<FusionSettings, 'requirem
     c.entity ? `组合范围「${c.entity}」：具体设计为「${row.detail.entity}」，明确主次角色、连接关系和拆合时的空间归属。` : '',
     c.physique ? `轮廓范围「${c.physique}」：具体表现为「${row.detail.physique}」，组织大中小体块与重心，让整体剪影一眼可辨。` : '',
   ].join('');
-  const cn = `原创角色设计「${row.name}」。以${row.source.name}为母体，保留${row.source.shape}；融合${row.concept.name}的身份，将${row.source.anchor}转化为${row.concept.prop}。核心机制：${row.mechanism.cn}。${extras}视觉语言：${row.concept.mood}，主结构紧凑，形态层级分明。性格「${c.personality}」，通过${row.personality.pose}呈现。${fixedCn} ${row.role ? `角色定位：${row.role}。` : ''}${cardCn} 单角色全身设定，三分之四正面视角，完整展示机关的形态、厚度、装配与动作逻辑。${row.advanced ? '高级融合：增加收纳态、启动态与释放态的三阶段变化；关键装置通过一条明确的结构链驱动，动作前后轮廓有强烈辨识度，同时保持角色主体的视觉主导权。' : ''}`;
+  let cn = `原创角色设计「${row.name}」。以${row.source.name}为母体，保留${row.source.shape}；融合${row.concept.name}的身份，将${row.source.anchor}转化为${row.concept.prop}。核心机制：${row.mechanism.cn}。${extras}视觉语言：${row.concept.mood}，主结构紧凑，形态层级分明。性格「${c.personality}」，通过${row.personality.pose}呈现。${fixedCn} ${row.role ? `角色定位：${row.role}。` : ''}${cardCn} 单角色全身设定，三分之四正面视角，完整展示机关的形态、厚度、装配与动作逻辑。${row.advanced ? '高级融合：增加收纳态、启动态与释放态的三阶段变化；关键装置通过一条明确的结构链驱动，动作前后轮廓有强烈辨识度，同时保持角色主体的视觉主导权。' : ''}`;
   const translate = (map: object, value: string) => lookup(map as Record<string, string>, value) || value;
   const extrasEn = [
     c.equipment ? `Equipment: ${englishDetail('equipment', c.equipment, row.detail.equipment)}, an unexpected but functional tool derived from the source anatomy and character role.` : '',
@@ -222,6 +273,11 @@ export function textFor(row: FusionRow, settings: Pick<FusionSettings, 'requirem
     c.physique ? `Silhouette: ${englishDetail('physique', c.physique, row.detail.physique)}, with coherent weight distribution and readable large forms.` : '',
   ].join(' ');
   let en = `Original character concept: ${translate(SOURCE_EN, row.source.name)} ${translate(CONCEPT_EN, row.concept.name)}${row.name.match(/ \d+$/)?.[0] || ''}. A ${translate(SOURCE_EN, row.source.name)} crossed with a ${translate(CONCEPT_EN, row.concept.name)}. Preserve a recognizable source silhouette and reinterpret its signature physical feature as a ${translate(PROP_EN, row.concept.prop)}. Main functional system: ${row.mechanism.en}. ${extrasEn} Design language inspired by ${translate(EN_LABEL, c.concept)}; ${row.personality.en}. ${!fixed ? '' : settings.requirementsEn?.trim() ? `Fixed art direction: ${settings.requirementsEn.trim()}` : fixed === DEFAULT_REQUIREMENTS ? `Premium family-friendly stylized 3D cartoon, ${bodyRatio ? '' : 'approximately 2.5 heads tall, '}simplified rounded geometry, bold readable silhouette, vibrant clean colors, matte materials, soft studio lighting, charming and sophisticated, clear assembly thickness and animation-friendly joints.` : `Fixed art direction: ${settings.requirementsEn?.trim() || fixed}`} ${row.role ? `Narrative role: ${roleEn[row.role] || row.role}.` : ''} ${cardEn} One full-body character, front three-quarter view, complete visible mechanism, believable connections, strong form hierarchy.${row.advanced ? ' Advanced fusion: show stored, activated and released states, driven by one coherent mechanical chain, with a clear dominant body silhouette.' : ''}`;
+  if (row.design) {
+    cn = [...row.design.sections.map(p => p.zh), row.design.requirements.zh].filter(Boolean).join(' ');
+    en = [...row.design.sections.map(p => p.en), row.design.requirements.en].filter(Boolean).join(' ');
+    if (row.advanced && row.design.equipment && (row.category.mechanism || row.design.traits.mechanismPrinciple || row.design.traits.mechanismMotion)) { cn += ' 高级融合：展示收纳态、启动态与释放态，以明确的结构链驱动。'; en += ' Advanced fusion: show stored, activated and released states driven by a clear structural chain.'; }
+  }
   const translated = settings.rules ? translationsFor({ rules: settings.rules }, c, row.translations) : row.translations || [];
   for (const tag of translated) {
     if (!tag.en) continue;
