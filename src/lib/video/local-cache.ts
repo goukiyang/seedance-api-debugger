@@ -1,5 +1,5 @@
 import { createWriteStream } from 'fs';
-import { mkdir, link, stat, unlink, chmod, open } from 'fs/promises';
+import { mkdir, link, stat, unlink, chmod, open, readFile, writeFile, lstat, realpath } from 'fs/promises';
 import { constants } from 'fs';
 import path from 'path';
 import { once } from 'events';
@@ -57,18 +57,20 @@ function localVideoPath(taskId: string) {
   return path.join(PUBLIC_VIDEO_DIR, `${taskId}.mp4`);
 }
 
-async function fetchVideo(url: string, signal: AbortSignal) {
+async function fetchVideo(url: string, signal: AbortSignal, range?: { offset: number; etag: string }) {
   return fetch(url, {
     method: 'GET',
     headers: {
       'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
       'Accept': 'video/mp4,*/*',
+      'Accept-Encoding': 'identity',
+      ...(range ? { Range: `bytes=${range.offset}-`, 'If-Range': range.etag } : {}),
     },
     signal,
   });
 }
 
-async function fetchVideoWithTimeout(url: string, timeoutMs: number) {
+async function fetchVideoWithTimeout(url: string, timeoutMs: number, range?: { offset: number; etag: string }) {
   const controller = new AbortController();
   const external = videoSaveSignal();
   const stop = () => controller.abort();
@@ -76,7 +78,7 @@ async function fetchVideoWithTimeout(url: string, timeoutMs: number) {
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
     if (external?.aborted) controller.abort();
-    return await fetchVideo(url, controller.signal);
+    return await fetchVideo(url, controller.signal, range);
   } finally {
     clearTimeout(timeoutId);
     external?.removeEventListener('abort', stop);
@@ -132,17 +134,52 @@ export async function writeResponseToFile(
   expectedBytes: number,
   timeoutMs = DOWNLOAD_TIMEOUT_MS,
   options: { idleTimeoutMs?: number; signal?: AbortSignal; beforePublish?: () => Promise<void>; validateMp4?: boolean;
-    publish?: (temporary: string, target: string) => Promise<void> } = {},
+    publish?: (temporary: string, target: string) => Promise<void>;
+    resume?: { path: string; fetchRange: (offset: number, etag: string) => Promise<Response> } } = {},
 ) {
-  const body = response.body;
-  if (!body) {
-    throw new Error('无法读取视频响应流');
+  // A partial stays private and is reusable only for the same strong entity and full length.
+  const etag = response.headers.get('etag') || '';
+  let resumable = Boolean(options.resume && expectedBytes > 0 && /^"[^"]*"$/.test(etag)
+    && !response.headers.get('content-encoding') && response.headers.get('accept-ranges') === 'bytes');
+  const tempPath = resumable ? options.resume!.path : `${targetPath}.${process.pid}.${Date.now()}.tmp`;
+  const metadataPath = `${tempPath}.json`;
+  let offset = 0;
+  if (resumable) {
+    let previous: { etag?: string; bytes?: number } | null = null;
+    try { previous = JSON.parse(await readFile(metadataPath, 'utf8')); } catch { /* An incomplete checkpoint cannot prove reuse. */ }
+    const partial = await stat(tempPath).catch(() => null);
+    if (previous?.etag === etag && previous.bytes === expectedBytes && partial?.isFile() && partial.size <= expectedBytes) offset = partial.size;
+    if (offset > 0) {
+      await response.body?.cancel();
+      response = offset === expectedBytes ? new Response(new Uint8Array()) : await options.resume!.fetchRange(offset, etag);
+      if (offset < expectedBytes) {
+        const length = response.headers.get('content-length');
+        const sameEntity = response.headers.get('etag') === etag && !response.headers.get('content-encoding');
+        if (response.status === 200 && sameEntity && Number(length) === expectedBytes) {
+          // A server may ignore Range. Use its complete body without appending to the old prefix.
+          offset = 0; resumable = false;
+        } else if (response.status !== 206 || !sameEntity
+          || response.headers.get('content-range') !== `bytes ${offset}-${expectedBytes - 1}/${expectedBytes}`
+          || length !== null && Number(length) !== expectedBytes - offset) {
+          await response.body?.cancel();
+          await unlink(tempPath).catch(() => undefined);
+          await unlink(metadataPath).catch(() => undefined);
+          throw new Error('VIDEO_RESUME_ENTITY_CHANGED');
+        }
+      }
+    }
+    if (offset === 0) await unlink(tempPath).catch(error => { if (error.code !== 'ENOENT') throw error; });
+    await writeFile(metadataPath, JSON.stringify({ etag, bytes: expectedBytes }), {
+      flag: constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, mode: 0o600,
+    });
   }
-
-  const tempPath = `${targetPath}.${process.pid}.${Date.now()}.tmp`;
-  const stream = createWriteStream(tempPath, { flags: 'wx', mode: 0o600 });
+  const body = response.body;
+  if (!body) throw new Error('VIDEO_RESPONSE_BODY_MISSING');
+  const stream = createWriteStream(tempPath, { flags: options.resume && tempPath === options.resume.path
+    ? constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW | (offset > 0 ? constants.O_APPEND : constants.O_TRUNC)
+    : 'wx', mode: 0o600 });
   const reader = body.getReader();
-  let receivedBytes = 0;
+  let receivedBytes = offset;
   const startedAt = Date.now();
   const idleTimeoutMs = options.idleTimeoutMs ?? VIDEO_SAVE_IDLE_TIMEOUT_MS;
   const read = <T,>(promise: Promise<T>) => readWithTimeout(promise, timeoutMs, startedAt, idleTimeoutMs, options.signal);
@@ -195,6 +232,7 @@ export async function writeResponseToFile(
     if (options.publish) await options.publish(tempPath, targetPath);
     else await link(tempPath, targetPath);
     await unlink(tempPath);
+    if (options.resume && tempPath === options.resume.path) await unlink(metadataPath).catch(() => undefined);
     return info.size;
   } catch (error) {
     cleanupDestroy = true;
@@ -203,7 +241,11 @@ export async function writeResponseToFile(
       const closed = new Promise<void>(resolve => stream.once('close', () => resolve()));
       stream.destroy(); await closed;
     }
-    await unlink(tempPath).catch(() => undefined);
+    const partial = resumable ? await stat(tempPath).catch(() => null) : null;
+    if (!partial || partial.size <= 0 || partial.size >= expectedBytes) {
+      await unlink(tempPath).catch(() => undefined);
+      if (options.resume && tempPath === options.resume.path) await unlink(metadataPath).catch(() => undefined);
+    }
     throw error;
   }
 }
@@ -421,6 +463,12 @@ async function cacheTaskVideoToLocalInner(
     }
   }
   const currentSource = { ...task, result_video_url: sourceUrl, result_last_frame_url: lastFrameUrl };
+  const partialRoot = process.env.NODE_ENV === 'production' ? '/data/video-api-debugger/var-lib/storage/video-save-partials'
+    : path.join(process.cwd(), '.cache/video-save-partials');
+  await mkdir(partialRoot, { recursive: true, mode: 0o700 });
+  const partialDirectory = await lstat(partialRoot);
+  if (!partialDirectory.isDirectory() || partialDirectory.isSymbolicLink() || await realpath(partialRoot) !== partialRoot
+    || partialDirectory.mode & 0o077 || partialDirectory.uid !== process.getuid?.()) throw new Error('VIDEO_PARTIAL_DIRECTORY_INVALID');
   let fileSize: number;
   try {
     fileSize = await writeResponseToFile(
@@ -429,6 +477,8 @@ async function cacheTaskVideoToLocalInner(
       Number.isFinite(expectedBytes) ? expectedBytes : 0,
       remaining(),
       { idleTimeoutMs: VIDEO_SAVE_IDLE_TIMEOUT_MS, signal: videoSaveSignal(), validateMp4: true,
+        resume: { path: path.join(partialRoot, videoSaveSource(currentSource) + '.part'),
+          fetchRange: (offset, etag) => fetchVideoWithTimeout(sourceUrl, Math.min(remaining(), VIDEO_SAVE_HEADER_TIMEOUT_MS), { offset, etag }) },
         beforePublish: () => assertVideoSaveOwnership(currentSource), publish: async (temporary, target) => {
           let linked = false;
           try { await commitVideoSavePublication(currentSource, publicPath, async () => {

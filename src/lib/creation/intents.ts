@@ -1,3 +1,4 @@
+import { enhanceVideoSourcePricing, assertEnhanceVideoSourceTaskAllowed } from '@/lib/tasks/enhance-video-create';
 import { assertNoPreparationRejection, originalPreparationRejection } from './preparation-receipts';
 import { writeCreationOperation } from './receipts';
 import type { Prisma, VideoCreationIntent } from '@prisma/client';
@@ -111,8 +112,15 @@ export async function prepareVideoCreationIntent(user: SessionUser, body: Record
     project_id: spec.project_id, video_card_id: spec.video_card_id, required_capabilities: body.required_capabilities };
   const pricingContext = spec.action === 'enhance' || spec.input.provider === 'volcengine_ip' ? undefined : await resolveVideoPricingContext(user, pricingBody, spec.action === 'draft_upgrade' ? 'draft_upgrade' : 'create');
   const provider = spec.action === 'enhance' ? 'volcengine_mediakit' : spec.input.provider || (spec.entry === 'ip' ? 'volcengine_ip' : 'seedance');
+  let sourceFacts: Pick<VideoPricingInput, 'sourceFps' | 'sourceDuration'> = {};
+  if (spec.action === 'enhance' && typeof spec.input.source_task_id === 'string') {
+    const source = await readCreationSource(prisma, user, spec.input.source_task_id);
+    if (source.local_status !== 'succeeded') throw new CreationError('源任务还没有成功产出视频', 409, 'creation_source_unavailable');
+    assertEnhanceVideoSourceTaskAllowed(source);
+    sourceFacts = enhanceVideoSourcePricing(source);
+  }
   const quote = await quoteVideoPricing({ ...spec.input, provider, model: spec.input.model, duration: spec.input.duration,
-    resolution: spec.input.resolution, toolVersion: spec.input.tool_version, context: pricingContext } as VideoPricingInput);
+    resolution: spec.input.resolution, toolVersion: spec.input.tool_version, context: pricingContext, ...sourceFacts } as VideoPricingInput);
   // Interactive single submissions can obtain their authoritative price here without a preview receipt.
   // Acceptance still checks this intent's frozen amount/revision and the caller's spending ceiling.
   const currentPricing = body.pricing_preparation === 'current' && spec.action === 'generate' && spec.count === 1
