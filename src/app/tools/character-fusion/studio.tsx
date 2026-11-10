@@ -57,13 +57,8 @@ export default function CharacterFusionStudio({ ownerId }: { ownerId: string }) 
   const [draftReady, setDraftReady] = useState(false), [rulesAtGeneration, setRulesAtGeneration] = useState('');
   const settingsRef = useRef(settings); settingsRef.current = settings;
   const resultsRef = useRef<HTMLElement>(null);
-  const batchBarRef = useRef<HTMLElement>(null);
   const storageKey = `sd2-character-fusion:v1:${ownerId}`;
-  const showResults = () => {
-    if (!resultsRef.current) return;
-    const bar = batchBarRef.current, offset = bar ? Number.parseFloat(getComputedStyle(bar).top) + bar.getBoundingClientRect().height + 16 : 80;
-    window.scrollTo({ top: window.scrollY + resultsRef.current.getBoundingClientRect().top - offset, behavior: 'smooth' });
-  };
+  const showResults = () => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   const loadModels = useCallback(async (force = false) => {
     if (!activeRef.current) return;
     modelController.current?.abort();
@@ -265,16 +260,6 @@ export default function CharacterFusionStudio({ ownerId }: { ownerId: string }) 
     {view === 'recipes' ? <section className={styles.recipes}><div className={styles.sectionHead}><h2>我的配方</h2><span>仅本人可见，保存在账号中</span></div>
       {loadingRecipes ? <p role="status">正在读取配方…</p> : recipeError ? <p role="alert" className={styles.error}>{recipeError}<button onClick={() => setRecipeReload(n => n + 1)}>重新读取</button></p> : recipes.length ? recipes.map(recipe => <article className={styles.recipe} key={recipe.id}><div><h3>{recipe.name}</h3><p>{recipe.settings.count} 条 · {recipe.settings.lang === 'zh' ? '中文' : recipe.settings.lang === 'en' ? 'English' : '中英双语'} · {recipe.settings.bossDimensions.length + (recipe.settings.cards || []).filter(c => c.joined).length} 个融合维度</p></div><div className={styles.actions}><button onClick={() => run(() => { setSettings(parseSettings(recipe.settings)); setView('workspace'); setNotice(`已套用「${recipe.name}」，已有提示词保留。`); })}>套用</button><button disabled={busy} onClick={() => setForm({ action: 'rename', id: recipe.id, name: recipe.name, revision: recipe.revision })}>改名</button><details className={styles.delete}><summary>删除</summary><p>删除「{recipe.name}」？</p><button disabled={busy} onClick={() => void deleteRecipe(recipe)}>确认删除</button></details></div></article>) : <p className={styles.empty}>还没有配方。设置好规则后，点“保存规则配方”。</p>}
     </section> : <>
-      <section ref={batchBarRef} className={styles.batchBar} aria-label="批量生成">
-        <label>生成数量<select aria-label="生成数量" value={settings.count} onChange={e => setSettings(s => ({ ...s, count: Number(e.target.value) }))}>{COUNTS.map(n => <option value={n} key={n}>{n} 条</option>)}</select></label>
-        {rows.length > 0 && <label className={styles.batchMode}>生成方式<select aria-label="批量生成方式" value={batchMode} onChange={e => setBatchMode(e.target.value as typeof batchMode)}><option value="replace">保留已选，换一批</option><option value="append">追加到清单</option></select></label>}
-        <button className={styles.primary} disabled={Boolean(generationProblem)} aria-describedby={generationProblem ? 'fusion-generation-problem' : undefined} onClick={generate}>生成 {settings.count} 条</button>
-        {rows.length > 0 && <button className={styles.quietButton} onClick={showResults}>清单 {rows.length} 条</button>}
-        {undo && <button className={styles.quietButton} onClick={() => { undo.restore(); setUndo(null); setError(''); setNotice(`已撤销${undo.label}。`); }}><Undo2 size={15} />撤销{undo.label}</button>}
-        <small className={styles.batchSummary}>{fixedCount ? `${fixedCount} 个固定项，其余随机` : '未锁定维度随机'}{picked.length > 0 && batchMode === 'replace' ? ` · 保留已选 ${picked.length} 条` : ''} · 本地组合免费</small>
-        {generationProblem && <div id="fusion-generation-problem" role="status" className={styles.batchFeedback}>{generationProblem}{missingCore.length > 0 && <button onClick={() => setSettings(s => ({ ...s, bossDimensions: Array.from(new Set([...s.bossDimensions, ...CORE.map(c => c.id)])) }))}>加入缺少的基础维度</button>}</div>}
-        {(error || notice) && <p role={error ? 'alert' : 'status'} className={`${styles.batchFeedback} ${error ? styles.error : styles.notice}`}>{error || notice}</p>}
-      </section>
       <section className={styles.boss} aria-labelledby="boss-title" onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }} onDrop={e => { e.preventDefault(); const id = e.dataTransfer.getData('application/x-sd2-fusion-dimension'); if (allCards.some(c => c.id === id)) addDimension(id); }}>
         <div className={styles.sectionHead}><div><h2 id="boss-title">当前组合与固定项</h2><p>锁定后每条都用；未锁定项按规则随机。</p></div><details className={styles.utilities} onKeyDown={e => { if (e.key === 'Escape') { e.currentTarget.open = false; e.currentTarget.querySelector('summary')?.focus(); } }}><summary>组合操作</summary><div><button onClick={() => setSettings(s => refreshBoss(s))}><RefreshCw size={16} />随机刷新</button><button onClick={() => setSettings(s => ({ ...s, bossLocks: defaults().bossLocks, cards: s.cards.map(c => ({ ...c, locked: false })) }))}><UnlockKeyhole size={16} />全部解锁</button></div></details></div>
         <label className={styles.roleSelect}>角色定位<select value={settings.role} onChange={e => setSettings(s => ({ ...s, role: e.target.value }))}><option value="">不限定位</option>{['主角', '配角', '伙伴', '反派', 'Boss', '路人'].map(role => <option key={role}>{role}</option>)}</select></label>
@@ -286,8 +271,7 @@ export default function CharacterFusionStudio({ ownerId }: { ownerId: string }) 
         {!settings.bossDimensions.length && <p>点击下方卡片的“未加入”，或展开后拖动顶部到这里。</p>}
         <div className={styles.bossFooter}><button disabled={!manualReady} title={manualReady ? undefined : '请先为当前组合选择可用标签，并加入基础维度'} onClick={() => run(() => { const row = bossRow(settings, rows); replaceResults([row, ...rows], '加入当前组合', [...selected, row.id], rows.length ? rulesAtGeneration : JSON.stringify({ rules: settings.rules, cards: settings.cards })); setNotice('当前组合已加入清单首位。'); })}><Plus size={16} />单独加入当前组合</button></div>
       </section>
-      <section className={styles.rules} aria-labelledby="rules-title"><div className={styles.sectionHead}><h2 id="rules-title">卡片与规则</h2><div className={styles.actions}><button aria-expanded={chatOpen} onClick={() => setChatOpen(v => !v)}><Plus size={16} />增加卡片</button><details className={styles.utilities} onKeyDown={e => { if (e.key === 'Escape') { e.currentTarget.open = false; e.currentTarget.querySelector('summary')?.focus(); } }}><summary>规则操作</summary><div><button onClick={() => { const previous = settings; setUndo({ label: '规则重置', restore: () => setSettings(current => ({ ...current, rules: previous.rules, boss: previous.boss, bossLocks: previous.bossLocks })) }); setSettings(s => reconcile({ ...s, rules: defaults().rules })); setNotice('内置规则已重置，扩展卡片保留。'); }}>重置内置规则</button><button onClick={() => { const previousExpanded = expanded, previousOrder = cardOrder; setUndo({ label: '布局重置', restore: () => { setExpanded(previousExpanded); setCardOrder(previousOrder); } }); setExpanded([]); setCardOrder([]); }}>恢复卡片布局</button></div></details></div></div>
-        {chatOpen && <CardChat value={conversation} onChange={setConversation} onConfirm={confirmCard} onClose={() => setChatOpen(false)} model={apiModel} modelReady={modelReady} onChooseModel={openModelSettings} />}
+      <section className={styles.rules} aria-labelledby="rules-title">
         <div className={styles.ruleGrid}>{orderedIds.map(id => {
           const builtin = CONFIG.find(c => c.id === id), custom = settings.cards.find(c => c.id === id);
           const title = builtin?.title || custom!.title, tags = builtin ? settings.rules[builtin.id] : custom!.tags;
@@ -299,9 +283,23 @@ export default function CharacterFusionStudio({ ownerId }: { ownerId: string }) 
             {builtin ? <form className={styles.addTag} onSubmit={e => { e.preventDefault(); addTag(builtin.id); }}><input aria-label={`自定义${title}标签`} placeholder="自定义标签" maxLength={30} value={tagInputs[builtin.id] || ''} onChange={e => setTagInputs(s => ({ ...s, [builtin.id]: e.target.value }))} /><button aria-label={`添加${title}标签`}><Plus size={16} /></button></form> : <div className={styles.cardTools}><button onClick={() => { const card = custom!, index = settings.cards.indexOf(card); setUndo({ label: '卡片移除', restore: () => setSettings(current => ({ ...current, cards: [...current.cards.slice(0, index), card, ...current.cards.slice(index)] })) }); setSettings(s => ({ ...s, cards: s.cards.filter(c => c.id !== id) })); setNotice('卡片已移除，已有提示词保留。'); }}>移除此卡片</button></div>}
           </RuleCard>;
         })}</div>
+        <div className={`${styles.sectionHead} ${styles.ruleFooter}`}><h2 id="rules-title">卡片与规则</h2><div className={styles.actions}><button aria-expanded={chatOpen} onClick={() => setChatOpen(v => !v)}><Plus size={16} />增加卡片</button><details className={styles.utilities} onKeyDown={e => { if (e.key === 'Escape') { e.currentTarget.open = false; e.currentTarget.querySelector('summary')?.focus(); } }}><summary>规则操作</summary><div><button onClick={() => { const previous = settings; setUndo({ label: '规则重置', restore: () => setSettings(current => ({ ...current, rules: previous.rules, boss: previous.boss, bossLocks: previous.bossLocks })) }); setSettings(s => reconcile({ ...s, rules: defaults().rules })); setNotice('内置规则已重置，扩展卡片保留。'); }}>重置内置规则</button><button onClick={() => { const previousExpanded = expanded, previousOrder = cardOrder; setUndo({ label: '布局重置', restore: () => { setExpanded(previousExpanded); setCardOrder(previousOrder); } }); setExpanded([]); setCardOrder([]); }}>恢复卡片布局</button></div></details></div></div>
+        {chatOpen && <CardChat value={conversation} onChange={setConversation} onConfirm={confirmCard} onClose={() => setChatOpen(false)} model={apiModel} modelReady={modelReady} onChooseModel={openModelSettings} />}
       </section>
       <section className={styles.composer} aria-label="生成设置">
-        <div className={styles.requirementsHead}><button type="button" role="switch" aria-checked={settings.requirementsEnabled} aria-controls="fusion-requirements" className={styles.switch} onClick={() => setSettings(s => ({ ...s, requirementsEnabled: !s.requirementsEnabled }))}><span /> <span className={styles.srOnly}>启用全局固定要求</span></button><strong>全局固定要求</strong><small>{settings.requirementsEnabled ? '已启用，每条中英提示词都会带入' : '未启用，原内容保留'}</small></div>
+        <div className={styles.composerHead}>
+          <div className={styles.requirementsHead}><button type="button" role="switch" aria-checked={settings.requirementsEnabled} aria-controls="fusion-requirements" className={styles.switch} onClick={() => setSettings(s => ({ ...s, requirementsEnabled: !s.requirementsEnabled }))}><span /> <span className={styles.srOnly}>启用全局固定要求</span></button><strong>全局固定要求</strong><small>{settings.requirementsEnabled ? '已启用，每条中英提示词都会带入' : '未启用，原内容保留'}</small></div>
+          <section className={styles.batchBar} aria-label="批量生成">
+            <label>生成数量<select aria-label="生成数量" value={settings.count} onChange={e => setSettings(s => ({ ...s, count: Number(e.target.value) }))}>{COUNTS.map(n => <option value={n} key={n}>{n} 条</option>)}</select></label>
+            {rows.length > 0 && <label className={styles.batchMode}>生成方式<select aria-label="批量生成方式" value={batchMode} onChange={e => setBatchMode(e.target.value as typeof batchMode)}><option value="replace">保留已选，换一批</option><option value="append">追加到清单</option></select></label>}
+            <button className={styles.primary} disabled={Boolean(generationProblem)} aria-describedby={generationProblem ? 'fusion-generation-problem' : undefined} onClick={generate}>生成 {settings.count} 条</button>
+            {rows.length > 0 && <button className={styles.quietButton} onClick={showResults}>清单 {rows.length} 条</button>}
+            {undo && <button className={styles.quietButton} onClick={() => { undo.restore(); setUndo(null); setError(''); setNotice(`已撤销${undo.label}。`); }}><Undo2 size={15} />撤销{undo.label}</button>}
+            <small className={styles.batchSummary}>{fixedCount ? `${fixedCount} 个固定项，其余随机` : '未锁定维度随机'}{picked.length > 0 && batchMode === 'replace' ? ` · 保留已选 ${picked.length} 条` : ''} · 本地组合免费</small>
+            {generationProblem && <div id="fusion-generation-problem" role="status" className={styles.batchFeedback}>{generationProblem}{missingCore.length > 0 && <button onClick={() => setSettings(s => ({ ...s, bossDimensions: Array.from(new Set([...s.bossDimensions, ...CORE.map(c => c.id)])) }))}>加入缺少的基础维度</button>}</div>}
+            {(error || notice) && <p role={error ? 'alert' : 'status'} className={`${styles.batchFeedback} ${error ? styles.error : styles.notice}`}>{error || notice}</p>}
+          </section>
+        </div>
         {settings.requirementsEnabled && <div id="fusion-requirements"><label className={styles.requirements}>中文要求<textarea maxLength={6000} rows={3} value={settings.requirements} onChange={e => setSettings(s => ({ ...s, requirements: e.target.value, requirementsEn: '' }))} placeholder="填写画风、比例、构图、材质与制作约束…" /></label>{rows.length > 0 && <small>改动会应用到当前清单的每条中英提示词。</small>}</div>}
       </section>
       <section className={styles.results} ref={resultsRef} aria-labelledby="results-title">
