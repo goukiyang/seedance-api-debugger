@@ -31,9 +31,10 @@ async function responseValue(response: Response) {
 export type StudioStyleGroupsHandle = { open: () => void; edit: (group?: StudioStyleSummary, copy?: boolean) => void };
 export const StudioStyleGroups = forwardRef<StudioStyleGroupsHandle, {
   userId: string; selected: StudioStyleSummary[]; onChange: (groups: StudioStyleSummary[]) => void;
+  appliedSelection?: StudioStyleSummary[];
   currentImages: UploadedAssetPayload[]; disabled?: boolean; tiles?: boolean; maxReferences?: number;
   managementOnly?: boolean; onUpdated?: (group: StudioStyleSummary, use?: boolean) => void; onClose?: () => void;
-}>(function StudioStyleGroups({ userId, selected, onChange, currentImages, disabled, tiles = false, maxReferences = MAX_REFERENCE_IMAGES, managementOnly = false, onUpdated, onClose }, ref) {
+}>(function StudioStyleGroups({ userId, selected, appliedSelection = selected, onChange, currentImages, disabled, tiles = false, maxReferences = MAX_REFERENCE_IMAGES, managementOnly = false, onUpdated, onClose }, ref) {
   const { confirm, prompt, productDialog } = useProductDialog();
   const [open, setOpen] = useState(false);
   const [groups, setGroups] = useState<StudioStyleSummary[]>([]);
@@ -375,7 +376,7 @@ export const StudioStyleGroups = forwardRef<StudioStyleGroupsHandle, {
         {latest && <details open><summary>当前已保存版本 · {latest.revision}</summary><strong>{latest.name}</strong><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{latest.note || '未填写整体备注'}</pre><StudioReferenceGrid items={latest.references || []} onChange={() => {}} onPreview={image => setPreview(image)} compact labels="style" disabled renderDetails={reference => <p>{reference.note || '未填写逐图备注'}</p>} /></details>}
         <div className={styles.resultActions}>{pending && !draftSaving ? <button type="button" disabled={busy} onClick={() => void queryPending()}><RefreshCw size={16} />核对原操作</button> : <>
           <button type="button" disabled={busy || conflict || uploading || !draft.name.trim() || !draft.references.length} onClick={() => void save()}><Save size={16} />保存</button>
-          <button type="button" className={styles.primary} disabled={busy || conflict || uploading || !draft.name.trim() || !draft.references.length || draft.disabled || selected.filter(item => item.id !== draft.id).reduce((sum, item) => sum + item.referenceCount, 0) + draft.references.length > maxReferences} onClick={() => void save(true)}><Save size={16} />保存并选用</button>
+          <button type="button" className={styles.primary} disabled={busy || conflict || uploading || !draft.name.trim() || !draft.references.length || draft.disabled || appliedSelection.filter(item => item.id !== draft.id).reduce((sum, item) => sum + item.referenceCount, 0) + draft.references.length > maxReferences} onClick={() => void save(true)}><Save size={16} />保存并选用</button>
         </>}</div>
       </>}
       {preview?.originalUrl && <ZoomableImagePreview src={preview.originalUrl} thumbnailSrc={preview.thumbnailUrl || undefined} alt="风格参考图" title="风格参考图" previewKey={preview.id} onClose={() => setPreview(null)} />}

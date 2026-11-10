@@ -270,7 +270,9 @@ export const StudioStyleSkillSelector = forwardRef<StudioStyleSkillSelectorHandl
       const select = (items: StudioStyleSummary[]) => use && !items.some(item => item.id === group.id) ? [...items, group] : refresh(items);
       setPendingStyles(select);
       if (use || appliedStyles.some(item => item.id === group.id && !item.historical)) applyStyles(select(appliedStyles));
-      setUndo(current => current ? { ...current, styles: current.styles.map(item => item.id === group.id && !item.historical ? group : item) } : current);
+      const refreshLive = (items: StudioStyleSummary[]) => items.map(item => item.id === group.id && !item.historical ? group : item);
+      if (use) setUndo({ styles: refreshLive(appliedStyles), skills: appliedSkills });
+      else setUndo(current => current ? { ...current, styles: refreshLive(current.styles) } : current);
       setDetail(current => current?.kind === 'styles' && current.value.id === group.id && !current.value.historical ? { ...current, value: group } : current);
       setPreferences(current => ({ ...current, query: '', styleScope: 'all', category: 'styles', view: 'available', styleRecent: [group.id, ...current.styleRecent.filter(id => id !== group.id)], pages: { ...current.pages, styles: pageDefaults() } }));
     }
@@ -296,7 +298,7 @@ export const StudioStyleSkillSelector = forwardRef<StudioStyleSkillSelectorHandl
           {(preferences.category === 'all' || preferences.category === 'styles') && list('styles')}{(preferences.category === 'all' || preferences.category === 'skills') && list('skills')}
         </>}
       </div>
-      <footer className={styles.footer}><div><button type="button" onClick={() => updateFilter({ view: 'selected' })}>已选 {selected.length} 项 · 查看</button><small>风格组 {selectedStyles.length} · 提示词组 {selectedSkills.length}/12 · 风格图片 {imageCount}/{cap} 张</small></div><button type="button" onClick={close}>取消</button><button type="button" className={styles.primary} disabled={Boolean(detail) || manager === 'styles' || manager === 'skills'} onClick={() => { applyStyles(pendingStyles); applySkills(pendingSkills); close(); }}>确认选择</button></footer>
+      <footer className={styles.footer}><div><button type="button" onClick={() => updateFilter({ view: 'selected' })}>已选 {selected.length} 项 · 查看</button><small>风格组 {selectedStyles.length} · 提示词组 {selectedSkills.length}/12 · 风格图片 {imageCount}/{cap} 张</small></div><button type="button" onClick={close}>取消</button><button type="button" className={styles.primary} disabled={Boolean(detail) || manager === 'styles' || manager === 'skills' || imageCount > cap} title={imageCount > cap ? `请先将风格图片减少至 ${cap} 张以内` : undefined} onClick={() => { applyStyles(pendingStyles); applySkills(pendingSkills); close(); }}>确认选择</button></footer>
     </dialog>
     {undo && <button type="button" title="撤销本次选择修改" aria-label="撤销本次选择修改" disabled={disabled} onClick={() => { if (open) { setPendingStyles(undo.styles); setPendingSkills(undo.skills); } else { applyStyles(undo.styles); applySkills(undo.skills); } setUndo(null); }}><Undo2 size={16} /></button>}
     <dialog ref={details} className={`${styles.dialog} ${styles.details}`} aria-label="查看已选内容">
@@ -328,7 +330,7 @@ export const StudioStyleSkillSelector = forwardRef<StudioStyleSkillSelectorHandl
         </>}
       </div>}
     </dialog>
-    <StudioStyleGroups key={`styles:${identity}`} ref={styleManager} userId={userId} selected={selectedStyles} onChange={onStylesChange} currentImages={currentImages} maxReferences={cap} disabled={disabled} managementOnly onUpdated={styleUpdated} onClose={closeManager} />
+    <StudioStyleGroups key={`styles:${identity}`} ref={styleManager} userId={userId} selected={selectedStyles} appliedSelection={appliedStyles} onChange={onStylesChange} currentImages={currentImages} maxReferences={cap} disabled={disabled} managementOnly onUpdated={styleUpdated} onClose={closeManager} />
     <StudioSkills key={`skills:${identity}`} ref={skillManager} userId={userId} selected={selectedSkills} onChange={onSkillsChange} disabled={disabled} managementOnly onUpdated={skillUpdated} onClose={closeManager} />
   </div>;
 });
