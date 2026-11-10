@@ -20,6 +20,7 @@ export type StudioStyleSkillSelectorProps = {
   userId: string; scope: string; selectedStyles: StudioStyleSummary[]; selectedSkills: SkillSummary[];
   onStylesChange: (next: StudioStyleSummary[]) => void; onSkillsChange: (next: SkillSummary[]) => void;
   currentImages: UploadedAssetPayload[]; maxReferences?: number; disabled?: boolean;
+  onStyleUpdated?: () => void;
 };
 const ids = (value: unknown): string[] => Array.isArray(value) ? Array.from(new Set(value.filter((id): id is string => typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id)))) : [];
 const pageDefaults = (): Paging => ({ cursor: '', previous: [], page: 1 });
@@ -61,7 +62,7 @@ async function readPage(kind: Kind, query: string, cursor = '', keys?: string[],
   return { items: (kind === 'styles' ? data.groups : data.skills) as StudioStyleSummary[] | SkillSummary[], next: data.nextCursor as string | null };
 }
 
-export const StudioStyleSkillSelector = forwardRef<StudioStyleSkillSelectorHandle, StudioStyleSkillSelectorProps>(function StudioStyleSkillSelector({ userId, scope, selectedStyles: appliedStyles, selectedSkills: appliedSkills, onStylesChange: applyStyles, onSkillsChange: applySkills, currentImages, maxReferences = MAX_REFERENCE_IMAGES, disabled = false }, ref) {
+export const StudioStyleSkillSelector = forwardRef<StudioStyleSkillSelectorHandle, StudioStyleSkillSelectorProps>(function StudioStyleSkillSelector({ userId, scope, selectedStyles: appliedStyles, selectedSkills: appliedSkills, onStylesChange: applyStyles, onSkillsChange: applySkills, currentImages, maxReferences = MAX_REFERENCE_IMAGES, disabled = false, onStyleUpdated }, ref) {
   const identity = `${userId}:${scope}`, key = `sd2:studio-style-skills:v1:${encodeURIComponent(userId)}:${encodeURIComponent(scope)}`, legacyKey = `sd2:skills:v1:${userId}`;
   const currentIdentity = useRef(identity); currentIdentity.current = identity;
   const [initialized, setInitialized] = useState(''), [preferences, setPreferences] = useState<Preferences>(defaults);
@@ -260,13 +261,20 @@ export const StudioStyleSkillSelector = forwardRef<StudioStyleSkillSelectorHandl
       {(paging.page > 1 || state.next) && <nav className={styles.pagination} aria-label={`${typeName(kind)}翻页`}><button type="button" disabled={state.loading || paging.page === 1} title="回到首页" aria-label={`${typeName(kind)}首页`} onClick={() => changePage(kind, 'home')}><Home size={16} /></button><button type="button" disabled={state.loading || Boolean(state.error) || !currentPage || !paging.previous.length} aria-label={`${typeName(kind)}上一页`} onClick={() => changePage(kind, 'previous')}><ChevronLeft size={16} /></button><span>{currentPage ? paging.page : '—'}</span><button type="button" disabled={state.loading || Boolean(state.error) || !currentPage || !state.next} aria-label={`${typeName(kind)}下一页`} onClick={() => changePage(kind, 'next')}><ChevronRight size={16} /></button></nav>}
     </section>;
   }
-  const styleUpdated = (group: StudioStyleSummary) => {
+  const styleUpdated = (group: StudioStyleSummary, use = false) => {
     if (group.unavailable) {
       const mark = (items: StudioStyleSummary[]) => items.map(item => item.id === group.id ? { ...item, unavailable: true } : item);
       setPendingStyles(mark); applyStyles(mark(appliedStyles));
     } else {
+      const refresh = (items: StudioStyleSummary[]) => items.map(item => item.id === group.id && (use || !item.historical) ? group : item);
+      const select = (items: StudioStyleSummary[]) => use && !items.some(item => item.id === group.id) ? [...items, group] : refresh(items);
+      setPendingStyles(select);
+      if (use || appliedStyles.some(item => item.id === group.id && !item.historical)) applyStyles(select(appliedStyles));
+      setUndo(current => current ? { ...current, styles: current.styles.map(item => item.id === group.id && !item.historical ? group : item) } : current);
+      setDetail(current => current?.kind === 'styles' && current.value.id === group.id && !current.value.historical ? { ...current, value: group } : current);
       setPreferences(current => ({ ...current, query: '', styleScope: 'all', category: 'styles', view: 'available', styleRecent: [group.id, ...current.styleRecent.filter(id => id !== group.id)], pages: { ...current.pages, styles: pageDefaults() } }));
     }
+    onStyleUpdated?.();
     pendingScroll.current = scroll.current; setRetry(current => ({ ...current, styles: current.styles + 1, recent: current.recent + 1 }));
   };
   const skillUpdated = () => { pendingScroll.current = scroll.current; setRetry(current => ({ ...current, skills: current.skills + 1, recent: current.recent + 1 })); };

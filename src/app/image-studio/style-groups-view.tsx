@@ -51,6 +51,9 @@ export const StudioStyleGroups = forwardRef<StudioStyleGroupsHandle, {
   const [latest, setLatest] = useState<StudioStyleSummary | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [draftPaused, setDraftPaused] = useState(false);
+  const [composing, setComposing] = useState(false);
+  const [draftSaving, setDraftSaving] = useState(false);
+  const inputLocked = busy && !draftSaving;
   const draftId = useRef(''), draftRevision = useRef(0), durable = useRef(''), editSequence = useRef(0);
   const storageKey = `sd2:style-editor:v2:${userId}`;
   const noteFieldId = useId();
@@ -73,11 +76,12 @@ export const StudioStyleGroups = forwardRef<StudioStyleGroupsHandle, {
     catch { setError('无法保留原操作编号，尚未发送；当前输入保留'); return false; }
   };
   useEffect(() => {
-    if (!draft || busy || pending || conflict || draftPaused || draftText(draft) === durable.current) return;
+    if (!draft || busy || pending || conflict || draftPaused || composing || draftText(draft) === durable.current) return;
     const owner = userId, value = draft, serialized = draftText(value), generation = editSequence.current;
     const timer = setTimeout(() => {
       const operation: Pending = { requestId: crypto.randomUUID(), kind: 'draft' };
-      if (!remember(operation)) return;
+      setDraftSaving(true);
+      if (!remember(operation)) { setDraftSaving(false); return; }
       setBusy(true);
       void fetchDraft(value, operation.requestId).then(responseValue).then(result => {
         if (!alive.current || actor.current !== owner || generation !== editSequence.current) return;
@@ -86,12 +90,12 @@ export const StudioStyleGroups = forwardRef<StudioStyleGroupsHandle, {
         if (!alive.current || actor.current !== owner || generation !== editSequence.current) return;
         if (cause.status >= 400 && cause.status < 500) { remember(null); setConflict(cause.status === 409); setDraftPaused(true); }
         setError(cause.message || '草稿结果待确认，请核对原操作');
-      }).finally(() => { if (alive.current && actor.current === owner && generation === editSequence.current) setBusy(false); });
+      }).finally(() => { if (alive.current && actor.current === owner && generation === editSequence.current) { setBusy(false); setDraftSaving(false); } });
     }, 700);
     return () => clearTimeout(timer);
     // Draft payload stays on the authenticated server; browser storage keeps only ids.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft, busy, pending, conflict, draftPaused, userId]);
+  }, [draft, busy, pending, conflict, draftPaused, composing, userId]);
   function fetchDraft(value: Draft, requestId: string) {
     return fetch('/api/image-studio/style-groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'draft', draftId: draftId.current, expectedRevision: draftRevision.current, requestId, value: JSON.parse(draftText(value)) }) });
   }
@@ -146,7 +150,7 @@ export const StudioStyleGroups = forwardRef<StudioStyleGroupsHandle, {
       const hasChanges = restored && draftText(restored) !== draftText(next);
       const value = hasChanges ? restored : next;
       setConflict(Boolean(hasChanges && restored.id && restored.revision !== next.revision));
-      setDraft(value); setSavedDraft(draftText(next)); durable.current = draftText(value);
+      setDraft(value); setComposing(false); setSavedDraft(draftText(next)); durable.current = draftText(value);
       remember(retained.draftId === draftId.current ? retained.pending || null : null, draftId.current, next.id);
     } catch (cause) { if (generation === editSequence.current && actor.current === owner) setError(cause instanceof Error ? cause.message : '完整内容读取失败，未打开空稿'); }
     finally { if (generation === editSequence.current && actor.current === owner) setReadingEditor(false); }
@@ -335,24 +339,25 @@ export const StudioStyleGroups = forwardRef<StudioStyleGroupsHandle, {
       })}</div>
       {cursor && <button type="button" disabled={loading} onClick={() => void load(cursor)}>加载更多</button>}
     </dialog>
-    <dialog ref={editor} className={`${styles.dialog} ${styles.styleDialog}`} aria-label="编辑风格组" onPaste={event => {
+    <dialog ref={editor} className={`${styles.dialog} ${styles.styleDialog}`} aria-label="编辑风格组"
+      onCompositionStartCapture={() => setComposing(true)} onCompositionEndCapture={() => setComposing(false)} onPaste={event => {
         if (picker || event.defaultPrevented) return;
         const files = Array.from(event.clipboardData.items).filter(item => item.kind === 'file' && item.type.startsWith('image/')).map(item => item.getAsFile()).filter((file): file is File => Boolean(file));
         if (files.length) { event.preventDefault(); event.stopPropagation(); void upload(files); }
       }}>
       <header className={styles.header}><h2>{draft?.id ? '编辑风格组' : '新建风格组'}</h2><button type="button" aria-label="关闭风格组编辑" disabled={busy || uploading} onClick={closeEditor}><X size={20} /></button></header>
       {draft && <>
-        <label className={styles.label}>名称<input autoFocus maxLength={80} disabled={busy} value={draft.name} onChange={event => setDraft(current => current ? { ...current, name: event.target.value } : current)} /></label>
+        <label className={styles.label}>名称<input autoFocus maxLength={80} disabled={inputLocked} value={draft.name} onChange={event => setDraft(current => current ? { ...current, name: event.target.value } : current)} /></label>
         <label className={styles.label} htmlFor={noteFieldId}>整体备注 <span>选填 · {draft.note.length}/8000</span></label>
-        <textarea id={noteFieldId} aria-label="风格组整体备注" rows={5} maxLength={8000} disabled={busy} value={draft.note}
+        <textarea id={noteFieldId} aria-label="风格组整体备注" rows={5} maxLength={8000} disabled={inputLocked} value={draft.note}
           placeholder="补充这组风格的整体说明" onChange={event => setDraft(current => current ? { ...current, note: event.target.value } : current)} />
-        <label className={styles.label}><span><input type="checkbox" checked={draft.shared !== false} disabled={busy || Boolean(draft.copyFrom)} onChange={event => setDraft(value => value ? { ...value, shared: event.target.checked } : value)} />共享给同事</span></label>
-        {draft.id && <label className={styles.label}><span><input type="checkbox" checked={draft.disabled === true} disabled={busy} onChange={event => setDraft(value => value ? { ...value, disabled: event.target.checked } : value)} />停用</span></label>}
-        <label className={styles.label}>封面<select value={draft.coverAssetId} disabled={busy} onChange={event => setDraft(current => current ? { ...current, coverAssetId: event.target.value } : current)}>
+        <label className={styles.label}><span><input type="checkbox" checked={draft.shared !== false} disabled={inputLocked || Boolean(draft.copyFrom)} onChange={event => setDraft(value => value ? { ...value, shared: event.target.checked } : value)} />共享给同事</span></label>
+        {draft.id && <label className={styles.label}><span><input type="checkbox" checked={draft.disabled === true} disabled={inputLocked} onChange={event => setDraft(value => value ? { ...value, disabled: event.target.checked } : value)} />停用</span></label>}
+        <label className={styles.label}>封面<select value={draft.coverAssetId} disabled={inputLocked} onChange={event => setDraft(current => current ? { ...current, coverAssetId: event.target.value } : current)}>
           {!draft.references.length && <option value="">请先添加图片</option>}{draft.references.map((ref, index) => <option key={`${ref.id}-${index}`} value={ref.id}>风格 {index + 1}</option>)}
         </select></label>
         <div onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); void upload(Array.from(event.dataTransfer.files)); }}>
-          <StudioReferenceGrid items={draft.references} onChange={changeReferences} onPreview={image => setPreview(image)} compact labels="style" notes disabled={busy || uploading} />
+          <StudioReferenceGrid items={draft.references} onChange={changeReferences} onPreview={image => setPreview(image)} compact labels="style" notes disabled={inputLocked || uploading} />
         </div>
         <div className={styles.counts}><button type="button" disabled={busy || uploading || draft.references.length >= MAX_REFERENCE_IMAGES} onClick={() => setPicker(true)}><Plus size={16} />从资产库选择</button></div>
         {uploading && <p role="status">正在上传图片…</p>}
@@ -368,7 +373,7 @@ export const StudioStyleGroups = forwardRef<StudioStyleGroupsHandle, {
           } catch (cause) { if (generation === editSequence.current) setError(cause instanceof Error ? cause.message : '读取失败'); }
         }}>查看最新版</button>}</p>}
         {latest && <details open><summary>当前已保存版本 · {latest.revision}</summary><strong>{latest.name}</strong><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{latest.note || '未填写整体备注'}</pre><StudioReferenceGrid items={latest.references || []} onChange={() => {}} onPreview={image => setPreview(image)} compact labels="style" disabled renderDetails={reference => <p>{reference.note || '未填写逐图备注'}</p>} /></details>}
-        <div className={styles.resultActions}>{pending ? <button type="button" disabled={busy} onClick={() => void queryPending()}><RefreshCw size={16} />核对原操作</button> : <>
+        <div className={styles.resultActions}>{pending && !draftSaving ? <button type="button" disabled={busy} onClick={() => void queryPending()}><RefreshCw size={16} />核对原操作</button> : <>
           <button type="button" disabled={busy || conflict || uploading || !draft.name.trim() || !draft.references.length} onClick={() => void save()}><Save size={16} />保存</button>
           <button type="button" className={styles.primary} disabled={busy || conflict || uploading || !draft.name.trim() || !draft.references.length || draft.disabled || selected.filter(item => item.id !== draft.id).reduce((sum, item) => sum + item.referenceCount, 0) + draft.references.length > maxReferences} onClick={() => void save(true)}><Save size={16} />保存并选用</button>
         </>}</div>
