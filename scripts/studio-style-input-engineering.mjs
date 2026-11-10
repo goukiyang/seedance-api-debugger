@@ -91,18 +91,44 @@ assert.equal(textarea().props.disabled, false);
 assert.ok([...storage.values()].some(value => value.includes(writes[2].value.requestId)));
 checks.push('unknown draft preserves original request identity and never resubmits while retaining input');
 await act(async () => tree.unmount());
+for (const actualFull of [true, false]) {
+  storage.clear();
+  const full = [{ ...group, id: '22222222-2222-4222-8222-222222222222', referenceCount: 10,
+    references: Array.from({ length: 10 }, (_, index) => ({ ...asset, id: `asset-${index}` })) }];
+  await act(async () => {
+    tree = Renderer.create(React.createElement(exports.StudioStyleGroups, { ref, userId: 'owner', selected: actualFull ? [] : full,
+      appliedSelection: actualFull ? full : [], onChange: () => {}, currentImages: [], maxReferences: 10 }),
+    { createNodeMock: element => element.type === 'dialog' ? { open: false, showModal() { this.open = true; }, close() { this.open = false; } } : {} });
+  });
+  await act(async () => { ref.current.edit(group); await new Promise(setImmediate); });
+  const saveUse = tree.root.findAllByType('button').find(button => button.children.includes('保存并选用'));
+  assert.equal(saveUse.props.disabled, actualFull, 'Save/use quota followed unconfirmed choices instead of actual selection');
+  await act(async () => tree.unmount());
+}
+checks.push('save/use image quota follows actual selection in both pending/applied mismatch directions');
 
 const parsed = ts.createSourceFile(selectorFile, selector, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-let updated, undoClick;
+let updated, undoClick, confirmDisabled, countExpression;
 function visit(node) {
   if (ts.isVariableDeclaration(node) && node.name.getText(parsed) === 'styleUpdated') updated = node.initializer.getText(parsed);
+  if (ts.isVariableDeclaration(node) && node.name.getText(parsed) === 'imageCount') countExpression = node.initializer.getText(parsed);
+  if (ts.isJsxOpeningElement(node) && node.tagName.getText(parsed) === 'button'
+    && node.parent.children?.some(item => ts.isJsxText(item) && item.text.trim() === '确认选择')) {
+    confirmDisabled = node.attributes.properties.find(item => ts.isJsxAttribute(item) && item.name.getText(parsed) === 'disabled').initializer.expression.getText(parsed);
+  }
   if (ts.isJsxOpeningElement(node) && node.tagName.getText(parsed) === 'button'
     && node.attributes.properties.some(item => ts.isJsxAttribute(item) && item.name.getText(parsed) === 'aria-label' && item.initializer?.text === '撤销本次选择修改')) {
     undoClick = node.attributes.properties.find(item => ts.isJsxAttribute(item) && item.name.getText(parsed) === 'onClick').initializer.expression.getText(parsed);
   }
   ts.forEachChild(node, visit);
 }
-visit(parsed); assert.ok(updated); assert.ok(undoClick);
+visit(parsed); assert.ok(updated); assert.ok(undoClick); assert.ok(confirmDisabled); assert.ok(countExpression);
+for (const count of [10, 11]) {
+  const context = { selectedStyles: [{ referenceCount: count }], detail: null, manager: null, cap: 10 };
+  vm.runInNewContext(ts.transpileModule(`const imageCount = ${countExpression}; globalThis.locked = ${confirmDisabled};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context);
+  assert.equal(context.locked, count > 10, 'Outer confirm accepted over-limit pending styles');
+}
+checks.push('outer confirmation requires remaining pending choices to fit the actual image limit');
 for (const scenario of ['current', 'historical', 'use', 'replace-history']) {
   const historical = scenario === 'historical' || scenario === 'replace-history';
   const use = scenario === 'use' || scenario === 'replace-history';
