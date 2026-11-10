@@ -180,7 +180,7 @@ async function main() {
     assertNoSynchronousImageAdmission: async () => {}, assertUsageProject: async () => {}, canUseCompanyTemplates: () => true,
     canViewStudioPreset: (_actor: unknown, preset: { owner_id: string; is_shared: boolean }) => preset.owner_id === owner || preset.is_shared,
     resolveStudioTaskSharedUse: async (_actor: unknown, _module: unknown, supplied: unknown) => { assert.deepEqual(plain(supplied), intent); return shared; },
-    assertSharedStudioWorkerReady: async () => {},
+    assertSharedStudioWorkerReady: async () => {}, assertStudioTaskSettingsWriter: async () => {},
     readStudioWorkspaceSource: async () => null,
     studioPresetArchived: async (id: string) => id === 'synthetic-prior-preset' && priorArchived,
     resolveStudioModuleGenerationConfig: (source: Record<string, unknown>) => ({ ...source, prices: settings.prices }),
@@ -208,10 +208,13 @@ async function main() {
     STUDIO_BATCH_LIMITS: { images: 30 }, pricingCanonical: (value: unknown) => JSON.stringify(value),
     // Any unexpected network/module access is a fixture failure, not a fallback.
     fetch: () => { forbiddenCalls++; throw new Error('Network prohibited'); },
-    require: () => { forbiddenCalls++; throw new Error('Application import prohibited'); },
+    require: (name: string) => {
+      if (name === './private-storage.server') return storageExports;
+      forbiddenCalls++; throw new Error('Application import prohibited');
+    },
   };
   const code = [declarations('src/lib/image-studio/style-groups.ts', ['StudioStyleError', 'parseStudioStyleIds']),
-    declarations('src/lib/image-studio/task-settings-storage.ts', ['assertStudioTaskSettingsWrite']),
+    declarations('src/lib/image-studio/task-settings-storage.ts', ['assertStudioTaskSettingsWrite', 'studioSettingsSourceContext']),
     declarations('src/lib/image-studio/fixed-references.ts', ['StudioFixedReferenceError', 'parseStudioFixedReferences']),
     declarations('src/lib/image-studio/reference-policy.ts', ['StudioReferencePolicyError', 'boundedPrimaryMax', 'orderedUnique',
       'defaultStudioReferencePolicy', 'validateStudioReferenceCounts', 'parsePolicyShape', 'parseStudioReferencePolicy', 'mapStudioReferencePolicy']),
@@ -410,6 +413,33 @@ async function main() {
     'old_restore_metadata_does_not_override_current_saved_definition', 'explicit_restore_only_initializes_editable_current_values',
     'private_draft_revision_drives_generation_without_publishing_defaults',
     'current_quote_single_and_batch_preparation_share_inputs', 'current_input_does_not_grant_colleague_definition_permissions');
+
+  const currentWithProvenance = { ...currentBody, restoredSettings: undefined,
+    taskSettings: taskSettingsContract.studioTaskSettings('current', marker.sourceTaskId) };
+  deleted = true;
+  const beforeCurrentProvenance = sourceReads;
+  const currentWithoutSource = await prepare(currentWithProvenance);
+  assert.equal(currentWithoutSource.snapshot.globalContext, settings.context);
+  assert.equal(currentWithoutSource.snapshot.moduleContext, '');
+  assert.equal(currentWithoutSource.snapshot.taskSettings.sourceTaskId, marker.sourceTaskId);
+  assert.deepEqual(JSON.parse(currentWithoutSource.task.reference_ids), ['current-main']);
+  const currentProvenanceQuoteAt = specificationInputs.length;
+  await engine.prepareImageBillingQuote(owner, currentWithProvenance);
+  assert.equal(JSON.stringify(specificationInputs[currentProvenanceQuoteAt]), JSON.parse(currentWithoutSource.task.billing_contract_json).specification);
+  assert.equal((await prepare(currentWithProvenance, true)).task.billing_contract_json, currentWithoutSource.task.billing_contract_json);
+  assert.equal(sourceReads, beforeCurrentProvenance);
+  checks.push('current_global_settings_ignore_unavailable_provenance_in_quote_single_and_batch');
+
+  const historicalWithProvenance = { ...currentWithProvenance,
+    taskSettings: taskSettingsContract.studioTaskSettings('historical', marker.sourceTaskId) };
+  await assert.rejects(() => prepare(historicalWithProvenance), /历史设置来源已不可用/);
+  await assert.rejects(() => prepare({ ...currentWithProvenance, restoredSettings: marker }));
+  deleted = false; sourceOwner = 'another-owner';
+  await assert.rejects(() => prepare(historicalWithProvenance), /历史设置来源已不可用/);
+  assert.equal((await prepare(currentWithProvenance)).snapshot.globalContext, settings.context);
+  sourceOwner = owner;
+  assert.equal((await prepare(historicalWithProvenance)).snapshot.globalContext, sourceSnapshot.globalContext);
+  checks.push('historical_context_and_explicit_definition_restore_keep_real_source_permissions');
 
   // Exercise the real draft-reference resolver, keeping identity/session and
   // encrypted storage as explicit external boundaries of this fixture.
