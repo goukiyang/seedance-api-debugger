@@ -1,10 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  "title": "资产页超分入口恢复",
+  "title": "视频下载与超分提交修复",
   "outline": [
-    "未绑定视频卡的视频也能从资产页打开超分",
-    "超分继续沿用原项目，并显示本次费用"
+    "视频保存持续完成，减少排队等待",
+    "下载就绪后自动更新入口",
+    "超分准备结束后可继续创建，保留原请求保护"
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

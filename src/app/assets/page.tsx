@@ -1344,6 +1344,26 @@ function AssetsPageContent() {
     };
   }, [user, assetView, isReactionView, isEnhanceView, scope, requestType, enhanceFilter, showUploadedAssets, sourceFilter, status, sort, groupBy, projectId, ownerUserId, keyword, page, pageCapacity, pageScope, restoredPageScope, restoredFiltersOwner, reloadToken]);
 
+  const hasPendingVideoDelivery = items.some(item => item.source === 'video_task' && item.deliveryStage?.key === 'preparing');
+  useEffect(() => {
+    if (!user?.id || isReactionView || !hasPendingVideoDelivery || syncingAssets || selectionMode) return;
+    const refresh = () => { if (!document.hidden) setReloadToken(value => value + 1); };
+    const timer = setInterval(refresh, 15_000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', refresh); };
+  }, [user?.id, isReactionView, hasPendingVideoDelivery, syncingAssets, selectionMode, pageScope]);
+
+  useEffect(() => {
+    setActiveItem(current => {
+      if (!current || current.source !== 'video_task') return current;
+      const latest = items.find(item => item.id === current.id);
+      if (!latest) return current;
+      return { ...current, downloadUrl: latest.downloadUrl, downloadable: latest.downloadable,
+        stableDownloadReady: latest.stableDownloadReady, deliveryStage: latest.deliveryStage,
+        deliveryCompletedAt: latest.deliveryCompletedAt };
+    });
+  }, [items]);
+
   useEffect(() => {
     if (!user?.id || hasExplicitContent || isReactionView || loading || showingCachedAssets || activeItem
       || selectionRestoreOwner.current === user.id) return;

@@ -103,16 +103,33 @@ export default function EnhanceVideoAction({ task, defaultOpen = false, resoluti
     try {
       const selectedFps = fps === 'none' ? null : Number(fps);
       // Keep the original asset key so existing or uncertain submissions resolve to the same task.
-      const key = requestOrigin === 'asset' && toolVersion === 'standard'
+      const businessKey = requestOrigin === 'asset' && toolVersion === 'standard'
         ? ['asset-enhance', task.id, resolution, selectedFps || 'source_fps'].join(':')
         : ['enhance', task.id, toolVersion, resolution, selectedFps || 'source_fps'].join(':');
-      const pendingKey = `sd2-enhance-acceptance:${pricing.actorId}:${key}`;
+      const preparationKey = `sd2-enhance-preparation:${pricing.actorId}:${businessKey}`;
+      let key = sessionStorage.getItem(preparationKey) || businessKey;
+      let pendingKey = `sd2-enhance-acceptance:${pricing.actorId}:${key}`;
       if (sessionStorage.getItem(pendingKey)) {
         const response = await fetch(`/api/tasks/request-status?idempotency_key=${encodeURIComponent(key)}`, { cache: 'no-store' });
         const original = await response.json();
         if (!creation.isCurrent()) return;
         if (response.ok && original.task?.id) { await creation.acceptTask(key, original.task.id); sessionStorage.removeItem(pendingKey); router.push(taskDetailHref(original.task.id, returnTo || `/tasks/${task.id}`)); return; }
         throw new Error('原超分提交待确认，请查询原任务；不会再次发送');
+      }
+      const originalResponse = await fetch(`/api/video/creation-intents?request_id=${encodeURIComponent(key)}`, { cache: 'no-store' });
+      const originalPreparation = await originalResponse.json();
+      if (!creation.isCurrent()) return;
+      if (!originalResponse.ok) throw new Error(originalPreparation.message || originalPreparation.error || '原超分准备暂时无法确认');
+      const closed = originalPreparation.intent?.request_id === key && originalPreparation.intent.state === 'closed'
+        && !originalPreparation.intent.accepted_task_id && !originalPreparation.intent.batch_id
+        || originalPreparation.intent === null && originalPreparation.state === 'rejected'
+          && originalPreparation.rejection?.code === 'creation_preparation_closed'
+          && originalPreparation.rejection.submitted === false && originalPreparation.rejection.acceptedCount === 0;
+      if (closed) {
+        // A fresh user submit may follow a proven closure; the old request stays sealed.
+        key = `${businessKey}:retry:${crypto.randomUUID()}`;
+        sessionStorage.setItem(preparationKey, key);
+        pendingKey = `sd2-enhance-acceptance:${pricing.actorId}:${key}`;
       }
       const body = { provider: 'volcengine_mediakit', model: 'enhance-video', action: 'enhance', entry: 'enhance',
         ...(pricing.quote?.pricing_revision ? { pricing_revision: pricing.quote.pricing_revision } : {}),

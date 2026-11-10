@@ -95,21 +95,26 @@ export async function processVideoDeliveryQueueBatch(options: WorkerOptions = {}
   let succeeded = 0;
   let failed = 0;
 
-  for (let index = 0; index < limit; index += 1) {
-    const job = await claimNextVideoDeliveryJob({
-      workerId,
-      lockTimeoutMs: options.lockTimeoutMs,
-    });
-    if (!job) break;
-
-    processed += 1;
-    try {
-      await processVideoDeliveryJob(job);
-      succeeded += 1;
-    } catch (error) {
-      failed += 1;
-      await failVideoDeliveryJob(job, error);
+  for (let index = 0; index < limit;) {
+    const jobs: VideoDeliveryJobRecord[] = [];
+    // Claim in order so these consumers cannot race for the same queue head.
+    while (jobs.length < 2 && index < limit) {
+      const job = await claimNextVideoDeliveryJob({ workerId, lockTimeoutMs: options.lockTimeoutMs });
+      if (!job) break;
+      jobs.push(job);
+      index += 1;
     }
+    if (!jobs.length) break;
+    processed += jobs.length;
+    await Promise.all(jobs.map(async job => {
+      try {
+        await processVideoDeliveryJob(job);
+        succeeded += 1;
+      } catch (error) {
+        failed += 1;
+        await failVideoDeliveryJob(job, error);
+      }
+    }));
   }
 
   return {
