@@ -55,10 +55,6 @@ export async function GET(
     throw error;
   }
 
-  if (task.public_video_url) {
-    return NextResponse.redirect(task.public_video_url, 302);
-  }
-
   const absolutePath = localPublicVideoPath(task.local_video_path);
   if (absolutePath) {
     let info;
@@ -71,6 +67,10 @@ export async function GET(
     if (info?.isFile() && info.size > 0) {
       return mediaPreviewResponse(request, task.local_video_path!, MIME_TYPE);
     }
+  }
+
+  if (task.public_video_url) {
+    return NextResponse.redirect(task.public_video_url, 302);
   }
 
   if (isInternalOnlyResultUrl(task.result_video_url)) {

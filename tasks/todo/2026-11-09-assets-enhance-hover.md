@@ -8,7 +8,7 @@
 
 1. [x] 核对现网与原因：2026-11-10T06:18Z 仍为 ea910bed8c26c8a5bfa64d1afe94f7ecf7b90e80 / v0.141.1；sd2-gray active，公网 release 相符。
 2. [x] 最小修复入口及共用组件，保留现有分辨率/帧率和返回资产页现场。
-3. [ ] Linux完整src类型检查和四文件相关lint均exit0（仅资产页既有invalidateAssetCache依赖warning）；待聚焦提交推送。
+3. [x] Linux完整src类型检查和四文件相关lint均exit0（仅资产页既有invalidateAssetCache依赖warning）；fd3c22756164652c98660f8095f24260811a1a4f已推origin并核同头。
 4. [ ] 完整继承前序4的统一健康发布，再用现有保护入口构建部署；核公网/服务并交付待用户手验。
 
 ## 原因与共享影响
@@ -34,3 +34,7 @@
 ## 本轮新发现的线索与问题
 
 未新增范围外问题；旧资产超分提交和无卡过滤为本次同一问题的必要配套，下载诉求已撤回。
+
+## 最终候选与发布接续
+
+4已正式交接实际健康ae8c3ab42374523dcb090bf55128823eaa291130 / v0.141.2 / BUILD _VfkjoUvLHnDSM1en0Dk8，2026-11-10T06:42:58Z收口，窗交7。最终候选完整继承此源，新增仅超分四文件及PATCH v0.141.3/短通知/本单；下载原字节保持。guard仍79abce5c6b06bd714261609678992a3161ba4bad / zxSxN0_ODrOhrA3gjUCPz，按原成功构建和原时间复用。未把ea910作最终基线。

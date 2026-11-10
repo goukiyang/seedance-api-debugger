@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { VideoTask } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { enqueueVideoDeliveryJob } from '@/lib/video/delivery-queue';
 import { createVideoTask, getProviderConfig } from '@/lib/provider/jimeng';
 import { createH3VideoJob, H3RequestError, type H3GeneratePayload } from '@/lib/provider/h3';
 import { getH3ApiSettings } from '@/lib/integrations/h3';
@@ -200,8 +201,11 @@ export async function processVideoRetries(shouldStop: () => boolean = () => fals
     if (shouldStop()) break;
     const value = JSON.parse(row.value_json) as import('./store').RetryRecord;
     if (value.attempts.at(-1)?.state !== 'accepted') continue;
-    await (await import('@/lib/video/task-finalizer')).finalizeVideoTaskStatus(value.taskId,
+    const result = await (await import('@/lib/video/task-finalizer')).finalizeVideoTaskStatus(value.taskId,
       { cacheOnSuccess: false, generateThumbnail: false, providerSignal: AbortSignal.timeout(30000) });
+    if (result.task?.local_status === 'succeeded') {
+      await enqueueVideoDeliveryJob(value.taskId, { priority: 5, payload: { source: 'safe_retry_worker' } });
+    }
     await prisma.platformSetting.updateMany({ where: { key: row.key, value_json: row.value_json }, data: { updated_at: new Date() } });
   }
 }

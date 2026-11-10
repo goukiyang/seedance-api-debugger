@@ -137,7 +137,14 @@ async function main() {
     assert.equal(completed.local_status, 'succeeded');
     assert.equal((await store.readRetry('video', id))!.value.attempts.length, 4);
     assert.equal(completed.frozen_cost, 0); assert.equal(completed.actual_cost, 5);
+    const videoDelivery = await prisma.videoDeliveryJob.findUniqueOrThrow({ where: { task_id: id } });
+    assert.equal(videoDelivery.status, 'pending');
+    assert.equal(videoDelivery.attempts, 0);
+    assert.equal(JSON.parse(videoDelivery.payload_json!).source, 'safe_retry_worker');
+    assert.equal(completed.delivery_status, 'pending');
     await video.processVideoRetries(); assert.equal(posts, 4);
+    assert.equal(await prisma.videoDeliveryJob.count({ where: { task_id: id } }), 1);
+    checks.push('video_background_success_queues_delivery_without_opening_status_or_replaying_generation');
     checks.push('video_real_adapter_background_four_attempts_success_stop_single_charge');
     const stopOwner = await user(), stopId = randomUUID();
     await prisma.videoTask.create({ data: { id: stopId, provider: 'seedance', model: task.model, generation_mode: 'all_in_one_reference', prompt: 'fixture',

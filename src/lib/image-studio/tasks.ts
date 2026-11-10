@@ -1035,9 +1035,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const auxiliaryCount = auxiliaryTransientIds.length + sourceTemplateReferenceIds.length + actualFixedReferences.length;
     try { validateStudioReferenceCounts(referencePolicy, [...referenceIds, ...sourceTemplateReferenceIds], templateFixedReferences.length, actualStyleReferenceGroups.reduce((total, group) => total + group.references.length, 0), true); }
     catch (error) { throw new StudioError((error as Error).message); }
-    if (input.taskSettings?.sourceTaskId) {
-      const originalGlobalContext = await studioSettingsSourceContext(tx, identity, input.taskSettings.sourceTaskId);
-      if (contextMode === 'historical') snapshotGlobalContext = originalGlobalContext;
+    if (contextMode === 'historical' && input.taskSettings?.sourceTaskId) {
+      snapshotGlobalContext = await studioSettingsSourceContext(tx, identity, input.taskSettings.sourceTaskId);
     }
     const baseContext = [snapshotGlobalContext.trim(), snapshotModuleContext.trim()].filter(Boolean).join('\n\n---\n模块上下文：\n');
     if (!input.prompt.trim() && !baseContext.trim() && !skills.length && primaryReferenceIds.length + auxiliaryCount === 0) throw new StudioError('请填写画面描述、上下文、选择skills或添加参考图片');
