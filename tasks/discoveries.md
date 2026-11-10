@@ -149,6 +149,8 @@ TPL-CURRENT01的实际独立checkout初始化CodeGraph约50分钟仍未完成，
 R02扩查补证：准备入口虽返回READY，独立checkout的git-common-dir不符合适配器限定，实际SQLite缺少current-inputs/tasks/batches/shared-contract四个后端文件。studio.tsx和PrivateDefinitionEditor.tsx已有记录且与当时源SHA一致，前端结构查询可用；不能据此声称后端索引恢复。缺口按定向源码接续，未扩改全局工具。
 
 R02改码后再次只读核对：studio.tsx索引已旧，未改动的PrivateDefinitionEditor仍同SHA，tasks.ts仍无索引；此后未用旧结构图作当前源结论，按当前源码和候选工程补证。索引缺口继续保留，不冒更新成功。
+
+TPL-STYLE03补证：再次准备约26分钟（sync扫描约20分钟）未完成，已终止本人ensure/sync；只使用hash匹配的两个风格前端记录及context查询，后端源码直读。未新增网站故障归因，不冒索引恢复。
 <!-- /TPL-CURRENT01-TOOL-20261109 -->
 
 <!-- TPL-CURRENT02-READ-SCOPE-20261109 -->
