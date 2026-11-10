@@ -1691,7 +1691,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const repairDefinition = sharedLive?.repairDefinition;
   const definitionEditable = (!module.sourcePresetId || module.sourcePresetOwnedByViewer === true) && (!sharedLive || (sharedLive.capabilities ? sharedLive.capabilities.editDefinition.allowed : sharedLive.mode === 'publisher' && sharedReady));
   const definitionReady = !sharedLive || definitionEditable && (sharedReady || Boolean(repairDefinition));
-  const sourceCoverEditable = sharedLive?.methodDraft === true && module.sourcePresetOwnedByViewer === true && !module.coverEditable;
+  const sourceCoverEditable = sharedLive?.mode === 'live' && module.sourcePresetOwnedByViewer === true && !module.coverEditable;
   const contextEditable = !module.privateDefinition && definitionEditable && module.contextEditable !== false && definitionReady;
   const fixedEditable = definitionEditable && isAdmin && module.fixedReferencesEditable !== false && definitionReady;
   const fixedRepairAllowed = !isAdmin && definitionReady && repairDefinition?.fixedReferenceRepairAllowed === true;
