@@ -2209,6 +2209,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     model: moduleModel, resolution: moduleDraft.resolution, quality: moduleDraft.quality });
   const latestSettingsDraft = useRef('');
   latestSettingsDraft.current = JSON.stringify({ moduleDraft, contextDialogSnapshot, personalOverrides, name, groupName, bannerAssetId: banner?.id || null });
+  function captureRestoreInputs() {
+    return JSON.stringify([liveGenerationSignature.current, latestSettingsDraft.current,
+      currentInputRevision.current, privateEditorEditVersion.current]);
+  }
+  function restoreInputsUnchanged(snapshot: string) {
+    return !isClientSessionBlocked() && snapshot === captureRestoreInputs();
+  }
   async function saveModuleSettings() {
     if (definitionReviewBusy) return;
     if (privateEditorBeforeClose.current && !await privateEditorBeforeClose.current()) return;
@@ -2753,17 +2760,22 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   async function restoreDefaults() {
     if (!draftLoaded || quickPresetLock.current || presetSaveLock.current || submitting || pendingSubmission || moduleSaving || uploading || bannerUploading || draftRestoring) return;
     if (sharedLive && (!sharedLive.available || !hasSharedDefaults(sharedLive.defaults))) { setError('模板暂不可用，本人草稿和历史保留'); return; }
+    const inputSnapshot = captureRestoreInputs();
     const snapshot = restoredSettingsError && recoverableDraft ? recoverableDraft : temporaryDraftPayload();
     let retained = false;
     try { const raw = JSON.stringify(module.privateDefinition ? retainLegacyPrivateDraft(defaultsRecoveryKey, snapshot) : snapshot); localStorage.setItem(defaultsRecoveryKey, raw); retained = localStorage.getItem(defaultsRecoveryKey) === raw; } catch { /* The visible snapshot can still be restored until this page closes. */ }
     if (!retained && (generationChanged || authorDefinitionDirty)
       && !(await confirm('本机未能保存当前草稿。恢复默认后只能在本页找回，刷新或离开后可能丢失本次修改。是否继续？', { title: '恢复默认', confirmLabel: '继续恢复默认' }))) return;
+    if (!restoreInputsUnchanged(inputSnapshot)) return;
     let defaultPersonalRecovery: ReturnType<typeof recoverStudioPersonalPrompt> | null = null;
     if (!sharedLive) {
       const sequence = ++draftRestoreSequence.current;
       setDraftRestoring(true);
       defaultPersonalRecovery = await recoverPersonalPromptInput(baseline.prompt, module.reproduceFromTaskId, prompt);
-      if (sequence !== draftRestoreSequence.current || isClientSessionBlocked()) return;
+      if (sequence !== draftRestoreSequence.current || !restoreInputsUnchanged(inputSnapshot)) {
+        if (sequence === draftRestoreSequence.current) setDraftRestoring(false);
+        return;
+      }
       setDraftRestoring(false);
     }
     setNamedSettingStyles(false);
@@ -2945,9 +2957,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       || uploading || bannerUploading || moduleSaving || moduleDeleting || ratioEditing || !sharedReady) return;
     quickPresetLock.current = true; setQuickPresetApplying(setting.id); setDraftRestoring(true); setError('');
     const scope = quickPresetScopeKey, sequence = ++draftRestoreSequence.current;
+    const inputSnapshot = captureRestoreInputs();
     try {
       const result = await readResponse(await fetchReadWithRetry(`/api/image-studio/module-settings?moduleId=${encodeURIComponent(module.id)}&id=${encodeURIComponent(setting.id)}`));
-      if (quickPresetReadScope.current !== scope || sequence !== draftRestoreSequence.current || isClientSessionBlocked()) return;
+      if (quickPresetReadScope.current !== scope || sequence !== draftRestoreSequence.current || !restoreInputsUnchanged(inputSnapshot)) return;
       const current = result.setting as StudioModuleSettings & { styleGroups: StudioStyleSummary[]; images: UploadedAssetPayload[] };
       if (current.ownerId !== userId || current.moduleId !== module.id || current.id !== setting.id) throw new Error('设置来源与当前模板不匹配，输入保留');
       const temporary = current.images.filter(image => !images.some(primary => primary.id === image.id));
@@ -2963,7 +2976,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       setCount(values.count); setAspectRatio(values.aspectRatio); setPrompt(values.prompt);
       setStyleGroups(current.styleGroups); setAuxiliaryImages(temporary); setNamedSettingStyles(true);
       moduleDialog.current?.close(); setSaveStatus(`已套用设置：${current.name}`);
-    } catch (cause) { if (quickPresetReadScope.current === scope) setError(cause instanceof Error ? cause.message : '设置未套用，当前输入保留'); }
+    } catch (cause) { if (quickPresetReadScope.current === scope && sequence === draftRestoreSequence.current && restoreInputsUnchanged(inputSnapshot)) setError(cause instanceof Error ? cause.message : '设置未套用，当前输入保留'); }
     finally { quickPresetLock.current = false; setQuickPresetApplying(null); if (sequence === draftRestoreSequence.current) setDraftRestoring(false); }
   }
 
@@ -2989,10 +3002,11 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     if (quickPresetLock.current || presetSaveLock.current || !draftLoaded || draftRestoring || submitting || pendingSubmission || uploading || bannerUploading || moduleSaving || moduleDeleting || ratioEditing) return;
     quickPresetLock.current = true; setQuickPresetApplying(preset.id); setError('');
     const sequence = draftRestoreSequence.current;
+    const inputSnapshot = captureRestoreInputs();
     setDraftRestoring(true);
     try {
       const available = await loadQuickPresets();
-      if (!available || sequence !== draftRestoreSequence.current) return;
+      if (!available || sequence !== draftRestoreSequence.current || !restoreInputsUnchanged(inputSnapshot)) return;
       const current = available.find(item => item.id === preset.id);
       if (!current) throw new Error('这个快捷模板已不可用，请重新选择。');
       if (!current.referencesAvailable) throw new Error('快捷模板中的部分参考图已不可用，当前设置未被替换。');
@@ -3009,12 +3023,19 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         images: (sharedLive ? current.personalImages || [] : current.images.filter(image => !policy.primaryIds.includes(image.id || ''))).map(image => ({ id: image.id })),
         referencePolicy: { ...policy, primaryIds: [] }, fixedReferences: current.fixedReferences, reproduceSourceTaskId: null }, false, true);
         if (restored) { setRestoredTaskSettings(null); setRestoredSettingsError(''); setAppliedSource(null); setReproductionGlobalContext(null); setSaveStatus(`已套用：${current.name}`); }
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '快捷模板套用失败'); }
+    } catch (cause) { if (sequence === draftRestoreSequence.current && restoreInputsUnchanged(inputSnapshot)) setError(cause instanceof Error ? cause.message : '快捷模板套用失败'); }
     finally { quickPresetLock.current = false; setQuickPresetApplying(null); setDraftRestoring(false); }
   }
 
   async function restoreTemporaryDraft(saved = recoverableDraft, automatic = false, preservePrimary = false) {
       const sequence = ++draftRestoreSequence.current;
+      const inputSnapshot = captureRestoreInputs();
+      const canRestore = () => {
+        if (sequence !== draftRestoreSequence.current) return false;
+        if (restoreInputsUnchanged(inputSnapshot)) return true;
+        setDraftRestoring(false);
+        return false;
+      };
       const recoveryRaw = saved ? JSON.stringify(saved) : null;
       if (saved && module.privateDefinition) saved = withoutLegacyPrivateFields(saved);
       setDraftRestoring(true);
@@ -3147,14 +3168,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
             recoveredStyles = restoredTask.snapshot.styleGroups || [];
           }
         } catch (cause) {
-          if (sequence === draftRestoreSequence.current && saved.restoredSettings !== undefined) {
+          if (canRestore() && saved.restoredSettings !== undefined) {
             setRestoredSettingsError(cause instanceof Error ? cause.message : '已恢复设置暂时无法读取，当前草稿保留。');
           }
-          if (sequence === draftRestoreSequence.current) { blockedDraftSignature.current = generationDraft; setError(cause instanceof Error ? cause.message : '草稿参考图读取失败，请重试'); if (!preservePrimary) setRecoverableDraft(saved); setDraftRestoring(false); }
+          if (canRestore()) { blockedDraftSignature.current = generationDraft; setError(cause instanceof Error ? cause.message : '草稿参考图读取失败，请重试'); if (!preservePrimary) setRecoverableDraft(saved); setDraftRestoring(false); }
           return false;
         }
-        if (sequence !== draftRestoreSequence.current) return false;
-        setNamedSettingStyles(saved.namedSettingStyles === true);
+        if (!canRestore()) return false;
         const structuredPrompt = saved.personalOverrides && typeof saved.personalOverrides === 'object' && Object.hasOwn(saved.personalOverrides, 'prompt') ? saved.personalOverrides.prompt : undefined;
         const selectedPersonalCandidate = Object.hasOwn(saved, 'personalPrompt') ? saved.personalPrompt : structuredPrompt !== undefined ? structuredPrompt : saved.prompt;
         const savedPersonalCandidate = saved.schemaVersion === 4 && isEncryptedStudioPersonalPrompt(selectedPersonalCandidate) && typeof saved.prompt === 'string' && !isEncryptedStudioPersonalPrompt(saved.prompt) ? saved.prompt : selectedPersonalCandidate;
@@ -3162,7 +3182,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         const personalRecovery = savedPersonalCandidate !== undefined || saved.personalPromptState === 'unknown'
           ? await recoverPersonalPromptInput(savedPersonalCandidate, personalSourceTaskId, prompt, recoveredRestoredSettings?.snapshot || restoredTask?.snapshot)
           : null;
-        if (sequence !== draftRestoreSequence.current || isClientSessionBlocked()) return false;
+        if (!canRestore()) return false;
+        setNamedSettingStyles(saved.namedSettingStyles === true);
         const recoveredMode = parseStudioTaskSettings(saved.taskSettings);
         setGlobalSettingsSourceTaskId(recoveredMode?.sourceTaskId || null);
         setGlobalContextMode(recoveredMode?.mode ?? (saved.restoredSettings || saved.reproduceSourceTaskId ? 'historical'
@@ -3981,16 +4002,14 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
       && (!item.task.owner || item.task.owner.id === userId));
   }
   async function restoreResultSettings(task: StudioTask, mode: StudioTaskSettings['mode'] = 'current') {
-    const scope = taskReadScope, view = currentView.current.token, signature = liveGenerationSignature.current;
-    const inputRevision = currentInputRevision.current;
+    const scope = taskReadScope, view = currentView.current.token, inputSnapshot = captureRestoreInputs();
     const sequence = ++detailReadSequence.current;
     try {
       const detail = await readTaskDetail(task);
       if (isClientSessionBlocked() || taskReadScopeRef.current !== scope || !currentView.current.active
-        || currentView.current.token !== view || currentInputRevision.current !== inputRevision
-        || liveGenerationSignature.current !== signature || sequence !== detailReadSequence.current) return;
+        || currentView.current.token !== view || !restoreInputsUnchanged(inputSnapshot) || sequence !== detailReadSequence.current) return;
       const reason = restoreTask(detail, mode); if (reason) setError(reason);
-    } catch (cause) { if (taskReadScopeRef.current === scope && sequence === detailReadSequence.current) setError(cause instanceof Error ? cause.message : '设置未能读取，当前输入保留'); }
+    } catch (cause) { if (taskReadScopeRef.current === scope && sequence === detailReadSequence.current && restoreInputsUnchanged(inputSnapshot)) setError(cause instanceof Error ? cause.message : '设置未能读取，当前输入保留'); }
   }
   async function readTaskDetail(task: StudioTask): Promise<StudioTask> {
     if (task.snapshot) return task;

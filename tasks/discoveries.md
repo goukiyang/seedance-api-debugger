@@ -140,3 +140,11 @@ SHARE-CHAIN-FIX01收口：R1–R5及飞书命名交集已部署0.138.0，实际�
 
 详[统一工单§9–10](todo/2026-11-08-capacity-report-hd-closure.md)，必要元数据/失败及复跑入口只保正式根私有资料索引；未新增账务真值、服务或生产探针。
 <!-- /D-20261109-CAP-REPORT-HD -->
+
+<!-- TPL-CURRENT01-TOOL-20261109 -->
+## D-20261109-CODEGRAPH-IO 本机索引准备缓慢（待核线索）
+
+TPL-CURRENT01的实际独立checkout初始化CodeGraph约50分钟仍未完成，进程处于读取等待，已停止本人索引；未取得可用查询，不声称覆盖当前源。日志 /Volumes/Data/Cache/template-current-input-20261109/codegraph-init.log，过程及安全源码替代见[原单](todo/2026-11-09-template-current-input.md#8-最终交付回执)。与既有D-20261101-06 worktree准备缓慢同属本机工具链线索，未核是否同根因，未证明仓库损坏或网站故障。应用以精确Git源、32项工程、两套完整构建和必要部署证据交付；本轮不扩为磁盘、Git存储或索引服务整治。
+
+R02扩查补证：准备入口虽返回READY，独立checkout的git-common-dir不符合适配器限定，实际SQLite缺少current-inputs/tasks/batches/shared-contract四个后端文件。studio.tsx和PrivateDefinitionEditor.tsx已有记录且与当时源SHA一致，前端结构查询可用；不能据此声称后端索引恢复。缺口按定向源码接续，未扩改全局工具。
+<!-- /TPL-CURRENT01-TOOL-20261109 -->

@@ -1,8 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '作品广场图片信息恢复', outline: [
-  '图片与视频统一显示模板、作者和观看数量',
-  '保留卡内悬停一键参考，卡片排列更稳定',
+const notice = { title: '模板恢复保留最新编辑', outline: [
+  '恢复历史、草稿或快捷设置时保留期间的新输入',
+  '私密原文的新编辑及时识别，保存默认仍独立处理',
+  '3D多视图规则保存期间继续输入时保留编辑窗口',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
