@@ -1,3 +1,9 @@
+<!-- FUSION-UX12-MATERIALS-20261110 -->
+## 角色融合UX12保留卡片与分组（2026-11-10）
+
+v0.142.4／94321fd71／0NgpOiaXpx1ldem_cu1Kf已部署，18:18Z健康，待用户手验。默认原卡片，卡片/分组共源、按账号记忆，原规则、手选/抽卡及新增定位保留。[原单UX12](../../tasks/todo/2026-11-08-character-fusion.md#ux12-保留原卡片呈现并可切换2026-11-10)及正式根私有 `docs/materials/2026-11-08-character-fusion-prototype/implementation/ux12/release-summary.json` 保安全工程/资源/健康摘要，原失败候选仍留服务器原stage；未导出DB/env/媒体/价格原行。完整类型/lint/Next与发布检查通过，源码索引同步超时另记；无收费或浏览器功能验收。
+<!-- /FUSION-UX12-MATERIALS-20261110 -->
+
 <!-- FUSION-UX09-MATERIALS-20261110 -->
 ## 角色融合整工具优化预览（2026-11-10）
 

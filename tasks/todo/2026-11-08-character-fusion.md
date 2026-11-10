@@ -761,8 +761,8 @@ stage为/data/video-api-debugger/release-staging/fusion-taxonomy-ux11-20261110/a
 - [x] 核实际工作区和原RuleCard/分组编辑关系，记录共享影响；以已健康c9945dc4db3eee450a2dfae4a1c047b34da108ef/v0.142.1/V2d6Nlr58aJXPzru7fABb为基线整合，保ImageStudio上下文/原封面及6项工程增量。
 - [x] 新目录复用原RuleCard做折叠卡片，默认卡片、按需展开选项/规则，类别名右侧锁头、加入/独立移出、顶部拖动和键盘前后移动保持；分组呈现保留。
 - [x] 视图/展开/顺序按账号记在原UI偏好内，切换不改配方或已有结果。主工作台与单条编辑复用呈现，DOM控制ID按编辑器实例隔离；自定义确认新增后展开原卡片区域并定位。
-- [ ] 完成必要类型/lint/完整构建与同批源码复核、索引更新；不主动浏览器、收费或自动功能验收。
-- [ ] 聚焦提交推送并按最新健康基线已有保护入口发布1424，核资源/服务及可恢复点，交用户手动验收。
+- [x] 完成必要类型/lint/完整构建与同批源码复核；索引准备两次超时，已按定向源码核对关系并保留待同步缺口。不主动浏览器、收费或自动功能验收。
+- [x] 聚焦提交推送并按最新健康基线已有保护入口发布1424，资源/服务及可恢复点已核，实际功能交用户手动验收。
 
 范围与架构：仅角色融合CatalogueEditor、RuleCard、studio与本模块CSS及正常版本元数据。RuleCard两个新呈现参数均默认保持原行为，另以实例controlId避免多编辑器重名；新旧视图沿用原settings和回调，只有UI偏好新增。具体项解锁同时解除类目/具体项锁，旧卡片快换类目同步清旧具体锁，避免显示切换而实际仍固定原对象；两种视图用同一操作，不改engine/API/JSON配方schema/费用/权限/中英目录。拖动ID分命名空间，原卡片顺序和布局重置/撤销继续保留。
 
@@ -775,4 +775,16 @@ Git：在codex/fusion-ux06-plaza-20261110干净f9dbcd07c上合并健康c994，pe
 最终基线5c4201af440e1dfb19b1fbbc1e67c154ae5289a2／0.142.3／87xXd_NaW61OguJTOJbeD在17:53:14Z健康，原发布者修正f3ec的JSX编译问题后真实完成构建和切版。仅继承该健康源：本批最终应用源2e67f6788f892b66c678614244b3dd3a0e2b4b1c／0.142.4，已推远端。与5c的应用差异只有4个融合UI文件和3个正常版本元数据，原工作区/DTO及18项工程脚本字节保持；2485个导出Git blob全部核对通过，stage为/data/video-api-debugger/release-staging/fusion-cards-ux12-20261110/attempt01。17:54:38Z核无其它发布controller后接续唯一构建，正常umask022，尚未切服务。
 
 第一候选2e67的attempt01完整Next在类型阶段发现joinCatalogueCard的Set被推断为string[]，未切服务；修正为明确Set<Dimension>，不改变运行逻辑、输入或功能。保留原失败stage/log，新候选沿同一1424继续封源，增加一次独立完整类型检查定位全部相关编译问题后再完成正常Next，不跳过类型/lint。
+
+修正候选94321fd714acd811001311de6b246f43c395432b已推远端，版本仍0.142.4；全部2485个导出blob重新核对通过，实际stage为fusion-cards-ux12-20261110/attempt02，先独立4GB完整tsc，再定向lint、原生/关联未变证据复用与鲜计价、完整Next及现有发布检查。attempt01失败未影响服务，运行基线继续为5c/1423，未抢占其它发布者。
+
+### UX12 实际交付与发布收口
+
+已部署，待用户手动验收。最终应用源94321fd714acd811001311de6b246f43c395432b／v0.142.4／BUILD 0NgpOiaXpx1ldem_cu1Kf，已推origin的codex/fusion-ux06-plaza-20261110。保已健康5c/1423全部功能，角色融合只有4个UI文件及正常版本元数据变化，engine/API/schema/目录/中英配对未改。原RuleCard呈现作为默认，卡片/分组切换共用一份选择和规则；默认折叠、展开顶部拖动、键盘前后、类别右侧锁头、加入与独立移出保留。展开后先见手选内容，标签规则再按需展开；原有卡片区域与96项/身形35项兼容入口保留，自定义确认加入后自动展开定位。视图、展开与顺序按账号记忆，现有结果/配方/手动选择/抽卡链保持。
+
+最终attempt02：2485个导出Git blob核对通过，独立4GB完整tsc、目标lint、完整Next内含types/lint均0；17原生与17关联沿匹配输入复用，鲜计价通过，6启动检查通过。第一次attempt01的2e67只因Set推断未通过类型检查，已用明确Dimension泛型修正，原失败日志/源码保留；未部署失败候选。CSS/缓存/hook提示未阻断构建，不为此修改无关模块或降低类型检查。CodeGraph准备两次在实际工作区git ls-files超30秒，本轮已定向核page账号key、CatalogueEditor/RuleCard/studio共源关系；索引刷新仍待同步，不冒成功。
+
+实际stage=/data/video-api-debugger/release-staging/fusion-cards-ux12-20261110/attempt02，pair d035fac9-8e42-4c6c-ab73-aadf2d0918a8，build0/cutover0。18:16:18Z公网58资源、融合页/布局32个真实manifest引用均200且SHA匹配，4匿名路由401；18:18:00Z实际健康为7服务/4timer/controller0。guard79abce5c6b06bd714261609678992a3161ba4bad／zxSxN0_ODrOhrA3gjUCPz原产物复用，价格d03c全字段、私密策略及环境/数据链接保持；一致SQLite备份、配置备份与同stage/program-recovery.sh只回程序入口保留，不回业务数据。本次无DDL、数据恢复、请求重发或真实生成/应用LLM收费调用，未演练生产回退。发布窗口已释放并给现有同项目发布者健康基线，仅继续本单文档收口。
+
+[安全发布摘要](../../docs/materials/2026-11-08-character-fusion-prototype/implementation/ux12/release-summary.json)保正式根私有资料，不含DB、环境、媒体或价格原行。实际入口https://sd2.youdooart.com/tools/character-fusion。没有自动浏览器或功能回归验收；卡片密度/层次、视图切换保选、折叠/拖动/触屏/键盘、锁定与移出、刷新记忆和新增卡片定位均待用户手验。本轮未新增范围外问题。
 <!-- /FUSION-UX12-20261110 -->
