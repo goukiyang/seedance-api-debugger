@@ -535,3 +535,14 @@ stage：`/data/video-api-debugger/release-staging/template-editor-entry-20261110
 
 attempt01缺baseline.build，创建候选/Next/切服务前退出；失败原证保留，attempt02补齐实际基线后成功。装备设计新旧定义差异和未覆盖边界见[原单§11](../tasks/todo/2026-11-09-template-current-input.md#11-tpl-editor04-原模板复用草稿及装备设计排查2026-11-10)。入口 https://sd2.youdooart.com/template-studio?type=image 。发布窗已交回后继。
 <!-- /TPL-EDITOR04-RELEASE-20261110 -->
+
+
+<!-- TPL-EDITOR05-RELEASE-20261110 -->
+### 2026-11-10 TPL-EDITOR05 复用草稿原件识别与完整设置：v0.142.3
+
+已部署；指定2个入口已按用户排查范围在真实登录页实点，保存与出图仍用户手验。主源5c4201af440e1dfb19b1fbbc1e67c154ae5289a2 / BUILD 87xXd_NaW61OguJTOJbeD；继承实际1421/c994，1422融合候选未上线，本批故障先发1423。修正不可用方法草稿的full DTO标记与原件选择，封面和本人设置准确选publisher；原件完整dialog等待水合后打开，点击处显示加载/失败，旧pin/草稿/历史保持。
+
+stage `/data/video-api-debugger/release-staging/template-original-controls-20261110/attempt02`，pair45ce9ed6-689c-4a2a-afc9-5df2895a550d。完整类型、18项生产父函数/TSX/等待条件/DTO工程、Next/type/lint、17+17有效输入复用及5项刷新、鲜计价通过，build0/cutover0。17:52:45Z公网58资源/4匿名401，17:53:14Z七服务同源/四timer/controller0，健康200。一致备份SHA cacb3f3443a0d9bf891a9078b6d0aecc119fe66144cc1490089e9c9b83a131c2，价格d03c539d.../策略/持久链接保持，无本轮DDL或数据恢复。恢复仅沿本stage program-recovery.sh及guard79abce5c6b06bd714261609678992a3161ba4bad / zxSxN0_ODrOhrA3gjUCPz；首段只读通过，未回退。
+
+1421真实故障已复现：封面拒绝提示屏外，上下文只读文章。1423刷新实点后：封面dialog及排版/选图启用；原件0100完整上下文dialog可达，查看原文后2个可编辑textarea和保存默认原文启用。未填改/保存定义、未保存封面、未生图；Agent会话正常关闭，不冒全业务验收。attempt01的TSX闭合错误被完整类型拦截，原证保留；修正后另源另stage成功。回执详[原单§12](../tasks/todo/2026-11-09-template-current-input.md#12-tpl-editor05-用户实测未闭环原件解析及真实编辑入口2026-11-10)，窗口已交后继融合1424。
+<!-- /TPL-EDITOR05-RELEASE-20261110 -->
