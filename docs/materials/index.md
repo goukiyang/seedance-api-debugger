@@ -1,3 +1,9 @@
+<!-- FUSION-UX08-DESIGN-MATERIALS-20261110 -->
+## 角色融合身形比例设计预览（2026-11-10）
+
+[原单D01](../../tasks/todo/2026-11-08-character-fusion.md#d01-按原图交互出预览用户追加2026-11-10)：用户偏好原图四行直接点选与即时结果，预览V1已查看（1624×969）；补类别旁锁头、移出及明确语言复制。原用户图片、生成图/提示词/元数据保正式根私有 `docs/materials/2026-11-08-character-fusion-prototype/implementation/ux08/design/`。为设计示意，UX08未构建/部署，不冒实时截图或功能验收；已有数据接线候选eaa4f2b保留待接续。
+<!-- /FUSION-UX08-DESIGN-MATERIALS-20261110 -->
+
 <!-- FUSION-UX07-MATERIALS-20261110 -->
 ## 角色融合UX07锁头与移出（2026-11-10）
 
