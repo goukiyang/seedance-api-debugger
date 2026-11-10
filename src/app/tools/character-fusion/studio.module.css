@@ -315,3 +315,16 @@
 .legacyRules { margin-bottom: 18px; }
 @media (max-width: 700px) { .catalogue { padding: 14px; } .catalogueRow { grid-template-columns: 1fr; gap: 8px; } .catalogueLabel { align-items: center; } .catalogueLabel strong { padding-top: 0; } .catalogueLabel small { width: auto; margin-left: 8px; } }
 @media (hover: none), (pointer: coarse) { .catalogueReveal, .facetRules:not([open]) { opacity: 1; } }
+
+.catalogueToolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+.presentationToggle { display: inline-flex; gap: 2px; padding: 3px; border-radius: 7px; background: var(--bg-input); }
+.page .presentationToggle button { min-height: 30px; padding: 5px 12px; font-size: 12px; color: var(--text-secondary); }
+.page .presentationToggle button[aria-pressed='true'] { background: var(--bg-hover); color: var(--text-primary); font-weight: 600; }
+.catalogueCardView { background: transparent; padding-inline: 0; }
+.catalogueCardGrid { align-items: start; }
+.page .catalogueChoice { justify-content: flex-start; width: 100%; padding: 6px 0; font-size: 18px; font-weight: 600; text-align: left; overflow-wrap: anywhere; }
+.catalogueCardGrid .cardDetails .catalogueValues { padding-top: 6px; }
+.catalogueCardGrid .pills { gap: 6px; }
+.catalogueCardGrid .pills button { font-size: 12px; padding: 6px 10px; }
+.catalogueCardGrid .concretePicker select { width: 100%; min-width: 0; }
+@media (max-width: 1100px) and (min-width: 761px) { .catalogueCardGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
