@@ -1,3 +1,9 @@
+<!-- IMG25-FAIL01-MATERIALS-20261110 -->
+## 2.5近期任务与供应商未决原证（2026-11-10）
+
+[原单IMG25-FAIL01](../../tasks/todo/2026-11-06-all-model-connectivity.md#img25-fail01-25当前生成未决核对2026-11-10)；[私有脱敏快照](2026-11-06-image-model-connectivity/diagnosis-20261110/image25-original-tasks.json)为洛杉矶09:26实际c994/v0.142.1只读元数据：09:00后8笔2.5 Sunburst最高档1成功/7供应商uncertain，原回执/诊断绑定一致，7点仍预留。保存原号、发送参数、安全事件及账本，不含提示词/Key/媒体，不提交私有文件。无新生成或旧待核重发，具体上游内部原因尚无证据。
+<!-- /IMG25-FAIL01-MATERIALS-20261110 -->
+
 <!-- IMG26-FAIL01-MATERIALS-20261110 -->
 ## 两个2.6近期失败的原号与账本诊断（2026-11-10）
 
