@@ -1299,3 +1299,7 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 <!-- FUSION-UX06-TODO-20261110 -->
 - 角色融合 UX06已部署，待用户手动验收：v0.141.6／e0c216c1d／lsPdfmtGbxJCrfijCOPoN。R03结构、广场色板与hover/focus次要图标落地，锁定常显、触屏可达，合并维度卡并精简默认信息，原能力保菜单。完整Next/types/lint及12:40:55Z七服务四timer、58资源/4匿名401通过；guard79ab、私有policy/数据/价格保持，未收费或自动功能验收。详见[原单UX06](todo/2026-11-08-character-fusion.md#ux06-r03方案落地与按需图标2026-11-10)。
 <!-- /FUSION-UX06-TODO-20261110 -->
+
+<!-- FUSION-UX07-TODO-20261110 -->
+- 角色融合UX07实施中：锁头紧邻类别名，启用卡片增加独立×移出组合，勾选只示状态，保卡片规则及再次加入；沿原hover/focus/touch与onJoin，无engine/API变更。当前健康0.141.6/e0c216，拟0.141.7，工程／部署后用户手验。详见[原单UX07](todo/2026-11-08-character-fusion.md#ux07-锁头紧邻类别与独立移出按钮2026-11-10)。
+<!-- /FUSION-UX07-TODO-20261110 -->

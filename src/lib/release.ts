@@ -1,11 +1,10 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  "title": "角色融合工作台布局优化",
+  "title": "角色融合卡片操作优化",
   "outline": [
-    "组合与规则合为一张卡，选值和层次更清楚",
-    "次要操作悬停显示，锁定状态持续可见",
-    "译文与复制语言入口更明确，沿用广场配色"
+    "锁头紧邻类别名称，锁定状态更清楚",
+    "启用的卡片增加独立移出按钮，保留规则可再次加入"
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
