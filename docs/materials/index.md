@@ -1,3 +1,9 @@
+<!-- ASSET-ENHANCE01-MATERIALS-20261109 -->
+## 资产页超分入口恢复元证（2026-11-09）
+
+[原单](../../tasks/todo/2026-11-09-assets-enhance-hover.md)及[资料](2026-11-09-assets-enhance-hover/README.md)。v0.141.3/cfaa689a5/scV6jSPgiMjf7ibSc8u3j，07:04:13Z健康收口；完整继承ae8c/0.141.2，源码/工程/完整构建、58公网资源/4匿名401及七服务四timer有证。服务器原证位于 `assets-enhance-hover-20261109/attempt01`，仅带回构建/public/pair元证，不导出DB/环境/价格原行或媒体。仅超分，下载按用户指令撤回；功能待用户手验，无新增范围外问题。
+<!-- /ASSET-ENHANCE01-MATERIALS-20261109 -->
+
 <!-- FUSION-MODEL01-MATERIALS-20261109 -->
 ## 角色融合模型设置与原位清除（2026-11-09）
 

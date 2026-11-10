@@ -1,3 +1,11 @@
+<!-- ASSET-ENHANCE01-RELEASE-20261109 -->
+## 2026-11-09 资产页视频悬停超分入口恢复 v0.141.3
+
+已部署，待用户手动验收。实际cfaa689a5361f2dc765acf12ad960d6afc8fc081 / BUILD scV6jSPgiMjf7ibSc8u3j，完整继承ae8c/0.141.2。stage `/data/video-api-debugger/release-staging/assets-enhance-hover-20261109/attempt01`，pair3b072a70-1445-48ec-bd6f-3d8709c3d11d；guard79ab/zx原产物及原时间复用。完整Next/types/lint、5受影响原生/29匹配复用、鲜计价与6启动门通过，build0/cutover0；07:02:40Z公网58资源/4匿名401，07:04:13Z七服务/四timer/controller0。
+
+一致备份SHA b09a86ec3b6c21ca016f52014504f5dd39eae78c8bb3a5af4df2db7d0e0c854b；价格d03c/私密策略/环境/数据及媒体链接保持，无新DDL/回数据/收费生成/浏览器验收。恢复仅本stage `program-recovery.sh release-input.json`，只回相容程序，未实际回退；后续先核当前源与窗口。仅恢复超分，下载已撤回且原代码保持。详[原单](../tasks/todo/2026-11-09-assets-enhance-hover.md)，功能用户手验；7已释放窗口。
+<!-- /ASSET-ENHANCE01-RELEASE-20261109 -->
+
 <!-- FUSION-MODEL01-RELEASE-20261109 -->
 ## 2026-11-09 角色融合模型设置与原位清除
 

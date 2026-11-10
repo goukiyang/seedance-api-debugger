@@ -1,6 +1,6 @@
 # ASSET-ENHANCE01 恢复资产页视频悬停超分入口
 
-日期：2026-11-09 America/Los_Angeles。用户要求：资产页鼠标移到视频后恢复原有超分按钮。用户曾同轮追加下载按钮，随后明确“下载按键的事忽略”，已撤回该部分；最终仅修超分。状态：源码和工程检查完成，待提交发布，功能由用户手动验收。
+日期：2026-11-09 America/Los_Angeles。用户要求：资产页鼠标移到视频后恢复原有超分按钮。用户曾同轮追加下载按钮，随后明确“下载按键的事忽略”，已撤回该部分；最终仅修超分。状态：已部署v0.141.3，待用户手动验收。
 
 ## 目标与范围
 
@@ -9,7 +9,7 @@
 1. [x] 核对现网与原因：2026-11-10T06:18Z 仍为 ea910bed8c26c8a5bfa64d1afe94f7ecf7b90e80 / v0.141.1；sd2-gray active，公网 release 相符。
 2. [x] 最小修复入口及共用组件，保留现有分辨率/帧率和返回资产页现场。
 3. [x] Linux完整src类型检查和四文件相关lint均exit0（仅资产页既有invalidateAssetCache依赖warning）；fd3c22756164652c98660f8095f24260811a1a4f已推origin并核同头。
-4. [ ] 完整继承前序4的统一健康发布，再用现有保护入口构建部署；核公网/服务并交付待用户手验。
+4. [x] 完整继承健康ae8c/0.141.2并保护构建部署，公网/服务检查通过，待用户手验。
 
 ## 原因与共享影响
 
@@ -38,3 +38,11 @@
 ## 最终候选与发布接续
 
 4已正式交接实际健康ae8c3ab42374523dcb090bf55128823eaa291130 / v0.141.2 / BUILD _VfkjoUvLHnDSM1en0Dk8，2026-11-10T06:42:58Z收口，窗交7。最终候选完整继承此源，新增仅超分四文件及PATCH v0.141.3/短通知/本单；下载原字节保持。guard仍79abce5c6b06bd714261609678992a3161ba4bad / zxSxN0_ODrOhrA3gjUCPz，按原成功构建和原时间复用。未把ea910作最终基线。
+
+## 发布结果（2026-11-09 America/Los_Angeles）
+
+已部署，待用户手动验收。实际cfaa689a5361f2dc765acf12ad960d6afc8fc081 / v0.141.3 / BUILD scV6jSPgiMjf7ibSc8u3j，完整继承ae8c和前序视频、UX04、生成误拦修复。2026-11-10T07:01:14Z完整Next含types/lint完成，build0；07:02:40Z公网58静态资源字节/4匿名401，07:04:13Z七服务/四timer健康/controller0，cutover0，6真实启动检查通过。17原生+17关联中实际受影响5组新跑、29项沿匹配02f/15/4原证复用且保原时间，当前计价门通过。无浏览器、收费生成或独立功能验收，下载块与ae8c逐字相同。
+
+stage `/data/video-api-debugger/release-staging/assets-enhance-hover-20261109/attempt01`，pair `3b072a70-1445-48ec-bd6f-3d8709c3d11d`；19项控制/源码输入与2475选定Git blob核同。价格全字段d03c539d74a31b5e2a6a0305724b1b9f193e0ade878370898c7632d1bdc96539、私有策略/环境/数据和媒体链接保持；一致备份SHA256 b09a86ec3b6c21ca016f52014504f5dd39eae78c8bb3a5af4df2db7d0e0c854b。无新DDL、业务数据回退或旧原号重发。
+
+恢复入口为同stage `bash program-recovery.sh release-input.json`，只回相容79abce5c6b06bd714261609678992a3161ba4bad / zxSxN0_ODrOhrA3gjUCPz程序；原guard构建复用，不重编或改原时间，未实际回退。后续先鲜核当前源与窗口，不重放旧恢复。[资料及元证](../../docs/materials/2026-11-09-assets-enhance-hover/README.md)。7已释放窗口并告知前序4，9明确无后续窗口需求；本轮不再Next或切版，未新增范围外问题。

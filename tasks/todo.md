@@ -1,8 +1,7 @@
-## ASSET-ENHANCE01 恢复资产页视频悬停超分入口
+## ASSET-ENHANCE01 资产页视频悬停超分入口恢复（已部署，待用户手验）
 
-超分无卡旧门槛及旧提交链原因已定位；四文件最小修复及Linux类型/lint检查通过，待前序4健康后继承构建部署。复用现有v2超分与原资产标准版key，保权限/费用/原请求；下载诉求已按用户新指令撤回，未收费生成，功能用户手验。详[原单](todo/2026-11-09-assets-enhance-hover.md)。
+v0.141.3 / cfaa689a5361f2dc765acf12ad960d6afc8fc081 / BUILD scV6jSPgiMjf7ibSc8u3j，2026-11-10T07:04:13Z健康收口。完整继承实际ae8c/0.141.2，修无卡旧门槛并复用v2超分/原asset-enhance标准key；下载诉求已撤回，原代码不变。完整Next/types/lint、原生/计价、6启动门、7服务4timer、公网58资源/4匿名401通过；无新DDL/回数据/生成收费/浏览器验收。详[原单](todo/2026-11-09-assets-enhance-hover.md)，实际悬停/超分用户手验。
 
-<!-- FUSION-MODEL01-TODO-20261109 -->
 ## 角色融合模型设置与清单清除（v0.139.5已部署，待手验）
 
 页面设置增加API模型下拉/相邻更新，按账号记住并用于卡片对话和英文补齐，费率关闭项隐藏。清单清除首次原位变确认，二次清本次清单，失焦/Esc取消，规则/模型/对话/配方保留。实际6326c2cc1b72fa6d3b39eca26d56114bff3b6a03 / BUILD AoNdyzGsO1MEBluVeppM3继承139.4，11:06:41Z健康。原6场景及差量UI检查复用、完整原生/计价/Next/types/lint和7服务4timer/35资源/2匿名401通过，674原guard复用；无DDL/改价/数据还原、真实文字/视频/模型调用或旧待核重发，HD control仍active。界面及实际AI待用户手验。本轮未新增范围外问题。[原单MODEL01](todo/2026-11-08-character-fusion.md#model01-页面设置选择api模型2026-11-09)。
