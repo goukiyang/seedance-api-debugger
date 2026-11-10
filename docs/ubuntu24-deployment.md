@@ -518,3 +518,21 @@ sudo nginx -t
 
 cutover0；03:12:30Z公网52资源/3匿名401，03:13:06Z七服务健康/控制器0/四timer。价格完整字段d03c及私密策略未变，一致备份SHA2850692d9891cbbd29e662037b1a0a77b01779da0db11dd731f774f435461a31；无DDL/回数据。恢复使用本stage `program-recovery.sh release-input.json` 的新guard，只读首段已核，未实际回退。恢复/套用期间保留新编辑，3D多视图规则保存中新输入保留窗口。功能及快速查看来源线索仍用户手验，详[原单§9](../tasks/todo/2026-11-09-template-current-input.md#9-tpl-current02-同类输入状态扩查2026-11-09)。
 <!-- /TPL-CURRENT02-20261109 -->
+
+<!-- TPL-STYLE03-RELEASE-20261110 -->
+## 2026-11-09 风格编辑输入稳定与直接选用
+
+已部署v0.141.1，待用户手验：ea910bed8c26c8a5bfa64d1afe94f7ecf7b90e80 / BUILD lHO0S8k8-A0XAml_bJzLu。原输入与风格聚焦差量ff65+3d525的三个前端最终SHA在实际web/image cwd均匹配；12项输入/选择及原32项准备证据有证，完整候选17原生/17关联、计价、Next/types/lint通过。stage capacity-report-hd-closure-20261109/attempt07，pair da0e5a12-790d-4b68-8172-3ded21bd61e7，build0/cutover0；05:56:06Z公网49资源/3匿名401，05:57:20Z七服务/四timer/控制器0，六启动门通过。guard79abce5c6b06bd714261609678992a3161ba4bad / zxSxN0_ODrOhrA3gjUCPz沿原已完整构建成品核验复用，固定恢复沿该stage program-recovery.sh release-input.json，只回程序，不回业务数据。
+
+用户随后新报“当前设置受已删除历史来源误挡生成”，源码1288及34项工程已收敛，尚不在141.1，沿4下一批安全点继续发布，未关闭整项任务。具体事实、准备失败原证和当前手验边界见[原单§10](../tasks/todo/2026-11-09-template-current-input.md#10-tpl-style03-风格编辑输入稳定与选用生效2026-11-09)。
+<!-- /TPL-STYLE03-RELEASE-20261110 -->
+
+<!-- TPL-STYLE03-BLOCKER-RELEASE-20261110 -->
+## 2026-11-09 当前通用设置不依赖失效历史编号
+
+已部署v0.141.2，待用户手验。最终ae8c3ab42374523dcb090bf55128823eaa291130 / BUILD `_VfkjoUvLHnDSM1en0Dk8`，继承141.1的风格输入修复，含本单1288两文件。stage `/data/video-api-debugger/release-staging/video-playback-start-20261109/attempt01`，pair3401e059-08df-4695-92a6-0d88be1f05a4，build0/cutover0；完整Next/types/lint、计价及六启动门通过，12受影响工程入口新跑/22未变原证复用，本单34项恢复工程在受影响项重跑。06:42:37Z公网57资源/4匿名401，06:42:58Z七服务/四timer/控制器0，06:45:53Z本单独立核实际web/image cwd、五源SHA、版本/BUILD和公网200一致。
+
+价格完整字段d03c539d…与私密策略保持，无新DDL或数据恢复；一致备份SHA636289efd67f516082e461f578bd43df357eeba3eb120dc6f9b820369ecc088b留stage。相容guard79abce5c6b06bd714261609678992a3161ba4bad / zxSxN0_ODrOhrA3gjUCPz沿原成品核验复用。仅回程序入口为本stage program-recovery.sh release-input.json，已只读核参数绑定，未实际回退；届时仍核实际源/所有者，不回业务数据库、媒体、账本或原请求回执。
+
+角色卡已确认current元数据携带deleted来源，修复只让真正historical读取其通用上下文；当前鲜值、主图、显式历史内容权限、旧受理及未知请求保护保留。输入/出图用户手验，未浏览器或收费生成。详情与剩余线索沿[原单§10](../tasks/todo/2026-11-09-template-current-input.md)。
+<!-- /TPL-STYLE03-BLOCKER-RELEASE-20261110 -->
