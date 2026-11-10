@@ -771,4 +771,8 @@ Git：在codex/fusion-ux06-plaza-20261110干净f9dbcd07c上合并健康c994，pe
 验证边界L1：工程检查与聚焦差异足以核本批呈现/状态引用/构建；实际卡片大小/密度、切换保选、折叠/拖动/键盘/触屏、跨刷新记忆和新增卡片定位待用户手验。原配方、已有行、模型选择和收费链不改；无新DDL或生产数据操作。
 
 本地改动文件ESLint与diff-check通过，原卡片及新目录调用/拖放/锁定/账号偏好已定向源码复核。CodeGraph准备入口两次在实际工作区git ls-files超过30秒而未完成，本批不信任旧索引；按四个本地UI文件与page账号key定向核关系，索引更新缺口如实保留，不扩大成图工具修复。
+
+最终基线5c4201af440e1dfb19b1fbbc1e67c154ae5289a2／0.142.3／87xXd_NaW61OguJTOJbeD在17:53:14Z健康，原发布者修正f3ec的JSX编译问题后真实完成构建和切版。仅继承该健康源：本批最终应用源2e67f6788f892b66c678614244b3dd3a0e2b4b1c／0.142.4，已推远端。与5c的应用差异只有4个融合UI文件和3个正常版本元数据，原工作区/DTO及18项工程脚本字节保持；2485个导出Git blob全部核对通过，stage为/data/video-api-debugger/release-staging/fusion-cards-ux12-20261110/attempt01。17:54:38Z核无其它发布controller后接续唯一构建，正常umask022，尚未切服务。
+
+第一候选2e67的attempt01完整Next在类型阶段发现joinCatalogueCard的Set被推断为string[]，未切服务；修正为明确Set<Dimension>，不改变运行逻辑、输入或功能。保留原失败stage/log，新候选沿同一1424继续封源，增加一次独立完整类型检查定位全部相关编译问题后再完成正常Next，不跳过类型/lint。
 <!-- /FUSION-UX12-20261110 -->

@@ -18,7 +18,7 @@ export function toggleCategoryLock(settings: FusionSettings, id: Dimension): Fus
 export function joinCatalogueCard(settings: FusionSettings, source: string): FusionSettings | null {
   if (!source.startsWith('catalogue-')) return null;
   const id = source.slice('catalogue-'.length);
-  if (id === 'source' || id === 'concept') return { ...settings, bossDimensions: Array.from(new Set([...settings.bossDimensions, id])) };
+  if (id === 'source' || id === 'concept') return { ...settings, bossDimensions: Array.from(new Set<Dimension>([...settings.bossDimensions, id])) };
   if (!TRAITS.some(t => t.id === id)) return null;
   const catalogue = settings.catalogue || emptyCatalogue(), value = catalogue.traits[id] || emptyTrait();
   return { ...settings, catalogue: { ...catalogue, traits: { ...catalogue.traits, [id]: { ...value, enabled: true, locked: value.values.length > 0 && value.locked } } } };
