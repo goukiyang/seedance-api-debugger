@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { defaults, generateBatch, refreshBoss, required, changeRow, missingRequired, bossRow, textFor, csvFor, parseSettings, CONFIG } from '../src/lib/character-fusion/engine';
+import { defaults, generateBatch, refreshBoss, required, changeRow, missingRequired, bossRow, textFor, csvFor, parseSettings, reconcile, CONFIG } from '../src/lib/character-fusion/engine';
 
 const settings = defaults();
 settings.rules.source.find(t => t.label === '动物')!.status = 'exclude';
@@ -8,6 +8,7 @@ settings.rules.mechanism[0].status = 'must';
 settings.bossDimensions.push('equipment');
 settings.rules.equipment[0].status = 'must';
 settings.bossLocks.concept = true; settings.bossLocks.equipment = true;
+settings.boss.equipment = settings.rules.equipment[0].label;
 for (let seed = 1; seed <= 32; seed++) {
   const rows = generateBatch(settings, seed);
   assert.equal(rows.length, 16);
@@ -17,6 +18,7 @@ for (let seed = 1; seed <= 32; seed++) {
   assert.equal(new Set(rows.map(r => r.name)).size, 16);
   assert.equal(refreshBoss(settings, () => .8).boss.concept, settings.boss.concept);
   assert.equal(refreshBoss(settings, () => .8).boss.equipment, settings.boss.equipment);
+  assert(rows.every(row => row.category.concept === settings.boss.concept && row.category.equipment === settings.boss.equipment));
   assert.deepEqual(missingRequired(settings, changeRow(settings, rows, rows[0].id, undefined, seed + 999)), []);
 }
 const restored = parseSettings(JSON.parse(JSON.stringify(settings)));
@@ -70,3 +72,32 @@ extended.cards[0].joined = false;
 assert(generateBatch(extended, 14).every(r => r.cards?.length === 0));
 assert(generateBatch(defaults(), 15).every(r => !r.category.equipment && !r.category.signature));
 console.log('PASS: requirement switch in both outputs; legacy recipes; custom bilingual cards participate only when joined; general character roles.');
+
+const fixed = defaults(); fixed.bossLocks.source = true;
+for (let seed = 1; seed <= 32; seed++) {
+  const batch = generateBatch(fixed, seed);
+  assert(batch.every(row => row.category.source === '动物'));
+  assert.equal(changeRow(fixed, batch, batch[0].id, undefined, seed + 50)[0].category.source, '动物');
+  assert.throws(() => changeRow(fixed, batch, batch[0].id, { dimension: 'source', value: '植物' }), /先解锁/);
+}
+fixed.rules.source.find(t => t.label === '植物')!.status = 'must';
+assert.throws(() => generateBatch(fixed), /固定项与规则冲突/);
+const lockedCard = defaults();
+lockedCard.cards = [{ id: 'card-locked', title: '阵营', titleEn: 'Faction', joined: true, locked: true, value: '探索者', tags: [{ label: '守护者', en: 'guardian', status: 'default' }, { label: '探索者', en: 'explorer', status: 'default' }] }];
+const cardBatch = generateBatch(lockedCard, 301);
+assert(cardBatch.every(row => row.cards?.[0].label === '探索者'));
+lockedCard.cards[0].value = '守护者';
+assert.equal(changeRow(lockedCard, cardBatch, cardBatch[0].id, undefined, 302)[0].cards?.[0].label, '守护者');
+lockedCard.cards[0].tags[1].status = 'must';
+assert.throws(() => generateBatch(lockedCard), /固定项与规则冲突/);
+const optionalFixed = defaults(); optionalFixed.bossDimensions.push('equipment'); optionalFixed.bossLocks.equipment = true;
+assert(generateBatch(optionalFixed, 303).every(row => row.category.equipment === ''));
+const excludedFixed = defaults(); excludedFixed.bossLocks.source = true;
+excludedFixed.rules.source.find(t => t.label === '动物')!.status = 'exclude';
+const unresolved = reconcile(excludedFixed);
+assert.equal(unresolved.boss.source, '动物'); assert.equal(unresolved.bossLocks.source, true);
+assert.throws(() => generateBatch(unresolved), /固定项与规则冲突/);
+assert.equal(parseSettings(JSON.parse(JSON.stringify(unresolved))).bossLocks.source, true);
+lockedCard.cards[0].tags[1].status = 'default'; lockedCard.cards[0].tags[0].status = 'exclude';
+assert.throws(() => generateBatch(lockedCard), /固定项与规则冲突/);
+console.log('PASS: batch/rewrite locks for built-in and custom cards; fixed vs required conflicts; fixed unused optional dimension.');
