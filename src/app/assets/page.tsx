@@ -1344,7 +1344,7 @@ function AssetsPageContent() {
     };
   }, [user, assetView, isReactionView, isEnhanceView, scope, requestType, enhanceFilter, showUploadedAssets, sourceFilter, status, sort, groupBy, projectId, ownerUserId, keyword, page, pageCapacity, pageScope, restoredPageScope, restoredFiltersOwner, reloadToken]);
 
-  const hasPendingVideoDelivery = items.some(item => item.source === 'video_task' && item.deliveryStage?.key === 'preparing');
+  const hasPendingVideoDelivery = items.some(item => shouldShowDeliveryStage(item) && item.deliveryStage?.key === 'preparing');
   useEffect(() => {
     if (!user?.id || isReactionView || !hasPendingVideoDelivery || syncingAssets || selectionMode) return;
     const refresh = () => { if (!document.hidden) setReloadToken(value => value + 1); };

@@ -27,6 +27,15 @@ function assetChecks() {
  const effects = [];
  function visit(node) { if (ts.isCallExpression(node) && node.expression.getText(source) === 'useEffect') effects.push(node.arguments[0].getText(source)); ts.forEachChild(node, visit); }
  visit(source);
+ const helpers = source.statements.filter(node => ts.isFunctionDeclaration(node) && ['isFastPathAssetVideo', 'shouldShowDeliveryStage'].includes(node.name?.text)).map(node => node.getText(source)).join('\n');
+ let pending;
+ function findPending(node) { if (ts.isVariableDeclaration(node) && node.name.getText(source) === 'hasPendingVideoDelivery') pending = node.getText(source); ts.forEachChild(node, findPending); }
+ findPending(source); assert.ok(pending);
+ for (const [provider, generationMode, key, expected] of [['seedance', 'text_to_video', 'preparing', true], ['seedance', 'text_to_video', 'ready', false], ['volcengine_ark', 'all_in_one_reference', 'preparing', false], ['seedance', 'enhance_video', 'preparing', false]]) {
+  const context = { items: [{ kind: 'video', source: 'video_task', provider, generationMode, deliveryStage: { key } }] };
+  vm.runInNewContext(ts.transpileModule(helpers + '\nconst ' + pending + ';globalThis.pending = hasPendingVideoDelivery;', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context);
+  assert.equal(context.pending, expected, provider + ' must follow its actual delivery path');
+ }
  const polling = effects.find(text => text.includes('!hasPendingVideoDelivery'));
  const metadata = effects.find(text => text.includes('downloadUrl: latest.downloadUrl'));
  assert.ok(polling && metadata);
@@ -52,5 +61,5 @@ function assetChecks() {
  assert.equal((await check(7, 5)).peak, 2, 'Two authorized saves should make progress together');
  await check(7, 5, 1); await check(0, 5); assert.equal((await check(3, 1)).peak, 1); await check(55, 500);
  assetChecks();
- console.log(JSON.stringify({ task: 'VID-DL01', checks: ['two_saves_progress_with_sequential_unique_claims', 'one_failure_keeps_the_other_save_and_original_failure_receipt', 'empty_queue_terminates', 'requested_batch_limit_is_preserved', 'existing_hard_limit_of_50_is_preserved', 'pending_delivery_refresh_pauses_for_hidden_selection_sync_and_stops_when_done', 'drawer_download_metadata_updates_without_replacing_playback_source'], applicationDatabaseOpened: false, paidRequests: 0, browserAcceptance: false }, null, 2));
+ console.log(JSON.stringify({ task: 'VID-DL01', checks: ['two_saves_progress_with_sequential_unique_claims', 'one_failure_keeps_the_other_save_and_original_failure_receipt', 'empty_queue_terminates', 'requested_batch_limit_is_preserved', 'existing_hard_limit_of_50_is_preserved', 'only_fast_path_pending_videos_enable_refresh', 'pending_delivery_refresh_pauses_for_hidden_selection_sync_and_stops_when_done', 'drawer_download_metadata_updates_without_replacing_playback_source'], applicationDatabaseOpened: false, paidRequests: 0, browserAcceptance: false }, null, 2));
 })().catch(error => { console.error(error); process.exitCode = 1; });
