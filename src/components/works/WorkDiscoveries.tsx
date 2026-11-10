@@ -6,7 +6,7 @@ import { worksRead, WorksClientError } from '@/lib/works/client';
 import type { WorkCard, WorkPage } from '@/lib/works/types';
 import type { AssetPlaybackCoordinator } from '@/lib/media/asset-playback';
 import { WorkMedia } from './WorkMedia';
-import { WorkAuthor } from './WorkAuthor';
+import { WorkCardInfo } from './WorkCardInfo';
 import { reuseWorkTemplate, type WorkOperate } from './WorkActions';
 import styles from './Works.module.css';
 
@@ -61,11 +61,7 @@ export function WorkDiscoveries({ viewerId, queryKey, revision, playback, onOpen
       {work.provenance?.template?.reuseVersion && <button type="button" className={styles.reuseButton}
         disabled={busyKeys.includes(`work:${work.id}`)} onClick={() => void reference(work)}><span>一键参考</span><ArrowUpRight size={15} aria-hidden="true" /></button>}
       </div>
-      <div className={styles.cardInfo}>
-        <div className={styles.cardSource}>{work.provenance && <a href={(work.provenance.template || work.provenance.tool).href}
-          title={`${work.provenance.tool.label} · ${(work.provenance.template || work.provenance.tool).label}`}>{(work.provenance.template || work.provenance.tool).label}</a>}</div>
-        <div className={styles.cardIdentity}><WorkAuthor author={work.author} /></div>
-      </div>
+      <WorkCardInfo work={work} />
     </article>)}</div>
   </section>;
 }

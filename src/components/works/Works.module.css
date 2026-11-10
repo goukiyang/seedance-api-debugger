@@ -60,59 +60,6 @@
 .duration { display: flex; align-items: center; gap: 4px; position: absolute; bottom: 8px; right: 8px; padding: 4px 7px; border-radius: 5px; color: var(--text-primary); background: var(--bg-primary); font-size: 11px; pointer-events: none; }
 .placeholder { display: flex !important; flex-direction: column; align-items: center; justify-content: center; gap: 8px; height: 100%; color: var(--text-secondary); font-size: 12px; }
 .cardInfo { display: flex; align-items: center; justify-content: space-between; gap: 5px; height: 44px; padding-top: 4px; }
-.imageCardDetails { position: absolute; top: 6px; left: 6px; z-index: 3; }
-@media (hover: hover) and (pointer: fine) {
-  .imageCardDetails { opacity: 0; pointer-events: none; transition: opacity 150ms ease-out; }
-  .workCard:hover .imageCardDetails, .workCard:focus-within .imageCardDetails,
-  .imageCardDetails:has([data-result-details][aria-expanded="true"]) { opacity: 1; pointer-events: auto; }
-}
-.imageCardDetails :global([data-result-details]) {
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 40px;
-  min-width: 40px;
-  min-height: 40px;
-  padding: 0;
-  border: 0;
-  border-radius: 20px;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  box-shadow: 0 1px 5px oklch(.08 .006 160 / .18);
-  text-decoration: none;
-}
-.imageCardDetailsBody { min-width: 0; margin-top: 8px; }
-.imageCardTitle { margin: 0 0 8px; color: var(--text-primary); font-size: 14px; font-weight: 550; line-height: 1.45; overflow-wrap: anywhere; }
-.imageCardDetailsList { margin: 0; }
-.imageCardDetailsList dd { min-width: 0; color: var(--text-primary); }
-.imageCardDetailsList a { color: var(--text-primary); overflow-wrap: anywhere; }
-.imageCardDetailsBody .authorIdentity {
-  justify-content: flex-start;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--text-primary);
-  font: inherit;
-  cursor: pointer;
-}
-.imageCardDetailsBody .authorAvatar { width: 20px; height: 20px; flex-basis: 20px; }
-.imageCardDetailsBody .authorName { white-space: normal; overflow: visible; }
-.imageCardDetailAction {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 40px;
-  margin-top: 4px;
-  padding: 7px 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 7px;
-  background: transparent;
-  color: var(--text-primary);
-  font: inherit;
-  cursor: pointer;
-}
-.imageCardDetailAction:hover { background: var(--bg-hover); }
-.imageCardDetailAction:focus-visible { outline: 2px solid var(--tone-info-text); outline-offset: 2px; }
 .cardActivity { display: flex; flex: 0 0 auto; gap: 5px; color: var(--text-secondary); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .cardActivity span { display: inline-flex; align-items: center; gap: 3px; }
 .cardActivity svg { flex: none; }
@@ -135,8 +82,6 @@
   pointer-events: none;
   transition: opacity 150ms ease-out;
 }
-.cardVisual:has(> .imageCardDetails) .cardOverlay { inset-inline-start: 52px; }
-.cardVisual:has(> .imageCardDetails) .cardOverlay .actions { height: auto; flex-wrap: wrap; }
 .workCard:hover .cardOverlay, .workCard:focus-within .cardOverlay { opacity: 1; }
 .cardOverlay .actions { height: 40px; gap: 2px; justify-content: flex-end; }
 .cardOverlay .actions > button, .cardOverlay .likeControl :global(.sd2-like.sd2-like) {
