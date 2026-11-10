@@ -1,5 +1,6 @@
 import { englishDetail } from './english';
 import { parseCardDraft, type FusionCard } from './cards';
+import { BODY_HEAD_RATIO_ID } from './body-cards';
 import { CONFIG, DEFAULT_REQUIREMENTS, SOURCES, CONCEPTS, MECHANISMS, PERSONALITIES, LEGACY_TAGS, DETAIL_ALTS, EN_LABEL, SOURCE_EN, CONCEPT_EN, PROP_EN } from './vocabulary';
 
 export { CONFIG, DEFAULT_REQUIREMENTS };
@@ -200,6 +201,8 @@ export function changeRow(s: FusionSettings, rows: FusionRow[], id: string, chan
 export function textFor(row: FusionRow, settings: Pick<FusionSettings, 'requirements' | 'lang'> & Partial<Pick<FusionSettings, 'requirementsEnabled' | 'requirementsEn' | 'rules'>>) {
   const c = row.category;
   const fixed = settings.requirementsEnabled ? settings.requirements.trim() : '';
+  const bodyRatio = row.cards?.some(card => card.id === BODY_HEAD_RATIO_ID);
+  const fixedCn = bodyRatio && fixed === DEFAULT_REQUIREMENTS && !settings.requirementsEn?.trim() ? fixed.replace('2.5头身，', '') : fixed;
   const roleEn: Record<string, string> = { '主角': 'protagonist', '配角': 'supporting character', '伙伴': 'companion', '反派': 'antagonist', Boss: 'boss character', '路人': 'background character' };
   const cardCn = (row.cards || []).map(v => `${v.title}：${v.label}。`).join('');
   const cardEn = (row.cards || []).map(v => `${v.titleEn}: ${v.en}.`).join(' ');
@@ -210,7 +213,7 @@ export function textFor(row: FusionRow, settings: Pick<FusionSettings, 'requirem
     c.entity ? `组合范围「${c.entity}」：具体设计为「${row.detail.entity}」，明确主次角色、连接关系和拆合时的空间归属。` : '',
     c.physique ? `轮廓范围「${c.physique}」：具体表现为「${row.detail.physique}」，组织大中小体块与重心，让整体剪影一眼可辨。` : '',
   ].join('');
-  const cn = `原创角色设计「${row.name}」。以${row.source.name}为母体，保留${row.source.shape}；融合${row.concept.name}的身份，将${row.source.anchor}转化为${row.concept.prop}。核心机制：${row.mechanism.cn}。${extras}视觉语言：${row.concept.mood}，主结构紧凑，形态层级分明。性格「${c.personality}」，通过${row.personality.pose}呈现。${fixed} ${row.role ? `角色定位：${row.role}。` : ''}${cardCn} 单角色全身设定，三分之四正面视角，完整展示机关的形态、厚度、装配与动作逻辑。${row.advanced ? '高级融合：增加收纳态、启动态与释放态的三阶段变化；关键装置通过一条明确的结构链驱动，动作前后轮廓有强烈辨识度，同时保持角色主体的视觉主导权。' : ''}`;
+  const cn = `原创角色设计「${row.name}」。以${row.source.name}为母体，保留${row.source.shape}；融合${row.concept.name}的身份，将${row.source.anchor}转化为${row.concept.prop}。核心机制：${row.mechanism.cn}。${extras}视觉语言：${row.concept.mood}，主结构紧凑，形态层级分明。性格「${c.personality}」，通过${row.personality.pose}呈现。${fixedCn} ${row.role ? `角色定位：${row.role}。` : ''}${cardCn} 单角色全身设定，三分之四正面视角，完整展示机关的形态、厚度、装配与动作逻辑。${row.advanced ? '高级融合：增加收纳态、启动态与释放态的三阶段变化；关键装置通过一条明确的结构链驱动，动作前后轮廓有强烈辨识度，同时保持角色主体的视觉主导权。' : ''}`;
   const translate = (map: object, value: string) => lookup(map as Record<string, string>, value) || value;
   const extrasEn = [
     c.equipment ? `Equipment: ${englishDetail('equipment', c.equipment, row.detail.equipment)}, an unexpected but functional tool derived from the source anatomy and character role.` : '',
@@ -218,7 +221,7 @@ export function textFor(row: FusionRow, settings: Pick<FusionSettings, 'requirem
     c.entity ? `Composition: ${englishDetail('entity', c.entity, row.detail.entity)}, with explicit primary and secondary roles, functional connections and legible assembly relationships.` : '',
     c.physique ? `Silhouette: ${englishDetail('physique', c.physique, row.detail.physique)}, with coherent weight distribution and readable large forms.` : '',
   ].join(' ');
-  let en = `Original character concept: ${translate(SOURCE_EN, row.source.name)} ${translate(CONCEPT_EN, row.concept.name)}${row.name.match(/ \d+$/)?.[0] || ''}. A ${translate(SOURCE_EN, row.source.name)} crossed with a ${translate(CONCEPT_EN, row.concept.name)}. Preserve a recognizable source silhouette and reinterpret its signature physical feature as a ${translate(PROP_EN, row.concept.prop)}. Main functional system: ${row.mechanism.en}. ${extrasEn} Design language inspired by ${translate(EN_LABEL, c.concept)}; ${row.personality.en}. ${!fixed ? '' : settings.requirementsEn?.trim() ? `Fixed art direction: ${settings.requirementsEn.trim()}` : fixed === DEFAULT_REQUIREMENTS ? 'Premium family-friendly stylized 3D cartoon, approximately 2.5 heads tall, simplified rounded geometry, bold readable silhouette, vibrant clean colors, matte materials, soft studio lighting, charming and sophisticated, clear assembly thickness and animation-friendly joints.' : `Fixed art direction: ${settings.requirementsEn?.trim() || fixed}`} ${row.role ? `Narrative role: ${roleEn[row.role] || row.role}.` : ''} ${cardEn} One full-body character, front three-quarter view, complete visible mechanism, believable connections, strong form hierarchy.${row.advanced ? ' Advanced fusion: show stored, activated and released states, driven by one coherent mechanical chain, with a clear dominant body silhouette.' : ''}`;
+  let en = `Original character concept: ${translate(SOURCE_EN, row.source.name)} ${translate(CONCEPT_EN, row.concept.name)}${row.name.match(/ \d+$/)?.[0] || ''}. A ${translate(SOURCE_EN, row.source.name)} crossed with a ${translate(CONCEPT_EN, row.concept.name)}. Preserve a recognizable source silhouette and reinterpret its signature physical feature as a ${translate(PROP_EN, row.concept.prop)}. Main functional system: ${row.mechanism.en}. ${extrasEn} Design language inspired by ${translate(EN_LABEL, c.concept)}; ${row.personality.en}. ${!fixed ? '' : settings.requirementsEn?.trim() ? `Fixed art direction: ${settings.requirementsEn.trim()}` : fixed === DEFAULT_REQUIREMENTS ? `Premium family-friendly stylized 3D cartoon, ${bodyRatio ? '' : 'approximately 2.5 heads tall, '}simplified rounded geometry, bold readable silhouette, vibrant clean colors, matte materials, soft studio lighting, charming and sophisticated, clear assembly thickness and animation-friendly joints.` : `Fixed art direction: ${settings.requirementsEn?.trim() || fixed}`} ${row.role ? `Narrative role: ${roleEn[row.role] || row.role}.` : ''} ${cardEn} One full-body character, front three-quarter view, complete visible mechanism, believable connections, strong form hierarchy.${row.advanced ? ' Advanced fusion: show stored, activated and released states, driven by one coherent mechanical chain, with a clear dominant body silhouette.' : ''}`;
   const translated = settings.rules ? translationsFor({ rules: settings.rules }, c, row.translations) : row.translations || [];
   for (const tag of translated) {
     if (!tag.en) continue;

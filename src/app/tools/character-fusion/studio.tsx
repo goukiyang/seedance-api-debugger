@@ -5,7 +5,8 @@ import { useAppSession } from '@/lib/context/AppSessionContext';
 import { ADDONS, CONFIG, CORE, COUNTS, allowed, bossRow, changeRow, csvFor, defaults, generateBatch, missingRequired, parseSettings, reconcile, refreshBoss, textFor, txtFor, validateGeneration, type Dimension, type FusionRow, type FusionSettings, type Tag } from '@/lib/character-fusion/engine';
 import RuleCard from './rule-card';
 import CardChat, { emptyConversation, type CardConversation } from './card-chat';
-import { parseCardDraft, type CardDraft } from '@/lib/character-fusion/cards';
+import { parseCardDraft, type CardDraft, type FusionCard } from '@/lib/character-fusion/cards';
+import { BODY_CARDS, bodyCombination, catalogueCards, updateCard } from '@/lib/character-fusion/body-cards';
 import { fusionAssistant } from '@/lib/character-fusion/assistant';
 import { usePricingModelAvailability } from '@/lib/pricing/use-model-availability';
 import type { FusionRecipe } from '@/lib/character-fusion/recipes';
@@ -132,7 +133,15 @@ export default function CharacterFusionStudio({ ownerId }: { ownerId: string }) 
     requestAnimationFrame(() => { if (activeRef.current) showResults(); });
   });
   const openModelSettings = () => { if (modelSettings.current) modelSettings.current.open = true; modelSettings.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); document.getElementById('fusion-api-model')?.focus({ preventScroll: true }); };
-  const addDimension = (id: string) => setSettings(s => CONFIG.some(c => c.id === id) ? s.bossDimensions.includes(id as Dimension) ? s : { ...s, bossDimensions: [...s.bossDimensions, id as Dimension] } : { ...s, cards: s.cards.map(c => c.id === id ? { ...c, joined: true } : c) });
+  const changeCard = (id: string, update: (card: FusionCard) => FusionCard) => run(() => {
+    const cards = updateCard(settings.cards, id, update);
+    if (!settings.cards.some(card => card.id === id)) setUndo({ label: '身形卡片设置', restore: () => setSettings(current => ({ ...current, cards: current.cards.filter(card => card.id !== id) })) });
+    setSettings(s => ({ ...s, cards }));
+  });
+  const addDimension = (id: string) => {
+    if (CONFIG.some(c => c.id === id)) setSettings(s => s.bossDimensions.includes(id as Dimension) ? s : { ...s, bossDimensions: [...s.bossDimensions, id as Dimension] });
+    else changeCard(id, card => ({ ...card, joined: true }));
+  };
   const toggleDimension = (id: Dimension) => setSettings(s => s.bossDimensions.includes(id) ? { ...s, bossDimensions: s.bossDimensions.filter(v => v !== id), bossLocks: { ...s.bossLocks, [id]: false } } : { ...s, bossDimensions: [...s.bossDimensions, id] });
   const cycleBoss = (id: Dimension) => {
     const pool = [...(ADDONS.some(c => c.id === id) ? [''] : []), ...allowed(settings, id)];
@@ -141,12 +150,16 @@ export default function CharacterFusionStudio({ ownerId }: { ownerId: string }) 
     setSettings(s => ({ ...s, boss: { ...s.boss, [id]: value }, bossLocks: { ...s.bossLocks, [id]: true } }));
   };
   const setTagStatus = (id: Dimension, label: string, status: Tag['status']) => setSettings(s => reconcile({ ...s, rules: { ...s.rules, [id]: s.rules[id].map(t => t.label === label ? { ...t, status } : t) } }));
-  const setCustomTagStatus = (id: string, label: string, status: Tag['status']) => setSettings(s => ({ ...s, cards: s.cards.map(c => {
-    if (c.id !== id) return c;
-    const tags = c.tags.map(t => t.label === label ? { ...t, status } : t);
-    const valid = tags.some(t => t.label === c.value && t.status !== 'exclude');
-    return { ...c, tags, value: valid || c.locked ? c.value : tags.find(t => t.status !== 'exclude')?.label || c.value };
-  }) }));
+  const setCustomTagStatus = (id: string, label: string, status: Tag['status']) => changeCard(id, card => {
+    const tags = card.tags.map(t => t.label === label ? { ...t, status } : t);
+    const valid = tags.some(t => t.label === card.value && t.status !== 'exclude');
+    return { ...card, tags, value: valid || card.locked ? card.value : tags.find(t => t.status !== 'exclude')?.label || card.value };
+  });
+  const cycleBodyCard = (id: string) => changeCard(id, card => {
+    const pool = card.tags.filter(tag => tag.status !== 'exclude');
+    if (!pool.length) throw new Error(`${card.title}没有可用选项，请先调整规则。`);
+    return { ...card, value: pool[(pool.findIndex(tag => tag.label === card.value) + 1) % pool.length].label, locked: true };
+  });
   const addTag = (id: Dimension) => run(() => {
     const label = (tagInputs[id] || '').trim();
     if (!label || label.length > 30) throw new Error('请输入 1–30 字的标签。');
@@ -194,7 +207,8 @@ export default function CharacterFusionStudio({ ownerId }: { ownerId: string }) 
     } catch (e) { if (activeRef.current) setError(e instanceof Error ? e.message : '删除未确认，请重新读取。'); }
     finally { if (activeRef.current) setBusy(false); }
   };
-  const allCards = [...CONFIG.map(c => ({ id: c.id, title: c.title })), ...settings.cards.map(c => ({ id: c.id, title: c.title }))];
+  const cardCatalogue = catalogueCards(settings.cards);
+  const allCards = [...CONFIG.map(c => ({ id: c.id, title: c.title })), ...cardCatalogue.map(c => ({ id: c.id, title: c.title }))];
   const orderedIds = Array.from(new Set([...cardOrder, ...allCards.map(c => c.id)])).filter(id => allCards.some(c => c.id === id));
   const moveCard = (source: string, target: string) => { if (!orderedIds.includes(source) || source === target) return; const order = orderedIds.filter(id => id !== source); order.splice(order.indexOf(target), 0, source); setCardOrder(order); };
   const moveBy = (id: string, direction: number) => { const index = orderedIds.indexOf(id), target = index + direction; if (target < 0 || target >= orderedIds.length) return; const order = [...orderedIds]; [order[index], order[target]] = [order[target], order[index]]; setCardOrder(order); };
@@ -259,20 +273,20 @@ export default function CharacterFusionStudio({ ownerId }: { ownerId: string }) 
       {loadingRecipes ? <p role="status">正在读取配方…</p> : recipeError ? <p role="alert" className={styles.error}>{recipeError}<button onClick={() => setRecipeReload(n => n + 1)}>重新读取</button></p> : recipes.length ? recipes.map(recipe => <article className={styles.recipe} key={recipe.id}><div><h3>{recipe.name}</h3><p>{recipe.settings.count} 条 · {recipe.settings.lang === 'zh' ? '中文' : recipe.settings.lang === 'en' ? 'English' : '中英双语'} · {recipe.settings.bossDimensions.length + (recipe.settings.cards || []).filter(c => c.joined).length} 个融合维度</p></div><div className={styles.actions}><button onClick={() => run(() => { setSettings(parseSettings(recipe.settings)); setView('workspace'); setNotice(`已套用「${recipe.name}」，已有提示词保留。`); })}>套用</button><button disabled={busy} onClick={() => setForm({ action: 'rename', id: recipe.id, name: recipe.name, revision: recipe.revision })}>改名</button><details className={styles.delete}><summary>删除</summary><p>删除「{recipe.name}」？</p><button disabled={busy} onClick={() => void deleteRecipe(recipe)}>确认删除</button></details></div></article>) : <p className={styles.empty}>还没有配方。设置好规则后，点“保存规则配方”。</p>}
     </section> : <>
       <section className={styles.boss} aria-labelledby="boss-title" onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }} onDrop={e => { e.preventDefault(); const id = e.dataTransfer.getData('application/x-sd2-fusion-dimension'); if (allCards.some(c => c.id === id)) addDimension(id); }}>
-        <div className={styles.sectionHead}><h2 id="boss-title">当前组合与固定项</h2><details className={styles.utilities} onKeyDown={e => { if (e.key === 'Escape') { e.currentTarget.open = false; e.currentTarget.querySelector('summary')?.focus(); } }}><summary>组合操作</summary><div><button onClick={() => setSettings(s => refreshBoss(s))}><RefreshCw size={16} />随机刷新</button><button onClick={() => setSettings(s => ({ ...s, bossLocks: defaults().bossLocks, cards: s.cards.map(c => ({ ...c, locked: false })) }))}><UnlockKeyhole size={16} />全部解锁</button><button disabled={!manualReady} title={manualReady ? undefined : '请先为当前组合选择可用标签，并加入基础维度'} onClick={() => run(() => { const row = bossRow(settings, rows); replaceResults([row, ...rows], '加入当前组合', [...selected, row.id], rows.length ? rulesAtGeneration : JSON.stringify({ rules: settings.rules, cards: settings.cards })); setNotice('当前组合已加入清单首位。'); })}><Plus size={16} />单独加入当前组合</button></div></details></div>
+        <div className={styles.sectionHead}><h2 id="boss-title">当前组合与固定项</h2><details className={styles.utilities} onKeyDown={e => { if (e.key === 'Escape') { e.currentTarget.open = false; e.currentTarget.querySelector('summary')?.focus(); } }}><summary>组合操作</summary><div><button disabled={!settings.cards.some(card => card.joined && BODY_CARDS.some(preset => preset.id === card.id))} onClick={() => void copy(bodyCombination(settings.cards, settings.lang))}><Copy size={16} />复制身形组合{outputLanguage}</button><button onClick={() => setSettings(s => refreshBoss(s))}><RefreshCw size={16} />随机刷新</button><button onClick={() => setSettings(s => ({ ...s, bossLocks: defaults().bossLocks, cards: s.cards.map(c => ({ ...c, locked: false })) }))}><UnlockKeyhole size={16} />全部解锁</button><button disabled={!manualReady} title={manualReady ? undefined : '请先为当前组合选择可用标签，并加入基础维度'} onClick={() => run(() => { const row = bossRow(settings, rows); replaceResults([row, ...rows], '加入当前组合', [...selected, row.id], rows.length ? rulesAtGeneration : JSON.stringify({ rules: settings.rules, cards: settings.cards })); setNotice('当前组合已加入清单首位。'); })}><Plus size={16} />单独加入当前组合</button></div></details></div>
         <label className={styles.roleSelect}>角色定位<select value={settings.role} onChange={e => setSettings(s => ({ ...s, role: e.target.value }))}><option value="">不限定位</option>{['主角', '配角', '伙伴', '反派', 'Boss', '路人'].map(role => <option key={role}>{role}</option>)}</select></label>
         <div className={styles.ruleGrid}>{orderedIds.map(id => {
-          const builtin = CONFIG.find(c => c.id === id), custom = settings.cards.find(c => c.id === id);
+          const builtin = CONFIG.find(c => c.id === id), custom = cardCatalogue.find(c => c.id === id), bodyPreset = BODY_CARDS.some(c => c.id === id);
           const title = builtin?.title || custom!.title, tags = builtin ? settings.rules[builtin.id] : custom!.tags;
           const joined = builtin ? settings.bossDimensions.includes(builtin.id) : custom!.joined;
           return <RuleCard key={id} id={id} title={title} tags={tags} joined={joined} locked={builtin ? settings.bossLocks[builtin.id] : custom!.locked} expanded={expanded.includes(id)}
-            selection={builtin ? <label className={styles.bossSelect}><span className={styles.srOnly}>精确选择{title}</span><select value={settings.boss[builtin.id]} onChange={e => setSettings(s => ({ ...s, boss: { ...s.boss, [builtin.id]: e.target.value }, bossLocks: { ...s.bossLocks, [builtin.id]: true } }))}>{ADDONS.some(c => c.id === id) && <option value="">本轮不使用</option>}{settings.boss[builtin.id] && !allowed(settings, builtin.id).includes(settings.boss[builtin.id]) && <option value={settings.boss[builtin.id]} disabled>{settings.boss[builtin.id]}（不可用）</option>}{!allowed(settings, builtin.id).length && CORE.some(c => c.id === id) && <option value="">没有可用标签</option>}{allowed(settings, builtin.id).map(label => <option key={label}>{label}</option>)}</select></label> : <label className={styles.bossSelect}><span className={styles.srOnly}>选择{title}</span><select value={custom!.value} onChange={e => setSettings(s => ({ ...s, cards: s.cards.map(v => v.id === id ? { ...v, value: e.target.value, locked: true } : v) }))}>{!custom!.tags.some(t => t.label === custom!.value && t.status !== 'exclude') && <option value={custom!.value} disabled>{custom!.value}（不可用）</option>}{custom!.tags.filter(t => t.status !== 'exclude').map(t => <option key={t.label}>{t.label}</option>)}</select></label>}
-            onLock={() => builtin ? setSettings(s => ({ ...s, bossLocks: { ...s.bossLocks, [builtin.id]: !s.bossLocks[builtin.id] } })) : setSettings(s => ({ ...s, cards: s.cards.map(v => v.id === id ? { ...v, locked: !v.locked } : v) }))}
-            onCycle={builtin ? () => cycleBoss(builtin.id) : undefined} onToggle={() => setExpanded(list => list.includes(id) ? list.filter(v => v !== id) : [...list, id])}
-            onJoin={() => builtin ? toggleDimension(builtin.id) : setSettings(s => ({ ...s, cards: s.cards.map(c => c.id === id ? { ...c, joined: !c.joined } : c) }))}
+            selection={builtin ? <label className={styles.bossSelect}><span className={styles.srOnly}>精确选择{title}</span><select value={settings.boss[builtin.id]} onChange={e => setSettings(s => ({ ...s, boss: { ...s.boss, [builtin.id]: e.target.value }, bossLocks: { ...s.bossLocks, [builtin.id]: true } }))}>{ADDONS.some(c => c.id === id) && <option value="">本轮不使用</option>}{settings.boss[builtin.id] && !allowed(settings, builtin.id).includes(settings.boss[builtin.id]) && <option value={settings.boss[builtin.id]} disabled>{settings.boss[builtin.id]}（不可用）</option>}{!allowed(settings, builtin.id).length && CORE.some(c => c.id === id) && <option value="">没有可用标签</option>}{allowed(settings, builtin.id).map(label => <option key={label}>{label}</option>)}</select></label> : <label className={styles.bossSelect}><span className={styles.srOnly}>选择{title}</span><select value={custom!.value} onChange={e => changeCard(id, card => ({ ...card, value: e.target.value, locked: true }))}>{!custom!.tags.some(t => t.label === custom!.value && t.status !== 'exclude') && <option value={custom!.value} disabled>{custom!.value}（不可用）</option>}{custom!.tags.filter(t => t.status !== 'exclude').map(t => <option key={t.label}>{t.label}</option>)}</select></label>}
+            onLock={() => builtin ? setSettings(s => ({ ...s, bossLocks: { ...s.bossLocks, [builtin.id]: !s.bossLocks[builtin.id] } })) : changeCard(id, card => ({ ...card, locked: !card.locked }))}
+            onCycle={builtin ? () => cycleBoss(builtin.id) : bodyPreset ? () => cycleBodyCard(id) : undefined} onToggle={() => setExpanded(list => list.includes(id) ? list.filter(v => v !== id) : [...list, id])}
+            onJoin={() => builtin ? toggleDimension(builtin.id) : changeCard(id, card => ({ ...card, joined: !card.joined }))}
             onTag={(label, status) => builtin ? setTagStatus(builtin.id, label, status) : setCustomTagStatus(id, label, status)}
             onDrop={source => moveCard(source, id)} onMove={direction => moveBy(id, direction)}>
-            {builtin ? <form className={styles.addTag} onSubmit={e => { e.preventDefault(); addTag(builtin.id); }}><input aria-label={`自定义${title}标签`} placeholder="自定义标签" maxLength={30} value={tagInputs[builtin.id] || ''} onChange={e => setTagInputs(s => ({ ...s, [builtin.id]: e.target.value }))} /><button aria-label={`添加${title}标签`}><Plus size={16} /></button></form> : <div className={styles.cardTools}><button onClick={() => { const card = custom!, index = settings.cards.indexOf(card); setUndo({ label: '卡片移除', restore: () => setSettings(current => ({ ...current, cards: [...current.cards.slice(0, index), card, ...current.cards.slice(index)] })) }); setSettings(s => ({ ...s, cards: s.cards.filter(c => c.id !== id) })); setNotice('卡片已移除，已有提示词保留。'); }}>移除此卡片</button></div>}
+            {builtin ? <form className={styles.addTag} onSubmit={e => { e.preventDefault(); addTag(builtin.id); }}><input aria-label={`自定义${title}标签`} placeholder="自定义标签" maxLength={30} value={tagInputs[builtin.id] || ''} onChange={e => setTagInputs(s => ({ ...s, [builtin.id]: e.target.value }))} /><button aria-label={`添加${title}标签`}><Plus size={16} /></button></form> : <div className={styles.cardTools}><button disabled={bodyPreset && !settings.cards.some(card => card.id === id)} onClick={() => { const card = custom!, index = settings.cards.indexOf(card); setUndo({ label: bodyPreset ? '身形卡片重置' : '卡片移除', restore: () => setSettings(current => ({ ...current, cards: [...current.cards.slice(0, index), card, ...current.cards.slice(index)] })) }); setSettings(s => ({ ...s, cards: s.cards.filter(c => c.id !== id) })); setNotice(bodyPreset ? '身形卡片已恢复默认并移出组合，已有提示词保留。' : '卡片已移除，已有提示词保留。'); }}>{bodyPreset ? '恢复默认并移出' : '移除此卡片'}</button></div>}
           </RuleCard>;
         })}</div>
         <div className={`${styles.sectionHead} ${styles.ruleFooter}`}><div className={styles.actions}><button aria-expanded={chatOpen} onClick={() => setChatOpen(v => !v)}><Plus size={16} />增加卡片</button><details className={styles.utilities} onKeyDown={e => { if (e.key === 'Escape') { e.currentTarget.open = false; e.currentTarget.querySelector('summary')?.focus(); } }}><summary>规则操作</summary><div><button onClick={() => { const previous = settings; setUndo({ label: '规则重置', restore: () => setSettings(current => ({ ...current, rules: previous.rules, boss: previous.boss, bossLocks: previous.bossLocks })) }); setSettings(s => reconcile({ ...s, rules: defaults().rules })); setNotice('内置规则已重置，扩展卡片保留。'); }}>重置内置规则</button><button onClick={() => { const previousExpanded = expanded, previousOrder = cardOrder; setUndo({ label: '布局重置', restore: () => { setExpanded(previousExpanded); setCardOrder(previousOrder); } }); setExpanded([]); setCardOrder([]); }}>恢复卡片布局</button></div></details></div></div>
