@@ -524,3 +524,14 @@ sudo nginx -t
 
 实际健康3d32f549a086ee51bbd332f56e58a5fdcc7cc879，BUILD kZ9Q8IQHJzXgm99agJDVN；完整继承e0c216／0.141.6。stage `/data/video-api-debugger/release-staging/fusion-ux07-20261110/attempt01`，pair ce668db9-410e-4d48-a59d-4f69276ed562。单main完整Next/types/lint通过，17原生及16关联复用、1关联刷新和fresh pricing有证，guard79ab／zxSxN0_ODrOhrA3gjUCPz沿既有健康产物。13:09:30Z公网、13:10:12Z七服务四timer/controller0、58资源/4匿名401及13融合资源字节匹配。价格、私有policy和同数据/环境链接保持；无DDL/数据还原/收费/自动浏览器验收。相同stage保configuration-before、database-before.sqlite和program-recovery.sh，仅服务器留存。锁头/独立×交互待用户手验，后续源码继承本实际健康源；9发布窗已释放。详见[原单UX07](../tasks/todo/2026-11-08-character-fusion.md#ux07-锁头紧邻类别与独立移出按钮2026-11-10)。
 <!-- /FUSION-UX07-RELEASE-20261110 -->
+
+
+<!-- TPL-EDITOR04-RELEASE-20261110 -->
+### 2026-11-10 TPL-EDITOR04 模板上下文与原封面入口：v0.142.1
+
+已部署，待用户手动验收。主源c9945dc4db3eee450a2dfae4a1c047b34da108ef / BUILD V2d6Nlr58aJXPzru7fABb，继承角色融合08a49383/v0.142.0；仅统一ImageStudio只读/编辑入口和本人live原件封面入口，不改模板生产定义。6项新隔离工程、完整类型及Next/type/lint，17+17内置矩阵相同输入复用及5项刷新、鲜计价通过。无收费生图或浏览器功能验收。
+
+stage：`/data/video-api-debugger/release-staging/template-editor-entry-20261110/attempt02`，pair49073d46-0bcb-49cb-9eb2-3167c14188ad；build/cutover均0。16:57:54Z公网58资源和4匿名401，16:58:33Z七服务同源、四timer及controller0，本机/公网健康200。一致备份SHA ede325946e0b63a4104c49ea220c6bb464538cbc88cc6c9b129fc0da43b22aba，价格d03c539d...和策略/持久链接不变，无本轮DDL或数据恢复。恢复沿本stage program-recovery.sh及79abce5c6b06bd714261609678992a3161ba4bad / zxSxN0_ODrOhrA3gjUCPz，首段只读前置验证通过，未实际回退。
+
+attempt01缺baseline.build，创建候选/Next/切服务前退出；失败原证保留，attempt02补齐实际基线后成功。装备设计新旧定义差异和未覆盖边界见[原单§11](../tasks/todo/2026-11-09-template-current-input.md#11-tpl-editor04-原模板复用草稿及装备设计排查2026-11-10)。入口 https://sd2.youdooart.com/template-studio?type=image 。发布窗已交回后继。
+<!-- /TPL-EDITOR04-RELEASE-20261110 -->
