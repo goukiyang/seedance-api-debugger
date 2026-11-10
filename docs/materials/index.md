@@ -1,7 +1,7 @@
 <!-- FUSION-UX05-MATERIALS-20261110 -->
-## 角色融合 UX05 层次方案预览 R01/R02（2026-11-10）
+## 角色融合 UX05 预览 R01–R03（2026-11-10）
 
-[方案与两版预览](../../tasks/todo/2026-11-08-character-fusion.md#ux05-层次与归属方案预览2026-11-10)：R02按用户反馈改中性灰，并增强卡内标题/内容/规则及结果框内四区分层；R01保历史、未获认可。两图1391×1131，已查看，演示数据、未实施。原件/完整提示词/来源说明保正式根私有 `docs/materials/2026-11-08-character-fusion-prototype/implementation/ux05/`；不升级应用或部署，不冒实页截图。
+[方案与原图](../../tasks/todo/2026-11-08-character-fusion.md#ux05-层次与归属方案预览2026-11-10)：R03按用户要求保灰色，删冗余常显信息/条带，能力归到规则/详情/清单入口；已查看，1536×1024演示图，未实施。R01/R02（1391×1131）保历史，未获认可。原件/完整提示词/来源说明保正式根私有 `docs/materials/2026-11-08-character-fusion-prototype/implementation/ux05/`；未升级应用、部署或冒实页截图。
 <!-- /FUSION-UX05-MATERIALS-20261110 -->
 
 <!-- FUSION-UX04-MATERIALS-20261109 -->
