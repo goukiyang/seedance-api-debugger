@@ -1,10 +1,12 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  "title": "用量读取与风格编辑优化",
+  "title": "视频查看与创作体验优化",
   "outline": [
-    "查看用量时减少对其他操作的阻塞",
-    "风格编辑输入不中断，保存后选用立即生效"
+    "视频生成完成后立即准备可查看文件",
+    "已有原片时优先直接播放，减少等待",
+    "角色融合减少边框，生成与规则操作归位",
+    "使用当前设置时，不再被失效历史记录阻断生成。"
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
