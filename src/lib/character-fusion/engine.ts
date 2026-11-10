@@ -67,7 +67,7 @@ export const allowed = (s: FusionSettings, id: Dimension) => s.rules[id].filter(
 export const required = (s: FusionSettings, id: Dimension) => s.rules[id].filter(t => t.status === 'must').map(t => t.label);
 export function reconcile(s: FusionSettings): FusionSettings {
   const next = { ...s, boss: { ...s.boss }, bossLocks: { ...s.bossLocks } };
-  for (const c of CONFIG) if (!allowed(s, c.id).includes(s.boss[c.id]) && !(optional(c.id) && s.boss[c.id] === '')) {
+  for (const c of CONFIG) if (!s.bossLocks[c.id] && !allowed(s, c.id).includes(s.boss[c.id]) && !(optional(c.id) && s.boss[c.id] === '')) {
     next.boss[c.id] = optional(c.id) ? '' : allowed(s, c.id)[0] || ''; next.bossLocks[c.id] = false;
   }
   return next;

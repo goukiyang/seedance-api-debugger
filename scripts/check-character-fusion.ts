@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { defaults, generateBatch, refreshBoss, required, changeRow, missingRequired, bossRow, textFor, csvFor, parseSettings, CONFIG } from '../src/lib/character-fusion/engine';
+import { defaults, generateBatch, refreshBoss, required, changeRow, missingRequired, bossRow, textFor, csvFor, parseSettings, reconcile, CONFIG } from '../src/lib/character-fusion/engine';
 
 const settings = defaults();
 settings.rules.source.find(t => t.label === '动物')!.status = 'exclude';
@@ -92,4 +92,12 @@ lockedCard.cards[0].tags[1].status = 'must';
 assert.throws(() => generateBatch(lockedCard), /固定项与规则冲突/);
 const optionalFixed = defaults(); optionalFixed.bossDimensions.push('equipment'); optionalFixed.bossLocks.equipment = true;
 assert(generateBatch(optionalFixed, 303).every(row => row.category.equipment === ''));
+const excludedFixed = defaults(); excludedFixed.bossLocks.source = true;
+excludedFixed.rules.source.find(t => t.label === '动物')!.status = 'exclude';
+const unresolved = reconcile(excludedFixed);
+assert.equal(unresolved.boss.source, '动物'); assert.equal(unresolved.bossLocks.source, true);
+assert.throws(() => generateBatch(unresolved), /固定项与规则冲突/);
+assert.equal(parseSettings(JSON.parse(JSON.stringify(unresolved))).bossLocks.source, true);
+lockedCard.cards[0].tags[1].status = 'default'; lockedCard.cards[0].tags[0].status = 'exclude';
+assert.throws(() => generateBatch(lockedCard), /固定项与规则冲突/);
 console.log('PASS: batch/rewrite locks for built-in and custom cards; fixed vs required conflicts; fixed unused optional dimension.');
