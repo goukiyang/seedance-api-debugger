@@ -1,6 +1,6 @@
 # 角色融合提示词
 
-日期：2026-11-08（洛杉矶）；状态：UX06按R03实施中，配色改沿广场；当前生产版本：0.141.5。
+日期：2026-11-08（洛杉矶）；状态：UX06已部署，待用户手动验收；UX06发布版本：0.141.6。
 
 ## 目标与来源
 
@@ -556,5 +556,11 @@ P1表示应先修正的预期、内容损失或信任问题；P2为效率、理�
 
 结构与范围：工作区codex/fusion-ux06-plaza-20261110从实际健康af172a3a38b65715ce813e798c72ef4c45680c3c／v0.141.5／XZeJNjda7tRedRPTt6YOq创建，保留该源全部视频续传／超分等增量。CodeGraph当前工作区查询命中RuleCard与CharacterFusionStudio，源码确认父状态唯一、RuleCard仅此页消费；仅3个界面文件及发布版本元数据，不改engine/API/schema、费用、账号权限或原请求。增长仍沿原有卡片与标签限制；无需新共享组件或重构平台。
 
-工程状态：定向TypeScript（next-env、两组件及真实导入依赖）通过；最终lint、完整Next及正式部署待本单后续回写。计划发布版本0.141.6，原健康guard79ab保持。功能由用户手动验收，不执行浏览器功能截图、真实LLM或收费回归。
+工程与发布：应用e0c216c1d52974473915af3583257e4dabea6c67已聚焦提交并推送，远端同号；v0.141.6／BUILD lsPdfmtGbxJCrfijCOPoN。定向TypeScript及最终两组件lint通过；服务器本轮3个变动TS/TSX lint和完整Next（含全仓types/lint）通过，2026-11-10T11:39:28Z构建完成。17项原生与16项关联证据按输入hash复用，1项关联刷新，fresh pricing通过；不冒所有旧检查均重跑。CodeGraph冻结源索引2042文件／34322节点／116070边，无待同步、哈希差异或解析错；sourceFingerprint 73e200e6ee0cd72eab2d14827b3851aeeb0ee33a2de2ddf2c5d519b6bae1f9b2。
+
+2026-11-10T12:40:10Z固定切版完成，12:40:55Z健康收口；stage `/data/video-api-debugger/release-staging/fusion-ux06-20261110/attempt01`，pair `0ebbb691-76b3-4cf9-8f87-82c4e93e21c6`。7服务／4timer、新源实际工作目录、58公网资源及4匿名401通过；融合页13个真实manifest资源均200且字节hash匹配，应用bundle含新版译文／详情入口。私有policy、同一环境／数据链接及价格hash d03c539d74a31b5e2a6a0305724b1b9f193e0ade878370898c7632d1bdc96539保持。既有推荐迁移仅读核、不执行DDL；一致备份与程序恢复入口保留，guard79ab／zxSxN0_ODrOhrA3gjUCPz沿既有健康产物，不重复构建。发布控制器已结束，窗口释放。
+
+Review：合并只作用于本工具；engine/API、权限／费用／草稿与结果操作处理器保持，低频能力保可达。hover与focus-within成对，粗指针／触屏直接显示，锁定及主要操作常显；无缺失CSS类。最初源包组装发现旧发布包既有103项非运行导出排除（示例环境、历史证据与媒体），在构建前沿旧相同策略纠正；保原失败材料，8个变动文件全部按Git blob验证，无新增应用文件被排除。完整构建的旧CSS／hooks警告非阻断，本轮目标lint零警告。
+
+原证摘要保正式根私有 `docs/materials/2026-11-08-character-fusion-prototype/implementation/ux06/release-summary.json`；不复制数据库、环境或用户媒体。无真实LLM、生成、收费请求、浏览器功能截图或自动功能验收。当前已部署，加入/移除、展开拖动、键盘/触屏、译文复制与菜单实际效果均待用户手验。本轮未新增范围外问题。
 <!-- /FUSION-UX06-20261110 -->

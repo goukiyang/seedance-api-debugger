@@ -510,3 +510,11 @@ sudo nginx -t
 
 新studio-current-input-v1合同已生效，后继先继承实际源；恢复只用本stage program-recovery.sh release-input.json及新guard，先核所有者与运行版本，不能回旧674。恢复入口第一段只读核定通过，未实际回退。首次包装器旧ST引用在切换前被保护拦住，inactive后修正本stage路径并保原证，未重建未变产物。详细工程、失败保护、恢复证据与手验清单沿[原单§8](../tasks/todo/2026-11-09-template-current-input.md#8-最终交付回执)，无收费生图或浏览器功能验收。
 <!-- /TPL-CURRENT01-DEPLOY-20261109 -->
+
+<!-- FUSION-UX06-RELEASE-20261110 -->
+## 角色融合UX06／v0.141.6（2026-11-10）
+
+实际健康源e0c216c1d52974473915af3583257e4dabea6c67，BUILD lsPdfmtGbxJCrfijCOPoN，完整继承af172／0.141.5。固定stage `/data/video-api-debugger/release-staging/fusion-ux06-20261110/attempt01`，pair 0ebbb691-76b3-4cf9-8f87-82c4e93e21c6。单main完整Next/types/lint通过，guard79ab／0.141.0+points-pricing-guard.1／zxSxN0_ODrOhrA3gjUCPz沿原健康产物复用；17原生、16关联复用、1关联刷新和fresh pricing有证。六份继承证明均在启动前补齐，新导出保旧103项非运行排除，8项差量全部Git blob验证。
+
+12:40:10Z公网、12:40:55Z健康：7服务4timer、58资源/4匿名401、融合页13资源字节匹配、controller0；同数据/环境链接、私有policy和价格保持，既有迁移只读核，无DDL/数据还原/收费调用。相同stage的configuration-before、database-before.sqlite和program-recovery.sh仅保服务器，不导出；程序恢复不回数据。本次融合页按R03合并卡片与按需操作并复用广场色板，已部署，待用户手验，无自动浏览器功能验收。完整范围及原证入口见[原单UX06](../tasks/todo/2026-11-08-character-fusion.md#ux06-r03方案落地与按需图标2026-11-10)。
+<!-- /FUSION-UX06-RELEASE-20261110 -->

@@ -1,3 +1,9 @@
+<!-- FUSION-UX06-MATERIALS-20261110 -->
+## 角色融合 UX06 R03落地与按需操作（2026-11-10）
+
+v0.141.6／e0c216c1d／lsPdfmtGbxJCrfijCOPoN已部署，12:40:55Z健康；待用户手动验收。广场色板、合并维度卡、hover/focus/触屏及明确译文复制入口沿[原单UX06](../../tasks/todo/2026-11-08-character-fusion.md#ux06-r03方案落地与按需图标2026-11-10)。工程、构建、13个融合资源与服务／保护摘要保正式根私有 `docs/materials/2026-11-08-character-fusion-prototype/implementation/ux06/release-summary.json`；R03原图沿UX05保留。无真实LLM／收费／自动功能验收，不公开DB、环境或媒体。
+<!-- /FUSION-UX06-MATERIALS-20261110 -->
+
 <!-- FUSION-MODEL01-MATERIALS-20261109 -->
 ## 角色融合模型设置与原位清除（2026-11-09）
 
