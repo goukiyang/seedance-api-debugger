@@ -16,6 +16,9 @@ import { readUsageMedia, type UsageMediaProjection } from './media';
 import { PublicUsageSummaryFold } from './public-summary-fold';
 import { usageRowSpool } from './row-spool';
 import { observeOperation } from '@/lib/performance/server-operations';
+import { sqlitePrismaReadClient } from '@/lib/sqlite-prisma-read-snapshot';
+import { withUsageReadSnapshot } from './sqlite-read-snapshot';
+import { withUsageReportAdmission } from '@/lib/admin/usage-report-admission';
 
 function canonicalQuery(scope: PublicUsageScope, query: UsagePublicQuery) {
   const params = new URLSearchParams();
@@ -191,15 +194,27 @@ export async function readUsagePublicSnapshot(db: Parameters<typeof resolveUsage
   } catch (error) { await spool.dispose(); throw error; }
 }
 
-async function snapshot(scope: PublicUsageScope, input: UsagePublicQuery) {
-  return prisma.$transaction(db => readUsagePublicSnapshot(db, scope, input, new Date().toISOString()), { maxWait: 10000, timeout: 120000 });
+async function snapshot(scope: PublicUsageScope, input: UsagePublicQuery, signal?: AbortSignal) {
+  return withUsageReportAdmission(async () => {
+    const captured: { result?: UsageExportSnapshot } = {};
+    try {
+      return await withUsageReadSnapshot(async (reader, asOf) => {
+        captured.result = await readUsagePublicSnapshot(sqlitePrismaReadClient(reader), scope, input, asOf);
+        return captured.result;
+      }, { signal });
+    } catch (error) {
+      // Child close can fail after capture returned a completed result spool.
+      await captured.result?.dispose?.();
+      throw error;
+    }
+  }, signal);
 }
 
-export async function getUsageReport(scope: PublicUsageScope, query: UsagePublicQuery): Promise<UsageReportDTO> {
-  const result = await snapshot(scope, query);
+export async function getUsageReport(scope: PublicUsageScope, query: UsagePublicQuery, signal?: AbortSignal): Promise<UsageReportDTO> {
+  const result = await snapshot(scope, query, signal);
   try { return result.report; } finally { await result.dispose?.(); }
 }
 
-export async function getUsageExportSnapshot(scope: PublicUsageScope, query: UsagePublicQuery): Promise<UsageExportSnapshot> {
-  return snapshot(scope, query);
+export async function getUsageExportSnapshot(scope: PublicUsageScope, query: UsagePublicQuery, signal?: AbortSignal): Promise<UsageExportSnapshot> {
+  return snapshot(scope, query, signal);
 }

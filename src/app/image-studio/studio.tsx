@@ -4538,6 +4538,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
             currentImages={auxiliaryImages} maxReferences={currentStyleCap}
             disabled={!definitionReady && !sharedReady || uploading || submitting || Boolean(pendingSubmission)}
             onStylesChange={setStyleGroups}
+            onStyleUpdated={onSharedRefresh}
             onSkillsChange={setSkills} />
         </section>
         <section className={`${styles.materialSection} ${templateWorkbench ? styles.auxiliaryMaterials : ''}`} aria-label="参考图">

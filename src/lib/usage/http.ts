@@ -1,3 +1,4 @@
+import { UsageReportBusyError } from '@/lib/admin/usage-report-admission';
 import { NextResponse } from 'next/server';
 import { AuthError, getSession } from '@/lib/auth/session';
 import { createProjectUsageScope, createSelfUsageScope } from './access';
@@ -16,10 +17,10 @@ export async function handleUsageRequest(request: Request, projectId?: string, c
       ? await createProjectUsageScope(user, projectId, params.has('member_owner_id') ? params.get('member_owner_id')! : undefined)
       : createSelfUsageScope(user);
     const query = parseUsageQuery(params, scope);
-    if (!csv) return NextResponse.json(await getUsageReport(scope, query), { headers: usagePrivateHeaders });
+    if (!csv) return NextResponse.json(await getUsageReport(scope, query, request.signal), { headers: usagePrivateHeaders });
     // Finish the safe snapshot before sending bytes; no database transaction
     // remains open while the browser downloads the completed projection.
-    const snapshot = await getUsageExportSnapshot(scope, query);
+    const snapshot = await getUsageExportSnapshot(scope, query, request.signal);
     const chunks = usageCsvChunks(snapshot);
     const encoder = new TextEncoder();
     const stream = new ReadableStream<Uint8Array>({
@@ -37,6 +38,7 @@ export async function handleUsageRequest(request: Request, projectId?: string, c
       'X-Usage-As-Of': snapshot.report.asOf, 'X-Usage-Fingerprint': snapshot.report.fingerprint,
       'X-Usage-Total': String(snapshot.records.length) } });
   } catch (error) {
+    if (error instanceof UsageReportBusyError) return NextResponse.json({ error: error.message }, { status: error.status, headers: { ...usagePrivateHeaders, 'Retry-After': '3' } });
     if (error instanceof AuthError || error instanceof UsageQueryError) return NextResponse.json({ error: error.message }, { status: error.status, headers: usagePrivateHeaders });
     return NextResponse.json({ error: csv ? '用量导出暂时失败，请保留条件后重试' : '用量暂时无法读取，请保留条件后重试' }, { status: 503, headers: usagePrivateHeaders });
   }

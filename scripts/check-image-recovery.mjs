@@ -293,6 +293,15 @@ const publicUsageFixtures = [
     databaseFlag: 'applicationDatabaseOpened', sources: [
       'scripts/project-create-client-engineering.ts', 'src/lib/projects/client-operations.ts',
     ] },
+  { file: 'scripts/public-usage-readonly-engineering.ts', schema: 'public-usage-readonly-engineering.v1',
+    timeoutMs: 120000, databaseFlag: 'productionDatabaseOpened', sources: [
+      'src/lib/usage/personal.ts', 'src/lib/usage/http.ts', 'src/app/api/projects/route.ts', 'src/lib/admin/usage-report-admission.ts',
+      'src/lib/sqlite-prisma-read-snapshot.ts', 'src/lib/usage/sqlite-read-snapshot.ts', 'scripts/usage-sqlite-reader.py',
+      'src/lib/usage/access.ts', 'src/lib/usage/source-scope.ts', 'src/lib/usage/project-directory.ts',
+      'src/lib/usage/media.ts', 'src/lib/usage/facts.ts', 'src/lib/usage/database.ts', 'src/lib/usage/aggregate.ts',
+      'src/lib/usage/row-spool.ts', 'src/lib/usage/csv.ts', 'src/lib/usage/query.ts', 'src/lib/usage/dto.ts',
+      'prisma/schema.prisma', 'scripts/public-usage-readonly-engineering.ts',
+    ] },
   { file: 'scripts/personal-usage-engineering.ts', schema: 'personal-usage-engineering.v1',
     databaseFlag: 'applicationDatabaseOpened', sources: [
       'src/lib/usage/dto.ts', 'src/lib/usage/access.ts', 'src/lib/usage/source-scope.ts', 'src/lib/usage/query.ts',

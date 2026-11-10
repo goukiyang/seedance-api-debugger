@@ -291,6 +291,9 @@ async function main() {
   const changed = await prepare(changedBody);
   assert.equal(changed.snapshot.styleGroups[0].revision, 4); assert.deepEqual(changed.snapshot.skills, []);
   assert.deepEqual(JSON.parse(changed.task.reference_ids), ['current-main', 'template-fixed', 'style-new']);
+  assert.ok(changed.task.context.includes('changed note'), 'Selected group note reaches the generation context');
+  assert.ok(changed.task.context.includes('selected note'), 'Selected per-image note reaches the generation context');
+  assert.ok(!changed.task.context.includes('old group note'), 'Replaced style does not keep the historical group note');
   await assert.rejects(() => prepare({ ...changedBody, draft: { ...changedBody.draft, styleGroupVersions: { [changedStyleId]: 3 } } }));
   currentStyles.delete(changedStyleId);
   await assert.rejects(() => prepare(changedBody));
