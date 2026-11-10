@@ -1,3 +1,9 @@
+<!-- FUSION-UX04-MATERIALS-20261109 -->
+## 角色融合 UX04 用户标注与源检查（2026-11-09）
+
+[原单UX04](../../tasks/todo/2026-11-08-character-fusion.md#ux04-视觉分组与截图位置修正2026-11-09)对应的原标注图和两文件源检查保正式根私有 `docs/materials/2026-11-08-character-fusion-prototype/implementation/ux04/`。原图明确生成栏/规则操作位置；源be6d39d45已推送，类型、lint及82个原事件handler保持有证，真实视觉/手机效果待用户手验；无浏览器或收费请求。
+<!-- /FUSION-UX04-MATERIALS-20261109 -->
+
 <!-- FUSION-UX03-MATERIALS-20261109 -->
 ## 角色融合 UX03 发布证据（2026-11-09）
 
