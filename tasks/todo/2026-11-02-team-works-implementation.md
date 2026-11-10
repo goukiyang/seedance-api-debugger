@@ -148,3 +148,23 @@ Baseline: actual 2239a1eaaa8e91bf53cb7e6f18a99a4c5a1cb1ed / 0.138.3; inherited t
 - 后台观测：18:38:37Z只读已有状态，自动曝光记录5条；reference origin/use均0。没有模拟同事点击或实际生成，后续真实参考并成功产出后才积累归因；该观测不代替用户功能验收。同包LANG01两UI保持79b原字节，沿其原16:18:54Z专项证据及本次完整构建；未扩大角色融合范围。
 
 发布汇总原证：[WORKS-AUTO01-release-summary.json](../../docs/materials/2026-11-02-team-works-research/auto-discovery-20261109/WORKS-AUTO01-release-summary.json)。服务器完整阶段 `/data/video-api-debugger/release-staging/works-auto-discovery-20261109/attempt02`，首次失败原证留attempt01；真实浏览器/触屏体验、同事成功参考实际链路仍用户手验，不以构建/健康冒验收。本会话结构查询工具不可用，定向核源码/调用点，未声称源码索引已更新。本轮未新增范围外线索；本次授权的自动曝光与成功归因已完成实施；接续为用户手验及真实业务自然积累，不代表其他原工单均已关闭。
+
+
+## WORKS-CARDINFO01：图片恢复视频同款底栏（2026-11-09 用户要求）
+
+用户要求广场图片下方恢复姓名、观看数量、模板名称等，与视频一致。本次仅作品广场/首页内嵌广场，替代此处图片隐藏元信息方案，不改其他生成结果页的UIH01。已核实际在线E0/v0.140.1/f0SnA9FbSNYxPYAEqyIDX，图片底栏受video条件隐藏、虚拟高度同样漏44px，三个相关前端文件与实施前分支同字节。
+
+复用既有视频底栏并提为两处实际调用的WorkCardInfo：模板/工具链接在左、观看/复用数在中、头像姓名在右，单行省略不换行。主瀑布流图片/视频及新作发现共用；图片虚拟高度补44px，移除重复隐藏信息面板及仅它使用的样式。完整作品详情仍由图片点击进入，封面内悬停一键参考、点赞、原件与访问权限保留；统计沿既有投影，不新增请求、页面计算或用户动作。
+
+代码已聚焦推送 `codex/works-image-card-metadata-20261109`；候选v0.140.2 / `d8eb67578df7a9b04273b1ab93dca6882d25b5f9`，完整继承已在线E0和新current-input合同；恢复复用E6/q_J相容版，不回旧674。架构为局部前端共享，无API/表/权限/生成费用/预计算变化。受影响Works（13组）及既有页面工程已补齐（共2个入口），其余16 native/15 linked原证按源字节和原验证器复用，原时间不改；新源计价门通过，main完整Next正在构建。未浏览器/生成测试，真实效果待用户手验。源码图工具本会话未提供，局部直接核源码与调用方，未冒索引更新。
+
+
+### WORKS-CARDINFO01 发布回执
+
+**已实现、提交推送并部署v0.140.2，待用户手动验收。** 上段构建中状态由此接续；最终源 `d8eb67578df7a9b04273b1ab93dca6882d25b5f9` / BUILD `RPD4MLbrvjN7MzDuF4nsh`。本轮修改8个文件，复用视频底栏为WorkCardInfo，并补图片虚拟高度；完整保留E0已发布的新输入与参考成功归因合同。移除的图片隐藏信息面板与私有样式已核无剩余调用，图片点击仍可进完整详情。
+
+完整Linux Next构建包含全类型/lint检查通过；受影响Works13组和页面工程共2入口fresh通过，原16 native/15 linked按原验证器与源字节复用，原时间不改写。新源计价门通过；guard E6/q_J原字节复用，未重编且不回674。发布退出0，33项公网构建资源、1个匿名401、6项实际startup、四timer与七服务同源健康通过。最后健康 2026-11-09 17:32:50（洛杉矶；原证 `2026-11-10T01:32:50.982694+00:00`），发布控制器0。
+
+旧writer自然退出、一致数据库备份及程序恢复入口齐全；只读继承迁移无DDL，不恢复/覆盖业务数据，价格所有字段、私密策略和原环境/数据链接保持。无真实浏览器、生成或付费测试；布局和触屏实际效果仍用户手验。本轮未新增范围外问题；仅本次图片底栏需求完成，不代关其他待办。
+
+原证：[发布汇总](../../docs/materials/2026-11-02-team-works-research/image-card-info-20261109/WORKS-CARDINFO01-release-summary.json)；完整服务器阶段 `/data/video-api-debugger/release-staging/works-image-card-info-20261109/attempt01`。入口 https://sd2.youdooart.com/works 及创作首页广场区，主版和E6相容版沿本阶段 `program-recovery.sh release-input.json` 恢复，程序回退不回数据。

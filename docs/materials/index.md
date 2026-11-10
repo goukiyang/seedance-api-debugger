@@ -551,3 +551,5 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 <!-- /CAP-REPORT-HD01-MATERIALS-20261109 -->
 
 - 2026-11-09 WORKS-AUTO01 自动曝光/参考成功归因：v0.140.0 已部署原证 [发布汇总](2026-11-02-team-works-research/auto-discovery-20261109/WORKS-AUTO01-release-summary.json)；原阶段服务器attempt02，原失败/通过时间保留，无真实用户模拟，功能待手验。
+
+- 2026-11-09 WORKS-CARDINFO01 图片与视频底栏统一：v0.140.2已部署，[发布原证](2026-11-02-team-works-research/image-card-info-20261109/WORKS-CARDINFO01-release-summary.json)，复用既有布局与相容恢复版，真实效果待用户手验。
