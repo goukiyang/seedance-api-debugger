@@ -247,7 +247,7 @@ export default function CharacterFusionStudio({ ownerId }: { ownerId: string }) 
         return en ? [{ dimension: c.id, label, en }] : [];
       }) })));
       setSettings(next); setTranslationOpen(true);
-      const pendingDirections = [...new Set(rows.filter(row => row.design && /[\u3400-\u9fff]/.test(row.design.requirements.en) && artDirectionPair(next.requirements, next.requirementsEn, Boolean(row.design.traits.headRatio)).zh !== row.design.requirements.zh).map(row => row.design!.requirements.zh))];
+      const pendingDirections = Array.from(new Set(rows.filter(row => row.design && /[\u3400-\u9fff]/.test(row.design.requirements.en) && artDirectionPair(next.requirements, next.requirementsEn, Boolean(row.design.traits.headRatio)).zh !== row.design.requirements.zh).map(row => row.design!.requirements.zh)));
       for (let i = 0; i < pendingDirections.length; i++) {
         if (!activeRef.current || controller.signal.aborted) return;
         setNotice(`正在补齐已有结果的固定要求 ${i + 1}/${pendingDirections.length}；已完成部分会保留。`);
