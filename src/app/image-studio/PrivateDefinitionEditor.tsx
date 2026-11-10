@@ -4,20 +4,23 @@ import { useEffect, useRef, useState, type RefObject, type MutableRefObject } fr
 import { Copy, FileText, RefreshCw, Save, X } from 'lucide-react';
 import { isClientSessionBlocked, watchSessionExit } from '@/lib/auth/client-session-boundary';
 import styles from './studio.module.css';
+import type { StudioPrivateDraftReference } from '@/lib/image-studio/current-inputs';
 import { useProductDialog } from '@/components/useProductDialog';
 import { readLegacyPrivateDraft, acknowledgeLegacyPrivateDraft, type LegacyPrivateDraft } from './private-draft-migration';
 import { usePageExitRisk } from '@/lib/hooks/page-exit-guard';
 
 type Values = { prompt: string; context: string };
 type Draft = { revision: number; sourceRevision: string; values: Values; appliedRequestId?: string };
-type Loaded = Values & { revision: number; sourceRevision: string; draft: Draft | null };
+type Loaded = Values & { revision: number; sourceRevision: string; draft: Draft | null; draftHeadRevision?: number };
 type Pending = { kind: 'draft' | 'save'; requestId: string };
 type PendingOperations = { draft: Pending | null; save: Pending | null };
 type Submitted = Pending & { values: Values; editVersion: number };
 type Props = { userId: string; moduleId: string; dialog: RefObject<HTMLElement>; blocked: boolean; open?: boolean;
   canRead: boolean; needsIdentity: boolean; onSaved: (revision: number, keepEditing?: boolean) => void;
   beforeClose: MutableRefObject<(() => Promise<boolean>) | null>; legacyDraftKey?: string; legacyDraftKeys?: string[];
-  endpoint?: string; contextOnly?: boolean; label?: string; maxLength?: number; allowEmpty?: boolean };
+  endpoint?: string; contextOnly?: boolean; label?: string; maxLength?: number; allowEmpty?: boolean;
+  sourceTaskId?: string; currentDraft?: StudioPrivateDraftReference | null; onEdit?: () => void;
+  onCurrentDraft?: (reference: StudioPrivateDraftReference | null) => void; saveLabel?: string };
 
 export function PrivateDefinitionEditor(props: Props) {
   const { confirm, productDialog } = useProductDialog();
@@ -36,6 +39,7 @@ export function PrivateDefinitionEditor(props: Props) {
   const migrating = useRef<LegacyPrivateDraft | null>(null);
   const epoch = useRef(0), locked = useRef(false);
   const draftBlocked = useRef(false);
+  const draftHeadRevision = useRef(0);
   const editVersion = useRef(0);
   const submitted = useRef<Partial<Record<Pending['kind'], Submitted>>>({});
   const state = useRef({ loaded, values, draft }); state.current = { loaded, values, draft };
@@ -66,6 +70,7 @@ export function PrivateDefinitionEditor(props: Props) {
   }
   function edit(next: Values) {
     editVersion.current++;
+    live.current.onEdit?.();
     state.current.values = next; setValues(next);
   }
   function clear() {
@@ -125,23 +130,29 @@ export function PrivateDefinitionEditor(props: Props) {
     if (locked.current || storageBlocked.current || props.blocked || !props.canRead) return;
     const scope = capture(); locked.current = true; setBusy(true); setNotice('');
     try {
-      const result = await responseJSON(await fetch(`${endpoint}?mode=private-editor&id=${encodeURIComponent(props.moduleId)}`,
+      const result = await responseJSON(await fetch(`${endpoint}?mode=private-editor&id=${encodeURIComponent(props.moduleId)}${props.sourceTaskId ? `&sourceTaskId=${encodeURIComponent(props.sourceTaskId)}` : ''}${props.currentDraft?.requestId ? `&draftRequestId=${encodeURIComponent(props.currentDraft.requestId)}` : ''}`,
         { cache: 'no-store', signal: AbortSignal.timeout(30000) }), scope) as Loaded;
       if (!current(scope)) return;
       const firstRead = !state.current.loaded;
       draftBlocked.current = false;
       state.current.loaded = result; state.current.draft = result.draft;
+      draftHeadRevision.current = result.draftHeadRevision ?? result.draft?.revision ?? 0;
       setLoaded(result); setDraft(result.draft); setConflict(false);
       try { setLegacy(nextLegacyDraft()); }
       catch { setNotice('本机旧草稿暂时无法读取，未清理任何内容'); }
       if (firstRead) {
-        const initial = result.draft && !result.draft.appliedRequestId && result.draft.sourceRevision === result.sourceRevision
-          ? result.draft.values : { prompt: result.prompt, context: result.context };
+        const selectedDraft = result.draft && props.currentDraft?.revision === result.draft.revision
+          && props.currentDraft.sourceRevision === result.draft.sourceRevision;
+        const activeDraft = !props.sourceTaskId && result.draft && (selectedDraft
+          || !result.draft.appliedRequestId && result.draft.sourceRevision === result.sourceRevision) ? result.draft : null;
+        const initial = activeDraft ? activeDraft.values : { prompt: result.prompt, context: result.context };
+        live.current.onCurrentDraft?.(activeDraft ? { revision: activeDraft.revision, sourceRevision: activeDraft.sourceRevision,
+          ...(selectedDraft && props.currentDraft?.requestId ? { requestId: props.currentDraft.requestId } : {}) } : null);
         state.current.values = initial; setValues(initial);
       }
       if (keepInput) {
         editVersion.current++;
-        setNotice('已核对最新版本，当前输入保留；保存原文后才会生效');
+        setNotice(props.onCurrentDraft ? '已核对最新版本，当前输入保留并用于本次生成' : '已核对最新版本，当前输入保留；保存原文后才会生效');
       } else if (result.draft && !result.draft.appliedRequestId && result.draft.sourceRevision !== result.sourceRevision) {
         setConflict(!firstRead && editVersion.current > 0);
         setNotice(firstRead ? '当前显示已保存原文；旧版本加密草稿仍保留，可主动恢复'
@@ -163,10 +174,12 @@ export function PrivateDefinitionEditor(props: Props) {
       const saved = await responseJSON(await fetch(endpoint, { method: 'PUT', cache: 'no-store',
         headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(30000),
         body: JSON.stringify({ action: 'save-private-draft', id: props.moduleId, requestId: original.requestId,
-          expectedRevision: state.current.draft?.revision || 0, sourceRevision: baseline.sourceRevision, values: snapshot }) }), scope) as Draft | { state: 'not-applied' };
+          expectedRevision: draftHeadRevision.current, sourceRevision: baseline.sourceRevision, values: snapshot }) }), scope) as Draft | { state: 'not-applied' };
       if (!current(scope)) return false;
       if ('state' in saved) { retain('draft', null); draftBlocked.current = true; setNotice('草稿已有更新，当前输入保留；可核对草稿或直接保存原文'); return false; }
       retain('draft', null); state.current.draft = saved; setDraft(saved); setNotice('');
+      draftHeadRevision.current = saved.revision;
+      live.current.onCurrentDraft?.({ revision: saved.revision, sourceRevision: saved.sourceRevision, requestId: original.requestId });
       if (migrating.current) {
         try {
           const cleared = acknowledgeLegacyPrivateDraft(migrating.current, saved.values);
@@ -250,6 +263,8 @@ export function PrivateDefinitionEditor(props: Props) {
         else {
           if (!state.current.draft || result.draft.revision >= state.current.draft.revision) {
             state.current.draft = result.draft; setDraft(result.draft);
+            draftHeadRevision.current = Math.max(draftHeadRevision.current, result.draft.revision);
+            live.current.onCurrentDraft?.({ revision: result.draft.revision, sourceRevision: result.draft.sourceRevision, requestId: original.requestId });
           }
           setNotice('原草稿已保存，当前输入已保留');
         }
@@ -305,7 +320,7 @@ export function PrivateDefinitionEditor(props: Props) {
       <label className={styles.label}>{props.contextOnly ? label : '模块上下文'}<button type="button" title="复制原文" aria-label="复制原文" onClick={() => void copy(values.context)}><Copy size={16} /></button><textarea rows={10} value={values.context} maxLength={props.maxLength || 20000}
         onChange={event => edit({ ...state.current.values, context: event.target.value })} /></label>
       <div className={styles.moduleSettingsActions}>
-        <button type="button" disabled={busy || Boolean(pending.save) || conflict} onClick={() => void save()}><Save size={16} />保存原文</button>
+        <button type="button" disabled={busy || Boolean(pending.save) || conflict} onClick={() => void save()}><Save size={16} />{props.saveLabel || '保存原文'}</button>
         <button type="button" onClick={async () => { if (await beforeClose()) clear(); }}><X size={16} />收起</button>
       </div>
       {conflict && !pending.save && <button type="button" disabled={busy} onClick={() => void read(true)}>核对最新版本并保留当前输入</button>}

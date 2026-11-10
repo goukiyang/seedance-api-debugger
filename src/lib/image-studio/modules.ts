@@ -17,7 +17,8 @@ import { getSkill, getSkillSelection, setSkillSelection, skillDTO, publicSkillSn
 import { studioVisibleAssetWhere } from './protected-assets';
 import { getStudioModuleReferencePolicy, parseStudioReferencePolicy, removeStudioModuleReferencePolicy, setStudioModuleReferencePolicy, validateStudioReferenceCounts, StudioReferencePolicyError, type StudioReferencePolicy } from './reference-policy';
 import { studioTemplateDefaultPolicy } from './template-defaults';
-import { assertStudioActor, deleteStudioGroup, getSharedStudioPersonalOverrides, getStudioRemovedDefaultGroups, publishSharedStudioModule, readSharedStudioModules, restoreStudioDefaultGroup, saveSharedStudioPersonal, studioPublisherKey, studioSharedBinding, StudioSharingError, type SharedStudioModuleRead } from './shared-contract';
+import { assertStudioActor, deleteStudioGroup, getSharedStudioPersonalOverrides, getStudioRemovedDefaultGroups, publishSharedStudioModule, readPrivateStudioGenerationDraft, readSharedStudioModules, restoreStudioDefaultGroup, saveSharedStudioPersonal, studioPublisherKey, studioSharedBinding, StudioSharingError, type SharedStudioModuleRead } from './shared-contract';
+import { parseStudioCurrentInputs } from './current-inputs';
 import type { SharedStudioLiveDTO } from './shared-types';
 import { moduleCoverKey, studioFixedCoverDTO } from './module-cover';
 import { readStudioModuleSharingPreference, writeStudioModuleSharingPreference, studioModuleSharingPreferenceKey } from './module-sharing-preference';
@@ -657,7 +658,17 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
       const newOrigins = studioDefinitionOrigins('image-module', { id, owner_id: ownerId, source_preset_id: forcedSourcePresetId });
       if (newOrigins.length) await requirePrivatePromptRequest(ownerId, newOrigins);
     }
-    const protectedData = current ? await protectStudioDefinitionPatch('image-module', current, data, ownerId, body.privatePromptEdit === true)
+    let privateDraftApplied = false;
+    if (body.currentInputs !== undefined) {
+      let currentInputs;
+      try { currentInputs = parseStudioCurrentInputs(body.currentInputs); }
+      catch (error) { throw new StudioModuleError((error as Error).message, 400); }
+      if (currentInputs?.privateDraft) {
+        const draft = await readPrivateStudioGenerationDraft(identity, id, currentInputs.privateDraft, tx);
+        data.prompt = draft.values.prompt; data.context = draft.values.context; privateDraftApplied = true;
+      }
+    }
+    const protectedData = current ? await protectStudioDefinitionPatch('image-module', current, data, ownerId, privateDraftApplied || body.privatePromptEdit === true)
       : writePrivateStudioDefinition('image-module', { id, owner_id: ownerId, context: '', ...data });
     const saved = !current
       ? await tx.imageStudioModule.create({ data: { id, owner_id: ownerId, ...protectedData } })

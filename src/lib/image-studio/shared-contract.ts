@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { parseStudioCurrentInputs } from './current-inputs';
 import type { ImageStudioPreset, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { canManageStudioPreset, canUseCompanyTemplates, canViewStudioPreset, type ImageStudioIdentity } from './access';
@@ -27,8 +28,8 @@ import type { SharedStudioCatalog, SharedStudioCatalogItem, SharedStudioDefaults
 import type { StudioOpenCommandStatus, StudioOpenNotApplied, StudioRetiredOpenProof } from './shared-types';
 import { parseStudioTaskSettings, studioTaskSettings, type StudioTaskSettings } from './task-settings';
 import { assertStudioTaskSettingsWrite, assertStudioTaskSettingsWriter, readStudioWorkspaceSource, writeStudioWorkspaceSource } from './task-settings-storage';
-import { assertRestoredStudioSourceRelation } from './restored-settings';
-import { readPrivateStudioDefinition, writePrivateStudioDefinition, protectStudioDefinitionPatch, transformPrivateImageTask } from './private-storage.server';
+import { assertRestoredStudioSourceRelation, hasSharedStudioPrompt, restoredStudioTemplatePrompt } from './restored-settings';
+import { readPrivateStudioDefinition, writePrivateStudioDefinition, protectStudioDefinitionPatch, transformPrivateImageTask, readPrivateImageTaskSnapshot } from './private-storage.server';
 import { isParameterCopyId, parameterCopyKey, readStudioParameterCopy, type StudioParameterCopy } from './parameter-copy';
 import { privateFieldOrigins, readPrivateFields, writePrivateFields, transferPrivateOrigins, transferPrivateFieldOrigin } from '@/lib/security/private-prompt-fields.server';
 import { privatePromptRequestCapabilities, requirePrivatePromptRequest } from '@/lib/security/private-prompt-request.server';
@@ -853,13 +854,34 @@ async function privateEditorTarget(actor: ImageStudioIdentity, moduleId: string,
     sourceRevision: source ? await sharedDefinitionToken(source, tx) : String(workspace.revision) };
 }
 
-export async function readPrivateStudioEditor(user: ImageStudioIdentity, moduleId: string) {
+export async function readPrivateStudioEditor(user: ImageStudioIdentity, moduleId: string, sourceTaskId?: string, draftRequestId?: string) {
   const actor = await assertStudioActor(user.id);
   const target = await privateEditorTarget(actor, moduleId, prisma);
-  const draft = await readPrivatePromptDraft(actor.id, { kind: target.kind, id: target.row.id,
+  if (sourceTaskId && draftRequestId) throw new StudioSharingError('请选择本次草稿或历史来源', 400);
+  const draftTarget = { kind: target.kind, id: target.row.id, origins: target.origins, fields: ['prompt', 'context'] };
+  const head = await readPrivatePromptDraft(actor.id, { kind: target.kind, id: target.row.id,
     origins: target.origins, fields: ['prompt', 'context'] });
-  return { id: moduleId, revision: target.workspace.revision, sourceRevision: target.sourceRevision,
-    prompt: target.row.prompt, context: target.reproduction?.moduleContext ?? target.row.context, draft };
+  const selected = draftRequestId ? await readPrivatePromptDraftReceipt(actor.id, draftTarget, draftRequestId) : head;
+  if (draftRequestId && (!selected || 'state' in selected)) throw new StudioSharingError('本次原文草稿未确认，当前输入保留，请核对原保存', 409);
+  const draft = selected && !('state' in selected) ? selected : null;
+  let prompt = target.row.prompt, context = target.reproduction?.moduleContext ?? target.row.context;
+  if (sourceTaskId !== undefined) {
+    if (!/^[A-Za-z0-9-]{1,120}$/.test(sourceTaskId)) throw new StudioSharingError('历史设置来源无效', 400);
+    const task = await prisma.imageStudioTask.findFirst({ where: { id: sourceTaskId, owner_id: actor.id, deleted_at: null } });
+    if (!task) throw new StudioSharingError('历史设置不存在或无权查看', 403);
+    const snapshot = readPrivateImageTaskSnapshot(task);
+    try {
+      assertRestoredStudioSourceRelation(task, snapshot, { moduleId, presetId: target.source?.id || null,
+        allowOrdinaryModulePromotion: !hasSharedStudioPrompt(snapshot) && task.module_id === moduleId
+          && target.source?.owner_id === actor.id && target.source.id === `module-source:${moduleId}` });
+      prompt = restoredStudioTemplatePrompt(snapshot);
+    } catch (error) { throw new StudioSharingError((error as Error).message, 409); }
+    const historicalOrigins = [...privateFieldOrigins(snapshot, 'moduleContext'), ...privateFieldOrigins(snapshot, 'templatePrompt')];
+    if (historicalOrigins.length) await requirePrivatePromptRequest(actor.id, historicalOrigins);
+    if (typeof snapshot.moduleContext !== 'string') throw new StudioSharingError('原记录没有完整上下文', 409);
+    context = snapshot.moduleContext;
+  }
+  return { id: moduleId, revision: target.workspace.revision, sourceRevision: target.sourceRevision, prompt, context, draft, draftHeadRevision: head?.revision || 0 };
 }
 
 export async function savePrivateStudioEditorDraft(user: ImageStudioIdentity, moduleId: string, input: Parameters<typeof savePrivatePromptDraft>[2]) {
@@ -868,6 +890,21 @@ export async function savePrivateStudioEditorDraft(user: ImageStudioIdentity, mo
   if (target.source && target.source.owner_id !== actor.id) throw new StudioSharingError('只有原模板作者可以保存模板内容；请另存参数方案', 403);
   return savePrivatePromptDraft(actor.id, { kind: target.kind, id: target.row.id, origins: target.origins,
     fields: ['prompt', 'context'] }, input);
+}
+
+// Per-use text remains in the existing encrypted draft. A request carries only
+// its exact revision, and never gains another template author's editing rights.
+export async function readPrivateStudioGenerationDraft(actor: ImageStudioIdentity, moduleId: string,
+  reference: { revision: number; sourceRevision: string; requestId?: string }, tx: Prisma.TransactionClient) {
+  const target = await privateEditorTarget(actor, moduleId, tx);
+  if (target.source && target.source.owner_id !== actor.id) throw new StudioSharingError('只有原模板作者可以修改模板上下文', 403);
+  const draftTarget = { kind: target.kind, id: target.row.id, origins: target.origins, fields: ['prompt', 'context'] };
+  const draft = reference.requestId ? await readPrivatePromptDraftReceipt(actor.id, draftTarget, reference.requestId, tx)
+    : await readPrivatePromptDraft(actor.id, draftTarget, tx);
+  if (!draft || 'state' in draft || draft.revision !== reference.revision || draft.sourceRevision !== reference.sourceRevision) {
+    throw new StudioSharingError('本次上下文草稿已有变化，请重新打开核对；本次尚未生成', 409);
+  }
+  return { values: draft.values, origins: target.origins };
 }
 
 export async function privateStudioEditorStatus(user: ImageStudioIdentity, moduleId: string, requestId: string, draft: boolean) {
@@ -1006,6 +1043,15 @@ export async function publishSharedStudioModule(user: ImageStudioIdentity, modul
       reproduction = await historicalDefinition(actor, sourceTaskId, tx, taskSettings);
     }
     if (taskSettings?.mode === 'historical' && !reproduction) throw new StudioSharingError('历史设置来源尚未确认，模板未保存', 409);
+    if (input.currentInputs !== undefined) {
+      let currentInputs;
+      try { currentInputs = parseStudioCurrentInputs(input.currentInputs); }
+      catch (error) { throw new StudioSharingError((error as Error).message, 400); }
+      if (currentInputs?.privateDraft) {
+        const current = await readPrivateStudioGenerationDraft(actor, moduleId, currentInputs.privateDraft, tx as Prisma.TransactionClient);
+        input = { ...input, privatePromptEdit: true, prompt: current.values.prompt, templatePrompt: current.values.prompt, context: current.values.context };
+      }
+    }
     const base = source || workspace;
     const stringField = (key: string, fallback: string, max: number, allowEmpty = true) => {
       const value = has(input, key) ? input[key] : fallback;

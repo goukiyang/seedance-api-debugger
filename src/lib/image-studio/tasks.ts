@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { parseStudioCurrentInputs } from './current-inputs';
 import { observeOperation } from '@/lib/performance/server-operations';
 import { likedStudioTaskPage } from './liked-task-page';
 import { studioClaimScanPage } from './claim-scan';
@@ -66,7 +67,7 @@ import type { SessionUser } from '@/lib/auth/session';
 import { resolveCanvasStudioReferenceUse } from '@/lib/canvas-studio-reference-use';
 import { resolveCanvasReferenceInputs } from '@/lib/canvas-reference-inputs';
 import { bindRoleMediaTask, roleMediaFingerprint, type RoleMediaSubmission } from '@/lib/canvas-roles/media-bindings';
-import { resolveSharedStudioModule, parseSharedStudioPersonalOverrides } from './shared-contract';
+import { resolveSharedStudioModule, parseSharedStudioPersonalOverrides, readPrivateStudioGenerationDraft } from './shared-contract';
 import { studioPresetArchived } from './preset-lifecycle';
 import type { SharedStudioIntent } from './shared-types';
 import { assertRestoredStudioDraft, assertRestoredStudioSourceRelation, assertRestoredStudioStyleVersions,
@@ -216,6 +217,21 @@ export function studioSharedGenerationSource(shared: NonNullable<Awaited<ReturnT
 
 export function normalizeSharedAuthorDraftForUse(actor: ImageStudioIdentity,
   shared: NonNullable<Awaited<ReturnType<typeof resolveStudioTaskSharedUse>>>, input: ReturnType<typeof parseStudioRequest>) {
+  if (input.currentInputs) {
+    const consumer = shared.binding.mode !== 'publisher' || shared.binding.ownerId !== actor.id || shared.definition.sourceOwnerId !== actor.id;
+    const draft = input.draft;
+    if (consumer && (input.currentInputs.privateDraft || draft?.moduleContext !== undefined || draft?.templatePrompt !== undefined
+      || draft?.templateReferenceIds !== undefined || draft?.fixedReferences !== undefined
+      || !input.restoredSettings && (draft?.skillIds !== undefined || draft?.skillVersions !== undefined))) {
+      throw new StudioError('只有原模板作者可以修改模板内部内容；本人输入和设置保留', 403);
+    }
+    if ((draft?.moduleContext !== undefined && privateFieldOrigins(shared.definition, 'context').length)
+      || draft?.templatePrompt !== undefined && privateFieldOrigins(shared.definition, 'templatePrompt').length) {
+      throw new StudioError('受保护的上下文请使用原文编辑入口；本次尚未生成', 403);
+    }
+    if (input.restoredSettings) assertRestoredStudioDraft(input);
+    return;
+  }
   if (input.restoredSettings) { assertRestoredStudioDraft(input); return; }
   const draft = input.draft;
   const hasDefinition = input.reproduceFromTaskId !== undefined || draft?.moduleContext !== undefined
@@ -303,6 +319,8 @@ export function safeImageChannelSnapshot(value: unknown): ImageGenerationChannel
 
 type StudioTaskDraft = {
   moduleContext?: string;
+  templatePrompt?: string;
+  templateReferenceIds?: string[];
   globalContext?: string;
   fixedReferences?: StudioFixedReference[];
   styleGroupIds?: string[];
@@ -335,7 +353,7 @@ function parseStudioTaskDraft(value: unknown, referenceIds: string[]): StudioTas
   if (value === undefined) return undefined;
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new StudioError('当前生成草稿无效');
   const record = value as Record<string, unknown>;
-  const allowed = ['moduleContext', 'globalContext', 'fixedReferences', 'styleGroupIds', 'styleGroupVersions', 'personalStyleSelection', 'skillIds', 'skillVersions', 'referencePolicy'];
+  const allowed = ['moduleContext', 'templatePrompt', 'templateReferenceIds', 'globalContext', 'fixedReferences', 'styleGroupIds', 'styleGroupVersions', 'personalStyleSelection', 'skillIds', 'skillVersions', 'referencePolicy'];
   if (Object.keys(record).some(key => !allowed.includes(key))) throw new StudioError('当前生成草稿包含不支持的字段');
   if (record.moduleContext !== undefined && (typeof record.moduleContext !== 'string' || record.moduleContext.length > 20000)) throw new StudioError('模块上下文最多 20000 字');
   if (record.globalContext !== undefined && (typeof record.globalContext !== 'string' || record.globalContext.length > 20000)) throw new StudioError('通用上下文最多 20000 字');
@@ -345,6 +363,16 @@ function parseStudioTaskDraft(value: unknown, referenceIds: string[]): StudioTas
     if (!record.skillVersions || typeof record.skillVersions !== 'object' || Array.isArray(record.skillVersions)
       || Object.entries(record.skillVersions).some(([id, version]) => !draft.skillIds?.includes(id) || typeof version !== 'string' || !/^[a-f0-9]{64}$/.test(version))) throw new StudioError('skills文字版本无效');
     draft.skillVersions = record.skillVersions as Record<string, string>;
+  }
+  if (record.templatePrompt !== undefined) {
+    if (typeof record.templatePrompt !== 'string' || record.templatePrompt.length > 20000) throw new StudioError('模板提示词最多 20000 字');
+    draft.templatePrompt = record.templatePrompt;
+  }
+  if (record.templateReferenceIds !== undefined) {
+    if (!Array.isArray(record.templateReferenceIds) || record.templateReferenceIds.length > MAX_REFERENCE_IMAGES
+      || record.templateReferenceIds.some(id => typeof id !== 'string' || !id || id.length > 100)
+      || new Set(record.templateReferenceIds).size !== record.templateReferenceIds.length) throw new StudioError('本次模板参考图无效');
+    draft.templateReferenceIds = record.templateReferenceIds as string[];
   }
   if (record.moduleContext !== undefined) draft.moduleContext = record.moduleContext as string;
   if (record.globalContext !== undefined) draft.globalContext = record.globalContext as string;
@@ -426,10 +454,15 @@ export function parseStudioRequest(body: Record<string, unknown>) {
   if (moduleRevision !== undefined && (!Number.isInteger(moduleRevision) || moduleRevision < 0)) throw new StudioError('模块已更新，请刷新后重试', 409);
   const reproduceFromTaskId = body.reproduceFromTaskId === undefined ? undefined : body.reproduceFromTaskId;
   if (reproduceFromTaskId !== undefined && (typeof reproduceFromTaskId !== 'string' || reproduceFromTaskId.length > 120)) throw new StudioError('历史生成记录无效', 400);
+  let currentInputs: ReturnType<typeof parseStudioCurrentInputs>;
+  try { if (body.currentInputs !== undefined) currentInputs = parseStudioCurrentInputs(body.currentInputs); }
+  catch (error) { throw new StudioError((error as Error).message, 400); }
+  if (!currentInputs && (draft?.templatePrompt !== undefined || draft?.templateReferenceIds !== undefined)) throw new StudioError('本次模板设置缺少有效版本，请刷新页面', 400);
   const restoredSettings = parseRestoredStudioSettings(body.restoredSettings);
+  if (currentInputs?.restoredDefinition && !restoredSettings) throw new StudioError('历史回填来源尚未确认，请重新选择原记录；输入保留', 409);
   const taskSettings = parseStudioTaskSettings(body.taskSettings);
   if (taskSettings && draft?.globalContext !== undefined) throw new StudioTaskSettingsError('通用上下文由已保存设置或原记录确定，不能随生成覆盖', 400);
-  assertRestoredStudioDraft({ restoredSettings, reproduceFromTaskId, draft });
+  assertRestoredStudioDraft({ restoredSettings, reproduceFromTaskId, draft, currentInputs });
   const projectId = parseUsageProjectId(body.projectId);
   return { requestId: body.requestId, prompt: body.prompt.trim(), count: Number(body.count), revision: Number(body.revision), moduleRevision, reproduceFromTaskId, referenceIds,
     ...(projectId !== undefined ? { projectId } : {}),
@@ -437,6 +470,7 @@ export function parseStudioRequest(body: Record<string, unknown>) {
     ...(personalOverrides ? { personalOverrides } : {}),
     ...(typeof body.personalPrompt === 'string' ? { personalPrompt: body.personalPrompt.trim() } : {}),
     ...(restoredSettings ? { restoredSettings } : {}), ...(taskSettings ? { taskSettings } : {}),
+    ...(currentInputs ? { currentInputs } : {}),
     ...(channelId !== undefined ? { channelId: channelId as string } : imageChannel ? { channelId: imageChannel.channelId } : {}),
     ...(imageChannel ? { imageChannel } : {}),
     ...(maxEstimatedCost !== undefined ? { maxEstimatedCost: maxEstimatedCost as number } : {}), ...(evolution ? { evolution } : {}), ...(draft !== undefined ? { draft } : {}), ...(aspectRatio !== undefined ? { aspectRatio } : {}), ...(resolution !== undefined ? { resolution } : {}), ...(model !== undefined ? { model: model as typeof IMAGE_STUDIO_MODELS[number] } : {}), ...(quality !== undefined ? { quality: quality as string } : {}) };
@@ -511,6 +545,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     || avatar || canvasUse || canvasPrompt || roleMedia || currentPricing || input.sharedLive || input.restoredSettings || input.reproduceFromTaskId)) {
     throw new StudioError('角色工具来源与本次原提交不匹配，输入与原号保留', 409);
   }
+  if (input.currentInputs && (avatar || canvasUse || canvasPrompt || roleMedia || characterLabPlanId || typeof moduleId !== 'string')) throw new StudioError('本次模板设置不能用于其他生成入口', 400);
   if (input.taskSettings && (avatar || canvasUse || canvasPrompt || roleMedia || typeof moduleId !== 'string')) throw new StudioError('模板设置模式不能用于其他生成入口', 400);
   const sheet = Boolean(avatar && isAvatarSheet(avatar));
   if (avatar && (moduleId !== undefined || input.sharedLive || input.restoredSettings || input.draft !== undefined || input.reproduceFromTaskId || (sheet ? input.count !== 1 || input.aspectRatio !== '1:1' : avatar.candidates.length !== input.count))) throw new StudioError('人物任务排版无效或继承了模板设置');
@@ -621,8 +656,18 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       && input.count !== (input.personalOverrides.count ?? sharedUse.definition.generationDefaults.count)) {
       throw new SharedStudioDefinitionError();
     }
-    const effectiveTemplatePrompt = restored ? restored.templatePrompt : sharedDefinition?.templatePrompt;
-    if (sharedDefinition || restored) input.prompt = [effectiveTemplatePrompt, personalPrompt].filter(Boolean).join('\n\n本次个人要求：\n');
+    const currentPrivateDraft = input.currentInputs?.privateDraft
+      ? await readPrivateStudioGenerationDraft(identity, String(moduleId), input.currentInputs.privateDraft, tx) : null;
+    const currentText = input.currentInputs ? {
+      prompt: currentPrivateDraft?.values.prompt ?? input.draft?.templatePrompt
+        ?? (input.currentInputs.restoredDefinition && restored ? restored.templatePrompt
+          : sharedDefinition?.templatePrompt),
+      context: currentPrivateDraft?.values.context ?? input.draft?.moduleContext
+        ?? (input.currentInputs.restoredDefinition && restored ? String(restored.snapshot.moduleContext)
+          : sharedDefinition?.context ?? workspace?.context ?? ''),
+    } : null;
+    const effectiveTemplatePrompt = currentText ? currentText.prompt : restored ? restored.templatePrompt : sharedDefinition?.templatePrompt;
+    if (sharedDefinition || restored || currentText?.prompt !== undefined) input.prompt = [effectiveTemplatePrompt, personalPrompt].filter(Boolean).join('\n\n本次个人要求：\n');
     const reproduceFromTaskId = restored?.source.id || (sharedUse ? undefined : input.reproduceFromTaskId || (!input.draft ? workspace?.reproduce_task_id : undefined));
     const contextMode = input.taskSettings?.mode ?? sharedDefinition?.reproduction?.taskSettings?.mode ?? 'historical';
     if (input.taskSettings?.mode === 'historical' && !input.taskSettings.sourceTaskId && !reproduceFromTaskId && !sharedDefinition?.reproduction) {
@@ -636,8 +681,13 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       if ((!reproduceFromTaskId || restored) && (!source || !canViewStudioPreset(identity, source))) throw new StudioError('该模板已停止共享，不能新建任务', 403);
       sourcePresetOwnerId = source?.owner_id || null;
     }
-    const moduleContextEditable = user.role === 'admin' || !workspace?.source_preset_id || sourcePresetOwnerId === ownerId;
+    const moduleContextEditable = !workspace?.source_preset_id || sourcePresetOwnerId === ownerId || !input.currentInputs && user.role === 'admin';
     const fixedReferencesEditable = user.role === 'admin' && (!workspace?.source_preset_id || sourcePresetOwnerId === ownerId);
+    if (input.currentInputs && !sharedDefinition && (input.draft?.templatePrompt !== undefined || input.draft?.templateReferenceIds !== undefined)) {
+      throw new StudioError('本次模板内部设置与当前工作区不匹配', 403);
+    }
+    if (input.currentInputs && !sharedDefinition && workspace && input.draft?.moduleContext !== undefined
+      && privateFieldOrigins(workspace, 'context').length) throw new StudioError('受保护的上下文请使用原文编辑入口', 403);
     if (input.draft?.moduleContext !== undefined && !moduleContextEditable) throw new StudioError('共享模板的内部上下文只能由创建者修改', 403);
     if (input.draft?.fixedReferences !== undefined && !fixedReferencesEditable) throw new StudioError('固定模板图只能由管理员修改原模板', 403);
     if (input.draft?.globalContext !== undefined && user.role !== 'admin') throw new StudioError('通用上下文只能由管理员修改', 403);
@@ -894,7 +944,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       styleReferenceGroups = styleGroups.map((group, index) => ({ ...styleGroupSnapshot[index], references: group.references }));
     } else {
       if (workspace) templateFixedReferences = await getStudioModuleFixedReferences(ownerId, workspace.id, tx);
-      if (!reproduceFromTaskId && input.draft?.fixedReferences !== undefined) {
+      if (!input.currentInputs && !reproduceFromTaskId && input.draft?.fixedReferences !== undefined) {
         const requestedIds = input.draft.fixedReferences.map(reference => reference.assetId);
         const uniqueRequestedIds = Array.from(new Set(requestedIds));
         const authorizedOriginalIds = Array.from(new Set(templateFixedReferences.map(reference => reference.assetId)));
@@ -925,8 +975,19 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         throw error;
       }
     }
+    if (input.currentInputs) {
+      snapshotModuleContext = currentText!.context;
+      if (input.draft?.fixedReferences !== undefined) {
+        const ids = Array.from(new Set(input.draft.fixedReferences.map(reference => reference.assetId)));
+        const originalIds = new Set([...(sharedDefinition?.fixedReferences || []), ...templateFixedReferences].map(reference => reference.assetId));
+        const owned = await tx.asset.findMany({ where: { id: { in: ids }, owner_id: ownerId, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(identity, tx)] }, select: { id: true } });
+        const original = await tx.asset.findMany({ where: { id: { in: ids.filter(id => originalIds.has(id)) }, status: 'active', type: 'image' }, select: { id: true } });
+        if (new Set([...owned, ...original].map(asset => asset.id)).size !== ids.length) throw new StudioError('固定参考图不存在或无权使用', 403);
+        templateFixedReferences = input.draft.fixedReferences;
+      }
+    }
     let referencePolicy: StudioReferencePolicy;
-    if (!avatar && (!sharedDefinition || restored)) skills = reproduceFromTaskId && input.draft?.skillIds === undefined
+    if (!avatar && (!sharedDefinition || restored || input.currentInputs && input.draft?.skillIds !== undefined)) skills = reproduceFromTaskId && input.draft?.skillIds === undefined
       ? await historicalSkills(identity, historicalSnapshot?.skills, tx)
       : await resolveSkills(identity, input.draft?.skillIds ?? (workspace ? await getSkillSelection(ownerId, workspace.id, tx) : []), tx);
     if (restored && input.draft?.skillIds === undefined && historicalSnapshot?.skillIds !== undefined) {
@@ -937,6 +998,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     }
     if (input.draft?.skillVersions && skills.some(skill => input.draft!.skillVersions![skill.id] !== publicSkillVersion(skill))) throw new StudioError('skills文字已更新，请重新选择后生成', 409);
     if (avatar) referencePolicy = { ...defaultStudioReferencePolicy(referenceIds), primaryIds: avatar.candidates[0]?.baselineAssetId ? [avatar.candidates[0].baselineAssetId] : [], useFixedReferences: false };
+    else if (input.currentInputs && input.draft?.referencePolicy && (!sharedDefinition
+      || sharedUse?.binding.mode === 'publisher' && sharedDefinition.sourceOwnerId === ownerId)) referencePolicy = input.draft.referencePolicy;
     else if (sharedDefinition && !restored) {
       const primaryIds = input.draft?.referencePolicy?.primaryIds ?? input.referenceIds;
       referencePolicy = { ...sharedDefinition.referencePolicy, primaryIds: referenceIds.filter(id => primaryIds.includes(id)) };
@@ -965,7 +1028,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const auxiliaryTransientIds = uniqueTransientIds.filter(id => !primaryIdSet.has(id));
     const includeTemplateFixed = referencePolicy.useFixedReferences;
     const actualTemplateFixedReferences = includeTemplateFixed ? templateFixedReferences : [];
-    const sourceTemplateReferenceIds = restored ? historicalTemplateReferences.map(reference => String(reference.id)) : sharedDefinition?.templateReferenceIds || [];
+    const sourceTemplateReferenceIds = input.currentInputs && input.draft?.templateReferenceIds !== undefined
+      ? input.draft.templateReferenceIds : restored ? historicalTemplateReferences.map(reference => String(reference.id)) : sharedDefinition?.templateReferenceIds || [];
     const actualStyleReferenceGroups = styleReferenceGroups;
     const actualFixedReferences = [...actualTemplateFixedReferences, ...actualStyleReferenceGroups.flatMap(group => group.references)];
     const auxiliaryCount = auxiliaryTransientIds.length + sourceTemplateReferenceIds.length + actualFixedReferences.length;
@@ -1025,7 +1089,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const ownedTransientIds = uniqueTransientIds.filter(id => !canvasReferenceOwners.has(id));
     const visibleTransient = await tx.asset.count({ where: { id: { in: ownedTransientIds }, owner_id: ownerId, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(identity, tx)] } });
     if (visibleTransient !== ownedTransientIds.length) throw new StudioError('本次参考图已不可用或无权查看', 403);
-    if (restored && sourceTemplateReferenceIds.length) {
+    if ((restored || input.currentInputs) && sourceTemplateReferenceIds.length) {
       const visibleTemplateReferences = await tx.asset.count({ where: { id: { in: sourceTemplateReferenceIds }, status: 'active', type: 'image',
         AND: [await studioVisibleAssetWhere(identity, tx)] } });
       if (visibleTemplateReferences !== new Set(sourceTemplateReferenceIds).size) throw new StudioError('原记录的模板参考图已不可用或无权使用，请使用当前模板', 403);
@@ -1156,6 +1220,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         ...(input.personalPrompt !== undefined ? { personalPromptSeparated: 1 } : {}) } } : {}),
       ...(imageFeishu ? { imageFeishu } : {}),
       ...(input.taskSettings ? { taskSettings: input.taskSettings } : {}),
+      ...(input.currentInputs ? { currentInputs: input.currentInputs } : {}),
       usageAttribution: { version: 1, projectId: usageProjectId },
       requestId: input.requestId, batchId, inputFingerprint: requestFingerprint,
       ...(quoteImageChannel
@@ -1228,6 +1293,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     }
     const frozenDefinition = restored?.snapshot ?? sharedDefinition ?? workspace;
     const frozenDefinitionOrigins = frozenDefinition ? [
+      ...(currentPrivateDraft?.origins || []),
       ...privateFieldOrigins(frozenDefinition, restored ? 'moduleContext' : 'context'),
       ...privateFieldOrigins(frozenDefinition, restored || sharedDefinition ? 'templatePrompt' : 'prompt'),
     ] : undefined;

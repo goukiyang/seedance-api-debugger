@@ -44,10 +44,11 @@ function decodeReceipt(raw: string, binding: ReturnType<typeof identity>['bindin
   } else validateDraft(saved.draft, target);
   return saved as Saved;
 }
-export async function readPrivatePromptDraft(actorId: string, target: DraftTarget) {
+export async function readPrivatePromptDraft(actorId: string, target: DraftTarget,
+  client: Pick<Prisma.TransactionClient, 'platformSetting'> = prisma) {
   await requirePrivatePromptRequest(actorId, target.origins);
   const { key, binding } = identity(actorId, target);
-  const row = await prisma.platformSetting.findUnique({ where: { key }, select: { value_json: true } });
+  const row = await client.platformSetting.findUnique({ where: { key }, select: { value_json: true } });
   return row ? decode(row.value_json, binding, target) : null;
 }
 // The caller has already authorized the saved definition in this transaction.
@@ -61,12 +62,13 @@ export async function clearAppliedPrivatePromptDraft(actorId: string, target: Dr
     await client.platformSetting.deleteMany({ where: { key, value_json: row.value_json } });
   }
 }
-export async function readPrivatePromptDraftReceipt(actorId: string, target: DraftTarget, requestId: string) {
+export async function readPrivatePromptDraftReceipt(actorId: string, target: DraftTarget, requestId: string,
+  client: Pick<Prisma.TransactionClient, 'platformSetting'> = prisma) {
   await requirePrivatePromptRequest(actorId, target.origins);
   if (!/^[A-Za-z0-9:_-]{1,160}$/.test(requestId)) throw new PrivatePromptError();
   const { binding } = identity(actorId, target);
   const key = `private_prompt_draft_receipt_v1:${privatePromptIndex('private-draft-request', JSON.stringify([actorId, binding.id, requestId]))}`;
-  const row = await prisma.platformSetting.findUnique({ where: { key }, select: { value_json: true } });
+  const row = await client.platformSetting.findUnique({ where: { key }, select: { value_json: true } });
   if (!row) return null;
   const saved = decodeReceipt(row.value_json, { ...binding, kind: 'private-prompt-draft-receipt', id: key }, target);
   return saved.draft;

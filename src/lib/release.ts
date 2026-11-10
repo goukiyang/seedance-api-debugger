@@ -1,9 +1,8 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
-const notice = { title: '作品广场自动发现与参考推荐', outline: [
-  '新作品自动获得展示机会，无需逐件提交',
-  '一键参考后成功产出，自动形成推荐依据',
-  '角色融合的译文和复制语言更清楚',
+const notice = { title: '生图模板使用当前设置', outline: [
+  '修改或清空上下文后，直接用于本次生成',
+  '保存默认单独处理，历史恢复后可继续编辑',
 ] };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
   // Older open pages still read `summary`; it now carries only the title.
