@@ -27,7 +27,7 @@ import type { ContentSummary } from '@/lib/content-reactions/types';
 import { IMAGE_STUDIO_MODEL_SHORT_LABELS, type ImageStudioModel } from '@/lib/image-studio/model-catalog';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import { RelativeTime } from '@/components/RelativeTime';
-import { useVideoPricing } from '@/lib/pricing/use-video-pricing';
+import EnhanceVideoAction from '@/components/EnhanceVideoAction';
 import { listReturnHref, readListReturn, taskDetailHref } from '@/lib/navigation/return-to';
 import { authorizeTaskReuseHref, taskReuseHref, taskReuseReturnTo } from '@/lib/navigation/task-reuse';
 import { isExternalUser } from '@/lib/access/external-role';
@@ -73,8 +73,6 @@ type AssetLibraryItemId = `video_task:${string}` | `asset:${string}` | `referenc
 function assetContentKey(id: AssetLibraryItemId) {
   return id.startsWith('multiview_work:') ? null : id as Exclude<AssetLibraryItemId, `multiview_work:${string}`>;
 }
-type EnhanceResolution = '720p' | '1080p' | '2k' | '4k';
-type EnhanceFps = 'none' | '30' | '60';
 type VideoDeliveryStageKey = 'generating' | 'preparing' | 'ready' | 'failed' | 'unavailable';
 
 type VideoDeliveryStage = {
@@ -272,24 +270,27 @@ const ASSET_BULK_TARGET_STORAGE_KEY = 'asset_library_bulk_target';
 const ASSET_BULK_ALBUM_STORAGE_KEY = 'asset_library_bulk_album_id';
 const WORKSPACE_TAB_ID_KEY = 'workspace_tab_id';
 
-function AssetToolbarPanel({ label, triggerContent, scopeKey, children, primary = false }: {
+function AssetToolbarPanel({ label, triggerContent, scopeKey, children, primary = false, triggerClassName, contentClassName, open: controlledOpen, onOpenChange }: {
   label: string; triggerContent: ReactNode; scopeKey: string; children: ReactNode; primary?: boolean;
+  triggerClassName?: string; contentClassName?: string; open?: boolean; onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false), id = useId();
+  const [internalOpen, setInternalOpen] = useState(false), id = useId();
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = onOpenChange ?? setInternalOpen;
   const trigger = useRef<HTMLButtonElement>(null), panel = useRef<HTMLDivElement>(null);
-  useEffect(() => setOpen(false), [scopeKey]);
+  useEffect(() => setInternalOpen(false), [scopeKey]);
   useDialogDismiss({ open, dialogRef: panel, branchRefs: [trigger], modal: false, onDismiss: () => setOpen(false) });
   useEffect(() => {
     if (!open) return;
     const frame = requestAnimationFrame(() => panel.current?.focus({ preventScroll: true }));
     return () => cancelAnimationFrame(frame);
   }, [open]);
-  return <Popper.Root><Popper.Anchor asChild><button ref={trigger} type="button" className={`${assetStyles.toolbarButton} ${primary ? assetStyles.primaryUpload : ''}`}
-    aria-label={label} title={label} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined} onClick={event => { event.currentTarget.focus({ preventScroll: true }); setOpen(value => !value); }}>
+  return <Popper.Root><Popper.Anchor asChild><button ref={trigger} type="button" className={`${triggerClassName || assetStyles.toolbarButton} ${primary ? assetStyles.primaryUpload : ''}`}
+    aria-label={label} title={label} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined} onClick={event => { event.currentTarget.focus({ preventScroll: true }); setOpen(!open); }}>
     {triggerContent}
   </button></Popper.Anchor>
     {open && createPortal(<Popper.Content ref={panel} id={id} role="dialog" aria-label={label} tabIndex={-1}
-      className={assetStyles.toolbarPanel} side="bottom" align="end" sideOffset={8} collisionPadding={12} sticky="always" hideWhenDetached>
+      className={`${assetStyles.toolbarPanel} ${contentClassName || ''}`} side="bottom" align="end" sideOffset={8} collisionPadding={12} sticky="always" hideWhenDetached>
       <header className={assetStyles.panelHeading}><strong>{label}</strong><button type="button" aria-label={`关闭${label}`} onClick={() => setOpen(false)}><X size={16} /></button></header>
       {children}
     </Popper.Content>, trigger.current?.closest('dialog[open]') || document.body)}
@@ -912,15 +913,7 @@ function AssetsPageContent() {
     const downloads = nativeVideoDownloads.current;
     return () => { for (const cancel of Array.from(downloads)) cancel(); downloads.clear(); downloadOwner.current = undefined; };
   }, [user?.id]);
-  const [aiMediaKitReady, setAiMediaKitReady] = useState<boolean | null>(null);
   const [enhanceMenuItemId, setEnhanceMenuItemId] = useState<AssetLibraryItemId | null>(null);
-  const [enhanceResolution, setEnhanceResolution] = useState<EnhanceResolution>('1080p');
-  const [enhanceFps, setEnhanceFps] = useState<EnhanceFps>('none');
-  const [enhanceSubmittingId, setEnhanceSubmittingId] = useState<AssetLibraryItemId | null>(null);
-  const enhanceQuoteItem = items.find(item => item.id === enhanceMenuItemId);
-  const enhancePricing = useVideoPricing({ provider: 'volcengine_mediakit', model: 'enhance-video',
-    duration: enhanceQuoteItem?.duration || 0, resolution: enhanceResolution, toolVersion: 'standard',
-    fps: enhanceFps === 'none' ? null : Number(enhanceFps) }, !!enhanceMenuItemId && aiMediaKitReady === true);
   const [preparingDownloadTaskId, setPreparingDownloadTaskId] = useState<string | null>(null);
   const [assetUploadFile, setAssetUploadFile] = useState<File | null>(null);
   const [assetUploading, setAssetUploading] = useState(false);
@@ -1166,21 +1159,7 @@ function AssetsPageContent() {
     setError(userLoadError);
   }, [user, userLoadError]);
 
-  useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
-    fetch('/api/config', { cache: 'no-store' })
-      .then((response) => response.json())
-      .then((data) => {
-        if (!cancelled) setAiMediaKitReady(data.aimediakit_enhance_video?.ready === true);
-      })
-      .catch(() => {
-        if (!cancelled) setAiMediaKitReady(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [user]);
+
 
   useEffect(() => {
     if (!user) return;
@@ -1514,67 +1493,6 @@ function AssetsPageContent() {
     id: activeItem.taskId, provider: activeItem.provider, generationMode: activeItem.generationMode,
     projectId: activeItem.project?.id, videoCardId: activeItem.videoCardId,
   }, currentAssetReturnTo()) : null;
-
-  const enhanceEstimatedCost = (item: AssetLibraryItem) => {
-    return item.id === enhanceQuoteItem?.id ? enhancePricing.quote?.estimatedCost ?? null : null;
-  };
-
-  const enhanceDisabledReason = (item: AssetLibraryItem) => {
-    if (aiMediaKitReady === null) return '正在检查配置';
-    if (!aiMediaKitReady) return 'AI MediaKit 未就绪';
-    if (!item.canEnhanceVideo) return '当前视频不可超分';
-    if (!item.taskId) return '缺少源任务';
-    if (!item.videoCardId) return '缺少视频卡';
-    if (!item.duration) return '缺少时长';
-    if (item.id !== enhanceQuoteItem?.id || !enhancePricing.quote) return enhancePricing.error || '正在读取报价';
-    return '';
-  };
-
-  const createEnhanceTask = async (item: AssetLibraryItem) => {
-    const disabledReason = enhanceDisabledReason(item);
-    if (disabledReason || !item.taskId || enhanceSubmittingId) {
-      if (disabledReason) setError(disabledReason);
-      return;
-    }
-    setEnhanceSubmittingId(item.id);
-    setError('');
-    setMessage('');
-    try {
-      const selectedFps = enhanceFps === 'none' ? null : Number(enhanceFps);
-      const response = await fetch('/api/tasks/enhance-video/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...(enhancePricing.quote?.pricing_revision ? { pricing_revision: enhancePricing.quote.pricing_revision } : {}),
-          source_task_id: item.taskId,
-          video_card_id: item.videoCardId,
-          tool_version: 'standard',
-          scene: 'aigc',
-          resolution: enhanceResolution,
-          fps: selectedFps || undefined,
-          duration: item.duration,
-          idempotency_key: [
-            'asset-enhance',
-            item.taskId,
-            enhanceResolution,
-            selectedFps || 'source_fps',
-          ].join(':'),
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        if (typeof data.code === 'string' && data.code.startsWith('pricing_') || typeof data.error === 'string' && data.error.startsWith('pricing_')) enhancePricing.refresh();
-        throw new Error(data.message || data.error || '创建超分任务失败');
-      }
-      setMessage('已创建超分任务，正在打开对比页');
-      setEnhanceMenuItemId(null);
-      window.location.href = taskDetailHref(data.id, currentAssetReturnTo());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '创建超分任务失败');
-    } finally {
-      setEnhanceSubmittingId(null);
-    }
-  };
 
   const beginTouchSelect = (item: AssetLibraryItem) => {
     if (!selectionMode) return;
@@ -2389,8 +2307,6 @@ function AssetsPageContent() {
                 const specText = formatAssetSpec(item);
                 const costBadge = item.referenceQuote ? `¥${usageCnyDisplay(item.referenceQuote.amountCnyMicros)}` : '';
                 const enhanceMenuOpen = enhanceMenuItemId === item.id;
-                const enhanceReason = enhanceMenuOpen ? enhanceDisabledReason(item) : '';
-                const estimatedEnhanceCost = enhanceMenuOpen ? enhanceEstimatedCost(item) : null;
                 const enhanceStateLabel = item.isEnhanceTask ? '超分结果' : '';
                 return (
                   <div
@@ -2469,61 +2385,33 @@ function AssetsPageContent() {
                       {item.generationOrigin && <small>{item.generationOrigin.label}{item.generationOrigin.templateName ? ` · ${item.generationOrigin.templateName}` : ''}</small>}
                       <div className="asset-card-title-row">
                         <strong>{shortText(item.title, '未命名资产', 34)}</strong>
-                        {item.canEnhanceVideo && (
+                        {item.canEnhanceVideo && item.taskId && (
                           <div
                             className="asset-card-enhance-shell"
                             onClick={(event) => event.stopPropagation()}
                             onPointerDown={(event) => event.stopPropagation()}
                           >
-                            <button
-                              type="button"
-                              className="asset-card-enhance-trigger"
-                              onClick={() => {
-                                setEnhanceMenuItemId((current) => current === item.id ? null : item.id);
-                              }}
+                            <AssetToolbarPanel
+                              label="视频超分"
+                              scopeKey={`${user?.id}:${item.id}`}
+                              open={enhanceMenuOpen}
+                              onOpenChange={open => setEnhanceMenuItemId(open ? item.id : null)}
+                              triggerClassName="asset-card-enhance-trigger"
+                              contentClassName={assetStyles.enhancePanel}
+                              triggerContent={<><Sparkles size={14} aria-hidden="true" /><span>超分</span></>}
                             >
-                              <Sparkles size={14} aria-hidden="true" />
-                              <span>超分</span>
-                            </button>
-                            {enhanceMenuOpen && (
-                              <div className="asset-card-enhance-menu">
-                                <label>
-                                  <span>分辨率</span>
-                                  <select
-                                    value={enhanceResolution}
-                                    onChange={(event) => setEnhanceResolution(event.target.value as EnhanceResolution)}
-                                  >
-                                    <option value="720p">720p</option>
-                                    <option value="1080p">1080p</option>
-                                    <option value="2k">2K</option>
-                                    <option value="4k">4K</option>
-                                  </select>
-                                </label>
-                                <label>
-                                  <span>帧率</span>
-                                  <select
-                                    value={enhanceFps}
-                                    onChange={(event) => setEnhanceFps(event.target.value as EnhanceFps)}
-                                  >
-                                    <option value="none">不插帧</option>
-                                    <option value="30">30 fps</option>
-                                    <option value="60">60 fps</option>
-                                  </select>
-                                </label>
-                                <span className="asset-card-enhance-cost">
-                                  预估冻结 {estimatedEnhanceCost === null ? '-' : `${estimatedEnhanceCost} 点`}
-                                </span>
-                                {enhanceReason && <span className="asset-card-enhance-warning">{enhanceReason}</span>}
-                                {enhancePricing.error && <button type="button" title="重新报价" aria-label="重新报价" onClick={enhancePricing.refresh}><RefreshCcw size={16} aria-hidden="true" /></button>}
-                                <button
-                                  type="button"
-                                  onClick={() => void createEnhanceTask(item)}
-                                  disabled={Boolean(enhanceReason) || enhanceSubmittingId === item.id}
-                                >
-                                  {enhanceSubmittingId === item.id ? '创建中...' : '开始超分'}
-                                </button>
-                              </div>
-                            )}
+                              <EnhanceVideoAction
+                                key={`${user?.id}:${item.id}`}
+                                defaultOpen
+                                requestOrigin="asset"
+                                resolutions={['720p', '1080p', '2k', '4k']}
+                                returnTo={currentAssetReturnTo()}
+                                task={{ id: item.taskId, project_id: item.project?.id,
+                                  provider: item.provider || 'seedance', generation_mode: item.generationMode || '',
+                                  local_status: item.status, result_video_url: item.previewUrl,
+                                  local_video_path: null, duration: item.duration, video_card_id: item.videoCardId }}
+                              />
+                            </AssetToolbarPanel>
                           </div>
                         )}
                         {shouldShowDeliveryStage(item) && item.deliveryStage?.key === 'ready' && item.taskId && (

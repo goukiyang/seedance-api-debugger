@@ -234,3 +234,8 @@ select.scopeField, .scopeField select, .panelField select { min-block-size: 36px
   .toolbarButton.toolbarButton, .batchEntry > button, .viewTabs button, .mediaTabs button, .toolbarPanel button, .searchField { min-block-size: 40px; }
   .sourceChoices label { min-block-size: 40px; }
 }
+
+.enhancePanel :global(.enhance-video-action) { margin-block-start: 0; padding: 0; border: 0; background: transparent; }
+.enhancePanel :global(.enhance-video-action) label,
+.enhancePanel :global(.enhance-video-action-meta) { min-inline-size: 0; flex: 1 1 135px; }
+.enhancePanel :global(.enhance-video-action) select { min-inline-size: 0; inline-size: 100%; }
