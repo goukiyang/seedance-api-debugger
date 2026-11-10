@@ -4522,8 +4522,8 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
           if (sourceCoverEditable) { await openOriginal('cover'); return; }
           if (!module.saved && !await saveModule(reproduceSourceTaskId, revisionRef.current, false)) return;
           setCoverEditorOpen(true);
-        })()}><ImagePlus size={17} />{sourceAction === 'cover' ? '正在打开封面…' : sourceCoverEditable ? '设置原模板封面' : '设置封面'}</button>
-        {sourceActionError && <span role="status" className={styles.error}>{sourceActionError}</span>}}
+        })()}><ImagePlus size={17} />{sourceAction === 'cover' ? '正在打开封面…' : sourceCoverEditable ? '设置原模板封面' : '设置封面'}</button>}
+        {sourceActionError && <span role="status" className={styles.error}>{sourceActionError}</span>}
         <button type="button" className={templateWorkbench ? styles.moduleDeleteIcon : undefined} title={module.id === `default-${userId}` ? (templateWorkbench ? '默认模块需要保留' : '默认模板需要保留') : (templateWorkbench ? '删除模块' : '删除模板')} aria-label={moduleDeleting ? '正在删除模块' : `删除${templateWorkbench ? '模块' : '模板'}：${name}`} aria-busy={moduleDeleting || undefined}
           disabled={module.id === `default-${userId}` || moduleDeleting || moduleSaving || submitting || uploading || bannerUploading || Boolean(pendingSubmission)}
           onClick={event => void deleteModule(event.currentTarget)}>{moduleDeleting ? <LoaderCircle size={17} className={styles.spinner} /> : <Trash2 size={17} />}{!templateWorkbench && (moduleDeleting ? '删除中' : '删除模板')}</button>

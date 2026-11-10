@@ -10,6 +10,7 @@ import ts from 'typescript';
 const require = createRequire(import.meta.url);
 const file = 'src/app/image-studio/studio.tsx', source = readFileSync(process.argv[3] || file, 'utf8');
 const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+assert.equal(ast.parseDiagnostics.length, 0, ts.formatDiagnosticsWithColorAndContext(ast.parseDiagnostics, { getCanonicalFileName: x => x, getCurrentDirectory: () => '.', getNewLine: () => '\n' }));
 const nodes = [];
 function visit(node) { nodes.push(node); ts.forEachChild(node, visit); }
 visit(ast);
