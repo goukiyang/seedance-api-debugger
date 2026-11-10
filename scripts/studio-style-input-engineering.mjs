@@ -13,7 +13,7 @@ const require = createRequire(import.meta.url);
 const editorFile = 'src/app/image-studio/style-groups-view.tsx';
 const selectorFile = 'src/app/image-studio/style-skill-selector.tsx';
 const source = readFileSync(process.argv[3] || editorFile, 'utf8');
-const selector = readFileSync(selectorFile, 'utf8');
+const selector = readFileSync(process.argv[4] || selectorFile, 'utf8');
 const checks = [], timers = new Map(), writes = [], storage = new Map();
 let timerId = 0;
 const asset = { id: 'asset', originalUrl: '/synthetic-image', note: 'image note', available: true };
@@ -93,20 +93,26 @@ checks.push('unknown draft preserves original request identity and never resubmi
 await act(async () => tree.unmount());
 
 const parsed = ts.createSourceFile(selectorFile, selector, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-let updated;
+let updated, undoClick;
 function visit(node) {
   if (ts.isVariableDeclaration(node) && node.name.getText(parsed) === 'styleUpdated') updated = node.initializer.getText(parsed);
+  if (ts.isJsxOpeningElement(node) && node.tagName.getText(parsed) === 'button'
+    && node.attributes.properties.some(item => ts.isJsxAttribute(item) && item.name.getText(parsed) === 'aria-label' && item.initializer?.text === '撤销本次选择修改')) {
+    undoClick = node.attributes.properties.find(item => ts.isJsxAttribute(item) && item.name.getText(parsed) === 'onClick').initializer.expression.getText(parsed);
+  }
   ts.forEachChild(node, visit);
 }
-visit(parsed); assert.ok(updated);
+visit(parsed); assert.ok(updated); assert.ok(undoClick);
 for (const scenario of ['current', 'historical', 'use', 'replace-history']) {
   const historical = scenario === 'historical' || scenario === 'replace-history';
   const use = scenario === 'use' || scenario === 'replace-history';
   let applied = scenario === 'use' ? [] : [{ ...group, historical }];
-  let pending = [...applied, { ...group, id: 'other-pending' }], refreshes = 0;
+  const originalApplied = [...applied];
+  let pending = [...applied, { ...group, id: 'other-pending' }], refreshes = 0, appliedSkills = [];
   const set = key => value => { if (key === 'pending') pending = typeof value === 'function' ? value(pending) : value; };
-  const context = { appliedStyles: applied, setPendingStyles: set('pending'), applyStyles: value => { applied = value; },
-    setUndo: () => {}, setDetail: () => {}, setPreferences: () => {}, setRetry: () => {}, pendingScroll: {}, scroll: { current: 0 },
+  const context = { appliedStyles: applied, appliedSkills, open: false, undo: { styles: pending, skills: [{ id: 'unconfirmed-skill' }] },
+    setPendingStyles: set('pending'), setPendingSkills: () => {}, applyStyles: value => { applied = value; }, applySkills: value => { appliedSkills = value; },
+    setUndo: value => { context.undo = typeof value === 'function' ? value(context.undo) : value; }, setDetail: () => {}, setPreferences: () => {}, setRetry: () => {}, pendingScroll: {}, scroll: { current: 0 },
     onStyleUpdated: () => refreshes++ };
   const compiled = ts.transpileModule(`globalThis.run = ${updated};`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
   vm.runInNewContext(compiled, context);
@@ -116,8 +122,15 @@ for (const scenario of ['current', 'historical', 'use', 'replace-history']) {
   assert.equal(applied[0].revision, historical && !use ? 1 : 2);
   assert.equal(pending.find(item => item.id === group.id).revision, historical && !use ? 1 : 2);
   assert.ok(pending.some(item => item.id === 'other-pending'));
+  if (use) {
+    vm.runInNewContext(ts.transpileModule(`(${undoClick})()`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context);
+    assert.deepEqual(applied.map(item => item.id), originalApplied.map(item => item.id), 'Undo applied an unconfirmed style');
+    assert.equal(appliedSkills.length, 0, 'Undo applied unconfirmed skills');
+    if (historical) assert.equal(applied[0].revision, 1, 'Undo lost the original frozen selection');
+  }
   checks.push(`confirmed style update: ${scenario}`);
 }
+checks.push('save/use undo restores actual prior selection without unconfirmed styles or skills');
 const files = [editorFile, selectorFile, 'src/app/image-studio/studio.tsx', 'scripts/studio-style-input-engineering.mjs'];
 const report = { passed: checks.length, checks, browserUsed: false, providerCalls: 0, productionWrites: 0,
   sourceSha256: Object.fromEntries(files.map(name => [name, createHash('sha256').update(readFileSync(name)).digest('hex')])) };

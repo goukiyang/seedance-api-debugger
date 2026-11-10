@@ -270,7 +270,9 @@ export const StudioStyleSkillSelector = forwardRef<StudioStyleSkillSelectorHandl
       const select = (items: StudioStyleSummary[]) => use && !items.some(item => item.id === group.id) ? [...items, group] : refresh(items);
       setPendingStyles(select);
       if (use || appliedStyles.some(item => item.id === group.id && !item.historical)) applyStyles(select(appliedStyles));
-      setUndo(current => current ? { ...current, styles: current.styles.map(item => item.id === group.id && !item.historical ? group : item) } : current);
+      const refreshLive = (items: StudioStyleSummary[]) => items.map(item => item.id === group.id && !item.historical ? group : item);
+      if (use) setUndo({ styles: refreshLive(appliedStyles), skills: appliedSkills });
+      else setUndo(current => current ? { ...current, styles: refreshLive(current.styles) } : current);
       setDetail(current => current?.kind === 'styles' && current.value.id === group.id && !current.value.historical ? { ...current, value: group } : current);
       setPreferences(current => ({ ...current, query: '', styleScope: 'all', category: 'styles', view: 'available', styleRecent: [group.id, ...current.styleRecent.filter(id => id !== group.id)], pages: { ...current.pages, styles: pageDefaults() } }));
     }
