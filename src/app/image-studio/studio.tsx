@@ -1588,6 +1588,7 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
       sharingMessage={module.sourcePresetId ? sharing.pending[module.sourcePresetId]?.error : undefined}
       onQuerySharing={async () => { if (module.sourcePresetId) { const result = await sharing.query(module.sourcePresetId); if (result.status !== 'completed') setError(result.error || '共享结果仍待确认'); } }}
       onLifecycleHistory={anchor => { if (module.sourcePresetId) setLifecycleHistory({ presetId: module.sourcePresetId, name: module.name, anchor }); }}
+      onOpenOriginal={forCoverEditor => { if (module.sourcePresetId) void openSharedPreset(module.sourcePresetId, { explicitSelection: true, forCoverEditor, recordUse: !forCoverEditor }); }}
       onModuleDelete={(item, anchor) => { const entry = directory.find(value => value.id === item.id);
         const target = entry?.deletion || (item as StudioModule & { deletion?: StudioDeletionTarget }).deletion;
         if (!target) { setError('删除权限尚未读取，请重新读取工作区'); return Promise.resolve(); }
@@ -1651,8 +1652,9 @@ function ImageStudioWorkspace({ isAdmin, userId, templateWorkbench = false, favo
   </main>)}</>;
 }
 
-function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, onMetadataChange, onModuleDelete, moduleDeletionPending, groups, protectedGroups, onDeleteGroup, groupDeleting, onToggleSharing, onChooseSharing, preferenceSharingId, preferenceSharingPending, sharingId, sharingPending, sharingMessage, onQuerySharing, onLifecycleHistory, settings, imageChannels, imageChannelId, imageChannelReady, imageChannelMessage, onImageChannelChange, globalSettingsSaving, settingsError, active, onActivate, onModuleChange, onParameterCopySaved, onReloadSettings, ratios, templateWorkbench, quickPresetVersion, viewToken, onResultsViewed, onTemplateEntered, onResultsAvailable, onGenerationAccepted, onManagePresets, onPresetSaved, registerPresetSource, registerResolutionDirty, resolutionDelta }: {
+function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, onMetadataChange, onModuleDelete, moduleDeletionPending, groups, protectedGroups, onDeleteGroup, groupDeleting, onToggleSharing, onChooseSharing, preferenceSharingId, preferenceSharingPending, sharingId, sharingPending, sharingMessage, onQuerySharing, onLifecycleHistory, onOpenOriginal, settings, imageChannels, imageChannelId, imageChannelReady, imageChannelMessage, onImageChannelChange, globalSettingsSaving, settingsError, active, onActivate, onModuleChange, onParameterCopySaved, onReloadSettings, ratios, templateWorkbench, quickPresetVersion, viewToken, onResultsViewed, onTemplateEntered, onResultsAvailable, onGenerationAccepted, onManagePresets, onPresetSaved, registerPresetSource, registerResolutionDirty, resolutionDelta }: {
   onSharedRefresh: () => void;
+  onOpenOriginal: (forCoverEditor?: boolean) => void;
   protectedGroups: string[];
   groupDeleting: boolean;
   onManagePresets: () => void;
@@ -1689,6 +1691,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
   const repairDefinition = sharedLive?.repairDefinition;
   const definitionEditable = (!module.sourcePresetId || module.sourcePresetOwnedByViewer === true) && (!sharedLive || (sharedLive.capabilities ? sharedLive.capabilities.editDefinition.allowed : sharedLive.mode === 'publisher' && sharedReady));
   const definitionReady = !sharedLive || definitionEditable && (sharedReady || Boolean(repairDefinition));
+  const sourceCoverEditable = sharedLive?.mode === 'live' && module.sourcePresetOwnedByViewer === true && !module.coverEditable;
   const contextEditable = !module.privateDefinition && definitionEditable && module.contextEditable !== false && definitionReady;
   const fixedEditable = definitionEditable && isAdmin && module.fixedReferencesEditable !== false && definitionReady;
   const fixedRepairAllowed = !isAdmin && definitionReady && repairDefinition?.fixedReferenceRepairAllowed === true;
@@ -4468,7 +4471,10 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     onPointerDownCapture={activateDraft} onFocusCapture={activateDraft}>
     {!draftLoaded && <p role="status">正在恢复工作区…</p>}
     <div hidden={!draftLoaded}>
-    {sharedLive?.methodDraft && <p className={styles.sharedOrigin} role="status">复用草稿 · 本次设置单独保存。<a href={`/template-studio?type=image&presetId=${encodeURIComponent(sharedLive.intent.presetId)}`}>打开原模板</a></p>}
+    {sharedLive?.methodDraft && <p className={styles.sharedOrigin} role="status">复用草稿 · 本次设置单独保存。<a href={`/template-studio?type=image&presetId=${encodeURIComponent(sharedLive.intent.presetId)}`} onClick={event => {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault(); onOpenOriginal();
+    }}>打开原模板</a></p>}
     <header className={styles.header}>
       <TemplateFavoriteTitle className={styles.moduleTitleRow} contentKey={sharedLive?.available ? `image_template:${sharedLive.intent.presetId}` : module.saved && !sharedLive ? `image_module:${module.id}` : undefined}>
         {!definitionReady ? <strong className={styles.moduleNameDisplay}>{name}</strong> : nameEditing ? <input ref={nameInput} className={styles.moduleName} aria-label="模块名称" value={name} maxLength={80} onChange={event => setName(event.target.value)} onBlur={() => setNameEditing(false)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); setNameEditing(false); } }} /> : <button type="button" className={styles.moduleNameDisplay} title={name} aria-label={`编辑模块标题：${name}`} onClick={() => setNameEditing(true)}>{name}</button>}
@@ -4479,12 +4485,13 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
         {templateWorkbench ? <VideoFeishuToggle state={imageFeishu} label="完成后发飞书" disabled={!draftLoaded || draftRestoring || submitting || Boolean(pendingSubmission) || Boolean(batch.pending)} /> : sharingControls}
         <ModuleGroupPicker value={groupName} groups={groups} protectedGroups={protectedGroups} disabled={!definitionReady || !draftLoaded || draftRestoring || moduleSaving || !sharedLive && automaticDirty || moduleDeleting || submitting || uploading || Boolean(pendingSubmission)} deleting={groupDeleting}
           onChange={value => void changeGroup(value)} onDelete={onDeleteGroup} />
-        {(canViewTemplateContext || templateWorkbench && (canManageTemplateSharing || sharingPending)) && <span className={styles.contextEntry}><button type="button" disabled={!draftLoaded || draftRestoring} aria-label={moduleSaveError ? '模板上下文，保存失败，打开查看并重试' : undefined} onClick={() => definitionEditable || module.privateDefinition ? openModuleDialog() : setReadingDefinition(true)}><Settings size={17} />模板上下文</button></span>}
+        {(canViewTemplateContext || templateWorkbench && (canManageTemplateSharing || sharingPending)) && <span className={styles.contextEntry}><button type="button" disabled={!draftLoaded || draftRestoring} aria-label={moduleSaveError ? '模板上下文，保存失败，打开查看并重试' : undefined} onClick={() => definitionEditable ? openModuleDialog() : setReadingDefinition(true)}><Settings size={17} />{definitionEditable ? '模板上下文' : '查看模板上下文'}</button></span>}
         <button type="button" disabled={!draftLoaded || draftRestoring} onClick={() => openModuleDialog(true)}>本次生成设置</button>
-        {(module.coverEditable || !module.saved && !sharedLive) && <button type="button" disabled={!draftLoaded || draftRestoring || moduleSaving || moduleDeleting || bannerUploading} onClick={() => void (async () => {
+        {(module.coverEditable || sourceCoverEditable || !module.saved && !sharedLive) && <button type="button" disabled={!draftLoaded || draftRestoring || moduleSaving || moduleDeleting || bannerUploading} onClick={() => void (async () => {
+          if (sourceCoverEditable) { onOpenOriginal(true); return; }
           if (!module.saved && !await saveModule(reproduceSourceTaskId, revisionRef.current, false)) return;
           setCoverEditorOpen(true);
-        })()}><ImagePlus size={17} />设置封面</button>}
+        })()}><ImagePlus size={17} />{sourceCoverEditable ? '设置原模板封面' : '设置封面'}</button>}
         <button type="button" className={templateWorkbench ? styles.moduleDeleteIcon : undefined} title={module.id === `default-${userId}` ? (templateWorkbench ? '默认模块需要保留' : '默认模板需要保留') : (templateWorkbench ? '删除模块' : '删除模板')} aria-label={moduleDeleting ? '正在删除模块' : `删除${templateWorkbench ? '模块' : '模板'}：${name}`} aria-busy={moduleDeleting || undefined}
           disabled={module.id === `default-${userId}` || moduleDeleting || moduleSaving || submitting || uploading || bannerUploading || Boolean(pendingSubmission)}
           onClick={event => void deleteModule(event.currentTarget)}>{moduleDeleting ? <LoaderCircle size={17} className={styles.spinner} /> : <Trash2 size={17} />}{!templateWorkbench && (moduleDeleting ? '删除中' : '删除模板')}</button>
@@ -4825,7 +4832,7 @@ function ImageStudioBlock({ isAdmin, userId, module, hidden, onSharedRefresh, on
     </div>
     {copyFeedback && <ImageResultOperationFeedback feedback={copyFeedback} anchorRef={copyFeedbackAnchor} onDismiss={operationId => setCopyFeedback(current => current?.operationId === operationId ? null : current)} onRetry={copyFeedback.phase === 'error' ? () => { const task = tasks.find(item => item.id === copyFeedback.id); if (task) void copyTaskContext(task); } : undefined} />}
     {inputPreviewSource && <StudioInputMainViewer source={inputPreviewSource} scopeKey={`${taskReadScope}:${JSON.stringify(inputPreviewSource)}`} onClose={() => setInputPreviewSource(null)} />}
-    {readingDefinition && <TemplateDefinitionRead target={module.sourcePresetId ? { presetId: module.sourcePresetId } : { moduleId: module.id }} scopeKey={`${userId}:${module.id}:definition`} attributes={templateSharingAttributes} onClose={() => setReadingDefinition(false)} />}
+    {readingDefinition && <TemplateDefinitionRead target={module.sourcePresetId ? { presetId: module.sourcePresetId } : { moduleId: module.id }} scopeKey={`${userId}:${module.id}:definition`} needsIdentity={module.requiresIdentityVerification === true} attributes={templateSharingAttributes} onClose={() => setReadingDefinition(false)} />}
     {assetPickerOpen && <UploadedImagePicker open imageOnly target="image-studio" contextTemplateId={module.sourcePresetId || sharedLive?.intent.presetId || module.id}
       contextKey={inputScopeKey(imageSourceTarget)} focusIntent={inputFocusIntents[imageSourceTarget]}
       onFocusIntentConsumed={id => setInputFocusIntents(previous => { if (previous[imageSourceTarget]?.id !== id) return previous; const next = { ...previous }; delete next[imageSourceTarget]; return next; })}
