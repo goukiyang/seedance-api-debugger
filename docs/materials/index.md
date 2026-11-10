@@ -581,3 +581,7 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 <!-- /CAP-REPORT-HD01-MATERIALS-20261109 -->
 
 - 2026-11-09 WORKS-AUTO01 自动曝光/参考成功归因：v0.140.0 已部署原证 [发布汇总](2026-11-02-team-works-research/auto-discovery-20261109/WORKS-AUTO01-release-summary.json)；原阶段服务器attempt02，原失败/通过时间保留，无真实用户模拟，功能待手验。
+
+<!-- FUSION-UX11-MATERIALS-20261110 -->
+- 2026-11-10 角色融合UX11类目/中英/手选与抽卡统一发布：[安全汇总](2026-11-08-character-fusion-prototype/implementation/ux11/release-summary.json)，v0.142.0/08a49383b，完整工程与公网/服务健康有证，功能待用户手验。原32项审计及实施状态沿[原角色融合单UX10–UX11](../../tasks/todo/2026-11-08-character-fusion.md#ux10-类目与选项关系审计2026-11-10)；原参考图、UX08/UX09方案继续复用。无环境、数据库、私有价格行、用户媒体或凭据导出。
+<!-- /FUSION-UX11-MATERIALS-20261110 -->
