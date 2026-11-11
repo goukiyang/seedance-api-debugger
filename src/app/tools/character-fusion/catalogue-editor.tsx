@@ -2,10 +2,11 @@
 import { useId, useState } from 'react';
 import { LockKeyhole, UnlockKeyhole, Plus, X, RefreshCw } from 'lucide-react';
 import { CONFIG, allowed, reconcile, type Dimension, type FusionSettings } from '@/lib/character-fusion/engine';
-import { TRAITS, concreteOptions, displayGroup, emptyCatalogue, emptyTrait, type TraitState } from '@/lib/character-fusion/catalogue';
+import { TRAITS, concreteOptions, displayGroup, emptyCatalogue, emptyTrait, dynamicPolicy, type TraitState } from '@/lib/character-fusion/catalogue';
 import RuleCard from './rule-card';
 import ChoicePills from './choice-pills';
 import { toggleChoice } from '@/lib/character-fusion/selection';
+import type { FusionCategory } from '@/lib/character-fusion/catalogue-model';
 import styles from './studio.module.css';
 
 export type CatalogueView = { presentation: 'cards' | 'groups'; expanded: string[]; order: string[] };
@@ -21,18 +22,22 @@ export function joinCatalogueCard(settings: FusionSettings, source: string): Fus
   if (!source.startsWith('catalogue-')) return null;
   const id = source.slice('catalogue-'.length);
   if (id === 'source' || id === 'concept') return { ...settings, bossDimensions: Array.from(new Set<Dimension>([...settings.bossDimensions, id])) };
+  if (settings.catalogue?.dynamic?.selections[id]) { const catalogue = settings.catalogue, dynamic = catalogue.dynamic!; return { ...settings, catalogue: { ...catalogue, dynamic: { ...dynamic, selections: { ...dynamic.selections, [id]: { ...dynamic.selections[id], enabled: true } } } } }; }
   if (!TRAITS.some(t => t.id === id)) return null;
   const catalogue = settings.catalogue || emptyCatalogue(), value = catalogue.traits[id] || emptyTrait();
   return { ...settings, catalogue: { ...catalogue, traits: { ...catalogue.traits, [id]: { ...value, enabled: true, locked: value.values.length > 0 && value.locked } } } };
 }
 
-export default function CatalogueEditor({ settings, onChange, view, onViewChange }: { settings: FusionSettings; onChange: (next: FusionSettings) => void; view?: CatalogueView; onViewChange?: (next: CatalogueView) => void }) {
+export default function CatalogueEditor({ settings, onChange, view, onViewChange, initialGroup }: { initialGroup?: 'fusion' | 'body' | 'extra'; settings: FusionSettings; onChange: (next: FusionSettings) => void; view?: CatalogueView; onViewChange?: (next: CatalogueView) => void }) {
   const instanceId = useId();
-  const [tab, setTab] = useState<'fusion' | 'body' | 'extra'>('fusion');
+  const [tab, setTab] = useState<'fusion' | 'body' | 'extra'>(initialGroup || 'fusion');
+  const [searches, setSearches] = useState<Record<string, string>>({});
   const [localView, setLocalView] = useState(defaultCatalogueView);
   const ui = view || localView, cards = ui.presentation === 'cards';
   const updateView = (update: Partial<CatalogueView>) => (onViewChange || setLocalView)({ ...ui, ...update });
-  const cardIds = [...(tab === 'fusion' ? ['catalogue-source', 'catalogue-concept'] : []), ...TRAITS.filter(t => t.group === tab).map(t => `catalogue-${t.id}`)];
+  const dynamicCategories = (settings.catalogue?.dynamic?.snapshot.categories || []).filter(category => settings.catalogue?.dynamic?.selections[category.id]);
+  const extraCategories = dynamicCategories.filter(category => !TRAITS.some(trait => trait.id === category.id) && !['dimension:source', 'dimension:concept'].includes(category.id));
+  const cardIds = [...(tab === 'fusion' ? ['catalogue-source', 'catalogue-concept'] : []), ...TRAITS.filter(t => t.group === tab).map(t => `catalogue-${t.id}`), ...extraCategories.filter(category => category.group === tab).map(category => `catalogue-${category.id}`)];
   const orderedIds = Array.from(new Set([...ui.order, ...cardIds])).filter(id => cardIds.includes(id));
   const moveCard = (source: string, target: string) => {
     if (!orderedIds.includes(source) || !orderedIds.includes(target) || source === target) return;
@@ -56,6 +61,7 @@ export default function CatalogueEditor({ settings, onChange, view, onViewChange
     });
   };
   const basePicker = (id: Dimension) => {
+    const dynamicCategory = dynamicCategories.find(category => category.id === `dimension:${id}`); if (dynamicCategory) return renderDynamic(dynamicCategory);
     const definition = CONFIG.find(c => c.id === id)!, joined = settings.bossDimensions.includes(id);
     const detail = catalogue.details[id], fixed = settings.bossLocks[id] || Boolean(detail?.locked);
     const fusion = catalogue.sourceFusion || emptyTrait();
@@ -95,7 +101,47 @@ export default function CatalogueEditor({ settings, onChange, view, onViewChange
       {controls}
     </div>;
   };
+  const renderDynamic = (category: FusionCategory) => {
+    const dynamic = catalogue.dynamic!, value = dynamic.selections[category.id];
+    const terms = dynamic.snapshot.terms.filter(term => term.categoryId === category.id);
+    const scopeLabels = { private: '本人', shared: '共享', builtin: '内置' };
+    const nameCounts = new Map<string, number>();
+    for (const term of terms) nameCounts.set(term.nameZh, (nameCounts.get(term.nameZh) || 0) + 1);
+    const scopedLabels = new Map(terms.map(term => [term.id, nameCounts.get(term.nameZh)! > 1 ? `${term.nameZh} · ${scopeLabels[term.scope]}` : term.nameZh]));
+    const labelCounts = new Map<string, number>();
+    for (const name of Array.from(scopedLabels.values())) labelCounts.set(name, (labelCounts.get(name) || 0) + 1);
+    const labelsById = new Map(terms.map(term => { const name = scopedLabels.get(term.id)!; return [term.id, labelCounts.get(name)! > 1 ? `${name} · ${term.id.slice(-8)}` : name]; }));
+    const termsByLabel = new Map(terms.map(term => [labelsById.get(term.id)!, term]));
+    const eligible = terms.filter(term => term.enabled && category.enabled && !value.excluded.includes(term.id));
+    const query = (searches[category.id] || '').trim().toLocaleLowerCase();
+    const matches = eligible.filter(term => !query || [term.nameZh, term.nameEn, ...term.aliases, ...term.tags].some(text => text.toLocaleLowerCase().includes(query)));
+    const change = (next: typeof value) => onChange({ ...settings, catalogue: { ...catalogue, dynamic: { ...dynamic, selections: { ...dynamic.selections, [category.id]: next } } } });
+    const label = (id: string) => labelsById.get(id) || `不可用词条 ${id}`;
+    const summary = value.locked ? value.values.map(label).join('、') || '尚未选择' : `随机${category.randomMax === 1 ? '1项' : `1–${category.randomMax}项`}`;
+    const controls = <div className={styles.catalogueValues}>
+      {!category.enabled && <p className={styles.error}>此类别已停用，原选择保留。请移出或在词库中恢复后再生成。</p>}
+      <div className={styles.choiceMeta}><span>{category.multi ? '多选组合共同生效' : '单选'} · {eligible.length} 个可用词条</span><button type="button" onClick={() => change({ ...value, enabled: true, locked: false })}><RefreshCw size={13} />随机</button></div>
+      <input aria-label={`搜索${category.nameZh}词条`} placeholder="搜索名称、别名或标签" value={searches[category.id] || ''} onChange={event => setSearches(current => ({ ...current, [category.id]: event.target.value }))} />
+      <ChoicePills label={category.nameZh} multi={category.multi} options={matches.map(term => ({ label: label(term.id) }))} values={value.locked ? value.values.map(label) : []} onSelect={name => {
+        const term = termsByLabel.get(name)!;
+        const values = toggleChoice(value.locked ? value.values : [], term.id, dynamicPolicy(category, terms));
+        change({ ...value, enabled: values.length > 0, locked: values.length > 0, values, excluded: value.excluded.filter(id => id !== term.id) });
+      }} />
+      {!matches.length && <p className={styles.hint}>{query ? '没有匹配词条，原选择保留。' : '当前没有可用词条，请调整排除规则或移出此类别。'}</p>}
+      {value.values.filter(id => !eligible.some(term => term.id === id)).length > 0 && <p className={styles.error}>原选择含停用或排除词条：{value.values.filter(id => !eligible.some(term => term.id === id)).map(label).join('、')}。未自动替换。</p>}
+      <details className={styles.facetRules}><summary>候选池与规则{value.candidates !== undefined ? ` · ${value.candidates.length}项候选` : ''}</summary>
+        <label><input type="checkbox" checked={value.candidates !== undefined} onChange={event => { const next = { ...value }; if (event.target.checked) next.candidates = eligible.map(term => term.id); else delete next.candidates; change(next); }} />限定随机候选池</label>
+        {value.candidates !== undefined && <div className={styles.pills}>{terms.filter(term => term.enabled).map(term => <label key={term.id} className={styles.choicePill}><input type="checkbox" checked={value.candidates!.includes(term.id)} onChange={event => change({ ...value, candidates: event.target.checked ? [...value.candidates!, term.id] : value.candidates!.filter(id => id !== term.id) })} />{label(term.id)}</label>)}</div>}
+        <div className={styles.tags}>{terms.map(term => <label key={term.id}><span className={styles.srOnly}>{label(term.id)}规则</span><select value={value.excluded.includes(term.id) ? 'exclude' : value.must.includes(term.id) ? 'must' : 'default'} onChange={event => change({ ...value, excluded: [...value.excluded.filter(id => id !== term.id), ...(event.target.value === 'exclude' ? [term.id] : [])], must: [...value.must.filter(id => id !== term.id), ...(event.target.value === 'must' ? [term.id] : [])] })}><option value="default">{label(term.id)} · 可用</option><option value="must">{label(term.id)} · 本批必出</option><option value="exclude">{label(term.id)} · 排除</option></select></label>)}</div>
+      </details>
+    </div>;
+    const tags = terms.map(term => ({ label: label(term.id), en: term.nameEn, status: value.excluded.includes(term.id) ? 'exclude' as const : value.must.includes(term.id) ? 'must' as const : 'default' as const }));
+    if (cards) return card(`catalogue-${category.id}`, { title: category.nameZh, tags, joined: value.enabled, locked: value.locked, lockDisabled: !value.values.length, summary, onLock: () => change({ ...value, locked: !value.locked }), onJoin: () => change({ ...value, enabled: !value.enabled }), onTag: (name, status) => { const id = termsByLabel.get(name)!.id; change({ ...value, excluded: [...value.excluded.filter(item => item !== id), ...(status === 'exclude' ? [id] : [])], must: [...value.must.filter(item => item !== id), ...(status === 'must' ? [id] : [])] }); } }, controls);
+    return <div className={styles.catalogueRow} key={category.id}><div className={styles.catalogueLabel}><strong>{category.nameZh}</strong><button className={styles.iconButton} aria-label={`${value.locked ? '解锁' : '锁定'}${category.nameZh}`} aria-pressed={value.locked} disabled={!value.values.length} onClick={() => change({ ...value, locked: !value.locked })}>{value.locked ? <LockKeyhole size={15} /> : <UnlockKeyhole size={15} />}</button><small>{value.enabled ? summary : '未启用'}</small><button className={styles.iconButton} aria-label={`${value.enabled ? '移出' : '加入'}${category.nameZh}`} onClick={() => change({ ...value, enabled: !value.enabled })}>{value.enabled ? <X size={15} /> : <Plus size={15} />}</button></div>{controls}</div>;
+  };
   const renderTrait = (id: string) => {
+    const dynamicCategory = dynamicCategories.find(category => category.id === id);
+    if (dynamicCategory) return renderDynamic(dynamicCategory);
     const t = TRAITS.find(t => t.id === id)!, s = catalogue.traits[id] || emptyTrait();
     const legacyDimension = id === 'primaryPersonality' ? 'personality' : ['mechanismPrinciple', 'mechanismMotion'].includes(id) ? 'mechanism' : undefined;
     const inherited = !s.enabled && legacyDimension && settings.bossDimensions.includes(legacyDimension);
@@ -130,10 +176,11 @@ export default function CatalogueEditor({ settings, onChange, view, onViewChange
     event.preventDefault(); event.stopPropagation(); onChange(next);
   }}>
     <div className={styles.catalogueToolbar}><div className={styles.tabs} aria-label="组合设置分组">{([['fusion', '融合设定'], ['body', '身形比例'], ['extra', '扩展设定']] as const).map(([id, title]) => <button type="button" key={id} aria-pressed={tab === id} onClick={() => setTab(id)}>{title}</button>)}</div><div className={styles.presentationToggle} role="group" aria-label="设置呈现方式"><button type="button" aria-pressed={cards} onClick={() => updateView({ presentation: 'cards' })}>卡片</button><button type="button" aria-pressed={!cards} onClick={() => updateView({ presentation: 'groups' })}>分组</button></div></div>
-    {cards ? <div className={`${styles.ruleGrid} ${styles.catalogueCardGrid}`}>{orderedIds.map(key => { const id = key.slice('catalogue-'.length); return id === 'source' || id === 'concept' ? basePicker(id) : renderTrait(id); })}</div> : <>
+    {cards ? <div className={`${styles.ruleGrid} ${styles.catalogueCardGrid}`}>{orderedIds.map(key => { const id = key.slice('catalogue-'.length); return id === 'source' || id === 'concept' ? basePicker(id) : extraCategories.some(category => category.id === id) ? renderDynamic(extraCategories.find(category => category.id === id)!) : renderTrait(id); })}</div> : <>
     {tab === 'fusion' && <>{(['source', 'concept'] as Dimension[]).map(basePicker)}{['primaryPersonality', 'mechanismPrinciple', 'mechanismMotion'].map(renderTrait)}<details className={styles.catalogueMore}><summary>独立设置职业、文化、世界与性格</summary>{TRAITS.filter(t => t.group === 'fusion' && !['primaryPersonality', 'mechanismPrinciple', 'mechanismMotion'].includes(t.id)).map(t => renderTrait(t.id))}</details></>}
     {tab === 'body' && <>{primaryBody.map(renderTrait)}<details className={styles.catalogueMore}><summary>更多身形属性</summary>{TRAITS.filter(t => t.group === 'body' && !primaryBody.includes(t.id)).map(t => renderTrait(t.id))}</details><p className={styles.hint}>同一属性以这里的明确选择为准；原有身形选项与固定要求原文保留。</p></>}
     {tab === 'extra' && <>{['narrative', 'allegiance', 'gameRole', 'equipmentPolicy', 'bodyCount'].map(renderTrait)}{(['角色关系与组合', '道具属性', '识别特征'] as const).map((title, i) => <details key={title} className={styles.catalogueMore}><summary>{title}</summary>{(i === 0 ? ['relationship', 'assembly', 'consciousness'] : i === 1 ? ['equipmentUse', 'equipmentReach', 'equipmentStructure'] : ['signatureArea', 'signatureKind']).map(renderTrait)}</details>)}</>}
+    {extraCategories.filter(category => category.group === tab).map(renderDynamic)}
     </>}
   </div>;
 }

@@ -1,10 +1,12 @@
 import type { FusionRow, FusionSettings, Dimension } from './engine';
-import { TRAITS, resolveTraits, type Pair } from './catalogue';
+import { TRAITS, resolveTraits, resolveDynamicTraits, type Pair } from './catalogue';
 import { CONFIG, DEFAULT_REQUIREMENTS, SOURCE_EN, CONCEPT_EN, PROP_EN, EN_LABEL, SOURCES, CONCEPTS } from './vocabulary';
 import { englishDetail } from './english';
 import { drawChoices } from './selection';
+import type { FusionCategory, FusionTerm } from './catalogue-model';
 
-export type Design = { sections: Pair[]; chosen?: Record<string, Pair[]>; traits: Record<string, Pair[]>; requirements: Pair; equipment: boolean; bodies: string; sources?: Pair[] };
+export type DesignCatalogueSnapshot = { version: string; categories: FusionCategory[]; terms: FusionTerm[]; selections: Record<string, string[]> };
+export type Design = { sections: Pair[]; chosen?: Record<string, Pair[]>; traits: Record<string, Pair[]>; requirements: Pair; equipment: boolean; bodies: string; sources?: Pair[]; dynamic?: DesignCatalogueSnapshot };
 const pair = (zh: string, en: string): Pair => ({ zh, en });
 const sourceShapes: Record<string, string> = Object.fromEntries(`海獭|round face, broad palms and a short streamlined body
 蜗牛|rounded spiral shell and short soft antennae
@@ -178,12 +180,48 @@ function applyLegacyBody(row: FusionRow, traits: Record<string, Pair[]>) {
   for (const [id, value] of legacyBodyMap[row.category.physique] || []) apply(id, value, id === 'headScale' ? 'a large head and short body' : undefined);
 }
 export function decorateRow(row: FusionRow, s: FusionSettings, random: () => number, index = 0, manual = false, retained?: Design): FusionRow {
-  const resolved = retained ? structuredClone(retained.chosen || retained.traits) : resolveTraits(s.catalogue, random, index, manual);
-  const chosen = structuredClone(resolved), explicitBody = TRAITS.some(t => t.group === 'body' && chosen[t.id]);
+  const dynamicChoices = retained ? {} : resolveDynamicTraits(s.catalogue, random, index, row.category);
+  const resolved = retained ? structuredClone(retained.chosen || retained.traits) : resolveTraits(s.catalogue, random, index, manual, dynamicChoices);
+  for (const { category, terms } of Object.values(dynamicChoices)) {
+    if (category.generationKind === 'trait') continue;
+    const term = terms[0]; if (!term) continue;
+    if (category.generationKind === 'body-card') {
+      row = { ...row, cards: [...(row.cards || []).filter(card => card.id !== category.legacyId), { id: category.legacyId || category.id, title: category.nameZh, titleEn: category.nameEn,
+        label: terms.map(term => term.legacyValue || term.nameZh).join('、'), en: terms.map(term => term.nameEn).join(', '), values: terms.map(term => ({ zh: term.legacyValue || term.nameZh, en: term.nameEn })), multi: category.multi }] };
+      for (const selected of terms) for (const trait of selected.data?.bodyTraits || []) (resolved[trait.id] ||= []).push(pair(trait.zh, trait.en));
+      continue;
+    }
+    const id = category.generationKind;
+    row = { ...row, category: { ...row.category, [id]: term.data!.group! } };
+    if (id === 'source') row = { ...row, source: { name: term.nameZh, en: term.nameEn, ...term.data!.source! } };
+    else if (id === 'concept') row = { ...row, concept: { name: term.nameZh, en: term.nameEn, ...term.data!.concept! } };
+    else if (id === 'mechanism') row = { ...row, mechanism: { cn: term.descriptionZh, en: term.descriptionEn } };
+    else if (id === 'personality') resolved.primaryPersonality = [{ zh: term.nameZh, en: term.nameEn, descriptionZh: term.descriptionZh, descriptionEn: term.descriptionEn }];
+    else row = { ...row, detail: { ...row.detail, [id]: term.descriptionZh } };
+  }
+  if (Object.values(dynamicChoices).some(({ category }) => category.generationKind === 'source' || category.generationKind === 'concept')) row = { ...row, name: row.source.root + row.concept.suffix };
+  const chosen = structuredClone(resolved);
+  const dynamic: DesignCatalogueSnapshot | undefined = retained ? retained.dynamic && structuredClone(retained.dynamic) : s.catalogue?.dynamic ? (() => {
+    const snapshot = s.catalogue!.dynamic!.snapshot, selections: Record<string, string[]> = {};
+    const categories = snapshot.categories.filter(category => s.catalogue!.dynamic!.selections[category.id]?.enabled);
+    for (const category of categories) selections[category.id] = (dynamicChoices[category.id]?.terms || []).map(term => term.id);
+    const selected = new Set(Object.values(selections).flat());
+    return { version: snapshot.version, categories: structuredClone(categories), terms: structuredClone(snapshot.terms.filter(term => selected.has(term.id))), selections };
+  })() : undefined;
+  const traitDefinitions = [...TRAITS.map(trait => {
+    const definition = dynamic?.categories.find(category => (category.legacyId || category.id) === trait.id);
+    return definition ? { ...trait, title: definition.nameZh, en: definition.nameEn, group: definition.group } : trait;
+  }), ...(dynamic?.categories.filter(category => !TRAITS.some(trait => trait.id === (category.legacyId || category.id))).map(category => ({ id: category.legacyId || category.id, title: category.nameZh, en: category.nameEn, group: category.group })) || [])];
+  const explicitBody = traitDefinitions.some(t => t.group === 'body' && chosen[t.id]);
+  const specialTerm = (id: Dimension) => {
+    const category = dynamic?.categories.find(category => category.generationKind === id);
+    return category ? dynamic?.terms.find(term => dynamic.selections[category.id]?.includes(term.id)) : undefined;
+  };
+  const detailEn = (id: Dimension) => specialTerm(id)?.descriptionEn || englishDetail(id, row.category[id], row.detail[id]);
   applyLegacyBody(row, resolved);
   const sections: Pair[] = [], add = (zh: string, en: string) => sections.push(pair(zh, en));
-  const translated = (map: object, key: string) => (map as Record<string, string>)[key] || row.translations?.find(t => t.label === key)?.en || key;
-  const body = TRAITS.some(t => t.group === 'body' && resolved[t.id]) || Boolean(resolved.headScale);
+  const translated = (map: object, key: string) => key === row.source.name && row.source.en ? row.source.en : key === row.concept.name && row.concept.en ? row.concept.en : key === row.concept.prop && row.concept.propEn ? row.concept.propEn : (map as Record<string, string>)[key] || row.translations?.find(t => t.label === key)?.en || key;
+  const body = traitDefinitions.some(t => t.group === 'body' && resolved[t.id]) || Boolean(resolved.headScale);
   const noProps = resolved.equipmentPolicy?.some(p => p.zh === '无道具') === true;
   const sourceName = translated(SOURCE_EN, row.source.name), conceptName = translated(CONCEPT_EN, row.concept.name);
   const fusion = s.catalogue?.sourceFusion;
@@ -198,9 +236,13 @@ export function decorateRow(row: FusionRow, s: FusionSettings, random: () => num
   };
   if (hasTheme) for (const [id, values] of Object.entries(themeDefaults[row.category.concept] || {})) if (!resolved[id]) resolved[id] = values.map(v => TRAITS.find(t => t.id === id)!.options.find(o => o.zh === v)!);
   const customOccupation = row.cards?.find(card => !card.id.startsWith('card-body-') && /^(?:职业|职业与身份|职业身份|身份|角色职业|职业设定)$/.test(card.title.trim()));
-  const occupation = resolved.occupation || (customOccupation ? customOccupation.values || [pair(customOccupation.label, customOccupation.en)] : undefined) || (row.category.source === '职业' ? [pair(row.source.name, sourceName)] : [pair(row.concept.name, conceptName)]);
+  const occupation: Pair[] = resolved.occupation || (customOccupation ? customOccupation.values || [pair(customOccupation.label, customOccupation.en)] : undefined) || (row.category.source === '职业' ? [pair(row.source.name, sourceName)] : [pair(row.concept.name, conceptName)]);
   if (resolved.occupation || customOccupation) row = { ...row, name: row.source.root + (occupation[0].zh === '无职业设定' ? '角色' : occupation[0].zh) };
   add(`原创角色设计「${row.name}」。造型母体：${row.source.name === '土星环' ? '土星环（带环行星原型）' : row.source.name}。`, `Original character design: ${sourceName}. Source prototype: ${sourceName}.`);
+  for (const id of ['source', 'concept'] as Dimension[]) {
+    const term = specialTerm(id);
+    if (term && term.descriptionZh !== term.nameZh) add(`${id === 'source' ? '母体' : '跨界'}补充：${term.descriptionZh}。`, `${id === 'source' ? 'Source' : 'Crossover'} details: ${term.descriptionEn}.`);
+  }
   if (sources.length) {
     add(`辅助融合元素：${sources.map(value => value.zh).join('、')}。以${row.source.name}为主母体，将辅助元素的材质和辨识结构融入同一角色，不因母体数量增加画面主体。`, `Additional fusion sources: ${sources.map(value => value.en).join(', ')}. Keep the ${sourceName} as the primary prototype and integrate the additional materials and recognizable structures into the same character; additional sources do not add characters.`);
     for (const source of sources) {
@@ -210,26 +252,27 @@ export function decorateRow(row: FusionRow, s: FusionSettings, random: () => num
   }
   if (noProps && row.category.source === '职业') add('以职业人物为人形母体，辨识特征通过服装与姿态表达，不添加独立道具。', 'Use a humanoid occupational prototype, conveying identity through clothing and posture without separate props.');
   else if (body) add(`保留${row.source.name}的材质、面部与表面辨识特征；主体轮廓和比例按下列身形设定。`, `Retain the recognizable material, facial and surface features of the ${sourceName}; use the silhouette and proportions specified below.`);
-  else add(`母体形态：${row.source.shape}。`, `Source form: ${sourceShapes[row.source.name] || `a clear geometric silhouette inspired by ${sourceName}`}.`);
-  if (occupation[0].zh !== '无职业设定') add(`职业与身份：${occupation.map(p => p.zh).join('、')}。${occupation.length > 1 ? `主要身份为${occupation[0].zh}，其余为兼任。` : ''}`, `Occupation: ${occupation.map(p => p.en).join(', ')}.${occupation.length > 1 ? ` Primary identity: ${occupation[0].en}; the others are additional roles.` : ''}`);
-  if (!hasTheme) add(`视觉语言：${row.concept.mood}。`, `Visual language: ${moods[row.concept.name] || `distinctive visual symbols of ${translated(EN_LABEL, row.category.concept)}`}.`);
+  else add(`母体形态：${row.source.shape}。`, `Source form: ${sourceShapes[row.source.name] || row.source.shapeEn || `a clear geometric silhouette inspired by ${sourceName}`}.`);
+  if (occupation[0].zh !== '无职业设定') add(`职业与身份：${occupation.map(p => p.descriptionZh || p.zh).join('、')}。${occupation.length > 1 ? `主要身份为${occupation[0].zh}，其余为兼任。` : ''}`, `Occupation: ${occupation.map(p => p.descriptionEn || p.en).join(', ')}.${occupation.length > 1 ? ` Primary identity: ${occupation[0].en}; the others are additional roles.` : ''}`);
+  if (!hasTheme) add(`视觉语言：${row.concept.mood}。`, `Visual language: ${moods[row.concept.name] || row.concept.moodEn || `distinctive visual symbols of ${translated(EN_LABEL, row.category.concept)}`}.`);
   let mechanism = row.mechanism;
   const mechIndex = CONFIG.find(c => c.id === 'mechanism')!.tags.indexOf(row.category.mechanism as never);
-  if (!retained && mechIndex >= 0 && extraMechanisms[mechIndex]) { const pool = [pair(row.mechanism.cn, row.mechanism.en), ...extraMechanisms[mechIndex]]; const v = pool[Math.floor(random() * pool.length)]; mechanism = { cn: v.zh, en: v.en }; }
+  if (!retained && !Object.values(dynamicChoices).some(value => value.category.generationKind === 'mechanism') && mechIndex >= 0 && extraMechanisms[mechIndex]) { const pool = [pair(row.mechanism.cn, row.mechanism.en), ...extraMechanisms[mechIndex]]; const v = pool[Math.floor(random() * pool.length)]; mechanism = { cn: v.zh, en: v.en }; }
   const independentMechanism = Boolean(resolved.mechanismPrinciple || resolved.mechanismMotion);
-  if (independentMechanism) mechanism = { cn: [...(resolved.mechanismPrinciple || []), ...(resolved.mechanismMotion || [])].map(p => p.zh).join('，'), en: [...(resolved.mechanismPrinciple || []), ...(resolved.mechanismMotion || [])].map(p => p.en).join(', ') };
+  if (independentMechanism) mechanism = { cn: [...(resolved.mechanismPrinciple || []), ...(resolved.mechanismMotion || [])].map(p => p.descriptionZh || p.zh).join('，'), en: [...(resolved.mechanismPrinciple || []), ...(resolved.mechanismMotion || [])].map(p => p.descriptionEn || p.en).join(', ') };
   if (row.category.mechanism && !independentMechanism && !noProps && row.category.mechanism !== '不强调机制') add(`作用机制：${mechanism.cn}。`, `Functional system: ${mechanism.en}.`);
   else if ((row.category.mechanism || independentMechanism) && noProps) add('机制通过角色自身的组织、姿态或内部结构表达，不添加外置装置。', 'Express the mechanism through the character’s own tissue, pose or internal structure, without external devices.');
+  if (specialTerm('mechanism') && noProps) add(`作用机制：${mechanism.cn}。`, `Functional system: ${mechanism.en}.`);
   if (!noProps) {
-    if (row.category.equipment) add(`道具：${row.detail.equipment}。`, `Equipment: ${englishDetail('equipment', row.category.equipment, row.detail.equipment)}.`);
+    if (row.category.equipment) add(`道具：${row.detail.equipment}。`, `Equipment: ${detailEn('equipment')}.`);
     else if (!resolved.occupation && !customOccupation && !hasTheme) add(`主题关联道具：${row.concept.prop}。`, `Theme-related prop: ${translated(PROP_EN, row.concept.prop)}.`);
   }
-  const anchorCn = noProps && row.category.source === '职业' ? '职业姿态' : sourceAnchors[row.source.anchor] ? row.source.anchor : '母体的标志特征';
-  const anchorEn = noProps && row.category.source === '职业' ? 'occupational posture' : sourceAnchors[row.source.anchor] || 'the source’s signature feature';
-  if (!noProps && row.category.equipment) add(`融合连接：让${anchorCn}参与${row.detail.equipment}的造型与使用方式。`, `Fusion connection: integrate ${anchorEn} into the form and operation of ${englishDetail('equipment', row.category.equipment, row.detail.equipment)}.`);
+  const anchorCn = noProps && row.category.source === '职业' ? '职业姿态' : sourceAnchors[row.source.anchor] || row.source.anchorEn ? row.source.anchor : '母体的标志特征';
+  const anchorEn = noProps && row.category.source === '职业' ? 'occupational posture' : sourceAnchors[row.source.anchor] || row.source.anchorEn || 'the source’s signature feature';
+  if (!noProps && row.category.equipment) add(`融合连接：让${anchorCn}参与${row.detail.equipment}的造型与使用方式。`, `Fusion connection: integrate ${anchorEn} into the form and operation of ${detailEn('equipment')}.`);
   else if (!noProps && !resolved.occupation && !customOccupation && !hasTheme) add(`融合连接：将${anchorCn}转化为${row.concept.prop}的结构线索。`, `Fusion connection: reinterpret ${anchorEn} as a structural cue for the ${translated(PROP_EN, row.concept.prop)}.`);
   else add(`融合连接：让${anchorCn}融入角色的轮廓、动作和自身功能，形成可解释的关联。`, `Fusion connection: integrate ${anchorEn} into the character’s silhouette, actions and intrinsic function with a clear causal relationship.`);
-  if (row.category.signature && !resolved.signatureArea && !resolved.signatureKind) add(`识别特征：${row.detail.signature}；按母体实际部位或拟人化结构适配，以经历或使用痕迹解释。`, `Signature: ${englishDetail('signature', row.category.signature, row.detail.signature)}; adapt it to the source anatomy or anthropomorphic structure and explain it through history or use.`);
+  if (row.category.signature && !resolved.signatureArea && !resolved.signatureKind) add(`识别特征：${row.detail.signature}；按母体实际部位或拟人化结构适配，以经历或使用痕迹解释。`, `Signature: ${detailEn('signature')}; adapt it to the source anatomy or anthropomorphic structure and explain it through history or use.`);
   const personalityPool = correctedPersonalities[row.category.personality];
   const personality = personalityPool ? personalityPool[Math.floor(random() * personalityPool.length)] : pair(row.personality.pose, row.personality.en);
   if (row.category.personality && !resolved.primaryPersonality) add(`主性格：${row.category.personality}。${personality.zh}。`, `Primary personality: ${personality.en}.`);
@@ -246,12 +289,12 @@ export function decorateRow(row: FusionRow, s: FusionSettings, random: () => num
   ];
   for (const [id, values] of Object.entries(entityDefaults[entityIndex] || {})) if (!resolved[id]) resolved[id] = values.map(v => TRAITS.find(t => t.id === id)!.options.find(o => o.zh === v)!);
   const bodies = resolved.bodyCount?.[0]?.zh || inferredBodies;
-  if (row.category.entity && !explicitComposition) add(`组合结构：${row.detail.entity}，明确连接关系和拆合空间。`, `Composition: ${englishDetail('entity', row.category.entity, row.detail.entity)}, with explicit connections and assembly space.`);
-  for (const t of TRAITS) {
+  if (row.category.entity && !explicitComposition) add(`组合结构：${row.detail.entity}，明确连接关系和拆合空间。`, `Composition: ${detailEn('entity')}, with explicit connections and assembly space.`);
+  for (const t of traitDefinitions) {
     const values = resolved[t.id]; if (!values?.length || t.id === 'occupation' || !explicitBody && t.group === 'body' || t.id === 'equipmentPolicy' && !noProps || noProps && t.id.startsWith('equipment') && t.id !== 'equipmentPolicy') continue;
-    add(`${t.title}：${values.map(p => p.zh).join('、')}。`, `${t.en}: ${values.map(p => p.en).join(', ')}.`);
+    add(`${t.title}：${values.map(p => p.descriptionZh || p.zh).join('、')}。`, `${t.en}: ${values.map(p => p.descriptionEn || p.en).join(', ')}.`);
   }
-  if (!explicitBody && row.category.physique) add(`形体轮廓：${row.detail.physique}。`, `Silhouette: ${englishDetail('physique', row.category.physique, row.detail.physique)}.`);
+  if (!explicitBody && row.category.physique) add(`形体轮廓：${row.detail.physique}。`, `Silhouette: ${detailEn('physique')}.`);
   if (explicitBody && resolved.headScale && !resolved.headRatio && !resolved.headBody) add(`头部与躯干：${resolved.headScale[0].zh}。`, `Head and body: ${resolved.headScale[0].en}.`);
   for (const c of row.cards || []) if ((!c.id.startsWith('card-body-') || !explicitBody) && c.id !== customOccupation?.id && !(noProps && /道具|装备|武器|工具/.test(c.title))) add(`${c.title}：${c.label}。`, `${c.titleEn}: ${c.en}.`);
   if (bodies === '单体' && resolved.relationship?.length) add('角色关系为故事背景，同伴不要求入画，只展示当前主体。', 'Relationships describe story context; companions remain off-screen and only the current character is shown.');
@@ -261,7 +304,7 @@ export function decorateRow(row: FusionRow, s: FusionSettings, random: () => num
   let cn = s.requirementsEnabled ? s.requirements : '', en = s.requirementsEnabled ? s.requirementsEn || (s.requirements === DEFAULT_REQUIREMENTS ? 'Premium family-friendly stylized 3D cartoon, approximately 2.5 heads tall, simplified rounded geometry, vivid clean colors, a strong readable silhouette, matte materials, soft studio lighting, charming without being infantile, clear thickness and assembly, suitable for 3D modeling and animation.' : s.requirements) : '';
   ({ zh: cn, en } = artDirectionPair(cn, en, Boolean(resolved.headRatio)));
   if (body && cn) add('身形设置中的明确比例优先于固定要求内同一属性的描述。', 'Explicit body proportions take precedence over descriptions of the same attributes in the fixed art direction.');
-  return { ...row, bridge: `${row.source.name} → ${occupation.map(p => p.zh).join('、')}${noProps ? ' · 无外置道具' : row.category.equipment ? ` · ${row.detail.equipment}` : ''}${row.category.mechanism ? ` · ${row.category.mechanism}` : ''}`, mechanism, personality: resolved.primaryPersonality ? { pose: resolved.primaryPersonality.map(p => p.zh).join('、'), en: resolved.primaryPersonality.map(p => p.en).join(', ') } : { pose: personality.zh, en: personality.en }, design: { sections, chosen, traits: resolved, requirements: pair(cn, en), equipment: !noProps, bodies, sources } };
+  return { ...row, bridge: `${row.source.name} → ${occupation.map(p => p.zh).join('、')}${noProps ? ' · 无外置道具' : row.category.equipment ? ` · ${row.detail.equipment}` : ''}${row.category.mechanism ? ` · ${row.category.mechanism}` : ''}`, mechanism, personality: resolved.primaryPersonality ? { pose: resolved.primaryPersonality.map(p => p.descriptionZh || p.zh).join('、'), en: resolved.primaryPersonality.map(p => p.descriptionEn || p.en).join(', ') } : { pose: personality.zh, en: personality.en }, design: { sections, chosen, traits: resolved, requirements: pair(cn, en), equipment: !noProps, bodies, sources, ...(dynamic ? { dynamic } : {}) } };
 }
 export function artDirectionPair(zh: string, en: string, headRatio: boolean): Pair {
   if (!headRatio) return pair(zh, en);

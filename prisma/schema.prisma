@@ -310,6 +310,10 @@ model VideoDeliveryJob {
 // ============================================================================
 
 model User {
+  fusion_categories CharacterFusionCategory[]
+  fusion_terms CharacterFusionTerm[]
+  fusion_workspaces CharacterFusionWorkspace[]
+  fusion_operations CharacterFusionOperation[]
   content_reactions      ContentReaction[]
   content_reaction_events ContentReactionEvent[]
   id                    String    @id @default(cuid())
@@ -2862,4 +2866,99 @@ model WorkDerivedLink {
   @@unique([source_work_id, derived_work_id, author_id])
   @@index([source_work_id, removed_at, created_at, id])
   @@index([derived_work_id, removed_at, created_at, id])
+}
+
+// Character fusion uses dedicated records; media workspaces and historical recipes are untouched.
+model CharacterFusionCategory {
+  id          String @id @default(cuid())
+  stable_id   String
+  scope_key   String
+  scope       String
+  owner_id    String
+  definition_json String
+  version     String
+  enabled     Boolean @default(true)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+  owner       User @relation(fields: [owner_id], references: [id], onDelete: Restrict)
+  terms       CharacterFusionTerm[]
+
+  @@unique([scope_key, stable_id])
+  @@index([owner_id, updated_at])
+  @@index([scope, enabled])
+}
+
+model CharacterFusionTerm {
+  id          String @id @default(cuid())
+  stable_id   String
+  scope_key   String
+  scope       String
+  owner_id    String
+  category_id String
+  category_record_id String?
+  definition_json String
+  version     String
+  enabled     Boolean @default(true)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+  owner       User @relation(fields: [owner_id], references: [id], onDelete: Restrict)
+  category    CharacterFusionCategory? @relation(fields: [category_record_id], references: [id], onDelete: Restrict)
+
+  @@unique([scope_key, stable_id])
+  @@index([category_id, enabled])
+  @@index([owner_id, updated_at])
+  @@index([scope, enabled])
+}
+
+model CharacterFusionWorkspace {
+  id          String @id @default(cuid())
+  owner_id    String
+  name        String
+  state_json  String
+  version     Int @default(1)
+  archived    Boolean @default(false)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+  owner       User @relation(fields: [owner_id], references: [id], onDelete: Restrict)
+  results     CharacterFusionResult[]
+  operations  CharacterFusionOperation[]
+
+  @@index([owner_id, archived, updated_at])
+}
+
+model CharacterFusionResult {
+  id           String @id @default(cuid())
+  workspace_id String
+  row_id       String
+  position     Int
+  version      Int @default(1)
+  row_json     String
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+  workspace    CharacterFusionWorkspace @relation(fields: [workspace_id], references: [id], onDelete: Restrict)
+
+  @@unique([workspace_id, row_id])
+  @@index([workspace_id, position])
+}
+
+model CharacterFusionOperation {
+  id             String @id @default(cuid())
+  owner_id       String
+  op_id          String
+  workspace_id   String?
+  target_kind    String
+  fingerprint    String
+  status         String @default("committed")
+  before_version Int @default(0)
+  after_version  Int @default(0)
+  result_json    String
+  undo_json      String?
+  undone_by      String?
+  created_at     DateTime @default(now())
+  owner          User @relation(fields: [owner_id], references: [id], onDelete: Restrict)
+  workspace      CharacterFusionWorkspace? @relation(fields: [workspace_id], references: [id], onDelete: Restrict)
+
+  @@unique([owner_id, op_id])
+  @@index([workspace_id, created_at])
+  @@index([owner_id, target_kind, created_at])
 }

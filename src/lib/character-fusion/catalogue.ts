@@ -1,10 +1,16 @@
-import { CONFIG, SOURCES, CONCEPTS, SOURCE_EN, CONCEPT_EN, LEGACY_TAGS, DETAIL_ALTS } from './vocabulary';
+import { CONFIG, SOURCES, CONCEPTS, SOURCE_EN, CONCEPT_EN, PROP_EN, EN_LABEL, LEGACY_TAGS, DETAIL_ALTS } from './vocabulary';
 import { englishDetail } from './english';
 import { choicesConflict, drawChoices, type SelectionPolicy } from './selection';
+import { NO_CHOICES } from './selection';
+import { BODY_CARDS } from './body-cards';
+import { builtinCategoryId, builtinTermId, FUSION_CATALOGUE_VERSION, parseFusionCatalogue, type FusionCatalogue, type FusionCategory, type FusionTerm } from './catalogue-model';
+import type { FusionSettings } from './engine';
 
-export type Pair = { zh: string; en: string };
+export type Pair = { zh: string; en: string; termId?: string; descriptionZh?: string; descriptionEn?: string };
 export type TraitState = { enabled: boolean; locked: boolean; values: string[]; excluded: string[]; must: string[] };
-export type CatalogueSettings = { details: Partial<Record<string, { value: string; locked: boolean }>>; traits: Record<string, TraitState>; sourceFusion?: TraitState };
+export type DynamicTraitState = TraitState & { candidates?: string[] };
+export type DynamicCatalogueSettings = { formatVersion: 1; selections: Record<string, DynamicTraitState>; snapshot: FusionCatalogue };
+export type CatalogueSettings = { details: Partial<Record<string, { value: string; locked: boolean }>>; traits: Record<string, TraitState>; sourceFusion?: TraitState; dynamic?: DynamicCatalogueSettings };
 export type Trait = SelectionPolicy & { id: string; title: string; en: string; group: 'fusion' | 'body' | 'extra'; options: Pair[] };
 const trait = (id: string, title: string, en: string, group: Trait['group'], entries: string, multi = false): Trait => ({ id, title, en, group, multi, randomMax: ['occupation', 'mechanismPrinciple', 'equipmentReach'].includes(id) ? 1 : multi ? 3 : 1,
   ...(id === 'assembly' ? { incompatible: [['独立站位', '并体融合'], ['独立站位', '骑乘共体']] as [string, string][] } : {}), options: entries.split(';').map(entry => { const [zh, en] = entry.split('|'); return { zh, en }; }) });
@@ -83,11 +89,13 @@ export function parseCatalogue(input: unknown): CatalogueSettings {
     for (const values of [state.values, state.excluded, state.must]) if (!Array.isArray(values) || values.length > options.length || new Set(values).size !== values.length || values.some(value => !options.some(option => option.zh === value))) throw new Error('辅助母体选项无效。');
     next.sourceFusion = { enabled: state.enabled, locked: state.locked, values: [...state.values], excluded: [...state.excluded], must: [...state.must] };
   }
+  if (c.dynamic !== undefined) next.dynamic = parseDynamicCatalogue(c.dynamic);
   return next;
 }
-export function resolveTraits(catalogue: CatalogueSettings | undefined, random: () => number, index: number, _manual = false): Record<string, Pair[]> {
+export function resolveTraits(catalogue: CatalogueSettings | undefined, random: () => number, index: number, _manual = false, dynamic = resolveDynamicTraits(catalogue, random, index)): Record<string, Pair[]> {
   const result: Record<string, Pair[]> = {};
   for (const t of TRAITS) {
+    if (catalogue?.dynamic?.selections[t.id]) continue;
     const s = catalogue?.traits[t.id]; if (!s?.enabled) continue;
     const pool = t.options.filter(o => !s.excluded.includes(o.zh));
     let values: string[];
@@ -97,5 +105,163 @@ export function resolveTraits(catalogue: CatalogueSettings | undefined, random: 
     } else values = [];
     result[t.id] = values.map(value => t.options.find(o => o.zh === value)!);
   }
+  for (const { category, terms } of Object.values(dynamic)) if (category.generationKind === 'trait') result[category.legacyId || category.id] = terms.map(termPair);
   return result;
+}
+
+/** Adapter only: the original lists and handlers remain the authority for built-ins. */
+export function builtinCatalogue(): FusionCatalogue {
+  const categories: FusionCategory[] = [], terms: FusionTerm[] = [];
+  const common = { version: '1', enabled: true, scope: 'builtin' as const, ownerId: null, aliases: [] as string[], tags: [] as string[] };
+  const add = (category: FusionCategory, options: Pair[], groupFor?: (label: string) => string) => {
+    categories.push(category);
+    options.forEach((option, index) => {
+      const group = groupFor?.(option.zh);
+      const source = category.generationKind === 'source' ? Object.values(SOURCES).flat().find(source => source.name === option.zh) : undefined;
+      const concept = category.generationKind === 'concept' ? Object.values(CONCEPTS).flat().find(concept => concept.name === option.zh) : undefined;
+      terms.push({ ...common, id: builtinTermId(category.id, option.zh), categoryId: category.id, nameZh: option.zh, nameEn: option.en,
+        descriptionZh: option.zh, descriptionEn: option.en, legacyValue: option.zh, sortOrder: index, ...(group ? { data: { group,
+          ...(source ? { source: { shape: source.shape, shapeEn: `a recognizable ${option.en} silhouette`, anchor: source.anchor, anchorEn: `the distinctive physical feature of the ${option.en}`, root: source.root } } : {}),
+          ...(concept ? { concept: { prop: concept.prop, propEn: (PROP_EN as Record<string, string>)[concept.prop] || 'a theme-related prop', mood: concept.mood, moodEn: `visual motifs associated with ${option.en}`, suffix: concept.suffix } } : {}) } } : {}) });
+    });
+  };
+  for (const dimension of CONFIG) {
+    const id = builtinCategoryId(dimension.id);
+    const options = dimension.tags.flatMap(label => concreteOptions(dimension.id, label));
+    const unique = options.filter((option, i) => options.findIndex(value => value.zh === option.zh) === i);
+    add({ ...common, id, legacyId: dimension.id, nameZh: dimension.title, nameEn: dimension.id, descriptionZh: dimension.title, descriptionEn: dimension.id,
+      sortOrder: categories.length, group: 'fusion', multi: false, randomMax: 1, generationKind: dimension.id },
+    unique.length ? unique : dimension.tags.map(label => ({ zh: label, en: (EN_LABEL as Record<string, string>)[label] || dimension.english.toLowerCase() })),
+    label => dimension.tags.find(group => concreteOptions(dimension.id, group).some(option => option.zh === label)) || label);
+  }
+  for (const definition of TRAITS) add({ ...common, id: definition.id, legacyId: definition.id, nameZh: definition.title, nameEn: definition.en, descriptionZh: definition.title, descriptionEn: definition.en,
+    sortOrder: categories.length, group: definition.group, multi: definition.multi, randomMax: definition.randomMax || 1, generationKind: 'trait',
+    exclusive: (definition.exclusive || NO_CHOICES).filter(label => definition.options.some(option => option.zh === label)).map(label => builtinTermId(definition.id, label)),
+    incompatible: (definition.incompatible || []).map(([a, b]) => [builtinTermId(definition.id, a), builtinTermId(definition.id, b)]) }, definition.options);
+  for (const card of BODY_CARDS) add({ ...common, id: card.id, legacyId: card.id, nameZh: card.title, nameEn: card.titleEn, descriptionZh: card.title, descriptionEn: card.titleEn,
+    sortOrder: categories.length, group: 'body', multi: Boolean(card.multi), randomMax: card.multi ? 3 : 1, generationKind: 'body-card',
+    exclusive: card.tags.filter(tag => NO_CHOICES.includes(tag.label)).map(tag => builtinTermId(card.id, tag.label)) }, card.tags.map(tag => ({ zh: tag.label, en: tag.en })));
+  return { version: FUSION_CATALOGUE_VERSION, categories, terms };
+}
+
+export function parseDynamicCatalogue(input: unknown): DynamicCatalogueSettings {
+  const value = input as DynamicCatalogueSettings;
+  if (!value || typeof value !== 'object' || value.formatVersion !== 1 || !value.selections || typeof value.selections !== 'object' || Array.isArray(value.selections)) throw new Error('此词库引用格式暂不支持，请保留草稿并刷新页面。');
+  const snapshot = parseFusionCatalogue(value.snapshot), selections: Record<string, DynamicTraitState> = {};
+  for (const [id, state] of Object.entries(value.selections)) {
+    const category = snapshot.categories.find(category => category.id === id);
+    if (!category || !state || typeof state !== 'object' || typeof state.enabled !== 'boolean' || typeof state.locked !== 'boolean') throw new Error('动态类别选择无效，原内容仍保留。');
+    const terms = snapshot.terms.filter(term => term.categoryId === id), ids = new Set(terms.map(term => term.id));
+    for (const list of [state.values, state.excluded, state.must, ...(state.candidates !== undefined ? [state.candidates] : [])]) {
+      if (!Array.isArray(list) || list.length > ids.size || new Set(list).size !== list.length || list.some(termId => typeof termId !== 'string' || !ids.has(termId))) throw new Error(`${category.nameZh}包含未知词条引用，请刷新目录后处理。`);
+    }
+    selections[id] = { enabled: state.enabled, locked: state.locked, values: [...state.values], excluded: [...state.excluded], must: [...state.must], ...(state.candidates !== undefined ? { candidates: [...state.candidates] } : {}) };
+  }
+  return { formatVersion: 1, selections, snapshot };
+}
+
+/** Call with the fresh, permission-filtered server catalogue before creating new results. */
+export function hydrateCatalogueSettings(settings: CatalogueSettings, catalogue: FusionCatalogue, context?: FusionSettings): CatalogueSettings {
+  const next = parseCatalogue(settings);
+  const fresh = parseFusionCatalogue(catalogue);
+  if (context) {
+    const builtin = builtinCatalogue();
+    const selections = next.dynamic?.selections || {};
+    for (const category of fresh.categories.filter(category => category.scope === 'builtin' && !selections[category.id])) {
+      const original = builtin.categories.find(original => original.id === category.id);
+      const terms = fresh.terms.filter(term => term.categoryId === category.id), oldTerms = builtin.terms.filter(term => term.categoryId === category.id);
+      if (!original || stableCatalogueValue(category) === stableCatalogueValue(original) && stableCatalogueValue(terms) === stableCatalogueValue(oldTerms)) continue;
+      const ids = (labels: string[]) => labels.map(label => terms.find(term => (term.legacyValue || term.nameZh) === label)?.id).map((id, index) => {
+        if (!id) throw new Error(`${category.nameZh}的原选择「${labels[index]}」无法读取，请保留草稿并调整。`);
+        return id;
+      });
+      if (category.generationKind === 'trait') {
+        const state = next.traits[category.legacyId || category.id]; if (!state?.enabled) continue;
+        selections[category.id] = { ...state, values: ids(state.values), excluded: ids(state.excluded), must: ids(state.must) };
+      } else if (category.generationKind === 'body-card') {
+        const card = context.cards.find(card => card.id === category.legacyId && card.joined); if (!card) continue;
+        selections[category.id] = { enabled: true, locked: card.locked, values: ids(card.values || [card.value]), excluded: ids(card.tags.filter(tag => tag.status === 'exclude').map(tag => tag.label)), must: ids(card.tags.filter(tag => tag.status === 'must').map(tag => tag.label)),
+          candidates: ids(card.tags.filter(tag => tag.status !== 'exclude').map(tag => tag.label)).filter(id => terms.find(term => term.id === id)?.enabled) };
+      } else {
+        const dimension = CONFIG.find(dimension => dimension.id === category.generationKind); if (!dimension || !context.bossDimensions.includes(dimension.id)) continue;
+        const propPolicy = next.traits.equipmentPolicy, dynamicProps = selections.equipmentPolicy;
+        const noProps = propPolicy?.enabled && propPolicy.locked && propPolicy.values.includes('无道具') || dynamicProps?.enabled && dynamicProps.locked && dynamicProps.values.some(id => fresh.terms.some(term => term.id === id && (term.legacyValue || term.nameZh) === '无道具'));
+        if (dimension.id === 'equipment' && noProps) continue;
+        if (dimension.id === 'personality' && (next.dynamic?.selections.primaryPersonality?.enabled || next.traits.primaryPersonality?.enabled)
+          || dimension.id === 'mechanism' && ['mechanismPrinciple', 'mechanismMotion'].some(id => next.dynamic?.selections[id]?.enabled || next.traits[id]?.enabled)
+          || dimension.id === 'physique' && (TRAITS.some(trait => trait.group === 'body' && next.traits[trait.id]?.enabled) || context.cards.some(card => card.joined && card.id.startsWith('card-body-')))
+          || dimension.id === 'entity' && ['bodyCount', 'assembly', 'relationship', 'consciousness'].some(id => next.dynamic?.selections[id]?.enabled || next.traits[id]?.enabled)
+          || dimension.id === 'signature' && ['signatureArea', 'signatureKind'].some(id => next.dynamic?.selections[id]?.enabled || next.traits[id]?.enabled)) continue;
+        const allowed = context.rules[dimension.id].filter(tag => tag.status !== 'exclude').map(tag => tag.label);
+        const candidates = terms.filter(term => term.enabled && allowed.includes(term.data!.group!) && (!context.bossLocks[dimension.id] || term.data!.group === context.boss[dimension.id])).map(term => term.id);
+        const detail = next.details[dimension.id];
+        const must = context.rules[dimension.id].filter(tag => tag.status === 'must').map(tag => {
+          const term = terms.find(term => term.data!.group === tag.label && term.enabled && candidates.includes(term.id));
+          if (!term) throw new Error(`${category.nameZh}的必出类别「${tag.label}」没有可用词条。`);
+          return term.id;
+        });
+        selections[category.id] = { enabled: true, locked: Boolean(detail?.locked), values: detail ? ids([detail.value]) : [], excluded: terms.filter(term => !allowed.includes(term.data!.group!)).map(term => term.id), must, candidates };
+        delete next.details[dimension.id];
+      }
+    }
+    if (Object.keys(selections).length) next.dynamic = { formatVersion: 1, selections, snapshot: fresh };
+  }
+  if (!next.dynamic) return next;
+  const selectedIds = Object.keys(next.dynamic.selections);
+  for (const id of selectedIds) {
+    const state = next.dynamic.selections[id], category = fresh.categories.find(category => category.id === id);
+    if (!category || state.enabled && !category.enabled) throw new Error('所选类别已停用或无权读取，请保留草稿并调整选择。');
+    const terms = fresh.terms.filter(term => term.categoryId === id), ids = new Set(terms.map(term => term.id));
+    if ([...state.values, ...state.excluded, ...state.must, ...(state.candidates || [])].some(termId => !ids.has(termId))) throw new Error(`${category.nameZh}的引用已失效或无权读取，请调整选择。`);
+    const active = [...(state.locked ? state.values : state.candidates || []), ...state.must];
+    if (state.enabled && active.some(termId => !terms.find(term => term.id === termId)?.enabled)) throw new Error(`${category.nameZh}包含已停用的选择，请调整后再生成。`);
+  }
+  next.dynamic.snapshot = { version: fresh.version, categories: fresh.categories.filter(category => selectedIds.includes(category.id)), terms: fresh.terms.filter(term => selectedIds.includes(term.categoryId)) };
+  return parseCatalogue(next);
+}
+
+function stableCatalogueValue(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableCatalogueValue).join(',')}]`;
+  if (value && typeof value === 'object') return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, entry]) => `${JSON.stringify(key)}:${stableCatalogueValue(entry)}`).join(',')}}`;
+  return JSON.stringify(value) ?? 'null';
+}
+
+export const dynamicPolicy = (category: FusionCategory, terms: FusionTerm[]): SelectionPolicy => ({ multi: category.multi, randomMax: category.randomMax,
+  exclusive: [...(category.exclusive || []), ...terms.filter(term => NO_CHOICES.includes(term.legacyValue || term.nameZh)).map(term => term.id)], incompatible: category.incompatible });
+export const dynamicPool = (category: FusionCategory, state: DynamicTraitState, terms: FusionTerm[]) => terms.filter(term => category.enabled && term.enabled && !state.excluded.includes(term.id) && (state.candidates === undefined || state.candidates.includes(term.id)));
+export const termPair = (term: FusionTerm): Pair => ({ zh: term.legacyValue || term.nameZh, en: term.nameEn, termId: term.id, descriptionZh: term.descriptionZh, descriptionEn: term.descriptionEn });
+export function resolveDynamicTraits(settings: CatalogueSettings | undefined, random: () => number, index: number, groups?: Record<string, string>): Record<string, { category: FusionCategory; terms: FusionTerm[] }> {
+  const dynamic = settings?.dynamic, result: Record<string, { category: FusionCategory; terms: FusionTerm[] }> = {};
+  if (!dynamic) return result;
+  for (const [id, state] of Object.entries(dynamic.selections)) {
+    if (!state.enabled) continue;
+    const category = dynamic.snapshot.categories.find(category => category.id === id)!;
+    const terms = dynamic.snapshot.terms.filter(term => term.categoryId === id);
+    let pool = dynamicPool(category, state, terms);
+    const group = groups?.[category.generationKind];
+    if (group && !state.locked && !state.must[index] && !['trait', 'body-card'].includes(category.generationKind)) {
+      pool = pool.filter(term => term.data?.group === group);
+      if (!pool.length) throw new Error(`${category.nameZh}在当前类别内没有可用词条，请调整类别或候选范围。`);
+    }
+    const selected = state.locked ? state.values : drawChoices(pool.map(term => term.id), dynamicPolicy(category, terms), random, state.must[index]);
+    result[id] = { category, terms: selected.map(id => terms.find(term => term.id === id)!) };
+  }
+  return result;
+}
+
+export function validateDynamicGeneration(settings: CatalogueSettings | undefined, count: number): string | null {
+  const dynamic = settings?.dynamic;
+  if (!dynamic) return null;
+  for (const [id, state] of Object.entries(dynamic.selections)) {
+    if (!state.enabled) continue;
+    const category = dynamic.snapshot.categories.find(category => category.id === id)!;
+    const terms = dynamic.snapshot.terms.filter(term => term.categoryId === id), pool = dynamicPool(category, state, terms), ids = pool.map(term => term.id);
+    if (!category.enabled) return `${category.nameZh}已停用，请调整后生成。`;
+    if (!pool.length) return `${category.nameZh}没有可生成的候选，请调整候选或排除项。`;
+    if (!state.locked && state.must.length > count) return `${category.nameZh}本批必出项超过生成数量。`;
+    if (state.must.some(id => !ids.includes(id))) return `${category.nameZh}的必出项不在有效候选范围内。`;
+    if (state.locked && (!state.values.length || state.values.some(id => !ids.includes(id)) || state.must.some(id => !state.values.includes(id)))) return `${category.nameZh}的固定组合与候选或排除规则冲突。`;
+    if (state.locked && state.values.some((value, index) => state.values.slice(index + 1).some(other => choicesConflict(dynamicPolicy(category, terms), value, other)))) return `${category.nameZh}固定组合包含互斥词条，请调整后生成。`;
+  }
+  return null;
 }

@@ -1,6 +1,7 @@
 import { englishDetail } from './english';
 import { parseCardDraft, cardValues, type FusionCard } from './cards';
-import { TRAITS, parseCatalogue, concreteOptions, type CatalogueSettings } from './catalogue';
+import { TRAITS, parseCatalogue, concreteOptions, builtinCatalogue, dynamicPool, dynamicPolicy, validateDynamicGeneration, type CatalogueSettings } from './catalogue';
+import { builtinCategoryId, type FusionCategory, type FusionTerm } from './catalogue-model';
 import { chooseConcrete, decorateRow, type Design } from './design';
 import { BODY_HEAD_RATIO_ID } from './body-cards';
 import { choicesConflict, drawChoices } from './selection';
@@ -15,8 +16,10 @@ export type FusionSettings = {
   boss: Categories; bossLocks: Record<Dimension, boolean>; bossDimensions: Dimension[];
   requirementsEnabled: boolean; requirementsEn: string; cards: FusionCard[]; role: string; catalogue?: CatalogueSettings;
 };
-type Source = { name: string; shape: string; anchor: string; root: string };
-type Concept = { name: string; prop: string; mood: string; suffix: string };
+type Source = { name: string; shape: string; anchor: string; root: string; en?: string; shapeEn?: string; anchorEn?: string };
+type Concept = { name: string; prop: string; mood: string; suffix: string; en?: string; propEn?: string; moodEn?: string };
+export type FusionRowCatalogueSnapshot = { formatVersion: 1; catalogueVersion: string; seed: number; engineVersion: string; categories: FusionCategory[]; terms: FusionTerm[];
+  selections: Record<string, string[]>; settings?: FusionSettings; settingsRef?: { operationId: string; configurationId: string }; body: { zh: string; en: string } };
 export type FusionRow = {
   id: string; name: string; category: Categories; source: Source; concept: Concept; bridge: string;
   mechanism: { cn: string; en: string }; personality: { pose: string; en: string };
@@ -24,7 +27,9 @@ export type FusionRow = {
   design?: Design;
   translations?: Array<{ dimension: Dimension; label: string; en: string }>;
   role?: string; cards?: Array<{ id: string; title: string; titleEn: string; label: string; en: string; values?: { zh: string; en: string }[]; multi?: boolean }>;
+  catalogueSnapshot?: FusionRowCatalogueSnapshot;
 };
+export const FUSION_ENGINE_VERSION = 'ux14-1';
 export const COUNTS = [4, 8, 12, 16, 24, 32];
 export const CORE = CONFIG.filter(c => !('optional' in c));
 export const ADDONS = CONFIG.filter(c => 'optional' in c);
@@ -98,8 +103,15 @@ export function refreshBoss(s: FusionSettings, rnd = Math.random, only?: Dimensi
   }
   const catalogue = parseCatalogue(s.catalogue);
   if (!only) for (const t of TRAITS) {
+    if (catalogue.dynamic?.selections[t.id]) continue;
     const state = catalogue.traits[t.id]; if (!state?.enabled || state.locked) continue;
     catalogue.traits[t.id] = { ...state, values: drawChoices(t.options.filter(o => !state.excluded.includes(o.zh)).map(o => o.zh), t, rnd) };
+  }
+  if (!only && catalogue.dynamic) for (const [id, state] of Object.entries(catalogue.dynamic.selections)) {
+    if (!state.enabled || state.locked) continue;
+    const category = catalogue.dynamic.snapshot.categories.find(category => category.id === id)!;
+    const terms = catalogue.dynamic.snapshot.terms.filter(term => term.categoryId === id);
+    state.values = drawChoices(dynamicPool(category, state, terms).map(term => term.id), dynamicPolicy(category, terms), rnd);
   }
   for (const [id, detail] of Object.entries(catalogue.details)) if (detail && !detail.locked && (!only || only === id)) {
     const pool = concreteOptions(id, boss[id as Dimension]);
@@ -112,7 +124,27 @@ export function refreshBoss(s: FusionSettings, rnd = Math.random, only?: Dimensi
   }) };
 }
 export function validateGeneration(s: FusionSettings) {
+  const dynamicError = validateDynamicGeneration(s.catalogue, s.count); if (dynamicError) return dynamicError;
+  if (s.catalogue?.dynamic) for (const [id, state] of Object.entries(s.catalogue.dynamic.selections)) {
+    if (!state.enabled) continue;
+    const category = s.catalogue.dynamic.snapshot.categories.find(category => category.id === id)!;
+    const dimension = CONFIG.find(dimension => dimension.id === category.generationKind);
+    if (!dimension) continue;
+    const terms = s.catalogue.dynamic.snapshot.terms.filter(term => term.categoryId === id);
+    const active = state.locked ? terms.filter(term => state.values.includes(term.id)) : dynamicPool(category, state, terms);
+    if (active.some(term => !allowed(s, dimension.id).includes(term.data!.group!))) return `${category.nameZh}的候选与原类别排除规则冲突，请调整候选范围。`;
+    if (s.bossLocks[dimension.id] && active.some(term => term.data!.group !== s.boss[dimension.id])) return `${category.nameZh}与原类别锁定冲突，请先解锁。`;
+    if (s.catalogue.details[dimension.id]?.locked) return `${category.nameZh}已使用新词库选择，请先解锁原具体选项。`;
+    const propPolicy = s.catalogue.traits.equipmentPolicy, dynamicProps = s.catalogue.dynamic.selections.equipmentPolicy;
+    const noProps = propPolicy?.enabled && propPolicy.locked && propPolicy.values.includes('无道具') || dynamicProps?.enabled && dynamicProps.locked && dynamicProps.values.some(id => s.catalogue!.dynamic!.snapshot.terms.some(term => term.id === id && (term.legacyValue || term.nameZh) === '无道具'));
+    if (dimension.id === 'equipment' && noProps) return '词库道具选择与固定无道具规则冲突，请保留一种明确设置。';
+    const guaranteed = terms.filter(term => (state.locked ? state.values : state.must).includes(term.id)).map(term => term.data!.group);
+    if (required(s, dimension.id).some(group => !guaranteed.includes(group))) return `${category.nameZh}的原类别必出项须在词库选择中明确设为本批必出。`;
+    const overrides = dimension.id === 'personality' ? ['primaryPersonality'] : dimension.id === 'mechanism' ? ['mechanismPrinciple', 'mechanismMotion'] : dimension.id === 'entity' ? ['bodyCount', 'assembly', 'relationship', 'consciousness'] : dimension.id === 'physique' ? TRAITS.filter(trait => trait.group === 'body').map(trait => trait.id) : [];
+    if (overrides.some(id => s.catalogue?.dynamic?.selections[id]?.enabled || !s.catalogue?.dynamic?.selections[id] && s.catalogue?.traits[id]?.enabled)) return `${category.nameZh}与已加入的专属属性重复，请保留一种明确设置。`;
+  }
   for (const definition of TRAITS) {
+    if (s.catalogue?.dynamic?.selections[definition.id]) continue;
     const state = s.catalogue?.traits[definition.id]; if (!state?.enabled) continue;
     const policy = s.catalogue?.traits.equipmentPolicy;
     if (definition.id.startsWith('equipment') && definition.id !== 'equipmentPolicy' && policy?.enabled && policy.locked && policy.values.includes('无道具')) continue;
@@ -146,6 +178,18 @@ export function validateGeneration(s: FusionSettings) {
 export function chooseCategories(s: FusionSettings, rnd: () => number): Categories[] {
   const rows = Array.from({ length: s.count }, () => ({} as Categories));
   for (const c of CONFIG) {
+    const dynamic = s.catalogue?.dynamic;
+    const dynamicCategory = dynamic?.snapshot.categories.find(category => category.generationKind === c.id && dynamic.selections[category.id]?.enabled);
+    if (dynamic && dynamicCategory) {
+      const state = dynamic.selections[dynamicCategory.id], terms = dynamic.snapshot.terms.filter(term => term.categoryId === dynamicCategory.id);
+      const pool = dynamicPool(dynamicCategory, state, terms), groups = Array.from(new Set(pool.map(term => term.data!.group!)));
+      const cycle = shuffled(groups, rnd);
+      rows.forEach((row, index) => {
+        const requiredId = state.locked ? state.values[0] : state.must[index];
+        row[c.id] = requiredId ? terms.find(term => term.id === requiredId)!.data!.group! : c.id === 'source' ? cycle[index % cycle.length] : pick(groups, rnd);
+      });
+      continue;
+    }
     if (optional(c.id) && !s.bossDimensions.includes(c.id)) { rows.forEach(row => { row[c.id] = ''; }); continue; }
     const concrete = s.catalogue?.details[c.id];
     const fixedCategory = concrete?.locked ? c.tags.find(label => concreteOptions(c.id, label).some(o => o.zh === concrete.value)) : undefined;
@@ -190,7 +234,7 @@ export function generateBatch(s: FusionSettings, seed = Date.now()) {
   const result: FusionRow[] = [];
   chooseCategories(s, seeded(seed)).forEach((category, i) => {
     const base = chooseConcrete({ ...makeRow(category, seed + i * 257), role: s.role, translations: translationsFor(s, category), cards: cardChoices(s, i, seeded(seed + i)) }, s);
-    result.push(uniqueName(decorateRow(base, s, seeded(seed + i * 397), i), result));
+    result.push(freezeRow(uniqueName(decorateRow(base, s, seeded(seed + i * 397), i), result), s, seed + i * 257));
   });
   return result;
 }
@@ -200,7 +244,7 @@ export function bossRow(s: FusionSettings, others: FusionRow[], seed = Date.now(
   const category = { ...s.boss };
   for (const c of ADDONS) if (!s.bossDimensions.includes(c.id)) category[c.id] = '';
   for (const c of s.cards.filter(c => c.joined && c.locked)) if (!cardValues(c).length || cardValues(c).some(value => !c.tags.some(t => t.label === value && t.status !== 'exclude'))) throw new Error(`请为${c.title}选择可用标签。`);
-  return uniqueName(decorateRow(chooseConcrete({ ...makeRow(category, seed), role: s.role, translations: translationsFor(s, category), cards: cardChoices(s, 0, seeded(seed), true) }, s, true), s, seeded(seed), 0, true), others);
+  return freezeRow(uniqueName(decorateRow(chooseConcrete({ ...makeRow(category, seed), role: s.role, translations: translationsFor(s, category), cards: cardChoices(s, 0, seeded(seed), true) }, s, true), s, seeded(seed), 0, true), others), s, seed);
 }
 function translationsFor(s: Pick<FusionSettings, 'rules'>, category: Categories, prior: FusionRow['translations'] = []): NonNullable<FusionRow['translations']> {
   return CONFIG.flatMap(c => { const label = category[c.id], en = s.rules[c.id].find(t => t.label === label)?.en || prior.find(t => t.dimension === c.id && t.label === label)?.en; return en ? [{ dimension: c.id, label, en }] : []; });
@@ -214,7 +258,9 @@ function cardChoices(s: FusionSettings, index: number, rnd: () => number, _manua
   });
 }
 export function missingRequired(s: FusionSettings, rows: FusionRow[]) {
-  return [...TRAITS.flatMap(t => s.catalogue?.traits[t.id]?.enabled ? s.catalogue.traits[t.id].must.filter(label => !rows.some(row => row.design?.traits[t.id]?.some(v => v.zh === label))).map(label => `${t.title}：${label}`) : []), ...CONFIG.filter(c => !optional(c.id) || s.bossDimensions.includes(c.id)).flatMap(c => required(s, c.id).filter(label => !rows.some(r => r.category[c.id] === label)).map(label => `${c.title}：${label}`)),
+  const dynamic = s.catalogue?.dynamic;
+  const dynamicMissing = dynamic ? Object.entries(dynamic.selections).flatMap(([id, state]) => !state.enabled ? [] : state.must.filter(termId => !rows.some(row => row.catalogueSnapshot?.selections[id]?.includes(termId))).map(termId => `${dynamic.snapshot.categories.find(category => category.id === id)!.nameZh}：${dynamic.snapshot.terms.find(term => term.id === termId)!.nameZh}`)) : [];
+  return [...dynamicMissing, ...TRAITS.flatMap(t => !dynamic?.selections[t.id] && s.catalogue?.traits[t.id]?.enabled ? s.catalogue.traits[t.id].must.filter(label => !rows.some(row => row.design?.traits[t.id]?.some(v => v.zh === label))).map(label => `${t.title}：${label}`) : []), ...CONFIG.filter(c => !optional(c.id) || s.bossDimensions.includes(c.id)).flatMap(c => required(s, c.id).filter(label => !rows.some(r => r.category[c.id] === label)).map(label => `${c.title}：${label}`)),
     ...s.cards.filter(c => c.joined).flatMap(c => c.tags.filter(t => t.status === 'must' && !rows.some(r => r.cards?.some(v => v.id === c.id && (v.values ? v.values.some(value => value.zh === t.label) : v.label === t.label)))).map(t => `${c.title}：${t.label}`))];
 }
 export function changeRow(s: FusionSettings, rows: FusionRow[], id: string, change?: { dimension: Dimension; value: string }, seed = Date.now()) {
@@ -239,27 +285,73 @@ export function changeRow(s: FusionSettings, rows: FusionRow[], id: string, chan
   }
   const row = uniqueName(chooseConcrete(makeRow(category, seed, change ? old : undefined, change?.dimension), s), others);
   const cards = change ? old.cards : cardChoices(s, 0, rnd);
-  return rows.map(r => r.id === id ? uniqueName(decorateRow({ ...row, id, advanced: old.advanced, isBoss: old.isBoss, role: old.role, cards, translations: translationsFor(s, category, old.translations) }, s, seeded(seed), 0, false, change ? old.design : undefined), others) : r);
+  return rows.map(r => r.id === id ? freezeRow(uniqueName(decorateRow({ ...row, id, advanced: old.advanced, isBoss: old.isBoss, role: old.role, cards, translations: translationsFor(s, category, old.translations) }, s, seeded(seed), 0, false, change ? old.design : undefined), others), change ? originalRowSettings(old) || s : s, seed) : r);
+}
+function originalRowSettings(row: FusionRow): FusionSettings | undefined {
+  if (!row.catalogueSnapshot) return undefined;
+  if (!row.catalogueSnapshot.settings) throw new Error('此结果的原配置尚未读取，请读取原操作配置后再调整。');
+  return row.catalogueSnapshot.settings;
 }
 export function settingsForRow(s: FusionSettings, row: FusionRow): FusionSettings {
-  const catalogue = parseCatalogue(s.catalogue);
+  const original = originalRowSettings(row);
+  const base = original || s;
+  const catalogue = parseCatalogue(base.catalogue);
   catalogue.traits = Object.fromEntries(TRAITS.map(t => [t.id, { enabled: Boolean((row.design?.chosen || row.design?.traits)?.[t.id]), locked: true, values: (row.design?.chosen || row.design?.traits)?.[t.id]?.map(v => v.zh).filter(label => t.options.some(o => o.zh === label)) || [], excluded: [], must: [] }]));
   catalogue.details = {};
   catalogue.sourceFusion = { enabled: Boolean(row.design?.sources?.length), locked: true, values: row.design?.sources?.map(value => value.zh) || [], excluded: [], must: [] };
+  if (catalogue.dynamic && row.catalogueSnapshot) {
+    for (const [id, state] of Object.entries(catalogue.dynamic.selections)) {
+      const values = row.catalogueSnapshot.selections[id] || [];
+      catalogue.dynamic.selections[id] = { enabled: state.enabled && values.length > 0, locked: true, values: [...values], excluded: [], must: [] };
+    }
+  }
   for (const id of ['source', 'concept', 'equipment', 'signature', 'entity', 'physique'] as Dimension[]) {
+    if (catalogue.dynamic?.snapshot.categories.some(category => category.generationKind === id && catalogue.dynamic!.selections[category.id]?.enabled)) continue;
     const value = id === 'source' ? row.source.name : id === 'concept' ? row.concept.name : row.detail[id];
     if (value && concreteOptions(id, row.category[id]).some(o => o.zh === value)) catalogue.details[id] = { value, locked: true };
   }
-  return { ...s, boss: { ...row.category }, bossLocks: Object.fromEntries(CONFIG.map(c => [c.id, true])) as FusionSettings['bossLocks'], bossDimensions: CONFIG.filter(c => row.category[c.id]).map(c => c.id), catalogue, cards: (row.cards || []).map(v => {
-    const prior = s.cards.find(c => c.id === v.id), values = v.values || [{ zh: v.label, en: v.en }];
-    return { ...(prior || { id: v.id, title: v.title, titleEn: v.titleEn, tags: values.map(value => ({ label: value.zh, en: value.en, status: 'default' as const })) }), multi: Boolean(v.multi), value: values[0].zh, values: v.multi ? values.map(value => value.zh) : undefined, joined: true, locked: true };
-  }), role: row.role || '', requirements: row.design?.requirements.zh ?? s.requirements, requirementsEn: row.design?.requirements.en ?? s.requirementsEn, requirementsEnabled: row.design ? Boolean(row.design.requirements.zh) : s.requirementsEnabled };
+  return { ...base, rules: Object.fromEntries(CONFIG.map(c => [c.id, base.rules[c.id].map(tag => ({ ...tag, status: tag.status === 'must' ? 'default' : tag.status }))])) as FusionSettings['rules'],
+    boss: { ...row.category }, bossLocks: Object.fromEntries(CONFIG.map(c => [c.id, true])) as FusionSettings['bossLocks'], bossDimensions: CONFIG.filter(c => row.category[c.id]).map(c => c.id), catalogue, cards: (row.cards || []).map(v => {
+    const prior = base.cards.find(c => c.id === v.id), values = v.values || [{ zh: v.label, en: v.en }];
+    const card = prior || { id: v.id, title: v.title, titleEn: v.titleEn, tags: values.map(value => ({ label: value.zh, en: value.en, status: 'default' as const })) };
+    return { ...card, tags: card.tags.map(tag => ({ ...tag, status: tag.status === 'must' ? 'default' as const : tag.status })), multi: Boolean(v.multi), value: values[0].zh, values: v.multi ? values.map(value => value.zh) : undefined, joined: true, locked: true };
+  }), role: row.role || '', requirements: row.design?.requirements.zh ?? base.requirements, requirementsEn: row.design?.requirements.en ?? base.requirementsEn, requirementsEnabled: row.design ? Boolean(row.design.requirements.zh) : base.requirementsEnabled };
 }
-export function reviseRow(s: FusionSettings, rows: FusionRow[], id: string) {
+export function reviseRow(s: FusionSettings, rows: FusionRow[], id: string, seed = Date.now()) {
   const error = validateGeneration(s); if (error) throw new Error(error);
   const old = rows.find(row => row.id === id); if (!old) throw new Error('这条提示词已不存在。');
-  const next = bossRow(s, rows.filter(row => row.id !== id));
-  return rows.map(row => row.id === id ? { ...next, id, advanced: old.advanced, isBoss: old.isBoss } : row);
+  const next = bossRow(s, rows.filter(row => row.id !== id), seed);
+  return rows.map(row => row.id === id ? refreshRowSnapshot({ ...next, id, advanced: old.advanced, isBoss: old.isBoss }) : row);
+}
+function freezeRow(row: FusionRow, settings: FusionSettings, seed: number): FusionRow {
+  const builtin = builtinCatalogue(), selections: Record<string, string[]> = {};
+  const select = (categoryId: string, labels: string[]) => {
+    const ids = builtin.terms.filter(term => term.categoryId === categoryId && labels.includes(term.legacyValue || term.nameZh)).map(term => term.id);
+    if (ids.length) selections[categoryId] = ids;
+  };
+  for (const dimension of CONFIG) select(builtinCategoryId(dimension.id), [dimension.id === 'source' ? row.source.name : dimension.id === 'concept' ? row.concept.name : row.detail[dimension.id] || row.category[dimension.id]]);
+  for (const [id, values] of Object.entries(row.design?.traits || {})) select(id, values.map(value => value.zh));
+  for (const card of row.cards || []) select(card.id, (card.values || [{ zh: card.label }]).map(value => value.zh));
+  Object.assign(selections, row.design?.dynamic?.selections);
+  const ids = new Set(Object.values(selections).flat()), categoryIds = new Set(Object.keys(selections));
+  const categories = new Map(builtin.categories.filter(category => categoryIds.has(category.id)).map(category => [category.id, category]));
+  const terms = new Map(builtin.terms.filter(term => ids.has(term.id)).map(term => [term.id, term]));
+  for (const category of row.design?.dynamic?.categories || []) categories.set(category.id, category);
+  for (const term of row.design?.dynamic?.terms || []) terms.set(term.id, term);
+  const next = { ...row, catalogueSnapshot: { formatVersion: 1 as const, catalogueVersion: row.design?.dynamic?.version || builtin.version, seed, engineVersion: FUSION_ENGINE_VERSION,
+    categories: structuredClone(Array.from(categories.values())), terms: structuredClone(Array.from(terms.values())), selections, settings: structuredClone(settings), body: { zh: '', en: '' } } };
+  return refreshRowSnapshot(next);
+}
+/** For explicit row-only translation/art-direction/advanced edits; definitions stay frozen. */
+export function refreshRowSnapshot(row: FusionRow, settings?: FusionSettings, seed?: number): FusionRow {
+  if (!row.catalogueSnapshot) return row;
+  const original = row.catalogueSnapshot;
+  const snapshot = { ...original, ...(settings ? { settings: structuredClone(settings) } : {}), ...(seed !== undefined ? { seed } : {}) };
+  const next = { ...row, catalogueSnapshot: snapshot };
+  if (!snapshot.settings && !row.design) throw new Error('此结果的原配置尚未读取，无法更新正文快照。');
+  const renderSettings = snapshot.settings || { requirements: '', requirementsEnabled: false };
+  snapshot.body = { zh: textFor(next, { ...renderSettings, lang: 'zh' }), en: textFor(next, { ...renderSettings, lang: 'en' }) };
+  return next;
 }
 export function textFor(row: FusionRow, settings: Pick<FusionSettings, 'requirements' | 'lang'> & Partial<Pick<FusionSettings, 'requirementsEnabled' | 'requirementsEn' | 'rules'>>) {
   const c = row.category;
@@ -290,7 +382,7 @@ export function textFor(row: FusionRow, settings: Pick<FusionSettings, 'requirem
     en = [...row.design.sections.map(p => p.en), row.design.requirements.en].filter(Boolean).join(' ');
     if (row.advanced && row.design.equipment && (row.category.mechanism || row.design.traits.mechanismPrinciple || row.design.traits.mechanismMotion)) { cn += ' 高级融合：展示收纳态、启动态与释放态，以明确的结构链驱动。'; en += ' Advanced fusion: show stored, activated and released states driven by a clear structural chain.'; }
   }
-  const translated = settings.rules ? translationsFor({ rules: settings.rules }, c, row.translations) : row.translations || [];
+  const translated = row.catalogueSnapshot ? row.translations || [] : settings.rules ? translationsFor({ rules: settings.rules }, c, row.translations) : row.translations || [];
   for (const tag of translated) {
     if (!tag.en) continue;
     en = en.replaceAll(tag.label + '探索者', tag.en + ' explorer').replaceAll(tag.label + '主题装置', tag.en + ' themed device').replaceAll(tag.label, tag.en);
@@ -304,6 +396,17 @@ export function txtFor(rows: FusionRow[], s: FusionSettings) {
 export function csvFor(rows: FusionRow[], s: FusionSettings) {
   const quote = (v: string) => '"' + (/^[=+\-@\t\r]/.test(v) ? "'" : '') + v.replace(/"/g, '""') + '"';
   const addons = ADDONS.filter(c => c.id !== 'mechanism' && c.id !== 'personality');
-  const traits = TRAITS.filter(t => rows.some(row => row.design?.traits[t.id]));
-  return [['名字', '性格', '母体', '跨界概念', '连接点', '机制', ...addons.map(c => c.title), ...traits.map(t => t.title), '完整提示词'], ...rows.map(r => [r.name, r.category.personality, r.source.name, r.concept.name, r.bridge, r.category.mechanism, ...addons.map(c => r.category[c.id]), ...traits.map(t => r.design?.traits[t.id]?.map(v => v.zh).join('、') || ''), textFor(r, s)])].map(row => row.map(quote).join(',')).join('\r\n');
+  const columns = new Map<string, { id: string; title: string; frozen: boolean }>();
+  for (const row of rows) {
+    if (row.catalogueSnapshot) for (const category of row.catalogueSnapshot.categories.filter(category => category.generationKind === 'trait' || row.design?.dynamic?.categories.some(dynamic => dynamic.id === category.id))) columns.set(`${category.id}:${category.nameZh}`, { id: category.id, title: category.nameZh, frozen: true });
+    else for (const trait of TRAITS.filter(trait => row.design?.traits[trait.id])) columns.set(`${trait.id}:${trait.title}`, { id: trait.id, title: trait.title, frozen: false });
+  }
+  const traits = Array.from(columns.values());
+  const valueFor = (row: FusionRow, column: typeof traits[number]) => {
+    const snapshot = row.catalogueSnapshot;
+    if (!snapshot) return row.design?.traits[column.id]?.map(value => value.zh).join('、') || '';
+    if (!snapshot.categories.some(category => category.id === column.id && category.nameZh === column.title)) return '';
+    return (snapshot.selections[column.id] || []).map(id => snapshot.terms.find(term => term.id === id)?.nameZh || '').join('、');
+  };
+  return [['名字', '性格', '母体', '跨界概念', '连接点', '机制', ...addons.map(c => c.title), ...traits.map(t => t.title), '完整提示词'], ...rows.map(r => [r.name, r.category.personality, r.source.name, r.concept.name, r.bridge, r.category.mechanism, ...addons.map(c => r.category[c.id]), ...traits.map(t => valueFor(r, t)), textFor(r, s)])].map(row => row.map(quote).join(',')).join('\r\n');
 }

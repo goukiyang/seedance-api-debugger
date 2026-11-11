@@ -335,3 +335,71 @@
 .catalogueCardGrid .pills button { font-size: 12px; padding: 6px 10px; }
 .catalogueCardGrid .concretePicker select { width: 100%; min-width: 0; }
 @media (max-width: 1100px) and (min-width: 761px) { .catalogueCardGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.documentBar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 20px; padding: 0 0 14px; margin-bottom: 14px; border-bottom: 1px solid var(--border-color); }
+.documentIdentity { display: grid; gap: 4px; min-width: 0; }
+.documentIdentity strong { font-size: 14px; overflow-wrap: anywhere; }
+.documentBar button, .documentBar summary { font-size: 12px; }
+.documentList > summary { padding: 8px 12px; }
+.documentList[open] { flex-basis: 100%; }
+.documentList > div { display: grid; gap: 12px; width: min(100%, 620px); padding: 12px; border-radius: 6px; background: var(--bg-input); }
+.documentList label { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.creationContext { display: flex; justify-content: space-between; align-items: start; flex-wrap: wrap; gap: 12px; margin: 12px 0 20px; }
+.creationContext > details { flex: 1 1 280px; }
+.creationContext summary { width: fit-content; padding: 9px 0; color: var(--text-secondary); font-size: 13px; }
+.contextFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 12px; }
+.contextFields label { display: grid; gap: 8px; font-size: 13px; }
+.creationContext + .chat { margin: 0 0 24px; }
+.librarySearch { display: flex; align-items: center; gap: 12px; margin: 18px 0; }
+.librarySearch > label { display: flex; gap: 8px; align-items: center; flex: 1; }
+.librarySearch input { width: 100%; }
+.libraryEditor { padding: 12px 0 20px; border-bottom: 1px solid var(--border-color); }
+.libraryEditor > summary { width: fit-content; font-weight: 600; padding: 8px 0; }
+.libraryScope { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding-top: 16px; }
+.libraryScope label { display: flex; align-items: center; gap: 8px; }
+.libraryForm { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; max-width: 980px; padding: 18px 0; }
+.libraryForm label { display: grid; gap: 7px; font-size: 13px; }
+.libraryForm .actions { grid-column: 1 / -1; }
+.libraryEditor > details { padding: 12px 0; }
+.libraryEditor > details > summary { width: fit-content; color: var(--text-secondary); }
+.libraryImport textarea { display: block; margin: 12px 0; font-family: ui-monospace, monospace; font-size: 12px; }
+.fileImport { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; }
+.libraryPreview { padding-top: 18px; }
+.libraryLine { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; padding: 8px 0; font-size: 13px; }
+.libraryLine > span:first-child { flex: 1; min-width: 150px; }
+.libraryLine > span:nth-child(2) { color: var(--tone-danger-text); }
+.libraryCategories { display: grid; gap: 8px; padding: 18px 0 0; }
+.libraryCategories > details { padding: 10px 0; border-bottom: 1px solid var(--border-color); }
+.libraryCategories p { max-width: 75ch; font-size: 13px; padding-top: 8px; }
+.libraryCategories .actions { margin-top: 10px; }
+.libraryTerms { display: grid; }
+.libraryTerm { display: flex; align-items: start; justify-content: space-between; flex-wrap: wrap; gap: 12px 24px; padding: 16px 0; border-bottom: 1px solid var(--border-color); }
+.libraryTerm > div:first-child { flex: 1 1 320px; }
+.libraryTerm strong, .libraryTerm small { display: block; }
+.libraryTerm p { max-width: 75ch; padding-top: 7px; font-size: 13px; }
+.libraryTerm details { margin-top: 8px; font-size: 12px; color: var(--text-secondary); }
+.libraryTerm summary { width: fit-content; }
+.libraryTerm .actions { font-size: 12px; }
+.catalogueValues > input { width: 100%; margin-bottom: 10px; }
+@media (max-width: 760px) {
+  .toolbar .tabs { flex-wrap: wrap; }
+  .documentBar > .actions { width: 100%; gap: 2px 6px; }
+  .documentIdentity { width: 100%; }
+  .documentList > div { width: 100%; }
+  .contextFields, .libraryForm { grid-template-columns: minmax(0, 1fr); }
+  .librarySearch { flex-wrap: wrap; }
+  .librarySearch > label, .librarySearch > select { flex-basis: 100%; }
+  .libraryTerm .actions { width: 100%; }
+  .libraryScope label { flex-wrap: wrap; }
+  .resultHeading > button { font-size: 12px; }
+}
+.semanticFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; grid-column: 1 / -1; border: 1px solid var(--border-color); border-radius: 6px; margin: 0; padding: 14px; }
+.semanticFields legend { padding-inline: 6px; color: var(--text-secondary); font-size: 13px; }
+.semanticFields > details { grid-column: 1 / -1; }
+@media (max-width: 760px) { .semanticFields { grid-template-columns: minmax(0, 1fr); } }
+.conflictDetails { margin: 0 0 18px; }
+.conflictDetails > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; padding: 12px 0; }
+.conflictDetails strong { grid-column: 1 / -1; font-size: 12px; }
+.conflictDetails label { color: var(--text-secondary); font-size: 12px; }
+.conflictDetails pre { max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; border-radius: 6px; background: var(--bg-input); }
+@media (max-width: 760px) { .conflictDetails > div { grid-template-columns: minmax(0, 1fr); } }
