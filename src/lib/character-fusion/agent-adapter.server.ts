@@ -184,7 +184,7 @@ export async function proposeFusionAgent(options: {
 }) {
   const scene = fusionAgentScene(options.workspace);
   // A column header preserves every control field without repeating its keys per card.
-  const fields = [...new Set(scene.cardControls.flatMap(card => Object.keys(card)))];
+  const fields = Array.from(new Set(scene.cardControls.flatMap(card => Object.keys(card))));
   const currentScene = { ...scene, cardControls: { fields, records: scene.cardControls.map(card => fields.map(field => (card as Record<string, unknown>)[field] ?? null)) } };
   const messages: MuskChatMessage[] = [
     { role: 'system', content: FUSION_AGENT_SYSTEM + '\n' + FUSION_AGENT_COMMANDS },
