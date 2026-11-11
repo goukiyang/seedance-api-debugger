@@ -19,7 +19,9 @@ export function fusionAgentCataloguePage(page: { catalogue: FusionCatalogue; nex
     : !q || returnedCategories.has(category.id) || [category.nameZh, category.nameEn, category.descriptionZh, category.descriptionEn, ...category.aliases, ...category.tags].some(value => value.toLocaleLowerCase().includes(q))));
   return { version: page.catalogue.version, nextCursor: page.nextCursor, total: page.total,
     categories: categories.map(category => ({ id: category.id, nameZh: category.nameZh, nameEn: category.nameEn, generationKind: category.generationKind, multi: category.multi, randomMax: category.randomMax })),
-    terms: page.catalogue.terms.map(term => ({ id: term.id, categoryId: term.categoryId, nameZh: term.nameZh, nameEn: term.nameEn, descriptionZh: term.descriptionZh, descriptionEn: term.descriptionEn, group: term.data?.group })) };
+    terms: page.catalogue.terms.map(term => ({ id: term.id, categoryId: term.categoryId === query.categoryId ? undefined : term.categoryId,
+      nameZh: term.nameZh, nameEn: term.nameEn, descriptionZh: term.descriptionZh === term.nameZh ? undefined : term.descriptionZh,
+      descriptionEn: term.descriptionEn === term.nameEn ? undefined : term.descriptionEn, group: term.data?.group })) };
 }
 
 export type FusionAgentProposal = { reply: string; reads: FusionAgentRead[]; commands: unknown[]; drafts: unknown[] };

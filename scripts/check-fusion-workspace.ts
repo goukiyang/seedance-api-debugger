@@ -8,7 +8,7 @@ import { defaults, parseSettings, generateBatch, textFor, csvFor, validateGenera
 import { builtinCatalogue, hydrateCatalogueSettings } from '../src/lib/character-fusion/catalogue';
 import type { FusionCatalogue, FusionCategory, FusionTerm } from '../src/lib/character-fusion/catalogue-model';
 import { applyFusionCommands, type FusionCommand, type FusionWorkspace } from '../src/lib/character-fusion/actions';
-import { bindFusionAgentCommands, fusionAgentCataloguePage, fusionAgentScene, parseFusionAgentProposal, proposeFusionAgent } from '../src/lib/character-fusion/agent-adapter.server';
+import { assertFusionAgentContext, FUSION_AGENT_SYSTEM, FUSION_AGENT_COMMANDS, bindFusionAgentCommands, fusionAgentCataloguePage, fusionAgentScene, parseFusionAgentProposal, proposeFusionAgent } from '../src/lib/character-fusion/agent-adapter.server';
 import { settingsChanges, mergeWorkspaceState } from '../src/app/tools/character-fusion/workspace-client';
 import { emptyWorkspaceState } from '../src/lib/character-fusion/actions';
 
@@ -88,6 +88,20 @@ async function main() {
     const browse = fusionAgentCataloguePage({ catalogue: { ...lookupCatalogue, terms: lookupCatalogue.terms.slice(0, 20) }, nextCursor: 'engineering-cursor', total: lookupCatalogue.terms.length }, {});
     assert.equal(browse.categories.length, lookupCatalogue.categories.filter(category => category.enabled).length);
     assert.equal(browse.nextCursor, 'engineering-cursor'); assert.equal(browse.total, lookupCatalogue.terms.length); assert.equal(browse.terms.length, 20);
+    const combinedReads = ['dimension:source', 'dimension:concept'].map(categoryId => {
+      const terms = lookupCatalogue.terms.filter(term => term.categoryId === categoryId), query = { kind: 'catalogue' as const, categoryId, limit: 30 };
+      const page = fusionAgentCataloguePage({ catalogue: { ...lookupCatalogue, terms: terms.slice(0, 30) }, nextCursor: terms.length > 30 ? 'next-page' : null, total: terms.length }, query);
+      assert.deepEqual(page.terms.map(term => term.id), terms.slice(0, 30).map(term => term.id));
+      assert(page.terms.every(term => term.categoryId === undefined && term.descriptionZh === undefined && term.descriptionEn === undefined));
+      assert.equal(page.categories[0].id, categoryId); assert.equal(page.total, terms.length);
+      return { query, page };
+    });
+    assertFusionAgentContext([{ role: 'system', content: FUSION_AGENT_SYSTEM + '\n' + FUSION_AGENT_COMMANDS },
+      { role: 'user', content: JSON.stringify({ currentScene: nativeScene, request: '硬科幻双体搭档，每套两位独立站立的伙伴，4套不同母体与主题，中英双语。' }) },
+      { role: 'user', content: JSON.stringify({ toolResults: combinedReads, remainingSteps: 5 }) }]);
+    const described = { ...lookupCatalogue.terms[0], descriptionZh: '与名称不同的具体造型描述', descriptionEn: 'Distinct concrete visual details beyond the name' };
+    const describedPage = fusionAgentCataloguePage({ catalogue: { ...lookupCatalogue, terms: [described] }, nextCursor: null, total: 1 }, { categoryId: described.categoryId });
+    assert.equal(describedPage.terms[0].descriptionZh, described.descriptionZh); assert.equal(describedPage.terms[0].descriptionEn, described.descriptionEn);
     checks.push('双关键词目录读取不重复全类别、上下文可继续提案，原词条/总数/游标与目录浏览保持');
 
     {
