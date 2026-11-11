@@ -8,7 +8,7 @@ import { assertCharacterFusionWritesEnabled } from '@/lib/character-fusion/build
 import { FusionError, parseOperationId, type FusionCommand } from '@/lib/character-fusion/actions';
 import { readFusionCatalogue } from '@/lib/character-fusion/catalogue-repository';
 import { executeWorkspaceOperation, getWorkspace, reserveAssistantOperation, finishAssistantOperation, cancelAssistantOperation } from '@/lib/character-fusion/workspace.server';
-import { bindFusionAgentCommands, FusionAgentError, proposeFusionAgent, type FusionAgentProposal } from '@/lib/character-fusion/agent-adapter.server';
+import { bindFusionAgentCommands, fusionAgentCataloguePage, FusionAgentError, proposeFusionAgent, type FusionAgentProposal } from '@/lib/character-fusion/agent-adapter.server';
 
 export const dynamic = 'force-dynamic';
 const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
@@ -59,9 +59,7 @@ export async function POST(request: NextRequest) {
           return { results: page.workspace.rows.map(row => ({ id: row.id, name: row.name, version: row.version, category: row.category, traits: row.design?.traits })), ...page.rowsPage };
         }
         const page = await readFusionCatalogue(user, { categoryId: read.categoryId, q: read.q, cursor: read.cursor, limit: read.limit || 20 });
-        return { version: page.catalogue.version, nextCursor: page.nextCursor, total: page.total,
-          categories: page.catalogue.categories.filter(category => category.enabled).map(category => ({ id: category.id, nameZh: category.nameZh, nameEn: category.nameEn, generationKind: category.generationKind, multi: category.multi, randomMax: category.randomMax })),
-          terms: page.catalogue.terms.map(term => ({ id: term.id, categoryId: term.categoryId, nameZh: term.nameZh, nameEn: term.nameEn, descriptionZh: term.descriptionZh, descriptionEn: term.descriptionEn })) };
+        return fusionAgentCataloguePage(page, read);
       },
     });
     proposed = result.proposal;
