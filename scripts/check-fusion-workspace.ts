@@ -72,8 +72,15 @@ async function main() {
     }
     const lookupCatalogue = builtinCatalogue(), projectedCategories: number[] = []; let lookupRounds = 0;
     const lookupResult = await proposeFusionAgent({ workspace: nativeWorkspace, message: '查询巨掌和巨脚',
-      complete: async () => ++lookupRounds === 1 ? JSON.stringify({ reply: '先查两个词', reads: [{ kind: 'catalogue', q: '巨掌' }, { kind: 'catalogue', q: '巨脚' }], commands: [], drafts: [] })
-        : JSON.stringify({ reply: '已读到两项', reads: [], commands: [], drafts: [] }),
+      complete: async messages => {
+        if (++lookupRounds === 1) {
+          const packed = JSON.parse(messages[messages.length - 1].content as string).currentScene.cardControls;
+          const unpacked = packed.records.map((record: unknown[]) => Object.fromEntries(packed.fields.flatMap((field: string, index: number) => record[index] === null ? [] : [[field, record[index]]])));
+          assert.deepEqual(unpacked, JSON.parse(JSON.stringify(nativeScene.cardControls)));
+          return JSON.stringify({ reply: '先查两个词', reads: [{ kind: 'catalogue', q: '巨掌' }, { kind: 'catalogue', q: '巨脚' }], commands: [], drafts: [] });
+        }
+        return JSON.stringify({ reply: '已读到两项', reads: [], commands: [], drafts: [] });
+      },
       read: async read => {
         if (read.kind !== 'catalogue') throw new Error('本场景只查询词库');
         const matchingTerms = lookupCatalogue.terms.filter(term => term.nameZh === read.q);
@@ -88,6 +95,10 @@ async function main() {
     const browse = fusionAgentCataloguePage({ catalogue: { ...lookupCatalogue, terms: lookupCatalogue.terms.slice(0, 20) }, nextCursor: 'engineering-cursor', total: lookupCatalogue.terms.length }, {});
     assert.equal(browse.categories.length, lookupCatalogue.categories.filter(category => category.enabled).length);
     assert.equal(browse.nextCursor, 'engineering-cursor'); assert.equal(browse.total, lookupCatalogue.terms.length); assert.equal(browse.terms.length, 20);
+    const actualSizedCursor = Buffer.from(JSON.stringify({ version: 'v'.repeat(64), offset: 30, signature: 's'.repeat(64) })).toString('base64url');
+    assert(actualSizedCursor.length > 200);
+    assert.equal(parseFusionAgentProposal(JSON.stringify({ reply: '继续下一页', reads: [{ kind: 'catalogue', categoryId: 'dimension:source', cursor: actualSizedCursor, limit: 30 }] })).reads[0].cursor, actualSizedCursor);
+    assert.throws(() => parseFusionAgentProposal(JSON.stringify({ reply: '', reads: [{ kind: 'catalogue', cursor: 'x'.repeat(1025) }] })), /cursor/);
     const combinedReads = ['dimension:source', 'dimension:concept'].map(categoryId => {
       const terms = lookupCatalogue.terms.filter(term => term.categoryId === categoryId), query = { kind: 'catalogue' as const, categoryId, limit: 30 };
       const page = fusionAgentCataloguePage({ catalogue: { ...lookupCatalogue, terms: terms.slice(0, 30) }, nextCursor: terms.length > 30 ? 'next-page' : null, total: terms.length }, query);
@@ -102,6 +113,25 @@ async function main() {
     const described = { ...lookupCatalogue.terms[0], descriptionZh: '与名称不同的具体造型描述', descriptionEn: 'Distinct concrete visual details beyond the name' };
     const describedPage = fusionAgentCataloguePage({ catalogue: { ...lookupCatalogue, terms: [described] }, nextCursor: null, total: 1 }, { categoryId: described.categoryId });
     assert.equal(describedPage.terms[0].descriptionZh, described.descriptionZh); assert.equal(describedPage.terms[0].descriptionEn, described.descriptionEn);
+    let pageRounds = 0;
+    await proposeFusionAgent({ workspace: nativeWorkspace, message: '硬科幻双体搭档，4套不同母体与主题，中英双语。',
+      complete: async messages => {
+        assertFusionAgentContext(messages);
+        if (++pageRounds === 1) return JSON.stringify({ reply: '先查候选', reads: combinedReads.map(item => item.query) });
+        if (pageRounds === 2) return JSON.stringify({ reply: '继续母体第二页', reads: [{ kind: 'catalogue', categoryId: 'dimension:source', cursor: actualSizedCursor, limit: 30 }] });
+        const facts = JSON.parse(messages[messages.length - 1].content as string).toolResults;
+        assert.equal(facts.length, 3);
+        assert.equal(facts.filter((item: { query: { categoryId: string } }) => item.query.categoryId === 'dimension:source').flatMap((item: { page: { terms: unknown[] } }) => item.page.terms).length, lookupCatalogue.terms.filter(term => term.categoryId === 'dimension:source').length);
+        return JSON.stringify({ reply: '所有已读取候选均保留', commands: [] });
+      },
+      read: async query => {
+        assert.equal(query.kind, 'catalogue');
+        if (query.kind !== 'catalogue') throw new Error('本场景只查询词库');
+        const terms = lookupCatalogue.terms.filter(term => term.categoryId === query.categoryId), offset = query.cursor ? 30 : 0;
+        return fusionAgentCataloguePage({ catalogue: { ...lookupCatalogue, terms: terms.slice(offset, offset + 30) }, nextCursor: !offset && terms.length > 30 ? actualSizedCursor : null, total: terms.length }, query);
+      },
+    });
+    assert.equal(pageRounds, 3);
     checks.push('双关键词目录读取不重复全类别、上下文可继续提案，原词条/总数/游标与目录浏览保持');
 
     {
