@@ -158,3 +158,12 @@ TPL-CURRENT01的实际独立checkout初始化CodeGraph约50分钟仍未完成，
 
 R02扩查补证：准备入口虽返回READY，独立checkout的git-common-dir不符合适配器限定，实际SQLite缺少current-inputs/tasks/batches/shared-contract四个后端文件。studio.tsx和PrivateDefinitionEditor.tsx已有记录且与当时源SHA一致，前端结构查询可用；不能据此声称后端索引恢复。缺口按定向源码接续，未扩改全局工具。
 <!-- /TPL-CURRENT01-TOOL-20261109 -->
+
+<!-- FUSION-UX15-BUILD-EXIT-DISCOVERY-20261111 -->
+## D-20261111-BUILD-INTERRUPT-ZERO 构建控制器中止后退出码可误写0（已确认工具缺陷）
+
+UX15 为避开另一项活动构建而停止自身候选控制器后，`main-complete-types.log` 明确记录 `Session terminated, killing shell...`，但 `build-exit.txt` 为0。继承 `build-controller.sh` 仅在 EXIT trap 读取当前 `$?`，没有把 TERM 中止固定为非成功，因而该文件不能单独证明完整检查完成。原证在[本轮中止材料](../docs/materials/2026-11-08-character-fusion-prototype/implementation/ux15/interrupted-01/)。
+
+本次完整类型没有报通过；尚无本次 main/guard build-success 与 source-pair 完整证明，后续发布仍被实际完整证明约束，未因退出码0切换线上。已完成的源码校验/私有Prisma准备可以按字节复用，被中止的类型检查须接续。发布引擎与另一任务均未修改；后续专项维护控制器时修正信号/退出记录，不能删除必要成品证明条件。本轮主任务继续，不扩大为发布工具重构。
+本轮发布影响已关闭：最终 b2 正式版与 b034 兼容回退版均有同源完整类型/Next 成品、源对和启动检查，v0.145.0 已部署并通过服务/公网检查。未用中止退出码0作成功证明；工具自身信号记录问题仍待专项维护，未冒称已修复。
+<!-- /FUSION-UX15-BUILD-EXIT-DISCOVERY-20261111 -->
