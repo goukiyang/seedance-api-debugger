@@ -1,0 +1,73 @@
+{
+  "version": "0.145.2",
+  "source": "adbc4587b002c7b32379f419729f2dbdfe56dd36",
+  "build": "U1Vfw8JndDHcOREZCUOex",
+  "deployedAt": "2026-11-11T14:36:37.366785+00:00",
+  "deployedAtUserTime": "2026-11-11T09:36:37.366785-05:00",
+  "userTimezone": "America/New_York",
+  "healthVerifiedAt": "2026-11-11T14:37:28.258519+00:00",
+  "stage": "/data/video-api-debugger/release-staging/character-thumbnail-upload-20261111/attempt01",
+  "pair": "684d8c5e-6b1c-4ac8-bff5-23ff98b95613",
+  "baseline": {
+    "source": "90fb0a812790ab3bceb358f5c7cfee91b844e6c4",
+    "version": "0.145.1",
+    "build": "l5xDbf3NvkT0mSk4Qt6uE"
+  },
+  "guard": {
+    "readerContract": "works-method-reader.1",
+    "cutoutReaderContract": "cutout-owner-reader.1",
+    "bodyPairReaderContract": "character-body-pair-reader.1",
+    "recipeReaderContract": "character-lab-recipe-reader.1",
+    "contextReaderContract": "character-independent-context.1",
+    "gridReaderContract": "character-explicit-grid.1",
+    "source": "bbbcc1f9b6a311de9ea1fa83d5d8c50525615d68",
+    "version": "0.145.1+points-pricing-guard.1",
+    "build": "wFBPdtkUEn_EQ74oygoGx"
+  },
+  "guardBase": {
+    "source": "90fb0a812790ab3bceb358f5c7cfee91b844e6c4",
+    "version": "0.145.1",
+    "build": "l5xDbf3NvkT0mSk4Qt6uE"
+  },
+  "guardEvidenceStage": "/data/video-api-debugger/release-staging/fusion-llm-live-ux16-20261111/attempt01",
+  "guardBuildReused": true,
+  "mainFullBuildPassed": true,
+  "buildExit": 0,
+  "cutoverExit": 0,
+  "engineeringChecks": 12,
+  "engineeringSourceHashes": 10,
+  "runtimeChanges": [
+    "package-lock.json",
+    "package.json",
+    "scripts/character-thumbnail-upload-engineering.mjs",
+    "src/app/api/character-assets/thumbnail/route.ts",
+    "src/components/CharacterAssetPanel.tsx",
+    "src/components/character-assets.css",
+    "src/lib/character-assets/service.ts",
+    "src/lib/release.ts"
+  ],
+  "nativeEvidence": {
+    "nativeCount": 17,
+    "reusedNativeCount": 17,
+    "freshNativeCount": 0,
+    "linkedCount": 17,
+    "reusedLinkedCount": 16,
+    "freshLinkedCount": 1
+  },
+  "publicAssets": 54,
+  "anonymous401": 8,
+  "newAnonymousPost401": true,
+  "services": 7,
+  "timers": 4,
+  "privatePolicyUnchanged": true,
+  "pricesUnchanged": true,
+  "schemaChanges": false,
+  "businessDataRestored": false,
+  "videoDeliveryTimeout": "2h",
+  "realUploads": 0,
+  "paidRequests": 0,
+  "browserRuns": 0,
+  "functionalAcceptance": false,
+  "publicProofSha256": "8caf2a6420716d6735dc18c7ea9cfbeee0ce13b3abad4e9c5ba8d2cb771c9b6b",
+  "sourcePairContractSha256": "233d97686d5c86bf08f6b1fd47f405e1fe413379fd381b862ed2a87061be4c85"
+}

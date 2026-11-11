@@ -325,4 +325,19 @@
 - 新工作区CodeGraph已同步2085文件，实际结构查询找到新登记函数；实施检查完成不冒已上线。等待UX16实际健康后继与当前发布窗口释放，再在该有效新基线上完成主候选完整构建、版本/健康与保护发布。功能仍由用户手验。
 
 本地已合入对方已推送的UX16候选`90fb0a812790ab3bceb358f5c7cfee91b844e6c4`（1451），本轮准备1452；该合并没有修改本轮10个工程源哈希，原12项证据继续有效，不重跑。正式窗口及实际上线元证仍待对方交回，未启动本轮服务器候选或切版。
+
+### 14.4 实际发布闭环
+
+**v0.145.2 已于2026-11-11 09:36:37（纽约时间，UTC-5）部署，待用户手动验收。** 原证时间14:36:37Z，后验health于14:37:28Z通过。主源`adbc4587b002c7b32379f419729f2dbdfe56dd36`／BUILD`U1Vfw8JndDHcOREZCUOex`，分支`codex/character-thumbnail-upload-20261111`已推并核远端；继承UX16实际健康90fb／1451／l5xDbf3NvkT0mSk4Qt6uE。先获构建窗口，再等待原owner真实调用结束并释放切换窗口后才切版；后继融合任务已收到本轮健康源与恢复合同，并明确将继承本轮健康源。
+
+- 修改四个产品文件（Panel、CSS、character-assets service、新thumbnail API）和一个工程脚本，另三版本文件；精确导出2520文件，净8个运行差量。Composer、共享上传器/referenceImport、schema、生成输入/编号、模型通路均无差量。
+- 完整Linux类型、改动lint、12项本源隔离工程与Next内置全量types/lint通过。17原生记录按未变输入复用；17关联记录16复用、1项projects工程刷新；fresh计价通过。主构建及cutover均0，完整成品/原始子进程结果共同绑定，未只凭wrapper 0冒成功。
+- 6真实启动检查、7服务、4timer、54公网资源、8匿名401通过，含新接口匿名POST→401；最终内外网health=true、releaseControllers=0。私密36目标策略/价格全字段/持久链接及2h看护保持。Works/CharacterAsset/5个Fusion表只读核既有原迁移，无DDL、数据恢复或未知任务重发。
+- 恢复继续复用原`bbbcc1f9b6a311de9ea1fa83d5d8c50525615d68`／1451+points-pricing-guard.1／`wFBPdtkUEn_EQ74oygoGx`的实际九门和已编译成品；guardBase仍90fb，不把本轮新主源当成原九门变换基源。只回程序/配置，保所有新数据；不要求故障main目录可读，未演练生产回退。
+
+服务器原证阶段`/data/video-api-debugger/release-staging/character-thumbnail-upload-20261111/attempt01`，pair`684d8c5e-6b1c-4ac8-bff5-23ff98b95613`；正式根私有`release/thumbnail-upload01/completed/`保存选定原证，未下载环境、DB、凭据或真实媒体。详[上传发布摘要](../../docs/materials/2026-11-11-seedance-private-character-assets/thumbnail-upload-release-summary.json)。新树CodeGraph已对应adbc/2085文件同步，源指纹`09bd2131d6224fbba65d1512de39ce4983374c7c7bb8b6c58e2e84b14a1ac4ee`；记录收口不重复索引/构建。
+
+新增请求结构（隔离工程验证，非真实上传）：通用上传返回本人站内素材编号后，`POST /api/character-assets/thumbnail`发送`{"assetId":"<上传返回的素材编号>"}`，返回同一`assetId`、`referenceImageId`及`/api/reference-images/<id>/content?variant=thumbnail`。角色显式保存才将该ID传入`thumbnailReferenceImageId`。这里的上传素材编号不同于角色的火山Asset ID，不用文本冒素材引用，也不附加生成工作区图片。
+
+实际新增/编辑上传、更换预览、取消/重开草稿、失败/未知恢复、保存后下拉选图及手机操作待用户手验。本轮未真实上传用户文件、未收费生成、未浏览器或截图功能验收；工程/健康与功能效果分开。未新增范围外问题。
 <!-- /ARK-CHARACTER-ASSET01-THUMB-UPLOAD14-20261111 -->
