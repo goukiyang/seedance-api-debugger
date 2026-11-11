@@ -1347,3 +1347,6 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 <!-- FUSION-UX17-PERSISTENT-DOCUMENTS-TODO-20261111 -->
 - [x] 角色融合UX17：常驻输入、新建/继续、跨文档草稿与结果隔离及刷新已按用户本轮要求真实测通；原话“大只佬，马里奥身型”由gpt-6.1-sol自动落实六项身型卡片，8条中英结果逐条验证，继续只改第2条且其余7条/身体/全局设置保持。已部署v0.145.5 / d339d3d3，15组工程及构建/健康通过；仅本轮指定流程实测通过，其它模型/实机与原历史清单仍按手验边界。见[原单UX17](todo/2026-11-08-character-fusion.md#fusion-ux17-persistent-documents)与[实测8方案](https://sd2.youdooart.com/tools/character-fusion?doc=cmwcdio7w005kba2ooordwlpb)。
 <!-- /FUSION-UX17-PERSISTENT-DOCUMENTS-TODO-20261111 -->
+<!-- FUSION-UX18-SCENARIOS-TODO-20261111 -->
+- [x] 角色融合UX18：8类原句场景/32条初始方案及5种续聊实测通过；实际发现问题已局部修复，v0.145.9已部署，卡片/分组及刷新保持，多选进入实际中英提示词。其它模型/实机触控仍未验。见[原单与逐组方案](todo/2026-11-08-character-fusion.md#fusion-ux18-eight-scenarios)。
+<!-- /FUSION-UX18-SCENARIOS-TODO-20261111 -->

@@ -579,3 +579,20 @@ attempt01缺baseline.build，创建候选/Next/切服务前退出；失败原证
 
 [原单UX17真实验收](../tasks/todo/2026-11-08-character-fusion.md#fusion-ux17-persistent-documents)另证本轮指定模型/文档功能通过，部署元证的functionalAcceptance=false原义不改。[1454元证](materials/2026-11-08-character-fusion-prototype/implementation/ux17/evidence/)、[1455元证](materials/2026-11-08-character-fusion-prototype/implementation/ux17/followup01/evidence/)只复制批准的JSON，不复制DB、env或配置备份。
 <!-- /FUSION-UX17-DEPLOY-20261111 -->
+<!-- FUSION-UX18-DEPLOY-20261111 -->
+## 角色融合八场景修复 v0.145.6 / v0.145.7 / v0.145.8（2026-11-11）
+
+- v1456：d64f7f2de4bbeae70d0f3c3d38a8ff4c3938a844 / BUILD BSjw9AlpRT5bMEsyDb56O，18:23:43Z部署，18:25:34Z健康；stage `fusion-eight-scenarios-ux18-20261111/attempt01`。源类型/lint/17组融合检查通过，准备包装断言误保15后先终止，停止期间修为17，保原失败与已过证据，通过独立resume控制器接续native/Next与发布。
+- v1457：73365e729ef4aef53e1a51edbad0e4faa83e6e1e / BUILD EfBgBXDrhibtZUSVDYvlb，18:59:16Z部署，18:59:24Z健康；stage `fusion-context-ux18-20261111/attempt01`，build/release两控制器exit0。完整类型、改动lint、17组融合、17native/17linked及完整Next通过；54公网资源/8匿名401/7服务/4timer，私有策略/费率相等。S08 UI仍超上下文，不能认功能全部通过。
+- v1458候选：2a4d309df在`fusion-pagination-ux18-20261111/attempt01`完整类型发现ES5编译目标不支持Set展开，exit2/包装exit1，未切版；改为等价Array.from后的10435ba8ff03d900b5ce0bc28986ede33efda61a已聚焦提交推送，在`attempt02`独立构建。此时尚未部署/未验，不改旧失败出口或复用失败为成功。
+
+完整stage前缀均`/data/video-api-debugger/release-staging/`。三版只改原助手/动作与工程检查及版本，不改依赖、schema或执行DDL，不回写旧结果或生产数据恢复。兼容guard仍bbbcc1f9b6a311de9ea1fa83d5d8c50525615d68 / wFBPdtkUEn_EQ74oygoGx，精确9门基源90fb/v1451保留；各版program-recovery入口实际切到该关闭新写的guard，保当前数据，不冒称直接切回前一完整功能版。运行恢复须核实际控制器/部署归属，保护后继发布。当前功能证据沿[UX18原单](../tasks/todo/2026-11-08-character-fusion.md#fusion-ux18-eight-scenarios)，发布元证functionalAcceptance=false不改其原义。
+
+1458最终发布：`10435ba8ff03d900b5ce0bc28986ede33efda61a` / BUILD `SIGDvh8jibctVS8D4ja3Y`，2026-11-11T19:20:48.451993Z部署、19:20:49.231779Z健康；stage `/data/video-api-debugger/release-staging/fusion-pagination-ux18-20261111/attempt02`，`sd2-fusion-pagination-ux18-build-20261111-r02.service`及`sd2-fusion-pagination-ux18-release-20261111-r02.service`均exit0/已结束。完整类型0、改动lint0、17组融合0、17native/17linked按依赖字节复用及新鲜费率检查通过、完整Next0；54公网资源/8匿名401/7服务/4timer通过，privatePolicyUnchanged和pricesUnchanged均true。实际程序恢复入口为上述stage的`bash program-recovery.sh release-input.json`，目标仍9门guard，不回数据；健康1457产物另存。元证见[最终1458批准JSON](materials/2026-11-08-character-fusion-prototype/implementation/ux18/followup03/evidence/)。页面指定流程测试正在进行，另由原单验收证据结论，不改发布元证语义。
+
+1459最终发布：`9eecde071f5a6641b35aa3d773749f47b9baeb70` / BUILD `fC_J9bL0UMQn3C-6rqNCm`，2026-11-11T20:12:06.102717Z部署，20:13:37.464918Z健康；stage `/data/video-api-debugger/release-staging/fusion-continuation-ux18-20261111/attempt03`。构建`sd2-fusion-continuation-ux18-build-20261111-r03.service`、发布`sd2-fusion-continuation-ux18-release-20261111-r03.service`均exit0/已结束，完整Linux类型/改动lint/17组融合/完整Next通过，17native及17linked按真实依赖复用；54资源、8匿名401、7服务/4timer、原私有策略/费率相等。仅7文件改动，不改依赖/schema，不执行DDL或历史回填。attempt01仅c773准备未构建，attempt02/a82在类型检查终止；attempt03只修源码类型，发布逻辑无改动，不重命名旧失败证据为成功。本机依赖缺失不冒全类型通过。
+
+当前程序恢复入口为上述1459 stage的`program-recovery.sh release-input.json`，实际目标仍既定兼容guard bbbcc1f9/wFBPdtkUEn_EQ74oygoGx，保当前数据，不是切回1458；健康1458产物单独保留。实际执行前核当前部署及控制器归属，不能覆盖后来的发布。[1459批准元证](materials/2026-11-08-character-fusion-prototype/implementation/ux18/followup06/evidence/)，功能复测另由UX18原单收口证据确认。
+
+UX18最终指定功能验收另证通过：8原句/32条、5续聊及视图/刷新；scope、失败修复和未验边界见原单最终收口及私有final-closure-assertions。此结论不改各次发布元证的functionalAcceptance=false。
+<!-- /FUSION-UX18-DEPLOY-20261111 -->

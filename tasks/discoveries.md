@@ -179,3 +179,14 @@ UX15 为避开另一项活动构建而停止自身候选控制器后，`main-com
 UX17收口：v0.145.5按本轮用户授权完成实际新建A/B/C、A/B及C/B互切、独立草稿、讨论不抽卡、原话8条双语、继续只改单条、刷新和保存中停止。当前指定流程通过；不把这次结果倒推成旧URL切换的已知根因，不清理来源未定文档。详见原单UX17；本轮未新增范围外问题。
 
 <!-- /FUSION-UX16-DOCUMENT-SWITCH-20261111 -->
+<!-- FUSION-UX18-DISCOVERIES-20261111 -->
+## D-20261111-FUSION-LOCAL-LINT 本机依赖缺口（已确认，待维护）
+
+本次角色融合聚焦lint在本机工作区因缺原依赖debug无法启动；候选Linux相同源码的改动lint及完整Next成功，因此不是生产故障证明。本轮未安装或升级无关依赖，不扩大成仓库依赖清理；后续本机维护按原lock/现有安装核对。工程证据沿[UX18原单](todo/2026-11-08-character-fusion.md#fusion-ux18-eight-scenarios)和正式根私有`docs/materials/2026-11-08-character-fusion-prototype/implementation/ux18/followup01/evidence/main-focused-engineering.json`。
+
+浏览器工具自有覆盖层挡鼠标、5分钟空闲关闭及一次测试脚本把键盘成功code=Enter误当报错均已区分工具/脚本与站点行为；原生同控件键盘继续、明确停止本人窗口，不更改共享工具或关闭用户Chrome。站点实际缺陷留原单修复/复测，不将这些路线观察记为额外站点Bug；未做全项目排查。
+
+后续补证：本机完整tsc还缺dotenv/recharts/radix/dnd-kit等已有依赖，并带出相关页面隐式any，完整本机类型检查未通过；本次改动模块无类型报错。保留正式根ux18/local-engineering/local-complete-types-environment.log，不为通过检查安装/升级共享依赖或改动无关页面；最终必须由同源Linux正式候选完成完整类型检查。
+
+最终补证：9eec/v0.145.9同源Linux完整类型exit0、改动lint与17组融合/完整Next通过；本机依赖缺失仍待独立维护，本轮不冒已修本机环境，也未新增范围外线上故障结论。
+<!-- /FUSION-UX18-DISCOVERIES-20261111 -->
