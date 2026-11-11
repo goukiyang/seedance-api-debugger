@@ -1354,3 +1354,7 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 <!-- FUSION-UX19-EXPERIENCE-TODO-20261111 -->
 - [x] 角色融合UX19使用体验复盘已记录：重复母体/同名方案、新建继承不透明、等待/完成反馈、上下文与聊天撤销边界；仅评估，优化未实施，保留现有卡片与已确认合同。见[原单体验复盘](todo/2026-11-08-character-fusion.md#fusion-ux19-experience-review)。
 <!-- /FUSION-UX19-EXPERIENCE-TODO-20261111 -->
+
+<!-- FUSION-UX20-REDESIGN-PLAN-TODO-20261111 -->
+- [x] 角色融合UX20架构/用户体验联合重规划已完成：原卡片＋常驻对话＋批次结果，三文档入口、持续/本批/单条范围、服务端差异分配、稳定身份、真实反馈、同源撤销、长聊及扩库接续已闭环设计；旧卡/冻结配置/相容writer风险与三批实施、A01–A13见[原单UX20](todo/2026-11-08-character-fusion.md#fusion-ux20-redesign-plan)。本轮仅规划记录，应用未改，实施/发布/新体验验收均未开始。
+<!-- /FUSION-UX20-REDESIGN-PLAN-TODO-20261111 -->
