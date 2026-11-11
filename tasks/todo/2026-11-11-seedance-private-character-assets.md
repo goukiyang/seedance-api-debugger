@@ -220,7 +220,7 @@
 <!-- ARK-CHARACTER-ASSET01-THUMBNAIL12-20261111 -->
 ## 12. 下拉按角色缩略图直接选用（2026-11-11）
 
-用户追加明确要求：以后在下拉中按角色缩略图直接选择。本轮只修「角色资产」面板与其缩略图选项映射，业务基线为已部署 v0.144.0 的后继记录提交 `cf1a3bd8a`。主控接续发布 v0.144.1；不改 API、schema、CAS、计费、生成输入或发布脚本，不新增收费调用、AK/SK 或供应商素材查询。
+用户追加明确要求：以后在下拉中按角色缩略图直接选择。该三文件实现与下拉箭头已保存在不可变提交 `c6c1f41fa7b7005015596304bbfb7b6aa87542d7`，尚未部署。随后用户明确要求先修复提示词组上线，本节改动已从当前急修树撤出：面板/CSS恢复已上线 `428c4257` 完整内容，Composer仅撤回缩略图 URL 映射，保留 §13 提示词组修复。v0.144.1用于提示词组急修；本节待其上线后接续，后续版本由主控安排。以下保留已完成实现与检查的历史记录，不代表线上已有该交互。未改 API、schema、CAS、计费、生成输入或发布脚本，未新增收费调用、AK/SK 或供应商素材查询。
 
 ### 12.1 本次实现与来源
 
@@ -239,3 +239,35 @@
 
 当前仍未取得火山资产本身的原图；推理 Key 不支持管理 GetAsset 查询，不新增 AK、不抓供应商图，也不把已生成视频帧冒作资产原图。无缩略图的记录可用有权的站内图片设置识别封面，不影响已有私域引用生成。本轮未新增任务外发现。
 <!-- /ARK-CHARACTER-ASSET01-THUMBNAIL12-20261111 -->
+
+
+<!-- ARK-CHARACTER-ASSET01-PROMPTGROUP13-20261111 -->
+## 13. 提示词组固定可用与 2.5 / IP 创建链修复（2026-11-11）
+
+用户指出“2.5模型选项没有提示词组功能，不应该根据模型区分，这个功能固定”，并明确优先将此项修复上线，缩略图交互稍后继续。范围是视频生成页的普通与 IP 线路及其型号切换；账号/组权限保持，模板、画布、3D多视图等其它工具不扩入口。前期提示词组合同见[原提示词组工单 §13.11–13.12](2026-10-12-style-skills-unified-selector.md#1311-pg-ui0304-与-pg-ip01-实施增量2026-10-30)，其中旧 IP 排除由本次明确要求替代，历史记录不改写。
+
+### 13.1 源证、共享影响与修法
+
+实际 gate 是 Composer 的 `videoSurface !== 'ip'`、切线路/草稿恢复主动清空组、客户端只向普通线路传组，以及 IP create 对非空组直接 426；共享 v2 合同也只接受 ordinary。改为沿现有视频生成页能力与账号权限显示固定入口，普通/IP均传不可变组 ID/版本及合同1；切型号/线路保留本人当前选择，不使用旧 unapplied 值覆盖新编辑或显式空选择。仅原仍待接续、可核对同账号/页签/nonce/修订的旧 IP handoff 可恢复旧隐藏选择，不批量回填已应用草稿。
+
+服务器复用 `resolveVideoPromptGroups`、原私有组权限与编译次序，个人输入最后；组本身不向前端下发正文，也不把组内文字当素材下载。ordinary/IP按线路合同接受，未按模型硬编码分叉；普通2.0/2.5/H3及官方IP目录均沿原模型可用性/费率检查。只选组而个人描述为空可正常准备，组合总长度仍沿原上限。原有角色有序引用与站内图片准备保留，`asset://`仅作 typed 上游引用。
+
+共享影响集中在 creation intents：准备及受理事务鲜核组权限并绑定服务器派生 `video_prompt_group_fingerprint`，组顺序、版本或个人描述变化均使 spec/hash/报价业务哈希变化；客户端不能伪造该字段。旧 ordinary prepared spec没有新派生字段时保原 hash 格式并重新核权，已受理/关闭原回执仍先返回，不改旧任务、不重发。IP创建复用原冻结扣费事务与 request fingerprint，task/snapshot按已有私有配方机制加密冻结，provider ledger仅留组引用与普通参数。无新表/迁移、无 Key 或现价修改，无额外费用协议。
+
+### 13.2 私密发送、读取与恢复
+
+官方 IP发送复用 `privatePromptFetch` / `assertPrivateSend`，精确 identity 为 provider `volcengine_ark`、实际配置 endpoint `https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks`、同一现有 Key 版本与实际 payload model。目录为 `doubao-seedance-2-0-260128`、`doubao-seedance-2-0-fast-260128`、`doubao-seedance-2-0-mini-260615`、`doubao-seedance-2-5-260628`；代码不为这些模型添加硬编码放行，不跟随重定向。生产当时该 Ark 目标尚无许可，由主控沿既有 policy/attestation 机制准备精确目标；正式许可未生效时新私有发送会拒绝，既有普通 Seedance 许可不变。
+
+发送前先核目标，再在实际传输前鲜核；未尝试外发的私密拒绝（`deliveryAttempted=false`）保持明确 503，可沿原失败结算释放本次冻结，不误报提交未知。实际已外发/重定向或网络未知继续原号查询、保冻结、不重发不自动退款。供应商创建回显与错误正文不落普通回执；IP status/list/request-status及共享 DTO 使用已有正向投影。本人可读冻结角色引用和有序图片，合法同事不能借含组任务拿到角色 URI或组正文。工程检查曾发现 IP request-status 选择 raw error_message且未选私有标记，现已补标记投影并保原未知状态码/只查原请求约束。
+
+主控独占维护相容 guard：保原开关并增加 `VIDEO_PROMPT_GROUP_WRITES_ENABLED=false`，共8个可选写关闭；新 guard保留本次 reader、历史任务/状态/结算，新增组执行及组维护写入关闭，不依赖无关风格组写开关，也不回数据。正式 reader 检查使用新脚本 `node scripts/video-prompt-groups-ip-engineering.mjs --reader-only`，须在真实关写源码执行，不能以模拟值冒 guard证明。
+
+### 13.3 工程检查与交付边界
+
+- 新 `scripts/video-prompt-groups-ip-engineering.mjs` 18项定向模拟通过：实际组服务/权限/不可变版本、普通/IP合同、服务器编译、真实准备与事务受理哈希、私密目标校验与模拟传输、加密 task/snapshot、IP status/list/reuse/状态路由及账单正向投影；含组+角色 `site/asset/site` 顺序及本人/非本人权限组合。全部使用隔离内存数据、临时合成密钥/许可及模拟 transport，无生产写/真实网络/模型调用。
+- 同脚本 `--reader-only --simulate-reader` 5项通过，明确是 fixture模拟，实际源码写开关仍为 true，不能算真实 guard检查；由主控对最终真实 guard运行无模拟参数的 reader命令。原用户功能手验边界不变。
+- 客户端16项定向断言与 `node --import tsx scripts/video-mode-switch-engineering.ts` 7项通过；旧通用组脚本只更正“IP不支持”的过期断言，没有重跑无关41组。
+- 使用与当前 schema匹配、隔离生成的 Prisma client作改动根定向 TypeScript检查通过；包含后补 request-status投影的最后一次定向检查仍运行，结果由主控候选前接收，不冒已通过。未 install、未重写共享 generated client或数据库。服务端改动语法解析通过。客户端/服务端窄 ESLint均因本机外置盘长时间 I/O无输出而终止，未记 PASS，最终候选 Next内置 lint/编译由主控接续。源码及 DOM语义自行 Review，未自动浏览器、截图、收费生成或另开审查线程。
+
+当前为源码实施与工程验证，尚待主控候选完整构建、真实8开关 reader检查、精确私密发送许可及保护部署；上线后普通/IP型号切换、组选择保留、组-only输入与成片效果仍待用户手验。缩略图 §12明确延期，不混入本次急修。未新增任务外问题。
+<!-- /ARK-CHARACTER-ASSET01-PROMPTGROUP13-20261111 -->

@@ -33,8 +33,8 @@ check(() => {
   const ip = modeSwitchInput(source, choice, true);
   assert.equal(ip.fields.model, choice.model); assert.notEqual(ip.fields.model, choice.id);
   assert.deepEqual(ip.workspace, source.workspace); assert.equal(ip.fields.prompt, source.fields.prompt);
-  assert.deepEqual(ip.fields.videoPromptGroups, []); assert.equal(ip.fields.draftMode, false); assert.equal(ip.fields.auxiliary, null);
-  assert.equal(ip.fields.unapplied?.feishu, true); assert.deepEqual(ip.fields.unapplied?.videoPromptGroups, refs);
+  assert.deepEqual(ip.fields.videoPromptGroups, refs); assert.equal(ip.fields.draftMode, false); assert.equal(ip.fields.auxiliary, null);
+  assert.equal(ip.fields.unapplied?.feishu, true); assert.equal(ip.fields.unapplied?.videoPromptGroups, undefined);
   const back = modeSwitchInput({ ...ip, fields: { ...ip.fields, prompt: 'edited in IP', seed: 42 } }, { ...choice, surface: 'normal', model: 'h3' });
   assert.equal(back.fields.prompt, 'edited in IP'); assert.equal(back.fields.seed, 42); assert.deepEqual(back.fields.videoPromptGroups, refs);
   assert.equal(back.fields.draftMode, true); assert.equal(back.fields.auxiliary, 'lora'); assert.equal(back.fields.provider, 'h3');

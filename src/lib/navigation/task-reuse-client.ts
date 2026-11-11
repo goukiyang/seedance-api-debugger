@@ -142,10 +142,10 @@ export function parseModeInputDraft(raw: string | null, owner: string, tab: stri
 }
 export function modeSwitchInput(source: TaskReuseInputBackup, target: VideoModelChoice, feishu = false): TaskReuseInputBackup {
   const fields = source.fields;
-  const unapplied = target.surface === 'ip' ? { videoPromptGroups: fields.videoPromptGroups, draftMode: fields.draftMode,
+  const unapplied = target.surface === 'ip' ? { draftMode: fields.draftMode,
     auxiliary: fields.auxiliary, feishu: feishu || fields.unapplied?.feishu, h3: fields.provider === 'h3' } : undefined;
   return { ...source, fields: { ...fields, model: target.model, provider: target.model === 'h3' ? 'h3' : 'seedance',
-    videoPromptGroups: target.surface === 'ip' ? [] : fields.unapplied?.videoPromptGroups || fields.videoPromptGroups,
+    videoPromptGroups: fields.videoPromptGroups,
     draftMode: target.surface === 'ip' ? false : fields.unapplied?.draftMode ?? fields.draftMode,
     auxiliary: target.surface === 'ip' ? null : fields.unapplied?.auxiliary ?? fields.auxiliary,
     unapplied } };
@@ -193,6 +193,15 @@ export function readVideoModeSwitch(storage: VideoInputStorage, owner: string, t
       const applied = parseModeInputDraft(storage.getItem(videoInputDraftKey(context)), owner, tab);
       if (!applied?.workspace || JSON.stringify(applied.fields) !== JSON.stringify(value.targetInput.fields)
         || JSON.stringify(applied.workspace.items) !== JSON.stringify(value.targetInput.workspace.items)) return null;
+    }
+    // Migrate only the original, still-pending handoff whose source proves the hidden selection.
+    // Applied drafts and later edits keep their current refs, including an explicitly empty list.
+    const targetFields = value.targetInput.fields;
+    if (pending && value.targetSurface === 'ip' && !targetFields.videoPromptGroups?.length
+      && targetFields.unapplied?.videoPromptGroups?.length
+      && JSON.stringify(targetFields.unapplied.videoPromptGroups) === JSON.stringify(value.sourceInput.fields.videoPromptGroups)) {
+      const { videoPromptGroups, ...unapplied } = targetFields.unapplied;
+      value.targetInput = { ...value.targetInput, fields: { ...targetFields, videoPromptGroups, unapplied } };
     }
     return value;
   } catch { return null; }

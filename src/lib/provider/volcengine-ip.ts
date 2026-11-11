@@ -1,3 +1,4 @@
+import type { PrivateOrigin } from '@/lib/security/private-prompts.server';
 import { normalizeArkAssetId } from '@/lib/character-assets/inputs';
 import type {
   CreateVideoInput,
@@ -67,6 +68,7 @@ type PrivateConfig = {
 };
 
 export type VolcengineIpRequestOptions = {
+  privateOrigins?: PrivateOrigin[];
   fetchImpl?: typeof fetch;
   apiKey?: string;
   model?: string;
@@ -524,7 +526,7 @@ async function requestVolcengineIpJson(
 
   let response: Response;
   try {
-    response = await fetchImpl(url, {
+    const initWithHeaders: RequestInit = {
       ...init,
       signal: options?.signal,
       headers: {
@@ -533,8 +535,16 @@ async function requestVolcengineIpJson(
         Authorization: `Bearer ${config.apiKey}`,
         ...(init.headers || {}),
       },
-    });
+    };
+    if (options?.privateOrigins?.length) {
+      const { privatePromptFetch } = await import('@/lib/security/private-prompt-send.server');
+      response = await privatePromptFetch({ endpoint: url, provider: VOLCENGINE_IP_VIDEO_PROVIDER, credential: config.apiKey, model: options.model || config.model }, options.privateOrigins, initWithHeaders, fetchImpl);
+    } else response = await fetchImpl(url, initWithHeaders);
   } catch (error) {
+    if (options?.privateOrigins?.length) {
+      const { isPrivatePromptError } = await import('@/lib/security/private-prompts.server');
+      if (isPrivatePromptError(error)) throw error;
+    }
     const message = error instanceof Error ? error.message : 'network error';
     throw new VolcengineIpRequestError({
       normalized: normalizeVolcengineIpError({
@@ -683,6 +693,13 @@ function parseTaskListResponse(raw: unknown): VolcengineIpTaskListResult {
   };
 }
 
+export async function assertPrivateVolcengineIpDestination(model: string, origins: PrivateOrigin[], options?: VolcengineIpRequestOptions) {
+  if (!origins.length) return;
+  const config = await resolvePrivateConfig(options, true);
+  const { assertPrivateSend } = await import('@/lib/security/private-prompt-send.server');
+  assertPrivateSend({ endpoint: buildTaskUrl(config.baseUrl), provider: VOLCENGINE_IP_VIDEO_PROVIDER, credential: config.apiKey, model }, origins);
+}
+
 export async function createVolcengineIpVideoTask(
   input: CreateVideoInput & { generation_mode: GenerationMode; model?: string; service_tier?: string },
   options?: VolcengineIpRequestOptions,
@@ -692,17 +709,26 @@ export async function createVolcengineIpVideoTask(
     ...input,
     model: input.model?.trim() || config.model,
   });
-  const raw = await requestVolcengineIpJson(
-    buildTaskUrl(config.baseUrl),
-    {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    },
-    config,
-    options,
-  );
+  try {
+    const raw = await requestVolcengineIpJson(
+      buildTaskUrl(config.baseUrl),
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      config,
+      { ...options, model: payload.model },
+    );
 
-  return parseCreateResponse(raw);
+    const result = parseCreateResponse(raw);
+    return options?.privateOrigins?.length ? { ...result, raw: { accepted: true, id: result.provider_task_id } } : result;
+  } catch (error) {
+    if (options?.privateOrigins?.length && error instanceof VolcengineIpRequestError) {
+      throw new VolcengineIpRequestError({ statusCode: error.statusCode,
+        normalized: { ...error.normalized, code: 'PROVIDER_CREATE_FAILED', providerMessage: undefined } });
+    }
+    throw error;
+  }
 }
 
 export async function getVolcengineIpTaskStatus(

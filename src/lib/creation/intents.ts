@@ -22,7 +22,7 @@ import { normalizeVideoFeishuChoice, VideoFeishuError } from '@/lib/video/feishu
 import { resolveMultiviewActionVideoInput } from '@/lib/video/multiview-action-video.server';
 import { assertVideoPromptGroupSurface } from '@/lib/video/prompt-groups';
 
-const INPUT_FIELDS = ['video_prompt_groups', 'video_prompt_groups_contract', 'provider', 'model', 'generation_mode', 'prompt', 'ratio', 'duration', 'resolution', 'seed',
+const INPUT_FIELDS = ['video_prompt_groups', 'video_prompt_groups_contract', 'video_prompt_group_fingerprint', 'provider', 'model', 'generation_mode', 'prompt', 'ratio', 'duration', 'resolution', 'seed',
   'generate_audio', 'return_last_frame', 'watermark', 'draft', 'resolution_approval_confirmed',
   'reference_image_urls', 'reference_video_urls', 'reference_audio_urls', 'first_frame_url', 'last_frame_url', 'frame_image_urls',
   'reference_image_ids', 'reference_image_inputs', 'character_asset_references', 'canvas_references', 'video_feishu', 'reference_album_ids', 'template_studio_run_id', 'template_studio_assets',
@@ -108,6 +108,10 @@ export async function prepareVideoCreationIntent(user: SessionUser, body: Record
   const characterReferences = await resolveVideoCharacterReferences(user, body);
   if (characterReferences !== undefined) body = { ...body, character_asset_references: characterReferences };
   else delete body.character_asset_references;
+  const groupRefs = assertVideoPromptGroupSurface(body);
+  const groupResolver = groupRefs.length ? (await import('@/lib/video/prompt-groups.server')).resolveVideoPromptGroups : null;
+  if (groupResolver) body = { ...body, video_prompt_group_fingerprint: (await groupResolver(user, groupRefs, String(body.prompt || ''))).fingerprint };
+  else delete body.video_prompt_group_fingerprint;
   const spec = normalizeVideoCreationSpec(body), inputHash = creationSpecHash(spec);
   const context = await readCreationContext(user, spec.project_id, spec.video_card_id);
   const parentId = creationParent(spec);
@@ -138,6 +142,7 @@ export async function prepareVideoCreationIntent(user: SessionUser, body: Record
     await resolveCanvasReferenceInputs(user, body, tx, { target: 'video' });
     await resolveMultiviewActionVideoInput(user, body, tx);
     await resolveVideoCharacterReferences(user, body, tx);
+    if (groupResolver && (await groupResolver(user, groupRefs, String(body.prompt || ''), tx)).fingerprint !== spec.input.video_prompt_group_fingerprint) throw new CreationError('提示词组输入已变化，请重新准备当前输入', 409, 'creation_input_changed');
     const current = await tx.videoCreationIntent.findUnique({ where: { owner_id_request_id: { owner_id: user.id, request_id: requestId } } });
     await assertNoPreparationRejection(tx, user.id, requestId, body);
     const data = { action: spec.action, entry: spec.entry, project_id: spec.project_id, legacy_card_id: spec.video_card_id,
@@ -232,6 +237,14 @@ export async function acceptVideoCreationIntent(tx: Prisma.TransactionClient, us
     || isBatch && intent.state !== 'batch_active' || intent.state === 'closed') throw new CreationError('原创作请求已结束或变化，未重新生成');
   const currentCharacters = await resolveVideoCharacterReferences(user, body, tx);
   if (currentCharacters !== undefined) body = { ...body, character_asset_references: currentCharacters };
+  const groupRefs = assertVideoPromptGroupSurface(body);
+  if (groupRefs.length) {
+    const { resolveVideoPromptGroups } = await import('@/lib/video/prompt-groups.server');
+    const groups = await resolveVideoPromptGroups(user, groupRefs, String(body.prompt || ''), tx);
+    // Legacy prepared ordinary intents freeze refs/versions without this newer derived field.
+    if (JSON.parse(intent.spec_json).input.video_prompt_group_fingerprint !== undefined) body = { ...body, video_prompt_group_fingerprint: groups.fingerprint };
+    else delete body.video_prompt_group_fingerprint;
+  } else delete body.video_prompt_group_fingerprint;
   const spec = creationSubmissionSpec(body, intent);
   await resolveCanvasReferenceInputs(user, body, tx, { target: 'video' });
   await resolveMultiviewActionVideoInput(user, body, tx, body.multiview_action !== undefined);

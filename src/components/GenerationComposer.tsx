@@ -401,6 +401,7 @@ function createModuleBuilderDraft(params: {
 interface Props {
   videoRedesign?: boolean;
   videoSurface?: VideoInputSurface;
+  allowVideoPromptGroups?: boolean;
   videoModelChoices?: VideoModelChoice[];
   modeSwitchBlocker?: string | null;
   modeSwitchInitializing?: boolean;
@@ -538,6 +539,7 @@ interface Props {
 export function GenerationComposer({
   videoRedesign = false,
   videoSurface,
+  allowVideoPromptGroups = false,
   videoModelChoices,
   modeSwitchBlocker = null,
   modeSwitchInitializing = false,
@@ -673,7 +675,7 @@ export function GenerationComposer({
   const [prompt, setPrompt] = useState('');
   const [promptAttempted, setPromptAttempted] = useState(false);
   const [videoPromptGroups, setVideoPromptGroups] = useState<VideoPromptGroupRef[]>([]);
-  const promptGroupsEnabled = videoRedesign && videoSurface !== 'ip';
+  const promptGroupsEnabled = videoRedesign && Boolean(videoSurface) && allowVideoPromptGroups;
   const ordinaryPromptMissing = videoRedesign && !prompt.trim() && !(promptGroupsEnabled && videoPromptGroups.length);
   useEffect(() => { if (!ordinaryPromptMissing) setPromptAttempted(false); }, [ordinaryPromptMissing]);
   const [ratio, setRatio] = useState<VideoRatio>(DEFAULT_RATIO);
@@ -884,7 +886,7 @@ export function GenerationComposer({
   const [ordinaryDraftLoaded, setOrdinaryDraftLoaded] = useState('');
   const applyModeFields = useCallback((value: TaskReuseInputBackup['fields']) => {
     settingsTouchedRef.current = true; appliedInitialSettingsRef.current = true;
-    setPrompt(value.prompt); restoreReferenceInputs(value.referenceImageInputs, value.referenceImageIssue, value.characterAssetReferences); setVideoPromptGroups(videoSurface === 'ip' ? [] : parseVideoPromptGroupRefs(value.videoPromptGroups));
+    setPrompt(value.prompt); restoreReferenceInputs(value.referenceImageInputs, value.referenceImageIssue, value.characterAssetReferences); setVideoPromptGroups(parseVideoPromptGroupRefs(value.videoPromptGroups));
     setGenerationMode(value.generationMode as GenerationMode); setRatio(value.ratio as VideoRatio); setDuration(value.duration as VideoDuration);
     setResolution(value.resolution as VideoResolution); setSeed(value.seed); setGenerateAudio(value.generateAudio); setReturnLastFrame(value.returnLastFrame);
     setWatermark(value.watermark); setDraftMode(videoSurface === 'ip' ? false : value.draftMode === true); setResolutionApprovalConfirmed(false);
@@ -957,7 +959,7 @@ export function GenerationComposer({
           && typeof saved.ratio === 'string' && typeof saved.resolution === 'string' && Number.isFinite(saved.duration) && saved.duration > 0
           && Number.isFinite(saved.seed) && typeof saved.model === 'string') {
           const restoredGroups = parseVideoPromptGroupRefs(saved.videoPromptGroups);
-          settingsTouchedRef.current = true; setPrompt(saved.prompt); restoreReferenceInputs(saved.referenceImageInputs, saved.referenceImageIssue, saved.characterAssetReferences); setVideoPromptGroups(videoSurface === 'ip' ? [] : restoredGroups); setGenerationMode(saved.generationMode); setRatio(saved.ratio);
+          settingsTouchedRef.current = true; setPrompt(saved.prompt); restoreReferenceInputs(saved.referenceImageInputs, saved.referenceImageIssue, saved.characterAssetReferences); setVideoPromptGroups(restoredGroups); setGenerationMode(saved.generationMode); setRatio(saved.ratio);
           setDuration(saved.duration); setResolution(saved.resolution); setSeed(saved.seed); setGenerateAudio(saved.generateAudio === true);
           setReturnLastFrame(saved.returnLastFrame === true); setWatermark(saved.watermark === true); setResolutionApprovalConfirmed(false);
           setDraftMode(videoSurface === 'ip' ? false : saved.draftMode === true);
@@ -1204,6 +1206,7 @@ export function GenerationComposer({
     const reason = (() => {
     if (!modeSwitchReady) return { message: '正在接续当前输入，请保留页面', tone: 'progress' as const };
     if (characterBlocker) return characterBlocker;
+    if (videoSurface && !promptGroupsEnabled && videoPromptGroups.length) return '当前账号尚不能使用所选提示词组，原选择已保留，请先核对账号。';
     if (videoSurface && !modelOptions.some(option => option.id === selectedModel)) return '当前型号不可用，原参数已保留，请明确选择可用型号。';
     if (imageResultHandoff) {
       if (!imageResultDraftReady || workspace.loading) return { message: '正在恢复这次图片接续草稿', tone: 'progress' as const };
@@ -1233,7 +1236,7 @@ export function GenerationComposer({
     if (isVolcengineIpModelId(selectedModel) && generationMode === 'first_last_frame' && imageReferenceAssets.length > 2) {
       return '首尾帧模式最多使用两张图片，请移除多余图片或切换全能参考模式。';
     }
-    if ((!videoRedesign || videoSurface === 'ip') && !prompt.trim()) return '请填写提示词';
+    if (!videoRedesign && !prompt.trim()) return '请填写提示词';
     if (prompt.length > MAX_GENERATION_PROMPT_CHARS) {
       return `${GENERATION_PROMPT_LIMIT_MESSAGE}，当前 ${prompt.length} 字`;
     }
@@ -2361,7 +2364,7 @@ export function GenerationComposer({
           {modeRecovery.materialsMissing && <p>此旧稿未记录素材，恢复时保留当前素材。</p>}</>}
         {inputRecoveryPair && <button type="button" disabled={inputRecoveryBusy || interactionLocked || workspace.loading || Boolean(inputRecoveryPair.pendingTarget && inputRecoveryPair.pendingTarget !== inputRecoveryPair.next)} onClick={() => void restoreInputRecovery(inputRecoveryPair.next)}>返回刚才输入</button>}
       </details>}
-      {videoSurface === 'ip' && unapplied && (unapplied.videoPromptGroups?.length || unapplied.draftMode || unapplied.auxiliary || unapplied.feishu || unapplied.h3) ? <p className={recoveryStyles.recovery} role="status">本线路未应用{[unapplied.videoPromptGroups?.length ? '提示词组' : '', unapplied.draftMode ? '样片' : '', unapplied.h3 ? 'H3选项' : '', unapplied.auxiliary ? 'LoRA' : '', unapplied.feishu ? '飞书发送' : ''].filter(Boolean).join('、')}，原线路输入已保留。</p> : null}
+      {videoSurface === 'ip' && unapplied && (unapplied.draftMode || unapplied.auxiliary || unapplied.feishu || unapplied.h3) ? <p className={recoveryStyles.recovery} role="status">本线路未应用{[unapplied.draftMode ? '样片' : '', unapplied.h3 ? 'H3选项' : '', unapplied.auxiliary ? 'LoRA' : '', unapplied.feishu ? '飞书发送' : ''].filter(Boolean).join('、')}，原线路输入已保留。</p> : null}
       <div
         ref={generationComposerRef}
         className={`generation-composer ${videoRedesign ? 'generation-composer--video' : ''}`}
@@ -2746,8 +2749,7 @@ export function GenerationComposer({
               disabled={interactionLocked || isSubmitting || inputRecoveryBusy || Boolean(inputRecoveryPair)}
               capacity={Math.max(0, seedanceReferenceMediaCapabilities(selectedModel).imageLimit - orderedReferenceInputs.length)}
               switchChoices={(videoModelChoices || []).filter(choice => choice.surface === 'ip').map(choice => ({ ...choice, disabled: choice.disabled || Boolean(modeSwitchBlocker), disabledReason: choice.disabledReason || modeSwitchBlocker || undefined }))}
-              thumbnails={workspace.assets.filter(asset => asset.type === 'image' && asset.referenceImageId).map(asset => ({ id: asset.referenceImageId!, name: asset.fileName,
-                thumbnailUrl: referenceLabels.find(reference => reference.contentKey === `reference_image:${asset.referenceImageId}`)?.thumbnailUrl || null }))}
+              thumbnails={workspace.assets.filter(asset => asset.type === 'image' && asset.referenceImageId).map(asset => ({ id: asset.referenceImageId!, name: asset.fileName }))}
               onJoin={joinCharacter} />}
             </div>
             <ReferenceStrip

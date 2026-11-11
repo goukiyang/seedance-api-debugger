@@ -201,7 +201,7 @@ export function projectVideoPromptGroupTask<T extends object & TaskProtectionSou
     } catch { result.pricing_snapshot = null; }
   }
   if (typeof source.id === 'string' && typeof source.local_status === 'string') Object.assign(result, taskThumbnailProjection(task as unknown as TaskThumbnailProjectionSource));
-  return result as T;
+  return projectCharacterAssetTask(result as T);
 }
 
 /** Partial legacy DTOs must not acquire the newly selected internal column. */
