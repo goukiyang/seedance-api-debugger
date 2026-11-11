@@ -235,7 +235,10 @@ export function applyFusionCommands(current: FusionDocument, request: FusionOper
         let settings = command.type === 'reviseRow' && command.settings ? trustedRowSettings(parseFusionSettings(command.settings), original, catalogue) : command.type === 'changeRow' && !command.dimension ? structuredClone(original) : settingsForRow(original, row); let changed: FusionRow[];
         if (command.type === 'changeRow' && command.dimension) {
           const dimension = command.dimension;
-          settings = { ...settings, boss: { ...settings.boss, [dimension]: command.value! }, bossLocks: { ...settings.bossLocks, [dimension]: original.bossLocks[dimension] }, catalogue: { ...settings.catalogue!, details: { ...settings.catalogue?.details, [dimension]: original.catalogue?.details[dimension] } } };
+          const details = { ...settings.catalogue?.details };
+          if (original.catalogue?.details[dimension]) details[dimension] = original.catalogue.details[dimension];
+          else delete details[dimension];
+          settings = { ...settings, boss: { ...settings.boss, [dimension]: command.value! }, bossLocks: { ...settings.bossLocks, [dimension]: original.bossLocks[dimension] }, catalogue: { ...settings.catalogue!, details } };
           if (settings.catalogue?.dynamic?.selections[`dimension:${dimension}`] && original.catalogue?.dynamic?.selections[`dimension:${dimension}`]) settings.catalogue.dynamic.selections[`dimension:${dimension}`] = structuredClone(original.catalogue.dynamic.selections[`dimension:${dimension}`]);
         }
         if (command.type === 'changeRow') settings = refreshRowCandidates(settings, original, rowAdjustmentAxes(settings, settingsForRow(original, row), command.dimension, !command.dimension), catalogue, command.dimension ? { [`dimension:${command.dimension}`]: command.value! } : {});
