@@ -5,7 +5,7 @@ const notice = {
   outline: [
     '打开即可聊天，新建和继续都保留输入入口',
     '新建沿用卡片设置，对话和结果分别保存',
-    '当前卡片保存后再抽卡，继续列表更容易辨认'
+    '口语描述身型时，组合体型和比例要求再抽卡'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
