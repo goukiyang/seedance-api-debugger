@@ -1350,3 +1350,7 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 <!-- FUSION-UX18-SCENARIOS-TODO-20261111 -->
 - [x] 角色融合UX18：8类原句场景/32条初始方案及5种续聊实测通过；实际发现问题已局部修复，v0.145.9已部署，卡片/分组及刷新保持，多选进入实际中英提示词。其它模型/实机触控仍未验。见[原单与逐组方案](todo/2026-11-08-character-fusion.md#fusion-ux18-eight-scenarios)。
 <!-- /FUSION-UX18-SCENARIOS-TODO-20261111 -->
+
+<!-- FUSION-UX19-EXPERIENCE-TODO-20261111 -->
+- [x] 角色融合UX19使用体验复盘已记录：重复母体/同名方案、新建继承不透明、等待/完成反馈、上下文与聊天撤销边界；仅评估，优化未实施，保留现有卡片与已确认合同。见[原单体验复盘](todo/2026-11-08-character-fusion.md#fusion-ux19-experience-review)。
+<!-- /FUSION-UX19-EXPERIENCE-TODO-20261111 -->
