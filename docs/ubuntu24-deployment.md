@@ -596,3 +596,17 @@ attempt01缺baseline.build，创建候选/Next/切服务前退出；失败原证
 
 UX18最终指定功能验收另证通过：8原句/32条、5续聊及视图/刷新；scope、失败修复和未验边界见原单最终收口及私有final-closure-assertions。此结论不改各次发布元证的functionalAcceptance=false。
 <!-- /FUSION-UX18-DEPLOY-20261111 -->
+
+<!-- FUSION-UX20-DEPLOY-20261111 -->
+## 角色融合对话工作台 v0.146.0（2026-11-11）
+
+已部署，待用户手动验收。主源 `299b233059d5cb0eb3535c0156f339e4ea0a6fcb` / BUILD `3bx2WwtUhmnJqcUOd8sp8`，完整继承实发v0.145.9/9eec。新同源相容保护版 `432d731391f74f3d68e05e56533d53bcf715bad0` / `0.146.0+points-pricing-guard.1` / BUILD `hef-UaX18nry02e07nlE0`，保新版JSON reader/元信息与双原号接续、关闭既有9门。
+
+stage `/data/video-api-debugger/release-staging/fusion-workbench-ux20-20261111/attempt01`；build控制器 `sd2-fusion-workbench-ux20-build-20261111.service`、release控制器 `sd2-fusion-workbench-ux20-release-20261111.service` 均exit0/已结束。两版各自完整类型/Next、主版目标lint与26组真实隔离SQLite通过，guard新鲜原生/关联/费率/reader和精确源差量已验。22:28:56.924723Z公网54资源/10匿名401，22:30:42.964598Z内外health200、7服务/4timer正常，无发布控制器。
+
+旧writer自然退出/排尽、无强杀，一致数据库备份与配置保本stage，未执行DDL、生产回填/数据恢复、改价或改PG私有策略。新格式仅在后续正常业务编辑产生，不批改旧must/candidates或旧正文。两版源码已分别推送既有任务分支及 `codex/fusion-ux20-guard-20261111`。
+
+恢复入口：`bash /data/video-api-debugger/release-staging/fusion-workbench-ux20-20261111/attempt01/program-recovery.sh /data/video-api-debugger/release-staging/fusion-workbench-ux20-20261111/attempt01/release-input.json`。同入口加 `--verify-only` 仅做只读核验，本次已通过，未实切恢复。真实恢复只切程序/配置到上述新保护版，保当前DB/账本/文件/回执，不依赖损坏主候选源码；先核无后继发布，旧bbbcc/1459不作新版开放写恢复目标。
+
+本轮无浏览器/真实模型或媒体生成，部署元证 `functionalAcceptance=false` 保原义。实际语言理解、界面/触控及A01–A13待用户手验；源工程不冒真实模型验收。[原单UX20实施与交付](../tasks/todo/2026-11-08-character-fusion.md#fusion-ux20-implementation)，[15份批准JSON](materials/2026-11-08-character-fusion-prototype/implementation/ux20/evidence/)。未导出DB/env/配置备份，原正式根脏改保留。
+<!-- /FUSION-UX20-DEPLOY-20261111 -->

@@ -1358,3 +1358,7 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 <!-- FUSION-UX20-REDESIGN-PLAN-TODO-20261111 -->
 - [x] 角色融合UX20架构/用户体验联合重规划已完成：原卡片＋常驻对话＋批次结果，三文档入口、持续/本批/单条范围、服务端差异分配、稳定身份、真实反馈、同源撤销、长聊及扩库接续已闭环设计；旧卡/冻结配置/相容writer风险与三批实施、A01–A13见[原单UX20](todo/2026-11-08-character-fusion.md#fusion-ux20-redesign-plan)。本轮仅规划记录，应用未改，实施/发布/新体验验收均未开始。
 <!-- /FUSION-UX20-REDESIGN-PLAN-TODO-20261111 -->
+
+<!-- FUSION-UX20-IMPLEMENTATION-TODO-20261111 -->
+- [x] 角色融合UX20三批已整合并部署 **v0.146.0**，待用户手动验收：主299b23305/3bx2WwtUhmnJqcUOd8sp8，同源9门保护432d73139/hef-UaX18nry02e07nlE0；26组隔离工程、双版完整类型/Next、54资源/10匿名401/7服务4timer与健康通过。保原卡片、多选和历史，持续/本批/单条共用引擎、批次身份、常驻聊天/撤销/长聊与词库接续已落地；无DDL/回填/真实LLM或浏览器验收。Review、恢复和A01–A13待手验边界见[原单最终交付](todo/2026-11-08-character-fusion.md#fusion-ux20-implementation)。本轮未新增范围外问题。
+<!-- /FUSION-UX20-IMPLEMENTATION-TODO-20261111 -->

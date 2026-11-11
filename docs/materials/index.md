@@ -624,3 +624,11 @@ v0.145.5 已部署；当前账号gpt-6.1-sol的原话“大只佬，马里奥身
 
 原证仅正式根私有保存，不强加Git：[闭环核对](2026-11-08-character-fusion-prototype/implementation/ux18/final-closure-assertions.private.json)、[8句与文档](2026-11-08-character-fusion-prototype/implementation/ux18/cases.private.json)、[32条初测核对](2026-11-08-character-fusion-prototype/implementation/ux18/validation-results-v1458-initial.private.json)、[单条重抽修复后](2026-11-08-character-fusion-prototype/implementation/ux18/S02-reroll-style-r2-validation.private.json)、[追加修复后](2026-11-08-character-fusion-prototype/implementation/ux18/S03-append-papercut-r2-validation.private.json)、[刷新](2026-11-08-character-fusion-prototype/implementation/ux18/S02-final-refresh-validation.private.json)、[视图/记忆](2026-11-08-character-fusion-prototype/implementation/ux18/S04-final-view-validation.private.json)、[本人窗口关闭](2026-11-08-character-fusion-prototype/implementation/ux18/browser-stop-final-confirmed.private.json)、[最终工程/部署](2026-11-08-character-fusion-prototype/implementation/ux18/followup06/evidence/)。ux18内保留各旧版失败、实际未执行提案、诊断、局部SQL负例/正例及各轮独立元证，不把本机缺依赖的完整类型冒通过。原证无凭据、生产DB或配置备份；其它模型/实机触控/图片视频生成未测。
 <!-- /FUSION-UX18-MATERIALS-20261111 -->
+
+<!-- FUSION-UX20-MATERIALS-20261111 -->
+## 角色融合 UX20 联合方案落地与发布（2026-11-11）
+
+v0.146.0已部署，待用户手动验收；原卡片与三批共用链、26组工程、双版完整构建和数据/恢复边界见[原单UX20最终交付](../../tasks/todo/2026-11-08-character-fusion.md#fusion-ux20-implementation)。
+
+正式根私有证据：[源层工程](2026-11-08-character-fusion-prototype/implementation/ux20/source-engineering.private.json)、[ES5/CSS](2026-11-08-character-fusion-prototype/implementation/ux20/source-types.private.json)、[两版构建/源绑定/启动/数据保护及公网健康批准JSON](2026-11-08-character-fusion-prototype/implementation/ux20/evidence/)。仅15份安全JSON，未复制生产DB、env或配置备份；包SHA已核。部署 `functionalAcceptance=false`，无浏览器/真实LLM/媒体调用，不冒A01–A13效果通过。
+<!-- /FUSION-UX20-MATERIALS-20261111 -->
