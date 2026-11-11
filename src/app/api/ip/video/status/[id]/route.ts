@@ -1,3 +1,4 @@
+import { hasVideoPromptGroups, videoPromptGroupTaskRefs } from '@/lib/video/prompt-groups';
 import { authenticateCodexVideoApi, hasCodexApiAuthSignal, CodexApiAuthError } from '@/lib/integrations/codex';
 import { projectCharacterAssetTask, hasCharacterAssetReferences } from '@/lib/character-assets/privacy';
 import { NextRequest, NextResponse } from 'next/server';
@@ -100,6 +101,9 @@ function serializeTaskForIpStatus<T extends {
   completed_at: Date | null;
 }>(task: T, options: { external?: boolean; viewerId?: string } = {}) {
   const source = task as T & { user_id?: string | null; owner_user_id?: string | null; params_json?: string | null; source_metadata_json?: string | null };
+  const groupProtected = hasVideoPromptGroups(source);
+  let groupRefs: ReturnType<typeof videoPromptGroupTaskRefs> = [];
+  if (groupProtected) { try { groupRefs = videoPromptGroupTaskRefs(source); } catch { /* Corrupt private history remains closed. */ } }
   const ownCharacters = options.viewerId === (source.owner_user_id || source.user_id) && hasCharacterAssetReferences(source);
   let frozenCharacters: unknown = undefined, imageInputs: unknown = undefined;
   if (ownCharacters && source.params_json) {
@@ -111,6 +115,7 @@ function serializeTaskForIpStatus<T extends {
   ) as T;
   return {
     ...(ownCharacters ? { character_asset_references: frozenCharacters, reference_image_inputs: imageInputs } : {}),
+    ...(groupProtected ? { video_prompt_groups: groupRefs, video_prompt_groups_contract: 1 } : {}),
     id: visibleTask.id,
     provider: visibleTask.provider,
     model: visibleTask.model ?? null,
@@ -149,7 +154,7 @@ function serializeTaskForIpStatus<T extends {
     public_video_storage_key: visibleTask.public_video_storage_key ?? null,
     public_video_file_size: visibleTask.public_video_file_size ?? null,
     public_video_cached_at: visibleTask.public_video_cached_at ?? null,
-    error_message: safeVolcengineIpUserMessage(visibleTask.error_message),
+    error_message: groupProtected && visibleTask.error_message ? '本次生成尚未完成，请核对原任务状态和费用；输入仍保留。' : safeVolcengineIpUserMessage(visibleTask.error_message),
     error_code: visibleTask.error_code ?? null,
     delivery_error: visibleTask.delivery_error ?? null,
     project_id: visibleTask.project_id,

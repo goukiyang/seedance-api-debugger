@@ -1,3 +1,8 @@
+import { randomUUID } from 'node:crypto';
+import { assertVideoPromptGroupSurface, VideoPromptGroupError } from '@/lib/video/prompt-groups';
+import { resolveVideoPromptGroups } from '@/lib/video/prompt-groups.server';
+import { protectVideoPromptGroupTask } from '@/lib/video/prompt-group-execution.server';
+import { isPrivatePromptError } from '@/lib/security/private-prompts.server';
 import { videoReferenceImageInputs, resolveVideoCharacterReferences, orderedVideoImageUrls, validateOrderedImagePrompt } from '@/lib/character-assets/video-reference.server';
 import { CreationError, isCreationV2 } from '@/lib/creation/contract';
 import { assertVideoCreationReady } from '@/lib/creation/context';
@@ -50,6 +55,7 @@ import {
   VolcengineIpConfigurationError,
   VolcengineIpRequestError,
   buildVolcengineIpCreatePayload,
+  assertPrivateVolcengineIpDestination,
   createVolcengineIpVideoTask,
   safeVolcengineIpUserMessage,
 } from '@/lib/provider/volcengine-ip';
@@ -462,11 +468,12 @@ export async function POST(request: NextRequest) {
   let receivedBody = await request.json();
   if (!receivedBody || typeof receivedBody !== 'object' || Array.isArray(receivedBody)) return errorJson('视频输入无效', 400);
   const characterRequestFingerprint = videoPricingBusinessFingerprint(receivedBody);
-  try { if (parseVideoPromptGroupRefs(receivedBody.video_prompt_groups).length) return NextResponse.json({ error: '提示词组仅支持普通视频生成页，未提交本次生成' }, { status: 426 }); }
+  try { parseVideoPromptGroupRefs(receivedBody.video_prompt_groups); }
   catch { return NextResponse.json({ error: '提示词组选择无效，未提交本次生成' }, { status: 400 }); }
   if (typeof receivedBody.idempotency_key === 'string' && receivedBody.idempotency_key) {
     const original = await prisma.videoTask.findUnique({ where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: receivedBody.idempotency_key } } });
-    const savedCharacterRequest = parseJsonRecord(original?.params_json)?.characterRequestFingerprint;
+    const originalParams = parseJsonRecord(original?.params_json);
+    const savedCharacterRequest = originalParams?.originalRequestFingerprint || originalParams?.characterRequestFingerprint;
     if (original && savedCharacterRequest) {
       await assertCanViewTask(user, original);
       if (savedCharacterRequest !== characterRequestFingerprint) return NextResponse.json({ error: '原请求内容不同，请查询原任务', code: 'IDEMPOTENCY_PAYLOAD_MISMATCH', existing_task_id: original.id }, { status: 409 });
@@ -493,6 +500,17 @@ export async function POST(request: NextRequest) {
   }
   if (restoredBatch.existingTask) return NextResponse.json(canvasVideoBatchTaskResponse(restoredBatch.existingTask));
   const body = restoredBatch.body as typeof receivedBody;
+  let groupRefs: ReturnType<typeof parseVideoPromptGroupRefs>;
+  let videoGroups: Awaited<ReturnType<typeof resolveVideoPromptGroups>>;
+  try {
+    groupRefs = assertVideoPromptGroupSurface({ ...body, entry: 'ip', provider: 'volcengine_ip' });
+    if (groupRefs.length && hasCodexApiAuthSignal(request)) throw new VideoPromptGroupError('提示词组仅供本人在视频生成页选用，原输入保留', 403);
+    videoGroups = await resolveVideoPromptGroups(user, groupRefs, typeof body.prompt === 'string' ? body.prompt : '');
+    if (groupRefs.length) { body.provider = 'volcengine_ip'; body.entry = 'ip'; }
+  } catch (error) {
+    if (error instanceof VideoPromptGroupError || isPrivatePromptError(error)) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
+    throw error;
+  }
   let canvasInputs: Awaited<ReturnType<typeof resolveCanvasReferenceInputs>> = null;
   const originalCanvasRequest = body.idempotency_key ? await prisma.videoTask.findUnique({ where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: body.idempotency_key } }, select: { id: true } }) : null;
   if (!originalCanvasRequest) {
@@ -522,6 +540,7 @@ export async function POST(request: NextRequest) {
   try { response = await runCanvasAdmission(); }
   catch (error) {
     if (error instanceof AuthError) return errorJson(error.message, error.status);
+    if (error instanceof VideoPromptGroupError || isPrivatePromptError(error)) return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
     if (error instanceof CreationError) return NextResponse.json({ error: error.message, code: error.code, field: error.field, action: error.action }, { status: error.status });
     if (!(error instanceof CanvasVideoBatchError)) throw error;
     response = NextResponse.json({ error: error.message, code: error.code, ...error.details }, { status: error.status });
@@ -553,7 +572,7 @@ export async function POST(request: NextRequest) {
   }
 
   // --- Validation ---
-  if (!body.prompt || typeof body.prompt !== 'string' || !body.prompt.trim()) {
+  if (typeof body.prompt !== 'string' || !groupRefs.length && !body.prompt.trim()) {
     return errorJson('提示词不能为空', 400);
   }
   if (exceedsGenerationPromptLimit(body.prompt)) {
@@ -580,7 +599,7 @@ export async function POST(request: NextRequest) {
   const agentPromptSnapshot = typeof body.agent_prompt_snapshot === 'string' && body.agent_prompt_snapshot.trim()
     ? body.agent_prompt_snapshot.trim()
     : null;
-  const finalPromptSnapshot = typeof body.final_prompt_snapshot === 'string' && body.final_prompt_snapshot.trim()
+  let finalPromptSnapshot = typeof body.final_prompt_snapshot === 'string' && body.final_prompt_snapshot.trim()
     ? body.final_prompt_snapshot.trim()
     : body.prompt.trim();
   if (exceedsGenerationPromptLimit(agentPromptSnapshot)) {
@@ -903,6 +922,7 @@ export async function POST(request: NextRequest) {
     ...(creationBody.video_feishu === undefined ? {} : { video_feishu: creationBody.video_feishu }),
     ...(body.canvas_references === undefined ? {} : { canvas_references: body.canvas_references }),
     prompt: body.prompt.trim(),
+    ...(groupRefs.length ? { videoPromptGroups: { refs: groupRefs, fingerprint: videoGroups.fingerprint } } : {}),
     ...(body.promptMentions != null ? { canvasPromptMentions: parseCanvasPromptMentions(body.promptMentions) } : {}),
     provider: VOLCENGINE_IP_VIDEO_PROVIDER,
     requestedModel,
@@ -949,6 +969,7 @@ export async function POST(request: NextRequest) {
   const requestFingerprint = generationRequestFingerprint(fingerprintPayload);
   sourceMetadata.request_fingerprint = requestFingerprint;
   if (characterReferences?.length) sourceMetadata.private_character_assets = true;
+  if (groupRefs.length) sourceMetadata.video_prompt_groups = { schema: 1, refs: groupRefs };
   if (idempotencyKey) {
     const existing = await prisma.videoTask.findUnique({
       where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: idempotencyKey } },
@@ -1293,6 +1314,10 @@ export async function POST(request: NextRequest) {
       ? await compileCanvasVideoPrompt(user, body.prompt, body.promptMentions, generationReferenceImageIds, preparedImages, finalReferenceImageUrls)
       : await renderPromptWithAssets(body.prompt, workspaceId, generationMode);
     ({ promptRendered, assetMapping } = rendered);
+    if (groupRefs.length) {
+      const compiled = await resolveVideoPromptGroups(user, groupRefs, promptRendered);
+      promptRendered = compiled.prompt; finalPromptSnapshot = promptRendered;
+    }
     if ('canvasPromptFingerprint' in rendered) sourceMetadata.canvas_prompt_fingerprint = rendered.canvasPromptFingerprint;
   } catch (error) { if (error instanceof AuthError) return errorJson(error.message, error.status); throw error; }
 
@@ -1323,6 +1348,7 @@ export async function POST(request: NextRequest) {
   };
 
   // --- Create snapshot ---
+  if (groupRefs.length) await assertPrivateVolcengineIpDestination(selectedModel, videoGroups.origins);
   const providerPayload = buildVolcengineIpCreatePayload({
     ...providerInput,
     model: selectedModel,
@@ -1341,9 +1367,11 @@ export async function POST(request: NextRequest) {
       reference_count: imageInputs?.length ?? preparedImages.length,
       ...(imageInputs === undefined ? {} : { reference_image_inputs: imageInputs, character_asset_references: characterReferences }),
     }),
+    ...(groupRefs.length ? { promptRenderedOverride: promptRendered, assetMappingOverride: imageInputs === undefined ? assetMapping : {}, protectedGroups: { origins: videoGroups.origins } } : {}),
     contentOverride: content,
   });
   const taskParams = {
+    ...(groupRefs.length ? { videoPromptGroups: groupRefs, videoPromptGroupsContract: 1, videoPromptGroupFingerprint: videoGroups.fingerprint, originalRequestFingerprint: characterRequestFingerprint } : {}),
     ...(imageInputs === undefined ? {} : { reference_image_inputs: imageInputs, characterAssetReferences: characterReferences, characterRequestFingerprint }),
     ...(creationBody.video_feishu === undefined ? {} : { video_feishu: creationBody.video_feishu }),
     ...(canvasInputs ? { canvas_references: canvasInputs.references } : {}),
@@ -1407,8 +1435,7 @@ export async function POST(request: NextRequest) {
       await assertCanvasVideoAdmission(tx, user, body, canvasAdmission, { projectId: project.id,
         videoCardId: videoCardId, branchId: videoBranch?.id || null, amount: estimatedCost });
       await assertVideoPricingAcceptance(priceQuote, body.pricing_revision, tx);
-      const task = await tx.videoTask.create({
-        data: {
+      const taskData = {
           provider: VOLCENGINE_IP_VIDEO_PROVIDER,
           model: selectedModel,
           generation_mode: generationMode,
@@ -1455,8 +1482,9 @@ export async function POST(request: NextRequest) {
           workspace_id: workspaceId,
           snapshot_id: snapshot.id,
           params_json: JSON.stringify(taskParams),
-        },
-      });
+      };
+      const task = await tx.videoTask.create({ data: groupRefs.length
+        ? protectVideoPromptGroupTask({ ...taskData, id: randomUUID() }, videoGroups.origins) : taskData });
 
       await enqueueVideoFeishuNotification(tx, user.id, task, creationBody.video_feishu);
       await acceptVideoCreationIntent(tx, user, creationBody, { taskId: task.id, cost: estimatedCost, pricingRevision: priceQuote.revision,
@@ -1701,7 +1729,7 @@ export async function POST(request: NextRequest) {
       endpoint: 'volcengine_ip.createContentsGenerationsTask',
       method: 'POST',
       idempotencyKey: idempotencyKey || null,
-      requestPayload: {
+      requestPayload: groupRefs.length ? { video_prompt_groups: { schema: 1, refs: groupRefs }, provider: VOLCENGINE_IP_VIDEO_PROVIDER, model: selectedModel, generation_mode: generationMode, ratio: requestedRatio, duration, resolution } : {
         ...providerPayload,
         client_request_id: taskId,
         source: {
@@ -1718,7 +1746,7 @@ export async function POST(request: NextRequest) {
     const acceptedProviderResult = await createVolcengineIpVideoTask({
       ...providerInput,
       model: selectedModel,
-    });
+    }, { privateOrigins: videoGroups.origins });
     providerResult = acceptedProviderResult;
     providerTaskId = acceptedProviderResult.provider_task_id || null;
 
@@ -1726,7 +1754,7 @@ export async function POST(request: NextRequest) {
       where: { id: taskId },
       data: {
         provider_task_id: acceptedProviderResult.provider_task_id,
-        raw_create_response: JSON.stringify(acceptedProviderResult.raw),
+        raw_create_response: groupRefs.length ? JSON.stringify({ accepted: true }) : JSON.stringify(acceptedProviderResult.raw),
         local_status: 'submitted',
       },
     });
@@ -1798,8 +1826,7 @@ export async function POST(request: NextRequest) {
       billing_scope: billingScope,
       billing_account_id: billingAccountId,
       snapshot_id: snapshot.id,
-      prompt_rendered: promptRendered,
-      asset_mapping: assetMapping,
+      ...(groupRefs.length ? { video_prompt_groups: groupRefs, video_prompt_groups_contract: 1 } : { prompt_rendered: promptRendered, asset_mapping: assetMapping }),
       reference_album_ids: generationReferenceAlbumIds,
       reference_image_ids: generationReferenceImageIds,
       reference_image_notice: referenceImageResizeSummary
@@ -1812,16 +1839,16 @@ export async function POST(request: NextRequest) {
       created_at: new Date().toISOString(),
     });
   } catch (err) {
-    const providerErrorMessage = volcengineProviderErrorMessage(err);
-    const providerErrorCode = volcengineProviderErrorCode(err);
-    const providerHttpStatus = volcengineProviderHttpStatus(err);
+    const providerErrorMessage = groupRefs.length ? '视频服务暂未完成本次生成，请核对原任务状态和费用。' : volcengineProviderErrorMessage(err);
+    const providerErrorCode = groupRefs.length ? 'PROVIDER_CREATE_FAILED' : volcengineProviderErrorCode(err);
+    const providerHttpStatus = isPrivatePromptError(err) ? err.status : volcengineProviderHttpStatus(err);
     const explicitProviderRejection = !providerTaskId && err instanceof VolcengineIpRequestError
       && typeof err.statusCode === 'number'
       && err.statusCode >= 400
       && err.statusCode < 500
       && ![408, 409, 425].includes(err.statusCode);
 
-    if (submissionStarted && !explicitProviderRejection) {
+    if (submissionStarted && !explicitProviderRejection && !(isPrivatePromptError(err) && !err.deliveryAttempted)) {
       const unconfirmedMessage = providerTaskId
         ? '火山已返回任务编号，但本地记录尚未确认完成。点数冻结保留，请勿重复提交；可查询任务状态或联系管理员核对。'
         : '上游提交结果尚未确认，点数冻结保留。请勿重复提交，可用原请求号查询状态或联系管理员核对。';

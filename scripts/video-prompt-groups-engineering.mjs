@@ -244,9 +244,10 @@ try {
   checks.push('disable/revoke blocks new acceptance and hides unauthorized metadata');
   assert.deepEqual(await groups.resolveVideoPromptGroups(ordinary, [], 'legacy'), { refs: [], prompt: 'legacy', origins: [], fingerprint: '' });
   assert.equal(contract.composeVideoPromptGroups('mine', ['a', 'b']).endsWith('mine'), true);
-  for (const entry of ['canvas', 'ip', 'template', 'multiview']) assert.throws(() => contract.assertVideoPromptGroupSurface({ entry, creation_contract_version: 2, video_prompt_groups_contract: 1, video_prompt_groups: [ref] }));
+  assert.doesNotThrow(() => contract.assertVideoPromptGroupSurface({ entry: 'ip', provider: 'volcengine_ip', creation_contract_version: 2, video_prompt_groups_contract: 1, video_prompt_groups: [ref] }));
+  for (const entry of ['canvas', 'template', 'multiview']) assert.throws(() => contract.assertVideoPromptGroupSurface({ entry, creation_contract_version: 2, video_prompt_groups_contract: 1, video_prompt_groups: [ref] }));
   assert.throws(() => contract.parseVideoPromptGroupRefs([ref, ref]));
-  checks.push('legacy empty path and unsupported-surface rejection');
+  checks.push('legacy empty path, ordinary/IP group support and unsupported tool rejection');
   const privacy = load('src/lib/video/multiview-task-privacy.ts');
   const task = { id: 'synthetic-task', prompt: 'personal', local_status: 'submitted', source_metadata_json: JSON.stringify({ video_prompt_groups: { schema: 1, refs: [ref] } }),
     final_prompt_snapshot: body, raw_create_response: body, raw_status_response: body, error_message: body,

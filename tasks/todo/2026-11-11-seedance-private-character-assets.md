@@ -1,7 +1,7 @@
 # Seedance 私域角色资产接入与管理入口
 
 版本：v1.0.0 / R01。日期：2026-11-11（America/New_York）。
-状态：已获用户“落地”授权；业务实施与聚焦模拟已完成，工程检查与原号读取鉴权窄检查已完成；正式候选构建、保护部署及唯一真实测试由主控接续，功能仍待用户手验。
+状态：v0.144.0已受保护部署；一次4秒真实IP任务生成、原片保存/下载和20点结算已核对，冻结0；界面与成片效果待用户手动验收。
 入口：[固定 todo](../todo.md)。本轮按用户“明确需求后查缺补漏、查闭环和风险”“在红框位置补新增、编辑、删除等入口”补充原需求，不把方案写成已实现。
 
 ## 1. 目标与已确认范围
@@ -112,8 +112,8 @@
 - [x] 在最新健康源建立隔离实施分支；新增最小角色登记模型及相容增量迁移、服务端目录服务和受鉴权 CRUD API（拟 `/api/character-assets` 与 `/:id`）。迁移不回填、改写老资产或业务记录。
 - [x] 在 `GenerationComposer` / `GeneratePageClient` 的素材头部和 `ReferenceStrip` / `PromptEditor` 接入共用管理面板及有序选择；复用现有层/表单，并扩展 `src/lib/navigation/task-reuse-client.ts` 的 ModeInputDraft 和既有模式切换。拟新增面板文件，名称随现有目录安排，不重写整个 composer。
 - [x] 扩展 `src/lib/creation/` 与客户端创建 hook、IP create、引用编译/快照、复用 DTO 和任务详情，使新字段全程保留；官方 provider 只补资产类型校验与错误映射。普通 create 的私域输入不支持时明确拒绝，不转发给网关。
-- [ ] 完成对应模拟/工程检查，核对实际差异；必要发布沿现有受保护发布流程，新增 schema 的备用 reader 必须可运行，只回程序不回业务数据。
-- [ ] 有条件执行一次真实测试并观察原任务到终态/交付；未满足条件则只保留该项缺口，继续不依赖它的工程交付。
+- [x] 完成对应模拟/工程检查，核对实际差异；必要发布沿现有受保护发布流程，新增 schema 的备用 reader 必须可运行，只回程序不回业务数据。
+- [x] 有条件执行一次真实测试并观察原任务到终态/交付；未满足条件则只保留该项缺口，继续不依赖它的工程交付。
 
 ## 7. 验证与交付边界
 
@@ -165,3 +165,109 @@
 
 这些证据属于工程模拟与代码检查；没有加载完整 IP HTTP 成功链、浏览器/手机功能验收或本轮真实生成。正式候选 Next/内置矩阵、迁移备份/停止 writer/保护部署、普通 Codex 本人项目的一次不超过 15 秒真实测试由主控接续，未知只查原号；用户界面效果仍待手动验收。本轮未新增任务外发现。
 <!-- /ARK-CHARACTER-ASSET01-IMPLEMENTATION-20261111 -->
+
+
+<!-- ARK-CHARACTER-ASSET01-RELEASE-20261111 -->
+## 10. 保护发布与一次实际任务闭环
+
+### 10.1 已部署的产物
+
+业务提交 `744c9bd9013a5a32a6f384628d1387ce48fdd0b0`、版本/main `428c425739cf63a2cad9f43f092d6b1538c4b023`（v0.144.0），已推送并核远端。主 BUILD `p9rZvxSRRS7FkgPUwJ5X3`；备用 `fb2dbdb050a51e6e0e186787501863c181014184`（0.144.0+points-pricing-guard.1），BUILD `Yxw1jVGLULCDIvK9QgCI7`。两个版本均本次串行完整 Next/type/lint 构建通过，不借旧 guard 的构建证明。主版本原生/关联34项中25项匹配原证、9项按变更刷新通过，admin pure因schema新增另行刷新；备用 native、计价与精确版本 reader 证据全新取得。
+
+工程工作区干净源导出各2501文件，未混入正式根其他脏改、密钥、数据库或用户媒体。CodeGraph 实际同步到版本提交，2064文件、无待同步/hash mismatch/parse error；真实 caller 查询核实七个引用消费者。main→guard 仅七文件、七写开关及版本变化，隐私/历史 reader 相同。
+
+2026-11-11 08:42:09 UTC 完成受保护切换：7服务、4timer、51项实际生成页/任务页静态资源、4项匿名401检查通过，公网 `/api/release` 返回0.144.0，health返回ok。发布窗口已收口；[部署摘要](../../docs/materials/2026-11-11-seedance-private-character-assets/release-summary.json)保留实际身份与证据边界。入口：[视频生成](https://sd2.youdooart.com/generate)、[IP生成](https://sd2.youdooart.com/generate/ip)。已部署，待用户手动验收。
+
+### 10.2 数据及恢复保护
+
+私有发布阶段 `/data/video-api-debugger/release-staging/character-assets-20261111/attempt01`；pair `e32d2e50-4628-4f41-81aa-c1e70049c966`。原11个writer自然退出，无强杀/超时；一致SQLite备份后仅执行本次锁定的3个DDL，08:41:48 UTC新增CharacterAsset表与2显式索引，原schema和旧数据不改。原Works迁移只读核验，不重复执行；不跑全仓migrate deploy，价格保护字段前后一致，2小时视频交付看护鲜核仍为2h。
+
+固定程序恢复入口：`bash /data/video-api-debugger/release-staging/character-assets-20261111/attempt01/program-recovery.sh /data/video-api-debugger/release-staging/character-assets-20261111/attempt01/release-input.json`。恢复只切本次新guard程序和配置指针，保留新表、媒体、点数、账本及回执；不回业务数据、不使用缺隐私reader的旧79ab。源码/构建/启动守卫已核对，本轮未在生产演练回退。
+
+### 10.3 一次真实任务
+
+沿本次用户授权，使用既有普通内部Codex账号本人personal项目，通过真实目录API登记裸ID（HTTP201，服务端仍显示未核验），再经IP Bearer v2入口创建一次4秒/480p/无音频任务。鲜报价及费用上限20点，原请求号 `1237dbdf-1562-4f1e-a421-3c96cb5ba774`；站内任务 `cmwbvf30t0009ulv9d99occnn`，上游任务 `cgt-20261111164225-06ca8`。创建HTTP200并受理，后续只GET原号/原任务，无换号、重复创建或额外飞书发送。
+
+任务终态succeeded，原片本地与公开保存均成功；只读账本核对实际20点、剩余冻结0点、两条正常冻结/结算记录，上游创建记录精确1条。已下载887045字节原片并用ffprobe核对H.264、864×496、24fps、实际4.041667秒（不超过15秒）；没有裁切、转码或重新生成。原片SHA256 `b4a85db2362034f6144e85415b0acd6019a74899e4926b161784c0c92c3b2a77`。
+
+[实际提交结构（隐藏密钥）](../../docs/materials/2026-11-11-seedance-private-character-assets/provider-request.redacted.json)来自该任务冻结快照和持久client_request_id，结合已绑定mapper核对，不冒充网络抓包：content文本后为image_url，URL为本次`asset://asset-20261111133644-8q2nk`，role为reference_image，和提示词`@图片1`一致。2.0已实际生成；2.5及替换不同ID由离线模拟覆盖，未再收费生成。
+
+测试原片：v1.0.0 · R01 · 原片（4秒，效果待用户手验）。本地资料路径 `docs/materials/2026-11-11-seedance-private-character-assets/release/real-test/character-asset-test-v1.0.0-R01-original.mp4`；不把网页版本当原片自身版本。测试目录记录归专用Codex账号，未向其他账号自动公开/预填。实际使用：本人刷新视频生成页，在右上「角色资产」新增姓名与可替换Asset ID，加入本次；普通页沿明确的「切换IP线路并使用」。
+
+### 10.4 手验及余项
+
+仍待用户手验：红框实际位置、手机/键盘、搜索/增改/停用/软删撤销、混排编号、刷新恢复、切线路保输入、视觉角色一致性及成片效果。本次工程和单个真实API任务不冒全部界面验收。
+
+未执行GetAsset/ListAssets管理查询，未申请新AK/SK；供应商管理状态仍显示未核验。真实生成证明本次已配置Key能够引用本次Asset ID，不泛化为所有资产/项目永远可用，不将管理API的Active当前值冒已查询。本轮未新增任务外问题。
+<!-- /ARK-CHARACTER-ASSET01-RELEASE-20261111 -->
+
+
+## 11. 修改文件与功能对应
+
+| 文件/目录 | 本次功能 |
+|---|---|
+| `src/components/CharacterAssetPanel.tsx`、`character-assets.css`、`GenerationComposer.tsx` | 素材区右上入口、本人目录搜索/新增/编辑/停用/删除恢复与小屏面板。 |
+| `src/components/generate/GeneratePageClient.tsx`、`ReferenceStrip.tsx`、`PromptEditor.tsx`、`src/lib/navigation/task-reuse-client.ts` | 普通图片/角色混排及统一图号、保原文插入、显式切IP和草稿恢复。 |
+| `prisma/schema.prisma`、本次唯一migration、`src/lib/character-assets/`、`src/app/api/character-assets/` | owner目录、ID规范化、版本冲突、授权缩略图、软删恢复、冻结引用与写暂停。 |
+| `src/lib/creation/intents.ts`、`src/lib/pricing/video-context.ts`、`src/app/api/{ip/tasks/create,tasks/create,tasks/estimate}/route.ts`、`src/lib/provider/volcengine-ip.ts` | v2准备/报价/受理同一输入、实际content、2.0/2.5映射、普通网关拒绝私域误传及清楚错误。 |
+| `src/lib/video/multiview-task-privacy.ts`、`src/lib/navigation/task-reuse-operation.server.ts`、`src/app/api/tasks/[id]/reuse/route.ts`、`src/app/tasks/[id]/page.tsx`、IP list/status/request-status | 旧快照、详情/复制/复用、跨账号隐私投影及正常Codex Bearer原号读取。 |
+| `scripts/character-assets-engineering.mjs`、`character-assets-ip-auth-engineering.mjs`、`create-pricing-compatible-guard.mjs`、`pricing-compatible-guard-engineering.mjs` | 18/23组模拟、七开关guard源生成/相容检查；不收费、不调真实供应商。 |
+| `src/app/api/codex/config/route.ts`、`src/lib/release.ts`、`package.json`/lock | 描述新输入合同、真实v0.144.0版本与用户更新摘要。 |
+
+发布专用脚本及完整日志在第10节固定私有stage与本地资料`release/`下；不把生产配置、数据库备份、token或原片整包提交到Git。
+
+
+<!-- ARK-CHARACTER-ASSET01-THUMBNAIL12-20261111 -->
+## 12. 下拉按角色缩略图直接选用（2026-11-11）
+
+用户追加明确要求：以后在下拉中按角色缩略图直接选择。该三文件实现与下拉箭头已保存在不可变提交 `c6c1f41fa7b7005015596304bbfb7b6aa87542d7`，尚未部署。随后用户明确要求先修复提示词组上线，本节改动已从当前急修树撤出：面板/CSS恢复已上线 `428c4257` 完整内容，Composer仅撤回缩略图 URL 映射，保留 §13 提示词组修复。v0.144.1用于提示词组急修；本节待其上线后接续，后续版本由主控安排。以下保留已完成实现与检查的历史记录，不代表线上已有该交互。未改 API、schema、CAS、计费、生成输入或发布脚本，未新增收费调用、AK/SK 或供应商素材查询。
+
+### 12.1 本次实现与来源
+
+- 默认展开紧凑角色缩略图网格，桌面三列、手机两列；点击原生封面按钮直接调用原 `onJoin`，选中显示勾与“已加入”，容量、停用/删除和在途锁仍拦。普通页仍须显式选 IP 型号，卡片明确显示“切换 IP 线路并使用”，不静默换型号/线路。
+- 搜索、新增及刷新保持；每卡的编辑、停用/启用、软删除/恢复、复制 ID 与上游未核验说明保留在次级管理区。无图展示“未设置缩略图”及「设置缩略图」，有图可「更换缩略图」；图片加载失败只回到“缩略图暂不可用”占位，不回退为原图或生成视频帧。
+- 新增/编辑表单中的文字缩略图 select 改为站内缩略图按钮网格，支持选择、勾选反馈和“不设置”；只改变表单的 `thumbnailReferenceImageId`，仍由原显式保存和 CAS 生效，失败保输入。当前缩略图不在本次素材中时保留原选项，使用目录 DTO 已授权的 `thumbnailUrl`，无法读取时显示占位。
+- 源码核对确认 `GeneratePageClient` 仅挂载共用 composer，实际 `useWorkspace` 位于 `GenerationComposer`。本次复用既有 `referenceLabels` 中已使用的受保护 thumbnail URL，按 `reference_image:<id>` 的真实 contentKey 匹配传给面板，不按图号猜图，不新造 URL。因此不需修改 GeneratePageClient，也没有把 `asset://` 作为图片链接。
+
+仅三个业务文件：`src/components/CharacterAssetPanel.tsx`、`GenerationComposer.tsx`、`character-assets.css`。原定位/关闭层、保存草稿和手机 sheet 保留；DOM 使用原生按钮、fieldset/legend、aria-pressed 与独立的管理 details，没有嵌套按钮或选择即保存。
+
+### 12.2 检查与手验边界
+
+两份改动 TSX 根及其导入类型的窄 `tsc` 检查通过，复用此前匹配 schema 的独立 generated client；首次窄配置漏载 `next-env.d.ts` 引起 CSS 声明缺失，补齐检查配置后通过，未改业务类型或依赖。两个改动 TSX 文件的直接 ESLint exit 0（5 条既有 Hook 依赖提醒及 1 条原生 `<img>` 建议，无错误），PostCSS 解析及 `git diff --check` 通过；没有重跑与本改动无关的 18/23 组模拟、浏览器、截图或收费生成。
+
+源码/DOM语义已自行核对：选角色只沿原 join，选缩略图只改未保存字段，管理按钮独立，失败图片不再试读原图，停用/删除卡仍可管理恢复。待用户手验：下拉卡片大小/手机密度、鼠标与键盘选图、无图/图片失败占位、设置/更换缩略图保存与冲突、普通页明确切 IP、已加入及容量/在途锁反馈。
+
+当前仍未取得火山资产本身的原图；推理 Key 不支持管理 GetAsset 查询，不新增 AK、不抓供应商图，也不把已生成视频帧冒作资产原图。无缩略图的记录可用有权的站内图片设置识别封面，不影响已有私域引用生成。本轮未新增任务外发现。
+<!-- /ARK-CHARACTER-ASSET01-THUMBNAIL12-20261111 -->
+
+
+<!-- ARK-CHARACTER-ASSET01-PROMPTGROUP13-20261111 -->
+## 13. 提示词组固定可用与 2.5 / IP 创建链修复（2026-11-11）
+
+用户指出“2.5模型选项没有提示词组功能，不应该根据模型区分，这个功能固定”，并明确优先将此项修复上线，缩略图交互稍后继续。范围是视频生成页的普通与 IP 线路及其型号切换；账号/组权限保持，模板、画布、3D多视图等其它工具不扩入口。前期提示词组合同见[原提示词组工单 §13.11–13.12](2026-10-12-style-skills-unified-selector.md#1311-pg-ui0304-与-pg-ip01-实施增量2026-10-30)，其中旧 IP 排除由本次明确要求替代，历史记录不改写。
+
+### 13.1 源证、共享影响与修法
+
+实际 gate 是 Composer 的 `videoSurface !== 'ip'`、切线路/草稿恢复主动清空组、客户端只向普通线路传组，以及 IP create 对非空组直接 426；共享 v2 合同也只接受 ordinary。改为沿现有视频生成页能力与账号权限显示固定入口，普通/IP均传不可变组 ID/版本及合同1；切型号/线路保留本人当前选择，不使用旧 unapplied 值覆盖新编辑或显式空选择。仅原仍待接续、可核对同账号/页签/nonce/修订的旧 IP handoff 可恢复旧隐藏选择，不批量回填已应用草稿。
+
+服务器复用 `resolveVideoPromptGroups`、原私有组权限与编译次序，个人输入最后；组本身不向前端下发正文，也不把组内文字当素材下载。ordinary/IP按线路合同接受，未按模型硬编码分叉；普通2.0/2.5/H3及官方IP目录均沿原模型可用性/费率检查。只选组而个人描述为空可正常准备，组合总长度仍沿原上限。原有角色有序引用与站内图片准备保留，`asset://`仅作 typed 上游引用。
+
+共享影响集中在 creation intents：准备及受理事务鲜核组权限并绑定服务器派生 `video_prompt_group_fingerprint`，组顺序、版本或个人描述变化均使 spec/hash/报价业务哈希变化；客户端不能伪造该字段。旧 ordinary prepared spec没有新派生字段时保原 hash 格式并重新核权，已受理/关闭原回执仍先返回，不改旧任务、不重发。IP创建复用原冻结扣费事务与 request fingerprint，task/snapshot按已有私有配方机制加密冻结，provider ledger仅留组引用与普通参数。无新表/迁移、无 Key 或现价修改，无额外费用协议。
+
+### 13.2 私密发送、读取与恢复
+
+官方 IP发送复用 `privatePromptFetch` / `assertPrivateSend`，精确 identity 为 provider `volcengine_ark`、实际配置 endpoint `https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks`、同一现有 Key 版本与实际 payload model。目录为 `doubao-seedance-2-0-260128`、`doubao-seedance-2-0-fast-260128`、`doubao-seedance-2-0-mini-260615`、`doubao-seedance-2-5-260628`；代码不为这些模型添加硬编码放行，不跟随重定向。生产当时该 Ark 目标尚无许可，由主控沿既有 policy/attestation 机制准备精确目标；正式许可未生效时新私有发送会拒绝，既有普通 Seedance 许可不变。
+
+发送前先核目标，再在实际传输前鲜核；未尝试外发的私密拒绝（`deliveryAttempted=false`）保持明确 503，可沿原失败结算释放本次冻结，不误报提交未知。实际已外发/重定向或网络未知继续原号查询、保冻结、不重发不自动退款。供应商创建回显与错误正文不落普通回执；IP status/list/request-status及共享 DTO 使用已有正向投影。本人可读冻结角色引用和有序图片，合法同事不能借含组任务拿到角色 URI或组正文。工程检查曾发现 IP request-status 选择 raw error_message且未选私有标记，现已补标记投影并保原未知状态码/只查原请求约束。
+
+主控独占维护相容 guard：保原开关并增加 `VIDEO_PROMPT_GROUP_WRITES_ENABLED=false`，共8个可选写关闭；新 guard保留本次 reader、历史任务/状态/结算，新增组执行及组维护写入关闭，不依赖无关风格组写开关，也不回数据。正式 reader 检查使用新脚本 `node scripts/video-prompt-groups-ip-engineering.mjs --reader-only`，须在真实关写源码执行，不能以模拟值冒 guard证明。
+
+### 13.3 工程检查与交付边界
+
+- 新 `scripts/video-prompt-groups-ip-engineering.mjs` 18项定向模拟通过：实际组服务/权限/不可变版本、普通/IP合同、服务器编译、真实准备与事务受理哈希、私密目标校验与模拟传输、加密 task/snapshot、IP status/list/reuse/状态路由及账单正向投影；含组+角色 `site/asset/site` 顺序及本人/非本人权限组合。全部使用隔离内存数据、临时合成密钥/许可及模拟 transport，无生产写/真实网络/模型调用。
+- 同脚本 `--reader-only --simulate-reader` 5项通过，明确是 fixture模拟，实际源码写开关仍为 true，不能算真实 guard检查；由主控对最终真实 guard运行无模拟参数的 reader命令。原用户功能手验边界不变。
+- 客户端16项定向断言与 `node --import tsx scripts/video-mode-switch-engineering.ts` 7项通过；旧通用组脚本只更正“IP不支持”的过期断言，没有重跑无关41组。
+- 使用与当前 schema匹配、隔离生成的 Prisma client作改动根定向 TypeScript检查通过；包含后补 request-status投影的最后一次定向检查仍运行，结果由主控候选前接收，不冒已通过。未 install、未重写共享 generated client或数据库。服务端改动语法解析通过。客户端/服务端窄 ESLint均因本机外置盘长时间 I/O无输出而终止，未记 PASS，最终候选 Next内置 lint/编译由主控接续。源码及 DOM语义自行 Review，未自动浏览器、截图、收费生成或另开审查线程。
+
+当前为源码实施与工程验证，尚待主控候选完整构建、真实8开关 reader检查、精确私密发送许可及保护部署；上线后普通/IP型号切换、组选择保留、组-only输入与成片效果仍待用户手验。缩略图 §12明确延期，不混入本次急修。未新增任务外问题。
+<!-- /ARK-CHARACTER-ASSET01-PROMPTGROUP13-20261111 -->

@@ -1,3 +1,4 @@
+import { parseVideoPromptGroupRefs } from '@/lib/video/prompt-groups';
 import { parseMultiviewGenerationSnapshot } from '@/lib/video/multiview-generation-contract';
 import { parseMultiviewActionBinding } from '@/lib/video/multiview-action-contract';
 import { getCreditSummary } from '@/lib/credits/policy';
@@ -16,7 +17,7 @@ export function creationNeedsApproval(projectType: string, spec: VideoCreationSp
 export async function readCreationAvailability(db: CreationDb, intent: VideoCreationIntent, projectType: string, payer: CreationPayer, user?: SessionUser, quotedCost?: number): Promise<CreationAvailability> {
   const spec = JSON.parse(intent.spec_json) as VideoCreationSpec;
   const reasons: CreationAvailability['reasons'] = [];
-  if (spec.action === 'generate' && spec.entry !== 'multiview' && (typeof spec.input.prompt !== 'string' || !spec.input.prompt.trim())) reasons.push({ code: 'creation_prompt_required', message: '请填写本次视频提示词', field: 'prompt', action: 'fix_input' });
+  if (spec.action === 'generate' && spec.entry !== 'multiview' && (typeof spec.input.prompt !== 'string' || !spec.input.prompt.trim()) && !parseVideoPromptGroupRefs(spec.input.video_prompt_groups).length) reasons.push({ code: 'creation_prompt_required', message: '请填写本次视频提示词', field: 'prompt', action: 'fix_input' });
   if (spec.entry === 'multiview') {
     // Actions and rotations share an entry, but have mutually exclusive input contracts.
     // Source ownership and frozen inputs are rechecked by preparation and acceptance.

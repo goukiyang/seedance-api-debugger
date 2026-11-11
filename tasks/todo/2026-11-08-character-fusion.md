@@ -1017,3 +1017,14 @@ P1–P4 已落盘，lead 已完成整批源码复核并将发现的必要修正�
 
 未新增范围外问题。本段记录的旧客户端过滤、新目录死词、并发覆盖、原号未知、整池重复、停用旧候选及全量导出缺口均属 UX14 已授权范围，已按各自因果做最小配套；未经手验的实际效果和未测规模不据此声称达标。
 <!-- /FUSION-UX15-IMPLEMENTATION-20261111 -->
+
+<!-- FUSION-UX15-LIVE-MERGE-20261111 -->
+### UX15 接续：纳入已发布 v0.144.1 修复（2026-11-11）
+
+主控鲜核线上为 `56ab5da038b38324837119b05e119446b93e9066` / v0.144.1（BUILD `AKcfrbYiND6eQc9UsrHtn`），因此将该正式源三方合并到当前 v0.145.0 候选 `e88cb1fbbf3cfa6c8a8bbbfb95e203fd7512ad07`，保留已发布的视频提示词组选用、IP 私密内容发送/投影及原号保护修复。实际冲突仅 `package.json`、`package-lock.json` 的版本行及 `src/lib/release.ts` 的最新 notice；逐冲突保留批准的 0.145.0 角色融合说明，没有整包 ours/theirs 覆盖。
+
+- 对照 Git blob：本期 28 个融合运行文件与 e88 全部字节一致；线上增量除这 3 个版本/notice 文件外，其余 23 文件与 56ab 全部一致。共同 `schema/prisma/auth/LLM/Musk/模型准入` 无线上差量；新增共同入口变化仅视频创作及 IP 路由，不改融合命令、目录、身份或模型边界。
+- 5 表迁移 DDL SHA256 仍为 `b3eaa42f12780635caf9a49d3daffda9ec8a6a5c0820cc5a6bd6ae6308a97318`；完整 `prisma/schema.prisma` 仍为 `379b407353322149ca872671b64ca98916482af653a78d4f0fa8d917bef6c7f0`。冲突清零、版本三处一致，`git diff --cached --check` 退出 0。
+- 复用主控已取得的 e88 Linux 完整类型检查（2026-11-11T10:34:47Z 退出 0）、定向 lint 与 10 组统一工程成功证据；本次不重跑未变契约、不安装依赖、不访问生产/模型/浏览器。新合并源的候选构建及新增输入检查由主控在 attempt02 完成，合并本身不冒功能或发布通过。
+- 56ab 原样保留了 `VIDEO_PROMPT_GROUP_WRITES_ENABLED` 的 guard 关闭逻辑：原 7 门 + 该组写门 + 本期融合写门共 9 门。guard 由主控继承新主源并核全部 false，本包不生成/改写 guard 或发布工具；回退保新增表和回执，用户手验安排不变。
+<!-- /FUSION-UX15-LIVE-MERGE-20261111 -->

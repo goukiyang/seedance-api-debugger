@@ -1,3 +1,4 @@
+import { projectVideoPromptGroupTask } from '@/lib/video/multiview-task-privacy';
 import { projectCharacterAssetTask } from '@/lib/character-assets/privacy';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
@@ -136,7 +137,7 @@ export async function GET(request: NextRequest) {
     const external = isExternalUser(user);
     return NextResponse.json({
       tasks: tasks.map((task) => {
-        const { source_metadata_json: _private, ...safeTask } = projectCharacterAssetTask(task);
+        const { source_metadata_json: _private, ...safeTask } = projectCharacterAssetTask(projectVideoPromptGroupTask(task));
         const visibleTask = external ? redactIpTaskForExternal(safeTask) : safeTask;
         return {
         ...visibleTask,
