@@ -173,6 +173,23 @@ async function main() {
     assert.equal(undone.workspace.state.summary, '当前摘要');
     assert.equal(undone.workspace.state.settings.lang, patch.workspace.state.settings.lang);
     checks.push('真实临时SQLite：本人归属、原号原子回执/幂等、不同载荷拒绝、字段CAS合并、冲突与局部撤销');
+    {
+      const originalDocument = (await repository.getWorkspace(actor, id)).workspace;
+      const freshState = { ...emptyWorkspaceState(), settings: { ...structuredClone(originalDocument.state.settings), count: 4, lang: 'both' as const } };
+      freshState.settings.catalogue!.traits.exaggeration = { enabled: true, locked: true, values: ['巨掌', '巨脚'], excluded: [], must: [] };
+      const createInput = { opId: 'engineering-inherit-new-document', name: '新的角色融合创作', state: freshState };
+      const freshDocument = await repository.createFusionWorkspace(actor, createInput);
+      assert.equal(freshDocument.rowsPage.total, 0); assert.deepEqual(freshDocument.workspace.state, freshState);
+      const freshResult = await repository.executeWorkspaceOperation(actor, freshDocument.workspace.id, { opId: 'engineering-fresh-document-generate', baseVersion: 1, commands: [{ type: 'generate', mode: 'replace', seed: 523 }] });
+      assert.equal(freshResult.rowsPage.total, 4);
+      for (const row of freshResult.workspace.rows) { const body = textFor(row, freshResult.workspace.state.settings); assert(body.includes('巨掌') && body.includes('巨脚') && body.includes('oversized palms') && body.includes('oversized feet')); }
+      assert.deepEqual((await repository.getWorkspace(actor, id)).workspace, originalDocument);
+      assert.deepEqual((await repository.getWorkspace(actor, freshDocument.workspace.id)).workspace, freshResult.workspace);
+      assert.equal((await repository.createFusionWorkspace(actor, createInput)).workspace.id, freshDocument.workspace.id);
+      await assert.rejects(() => repository.createFusionWorkspace(actor, { ...createInput, state: { ...freshState, settings: { ...freshState.settings, count: 8 } } }));
+      checks.push('新文档继承卡片数量语言但无旧结果/对话，真实生成和双向继续隔离，创建原号固定载荷');
+    }
+
 
     const entries = [{ kind: 'category', data: category }, { kind: 'term', data: term }];
     const preview = await library.manageFusionCatalogue(actor, { action: 'preview', scope: 'private', entries });

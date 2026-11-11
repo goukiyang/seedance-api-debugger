@@ -403,3 +403,17 @@
 .conflictDetails label { color: var(--text-secondary); font-size: 12px; }
 .conflictDetails pre { max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; border-radius: 6px; background: var(--bg-input); }
 @media (max-width: 760px) { .conflictDetails > div { grid-template-columns: minmax(0, 1fr); } }
+
+/* Keep the creation input available while the original cards and tool views scroll. */
+.creationChat { position: sticky; top: 8px; z-index: 15; margin: 0 0 20px; padding: 12px 14px; border: 1px solid var(--border-color); background: var(--bg-panel); }
+.creationChat .sectionHead { margin-bottom: 6px; }
+.creationChat .chatMessages { max-height: min(22vh, 180px); }
+.creationChat .chatInput textarea { min-height: 66px; max-height: 160px; }
+.documentEntry { display: grid; gap: 3px; min-width: 0; }
+.documentEntry strong { font-size: 13px; font-weight: 500; }
+.documentEntry button { justify-self: start; min-height: 24px; padding: 2px 0; }
+@media (max-width: 680px) {
+  .creationChat { top: 0; padding: 10px; }
+  .creationChat .chatMessages { max-height: 120px; }
+  .creationChat .sectionHead p { font-size: 11px; }
+}

@@ -69,7 +69,9 @@ export async function POST(request: NextRequest) {
       : commands.length ? `已应用 ${commands.length} 项创作操作。${result.proposal.reply}` : `本轮仅提供建议或草稿，未执行抽卡或设置变更。${result.proposal.reply}`;
     const messages = [...workspace.state.messages, { role: 'user' as const, content: body.message.trim() }, { role: 'assistant' as const, content: reply }].slice(-20);
     const context: FusionCommand = { type: 'context', messages, expected: { messages: workspace.state.messages } };
-    const receipt = await executeWorkspaceOperation(user, workspaceId, { opId, baseVersion: workspace.version, commands: [...commands, context] }, { assistantFingerprint: intent.fingerprint });
+    const title: FusionCommand[] = !workspace.rows.length && !workspace.state.messages.some(message => message.role === 'user') && ['新的角色融合创作', '继续角色融合创作', '未命名创作'].includes(workspace.name)
+      ? [{ type: 'rename', name: body.message.trim().replace(/\s+/g, ' ').slice(0, 40), expected: workspace.name }] : [];
+    const receipt = await executeWorkspaceOperation(user, workspaceId, { opId, baseVersion: workspace.version, commands: [...commands, ...title, context] }, { assistantFingerprint: intent.fingerprint });
     return json({ ...receipt, reply, drafts: result.proposal.drafts, reads: result.reads, iterations: result.iterations, limitReached: result.limitReached, model: selectedModel });
   } catch (error) {
     // A dropped connection does not cancel a possibly submitted operation.

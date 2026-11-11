@@ -1,11 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '角色融合对话调整更准确',
+  title: '角色融合常驻创作窗口',
   outline: [
-    '助手可区分主题大类与具体词条',
-    '只改某条主题时保留母体、性格和身形',
-    '原卡片、多选及扩展词库继续参与抽卡'
+    '打开即可聊天，新建和继续都保留输入入口',
+    '新建沿用卡片设置，对话和结果分别保存',
+    '当前卡片保存后再抽卡，继续列表更容易辨认'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
