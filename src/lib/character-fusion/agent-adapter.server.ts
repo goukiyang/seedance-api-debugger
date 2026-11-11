@@ -2,7 +2,7 @@ import type { MuskChatMessage } from '@/lib/integrations/musk';
 import { randomUUID } from 'node:crypto';
 import { CONFIG, COUNTS } from './engine';
 import { TRAITS } from './catalogue';
-import type { FusionCatalogue } from './catalogue-model';
+import { builtinCategoryId, type FusionCatalogue } from './catalogue-model';
 import { parseFusionCommands, settingsFingerprint, type FusionCommand, type FusionWorkspace } from './actions';
 
 export const FUSION_AGENT_MAX_STEPS = 6;
@@ -120,14 +120,14 @@ export function fusionAgentScene(workspace: FusionWorkspace) {
   const settings = workspace.state.settings;
   const dynamicIds = new Set(Object.keys(settings.catalogue?.dynamic?.selections || {}));
   const cardControls = [
-    ...CONFIG.filter(card => !dynamicIds.has(`dimension:${card.id}`)).map(card => ({
-      id: `dimension:${card.id}`, title: card.title, kind: 'dimension', joined: settings.bossDimensions.includes(card.id),
+    ...CONFIG.filter(card => !dynamicIds.has(builtinCategoryId(card.id))).map(card => ({
+      id: builtinCategoryId(card.id), title: card.title, kind: 'dimension', joined: settings.bossDimensions.includes(card.id),
       selectionPath: card.id === 'source' && settings.catalogue?.sourceFusion?.enabled ? ['catalogue', 'sourceFusion'] : ['boss', card.id],
       values: card.id === 'source' && settings.catalogue?.sourceFusion?.enabled ? settings.catalogue.sourceFusion.values : [settings.boss[card.id]],
       locked: settings.bossLocks[card.id], multi: card.id === 'source' && settings.catalogue?.sourceFusion?.enabled === true,
     })),
-    ...TRAITS.filter(card => !dynamicIds.has(`trait:${card.id}`)).map(card => ({
-      id: `trait:${card.id}`, title: card.title, kind: 'trait', joined: settings.catalogue?.traits[card.id]?.enabled === true,
+    ...TRAITS.filter(card => !dynamicIds.has(card.id)).map(card => ({
+      id: card.id, title: card.title, kind: 'trait', joined: settings.catalogue?.traits[card.id]?.enabled === true,
       selectionPath: ['catalogue', 'traits', card.id], multi: card.multi === true,
       values: settings.catalogue?.traits[card.id]?.values || [], locked: settings.catalogue?.traits[card.id]?.locked === true,
     })),

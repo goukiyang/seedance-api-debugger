@@ -34,8 +34,10 @@ async function main() {
       archived: false, updatedAt: new Date(0).toISOString(), state: emptyWorkspaceState(), rows: [] };
     const nativeScene = fusionAgentScene(nativeWorkspace);
     assert.equal(nativeScene.settings.customCards.length, 0);
-    for (const id of ['dimension:source', 'dimension:concept', 'trait:primaryPersonality']) assert(nativeScene.cardControls.some(card => card.id === id && card.joined));
-    const exaggerationControl = nativeScene.cardControls.find(card => card.id === 'trait:exaggeration');
+    const sceneCatalogue = builtinCatalogue();
+    for (const control of nativeScene.cardControls) if (control.kind === 'dimension' || control.kind === 'trait') assert(sceneCatalogue.categories.some(category => category.id === control.id), `Unknown catalogue reference: ${control.id}`);
+    for (const id of ['dimension:source', 'dimension:concept', 'primaryPersonality']) assert(nativeScene.cardControls.some(card => card.id === id && card.joined));
+    const exaggerationControl = nativeScene.cardControls.find(card => card.id === 'exaggeration');
     assert(exaggerationControl?.multi && !exaggerationControl.joined);
     assert.deepEqual(exaggerationControl.selectionPath, ['catalogue', 'traits', 'exaggeration']);
     const requested = bindFusionAgentCommands([{ type: 'patchSettings', changes: [{ path: ['count'], value: 4 }, { path: ['lang'], value: 'both' }] }, { type: 'generate', mode: 'replace' }], nativeWorkspace, 61);
@@ -54,10 +56,13 @@ async function main() {
         if (read.kind !== 'catalogue') throw new Error('本场景只查询词库');
         const matchingTerms = lookupCatalogue.terms.filter(term => term.nameZh === read.q);
         const page = fusionAgentCataloguePage({ catalogue: { ...lookupCatalogue, terms: matchingTerms }, nextCursor: null, total: matchingTerms.length }, read);
-        assert.equal(page.total, 1); assert.equal(page.terms[0].nameZh, read.q); projectedCategories.push(page.categories.length); return page;
+        assert.equal(page.total, 2); assert.equal(page.terms[0].nameZh, read.q);
+        assert.deepEqual(page.terms.map(term => term.id), matchingTerms.map(term => term.id));
+        assert.deepEqual(page.categories.map(category => category.id).sort(), ['card-body-exaggeration', 'exaggeration']);
+        projectedCategories.push(page.categories.length); return page;
       },
     });
-    assert.equal(lookupResult.iterations, 2); assert.equal(lookupRounds, 2); assert.deepEqual(projectedCategories, [1, 1]);
+    assert.equal(lookupResult.iterations, 2); assert.equal(lookupRounds, 2); assert.deepEqual(projectedCategories, [2, 2]);
     const browse = fusionAgentCataloguePage({ catalogue: { ...lookupCatalogue, terms: lookupCatalogue.terms.slice(0, 20) }, nextCursor: 'engineering-cursor', total: lookupCatalogue.terms.length }, {});
     assert.equal(browse.categories.length, lookupCatalogue.categories.filter(category => category.enabled).length);
     assert.equal(browse.nextCursor, 'engineering-cursor'); assert.equal(browse.total, lookupCatalogue.terms.length); assert.equal(browse.terms.length, 20);
