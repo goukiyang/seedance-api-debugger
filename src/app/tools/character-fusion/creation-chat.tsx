@@ -54,12 +54,12 @@ export default function CreationChat({ ownerId, workspaceId, documentName, prepa
   const send = async () => {
     if (busy || pending || disabled || preparing || !workspaceId || !modelReady || !input.trim() || !active) return;
     const operation = { opId: crypto.randomUUID(), message: input.trim() }, request = new AbortController();
-    controller.current = request; setBusy(true); setError(''); setReply('');
+    controller.current = request; setBusy(true); setError(''); setReply(''); setPending(operation); persist(input, operation);
     try {
       const ready = await onPrepare();
       if (!accepts(workspaceId)) return;
-      if (!ready || ready.workspaceId !== workspaceId) { setError('当前设置尚未保存，输入已保留。请先核对工作文档。'); return; }
-      setPending(operation); persist(input, operation);
+      request.signal.throwIfAborted();
+      if (!ready || ready.workspaceId !== workspaceId) { setPending(null); persist(inputRef.current, null); setError('当前设置尚未保存，输入已保留。请先核对工作文档。'); return; }
       const result = await postFusion<AssistantResponse>('/api/character-fusion/assistant', { workspaceId, opId: operation.opId, baseVersion: ready.version, message: operation.message, model }, request.signal);
       if (!accepts(workspaceId)) return;
       if (result.workspace) onWorkspace({ workspace: result.workspace, rowChanges: result.rowChanges, rowsPage: result.rowsPage });
