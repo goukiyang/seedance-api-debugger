@@ -314,6 +314,20 @@ async function main() {
       assert.deepEqual(rerolled.workspace.rows.filter(row => row.id !== target.id), initial.workspace.rows.filter(row => row.id !== target.id));
       assert.deepEqual(rerolled.workspace.state.settings, initial.workspace.state.settings);
       assert.deepEqual((await repository.getWorkspace(actor, styleDocument.workspace.id)).workspace, rerolled.workspace);
+      const oldDocument = await repository.createFusionWorkspace(actor, { opId: 'engineering-old-style-create', name: '升级前已改画风的压缩结果', state: styleState });
+      const oldGenerated = await repository.executeWorkspaceOperation(actor, oldDocument.workspace.id, { opId: 'engineering-old-style-generate', baseVersion: 1, commands: [{ type: 'generate', mode: 'replace', seed: 912 }] });
+      const oldTarget = oldGenerated.workspace.rows[1];
+      const oldStyled = applyFusionCommands(oldGenerated.workspace, { opId: 'engineering-old-style-fixture', baseVersion: oldGenerated.workspace.version, commands: [{ type: 'patchRow', rowId: oldTarget.id, expectedVersion: oldTarget.version, patch: { requirements: { zh: '蒸汽朋克，霓虹金属', en: 'Steampunk, neon lighting and metallic materials' } } }] }, builtinCatalogue()).rows[1];
+      assert.deepEqual(oldStyled.catalogueSnapshot!.settingsRef, oldTarget.catalogueSnapshot!.settingsRef);
+      // Recreate the observed pre-upgrade persisted row in the isolated SQLite fixture only.
+      await prisma.characterFusionResult.update({ where: { workspace_id_row_id: { workspace_id: oldDocument.workspace.id, row_id: oldTarget.id } }, data: { row_json: JSON.stringify(oldStyled), version: oldStyled.version } });
+      const oldRead = (await repository.getWorkspace(actor, oldDocument.workspace.id)).workspace;
+      const oldRerolled = await repository.executeWorkspaceOperation(actor, oldDocument.workspace.id, { opId: 'engineering-old-style-reroll', baseVersion: oldRead.version, commands: [{ type: 'changeRow', rowId: oldTarget.id, expectedVersion: oldStyled.version, seed: 913 }] });
+      assert.match(oldRerolled.workspace.rows[1].catalogueSnapshot!.body.en, /Steampunk/);
+      assert.doesNotMatch(oldRerolled.workspace.rows[1].catalogueSnapshot!.body.en, /Cyberpunk/);
+      assert.deepEqual(oldRerolled.workspace.rows.filter(row => row.id !== oldTarget.id), oldGenerated.workspace.rows.filter(row => row.id !== oldTarget.id));
+      assert.deepEqual(oldRerolled.workspace.state.settings, oldGenerated.workspace.state.settings);
+
     }
     checks.push('真实临时SQLite：本人归属、原号原子回执/幂等、不同载荷拒绝、字段CAS合并、冲突、局部撤销与持久单条画风后重抽');
     {

@@ -234,6 +234,9 @@ export function applyFusionCommands(current: FusionDocument, request: FusionOper
         compare(stale, ['rows', row.id], row.version, command.expectedVersion !== undefined, command.expectedVersion);
         const original = row.catalogueSnapshot?.settings || next.state.settings;
         let settings = command.type === 'reviseRow' && command.settings ? trustedRowSettings(parseFusionSettings(command.settings), original, catalogue) : command.type === 'changeRow' && !command.dimension ? structuredClone(original) : settingsForRow(original, row); let changed: FusionRow[];
+        if (command.type === 'changeRow' && !command.dimension && row.design) settings = { ...settings,
+          requirements: row.design.requirements.zh, requirementsEn: row.design.requirements.en,
+          requirementsEnabled: Boolean(row.design.requirements.zh || row.design.requirements.en) };
         if (command.type === 'changeRow' && command.dimension) {
           const dimension = command.dimension;
           const details = { ...settings.catalogue?.details };
