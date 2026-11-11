@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, Check, Copy, Image as ImageIcon, Plus, RefreshCw, UsersRound, X } from 'lucide-react';
+import { ArrowLeft, Check, ChevronDown, Copy, Image as ImageIcon, Plus, RefreshCw, UsersRound, X } from 'lucide-react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { uploadSession } from '@/lib/http/upload-session';
 import type { CharacterAssetDTO } from '@/lib/character-assets/types';
@@ -157,7 +157,7 @@ export function CharacterAssetPanel({ ownerId, directory, selectedIds, disabled,
     : thumbnails;
   return <>
     <button type="button" ref={triggerRef} className="character-assets-trigger" aria-haspopup="dialog" aria-expanded={open}
-      disabled={!ownerId} onClick={() => { setOpen(current => !current); if (!open) void directory.refresh(); }}><UsersRound size={15} />角色资产</button>
+      disabled={!ownerId} onClick={() => { setOpen(current => !current); if (!open) void directory.refresh(); }}><UsersRound size={15} />角色资产<ChevronDown size={12} aria-hidden="true" /></button>
     {open && createPortal(<div ref={panelRef} className="character-assets-panel" role="dialog" aria-label="角色资产" tabIndex={-1}
       style={{ left: position.left, top: position.top, maxHeight: position.maxHeight }}>
       <header><div>{editing && <button type="button" className="btn-icon" aria-label="返回角色列表" disabled={busy} onClick={() => setEditing(null)}><ArrowLeft size={16} /></button>}
