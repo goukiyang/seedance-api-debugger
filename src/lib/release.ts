@@ -1,11 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '角色融合常驻创作窗口',
+  title: '角色融合多场景创作',
   outline: [
-    '打开即可聊天，新建和继续都保留输入入口',
-    '新建沿用卡片设置，对话和结果分别保存',
-    '口语描述身型时，组合体型和比例要求再抽卡'
+    '画风、角色和身体要求一起进入方案',
+    '复杂想法分批查询，并纠正无效提案',
+    '单条改画风，保留其余结果和当前设置'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

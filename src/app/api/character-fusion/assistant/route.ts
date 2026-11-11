@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
       read: async read => {
         if (read.kind === 'results') {
           const page = await getWorkspace(user, workspaceId, { cursor: read.cursor, limit: read.limit || 20 });
-          return { results: page.workspace.rows.map(row => ({ id: row.id, name: row.name, version: row.version, category: row.category, traits: row.design?.traits })), ...page.rowsPage };
+          return { results: page.workspace.rows.map(row => ({ id: row.id, name: row.name, version: row.version, category: row.category, traits: row.design?.traits, requirements: row.design?.requirements })), ...page.rowsPage };
         }
         const page = await readFusionCatalogue(user, { categoryId: read.categoryId, q: read.q, cursor: read.cursor, limit: read.limit || 20 });
         return fusionAgentCataloguePage(page, read);

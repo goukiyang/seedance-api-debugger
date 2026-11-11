@@ -39,6 +39,8 @@ async function main() {
     for (const id of ['dimension:source', 'dimension:concept', 'primaryPersonality']) assert(nativeScene.cardControls.some(card => card.id === id && card.joined));
     const exaggerationControl = nativeScene.cardControls.find(card => card.id === 'exaggeration');
     assert(exaggerationControl?.multi && !exaggerationControl.joined);
+    assert('options' in exaggerationControl);
+    assert.deepEqual(exaggerationControl.options, ['巨头', '巨肩', '巨胸', '巨腹', '巨臂', '巨掌', '巨腿', '巨脚', '无']);
     assert.deepEqual(exaggerationControl.selectionPath, ['catalogue', 'traits', 'exaggeration']);
     const requested = bindFusionAgentCommands([{ type: 'patchSettings', changes: [{ path: ['count'], value: 4 }, { path: ['lang'], value: 'both' }] }, { type: 'generate', mode: 'replace' }], nativeWorkspace, 61);
     const nativeApplied = applyFusionCommands(nativeWorkspace, { opId: 'engineering-native-language', baseVersion: 1, commands: requested }, builtinCatalogue());
@@ -87,6 +89,53 @@ async function main() {
     assert.equal(browse.categories.length, lookupCatalogue.categories.filter(category => category.enabled).length);
     assert.equal(browse.nextCursor, 'engineering-cursor'); assert.equal(browse.total, lookupCatalogue.terms.length); assert.equal(browse.terms.length, 20);
     checks.push('双关键词目录读取不重复全类别、上下文可继续提案，原词条/总数/游标与目录浏览保持');
+
+    {
+      let rounds = 0, reads = 0;
+      const corrected = await proposeFusionAgent({ workspace: nativeWorkspace, message: '复杂身体与角色要求一起抽卡',
+        complete: async messages => {
+          rounds++;
+          if (rounds === 1) return JSON.stringify({ reply: '先查询全部要求', reads: ['圆润', '矮胖', '壮硕', '大头', '短腿', '胆小', '勇敢', '职业'].map(q => ({ kind: 'catalogue', q, limit: 30 })) });
+          if (rounds === 2) {
+            assert(messages.some(message => typeof message.content === 'string' && message.content.includes('proposalError')));
+            return JSON.stringify({ reply: '拆开查询', reads: [{ kind: 'catalogue', q: '矮胖', limit: 30 }] });
+          }
+          return JSON.stringify({ reply: '按原要求生成', commands: [{ type: 'generate', mode: 'replace' }] });
+        }, read: async () => { reads++; return { terms: [] }; },
+      });
+      assert.equal(rounds, 3); assert.equal(reads, 1); assert.equal(corrected.iterations, 3);
+      assert.deepEqual(corrected.proposal.commands, [{ type: 'generate', mode: 'replace' }]);
+      let invalidRounds = 0, invalidReads = 0;
+      await assert.rejects(() => proposeFusionAgent({ workspace: nativeWorkspace, message: '保持严格查询上限',
+        complete: async () => { invalidRounds++; return JSON.stringify({ reply: '错误分页', reads: [{ kind: 'catalogue', limit: 99 }] }); },
+        read: async () => { invalidReads++; return {}; },
+      }));
+      assert.equal(invalidRounds, 6); assert.equal(invalidReads, 0);
+      assert.equal(nativeWorkspace.rows.length, 0);
+      checks.push('真实八查询反例可在原六次预算内纠正，非法查询不执行且持续错误有界结束');
+    }
+
+    {
+      const rowWorkspace: FusionWorkspace = { ...nativeWorkspace, state: nativeApplied.state, rows: nativeApplied.rows };
+      const target = rowWorkspace.rows[1], requirements = { zh: '蒸汽朋克画风，黄铜材质。', en: 'Steampunk art direction with brass materials.' };
+      const commands = bindFusionAgentCommands([{ type: 'patchRow', rowId: target.id, patch: { requirements } }], rowWorkspace, 65);
+      const applied = applyFusionCommands(rowWorkspace, { opId: 'engineering-style-only', baseVersion: rowWorkspace.version, commands }, sceneCatalogue);
+      const changed = applied.rows[1];
+      assert.equal(changed.version, target.version + 1); assert.deepEqual(changed.design, { ...target.design, requirements });
+      assert.deepEqual(changed.source, target.source); assert.deepEqual(changed.category, target.category); assert.deepEqual(changed.personality, target.personality);
+      assert.deepEqual(applied.rows.filter(row => row.id !== target.id), rowWorkspace.rows.filter(row => row.id !== target.id));
+      assert.deepEqual(applied.state.settings, rowWorkspace.state.settings);
+      assert.match(changed.catalogueSnapshot!.body.zh, /蒸汽朋克/); assert.match(changed.catalogueSnapshot!.body.en, /Steampunk/);
+      const afterStyle: FusionWorkspace = { ...rowWorkspace, rows: applied.rows };
+      const reroll = bindFusionAgentCommands([{ type: 'changeRow', rowId: target.id }], afterStyle, 68);
+      const rerolled = applyFusionCommands(afterStyle, { opId: 'engineering-style-reroll', baseVersion: afterStyle.version, commands: reroll }, sceneCatalogue);
+      assert.deepEqual(rerolled.rows[1].design?.requirements, requirements);
+      assert.deepEqual(rerolled.rows.filter(row => row.id !== target.id), applied.rows.filter(row => row.id !== target.id));
+      assert.deepEqual(rerolled.state.settings, applied.state.settings);
+      assert.throws(() => bindFusionAgentCommands([{ type: 'patchRow', rowId: target.id, patch: { advanced: true } }], rowWorkspace, 66));
+      assert.throws(() => bindFusionAgentCommands([{ type: 'patchRow', rowId: 'outside-document', patch: { requirements } }], rowWorkspace, 67));
+      checks.push('助手仅开放单条中英文画风快照修改，保母体身体其它行和全局设置，拒绝越界字段与行');
+    }
 
     const originalCatalogue = builtinCatalogue();
     assert.deepEqual(originalCatalogue, builtinCatalogue());

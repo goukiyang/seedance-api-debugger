@@ -225,7 +225,8 @@ export function applyFusionCommands(current: FusionDocument, request: FusionOper
         compare(stale, ['rows', row.id], row.version, command.expectedVersion !== undefined, command.expectedVersion);
         const { requirements, ...patch } = command.patch;
         if (requirements && !row.design) throw new FusionError('旧结果没有可修改的要求快照。');
-        const changed = refreshRowSnapshot({ ...row, ...patch, ...(requirements && row.design ? { design: { ...row.design, requirements } } : {}) });
+        const snapshotSettings = requirements && row.catalogueSnapshot?.settings ? { ...row.catalogueSnapshot.settings, requirements: requirements.zh, requirementsEn: requirements.en, requirementsEnabled: Boolean(requirements.zh || requirements.en) } : undefined;
+        const changed = refreshRowSnapshot({ ...row, ...patch, ...(requirements && row.design ? { design: { ...row.design, requirements } } : {}) }, snapshotSettings);
         next.rows = next.rows.map(item => item.id === row.id ? { ...changed, version: row.version + 1 } : item); break;
       }
       case 'changeRow': case 'reviseRow': {
