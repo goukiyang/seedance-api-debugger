@@ -2749,7 +2749,8 @@ export function GenerationComposer({
               disabled={interactionLocked || isSubmitting || inputRecoveryBusy || Boolean(inputRecoveryPair)}
               capacity={Math.max(0, seedanceReferenceMediaCapabilities(selectedModel).imageLimit - orderedReferenceInputs.length)}
               switchChoices={(videoModelChoices || []).filter(choice => choice.surface === 'ip').map(choice => ({ ...choice, disabled: choice.disabled || Boolean(modeSwitchBlocker), disabledReason: choice.disabledReason || modeSwitchBlocker || undefined }))}
-              thumbnails={workspace.assets.filter(asset => asset.type === 'image' && asset.referenceImageId).map(asset => ({ id: asset.referenceImageId!, name: asset.fileName }))}
+              thumbnails={workspace.assets.filter(asset => asset.type === 'image' && asset.referenceImageId).map(asset => ({ id: asset.referenceImageId!, name: asset.fileName,
+                thumbnailUrl: referenceLabels.find(reference => reference.contentKey === `reference_image:${asset.referenceImageId}`)?.thumbnailUrl || null }))}
               onJoin={joinCharacter} />}
             </div>
             <ReferenceStrip

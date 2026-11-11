@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, Check, Copy, Image as ImageIcon, Plus, RefreshCw, UsersRound, X } from 'lucide-react';
+import { ArrowLeft, Check, ChevronDown, Copy, Image as ImageIcon, Plus, RefreshCw, UsersRound, X } from 'lucide-react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { uploadSession } from '@/lib/http/upload-session';
 import type { CharacterAssetDTO } from '@/lib/character-assets/types';
@@ -13,6 +13,13 @@ type CharacterForm = {
   name: string; assetId: string; groupId: string; projectName: string; notes: string;
   thumbnailReferenceImageId: string; revision?: number;
 };
+function CharacterThumbnail({ src, emptyLabel = '未设置缩略图' }: { src: string | null | undefined; emptyLabel?: string }) {
+  const [failedSource, setFailedSource] = useState<string | null>(null);
+  return src && failedSource !== src
+    ? <img src={src} alt="" loading="lazy" onError={() => setFailedSource(src)} />
+    : <span className="character-assets-image-placeholder"><ImageIcon size={24} aria-hidden="true" /><span>{src ? '缩略图暂不可用' : emptyLabel}</span></span>;
+}
+
 const emptyForm = (): CharacterForm => ({ name: '', assetId: '', groupId: '', projectName: '', notes: '', thumbnailReferenceImageId: '' });
 const formFor = (asset: CharacterAssetDTO): CharacterForm => ({ name: asset.name, assetId: asset.assetId,
   groupId: asset.groupId || '', projectName: asset.projectName || '', notes: asset.notes || '',
@@ -66,7 +73,7 @@ type Props = {
   capacity: number;
   isIp: boolean;
   switchChoices: Array<{ id: string; label: string; disabled?: boolean; disabledReason?: string }>;
-  thumbnails: Array<{ id: string; name: string }>;
+  thumbnails: Array<{ id: string; name: string; thumbnailUrl: string | null }>;
   onJoin: (asset: CharacterAssetDTO, targetChoice?: string) => void;
 };
 
@@ -145,9 +152,12 @@ export function CharacterAssetPanel({ ownerId, directory, selectedIds, disabled,
   const items = directory.assets.filter(asset => `${asset.name} ${asset.assetId}`.toLowerCase().includes(query.trim().toLowerCase()));
   const activeChoice = switchChoices.find(choice => choice.id === targetChoice);
   const currentRecord = directory.assets.find(asset => asset.id === editing);
+  const thumbnailOptions = form.thumbnailReferenceImageId && !thumbnails.some(item => item.id === form.thumbnailReferenceImageId)
+    ? [{ id: form.thumbnailReferenceImageId, name: '当前缩略图', thumbnailUrl: currentRecord?.thumbnailReferenceImageId === form.thumbnailReferenceImageId ? currentRecord.thumbnailUrl : null }, ...thumbnails]
+    : thumbnails;
   return <>
     <button type="button" ref={triggerRef} className="character-assets-trigger" aria-haspopup="dialog" aria-expanded={open}
-      disabled={!ownerId} onClick={() => { setOpen(current => !current); if (!open) void directory.refresh(); }}><UsersRound size={15} />角色资产</button>
+      disabled={!ownerId} onClick={() => { setOpen(current => !current); if (!open) void directory.refresh(); }}><UsersRound size={15} />角色资产<ChevronDown size={12} aria-hidden="true" /></button>
     {open && createPortal(<div ref={panelRef} className="character-assets-panel" role="dialog" aria-label="角色资产" tabIndex={-1}
       style={{ left: position.left, top: position.top, maxHeight: position.maxHeight }}>
       <header><div>{editing && <button type="button" className="btn-icon" aria-label="返回角色列表" disabled={busy} onClick={() => setEditing(null)}><ArrowLeft size={16} /></button>}
@@ -156,10 +166,22 @@ export function CharacterAssetPanel({ ownerId, directory, selectedIds, disabled,
       {editing ? <form onSubmit={event => { event.preventDefault(); void save(); }} className="character-assets-form">
         <label>角色名称<input value={form.name} maxLength={120} onChange={event => setForm(current => ({ ...current, name: event.target.value }))} required /></label>
         <label>Asset ID<input value={form.assetId} maxLength={264} onChange={event => setForm(current => ({ ...current, assetId: event.target.value }))} placeholder="asset-… 或 asset://asset-…" required /></label>
-        <label>缩略图<select value={form.thumbnailReferenceImageId} onChange={event => setForm(current => ({ ...current, thumbnailReferenceImageId: event.target.value }))}>
-          <option value="">无缩略图</option>{form.thumbnailReferenceImageId && !thumbnails.some(item => item.id === form.thumbnailReferenceImageId)
-            && <option value={form.thumbnailReferenceImageId}>保留当前缩略图</option>}
-          {thumbnails.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select><small>可选本次素材中的站内图片，仅作识别封面。</small></label>
+        <fieldset className="character-assets-thumbnail-picker" disabled={busy}>
+          <legend>缩略图</legend>
+          <div className="character-assets-thumbnail-options">
+            <button type="button" className="character-assets-thumbnail-option" aria-pressed={!form.thumbnailReferenceImageId}
+              onClick={() => setForm(current => ({ ...current, thumbnailReferenceImageId: '' }))}>
+              <span className="character-assets-image"><CharacterThumbnail src={null} emptyLabel="无缩略图" /></span><span>不设置</span>
+            </button>
+            {thumbnailOptions.map(item => <button key={item.id} type="button" className="character-assets-thumbnail-option"
+              aria-pressed={form.thumbnailReferenceImageId === item.id} aria-label={`选择${item.name}作为缩略图`}
+              onClick={() => setForm(current => ({ ...current, thumbnailReferenceImageId: item.id }))}>
+              <span className="character-assets-image"><CharacterThumbnail key={item.id} src={item.thumbnailUrl} emptyLabel="暂无缩略图" /></span>
+              <span>{item.name}</span>{form.thumbnailReferenceImageId === item.id && <Check className="character-assets-selected-check" size={15} aria-hidden="true" />}
+            </button>)}
+          </div>
+          <small>{thumbnails.length ? '选择本次素材中的站内图片，仅作识别封面。' : '可先将有权使用的站内图片加入本次素材，再按图选择封面。'}</small>
+        </fieldset>
         <details><summary>分组、项目与备注</summary><label>Group ID<input value={form.groupId} maxLength={264} onChange={event => setForm(current => ({ ...current, groupId: event.target.value }))} /></label>
           <label>Ark ProjectName<input value={form.projectName} maxLength={120} onChange={event => setForm(current => ({ ...current, projectName: event.target.value }))} placeholder="未知可留空" /></label>
           <label>备注<textarea value={form.notes} maxLength={2000} onChange={event => setForm(current => ({ ...current, notes: event.target.value }))} rows={3} /></label></details>
@@ -176,16 +198,29 @@ export function CharacterAssetPanel({ ownerId, directory, selectedIds, disabled,
         {notice && <p className="character-assets-notice" role="status">{notice}</p>}
         {!directory.ready && directory.loading ? <p className="character-assets-empty">正在读取角色目录…</p> : !directory.ready ? <p className="character-assets-empty">目录尚未读取成功，请刷新重试。</p> : !items.length ? <p className="character-assets-empty">{query ? '没有匹配的角色' : '登记已有 Asset ID，之后可直接加入本次。'}</p> : <ul className="character-assets-list">{items.map(asset => {
           const selected = selectedIds.includes(asset.id);
-          return <li key={asset.id}><div className="character-assets-row"><div className="character-assets-avatar">{asset.thumbnailUrl ? <img src={asset.thumbnailUrl} alt="" /> : <ImageIcon size={22} />}</div>
-            <div className="character-assets-name"><strong>{asset.name}</strong><small>{asset.deletedAt ? '已删除' : !asset.enabled ? '已停用' : '未核验'}</small></div>
-            {asset.deletedAt ? <button type="button" className="btn-secondary" disabled={busy} onClick={() => void mutate(`/${encodeURIComponent(asset.id)}`, 'PATCH', { revision: asset.revision, restore: true }, '记录已恢复，请重新选择所需版本')}>恢复</button>
-              : <button type="button" className="btn-secondary" disabled={disabled || !asset.enabled || (!selected && capacity <= 0) || (selected && isIp) || !isIp && (!activeChoice || activeChoice.disabled)}
-                title={!selected && capacity <= 0 ? '图片与角色已达到当前型号参考上限' : !isIp && !activeChoice ? '先明确选择 IP 型号' : activeChoice?.disabledReason}
-                onClick={() => { onJoin(asset, isIp ? undefined : targetChoice); if (isIp) setOpen(false); }}>{selected && isIp ? <><Check size={13} />已加入</> : isIp ? '加入本次' : '切换 IP 线路并使用'}</button>}
-          </div><details className="character-assets-meta"><summary>详情与管理</summary><div className="character-assets-id"><code>{asset.assetId}</code><button type="button" className="btn-icon" aria-label={`复制 ${asset.name} 的 Asset ID`} onClick={() => { void navigator.clipboard.writeText(asset.assetId).then(() => setNotice('Asset ID 已复制'), () => setError('复制失败，请手动选择 ID 复制。')); }}><Copy size={13} /></button></div>
-            <small>上游状态未核验{asset.groupId ? ` · ${asset.groupId}` : ''}{asset.projectName ? ` · ${asset.projectName}` : ''}</small>{asset.notes && <p>{asset.notes}</p>}
-            {!asset.deletedAt && <div className="character-assets-management"><button type="button" disabled={busy} onClick={() => beginEdit(asset)}>编辑</button><button type="button" disabled={busy} onClick={() => void mutate(`/${encodeURIComponent(asset.id)}`, 'PATCH', { revision: asset.revision, enabled: !asset.enabled }, asset.enabled ? '记录已停用' : '记录已启用')}>{asset.enabled ? '停用' : '启用'}</button>
-              <button type="button" disabled={busy} onClick={() => void mutate(`/${encodeURIComponent(asset.id)}`, 'DELETE', { revision: asset.revision }, '记录已删除，可在列表中恢复')}>删除记录</button></div>}</details></li>;
+          const joinDisabled = busy || disabled || Boolean(asset.deletedAt) || !asset.enabled || (!selected && capacity <= 0)
+            || (selected && isIp) || !isIp && (!activeChoice || activeChoice.disabled);
+          const joinLabel = asset.deletedAt ? '已删除' : !asset.enabled ? '已停用' : selected && isIp ? '已加入' : isIp ? '加入本次' : '切换 IP 线路并使用';
+          const joinReason = asset.deletedAt ? '恢复记录后再选择' : !asset.enabled ? '启用记录后再选择'
+            : !selected && capacity <= 0 ? '图片与角色已达到当前型号参考上限' : !isIp && !activeChoice ? '先明确选择 IP 型号' : activeChoice?.disabledReason;
+          return <li key={asset.id}>
+            <button type="button" className="character-assets-choice" aria-pressed={selected} aria-label={`${asset.name}：${joinLabel}`}
+              disabled={joinDisabled} title={joinReason} onClick={() => { onJoin(asset, isIp ? undefined : targetChoice); if (isIp) setOpen(false); }}>
+              <span className="character-assets-image"><CharacterThumbnail key={asset.id} src={asset.thumbnailUrl} />
+                {selected && <span className="character-assets-selected-check"><Check size={15} aria-hidden="true" /></span>}
+              </span>
+              <strong>{asset.name}</strong><span className="character-assets-choice-action">{joinLabel}</span>
+            </button>
+            {!asset.deletedAt && <button type="button" className="character-assets-cover-action" disabled={busy} onClick={() => beginEdit(asset)}>{asset.thumbnailUrl ? '更换缩略图' : '设置缩略图'}</button>}
+            <details className="character-assets-meta"><summary>管理</summary><div className="character-assets-id"><code>{asset.assetId}</code><button type="button" className="btn-icon" aria-label={`复制 ${asset.name} 的 Asset ID`} onClick={() => { void navigator.clipboard.writeText(asset.assetId).then(() => setNotice('Asset ID 已复制'), () => setError('复制失败，请手动选择 ID 复制。')); }}><Copy size={13} /></button></div>
+              <small>上游状态未核验{asset.groupId ? ` · ${asset.groupId}` : ''}{asset.projectName ? ` · ${asset.projectName}` : ''}</small>{asset.notes && <p>{asset.notes}</p>}
+              <div className="character-assets-management">{asset.deletedAt
+                ? <button type="button" disabled={busy} onClick={() => void mutate(`/${encodeURIComponent(asset.id)}`, 'PATCH', { revision: asset.revision, restore: true }, '记录已恢复，请重新选择所需版本')}>恢复记录</button>
+                : <><button type="button" disabled={busy} onClick={() => beginEdit(asset)}>编辑</button><button type="button" disabled={busy} onClick={() => void mutate(`/${encodeURIComponent(asset.id)}`, 'PATCH', { revision: asset.revision, enabled: !asset.enabled }, asset.enabled ? '记录已停用' : '记录已启用')}>{asset.enabled ? '停用' : '启用'}</button>
+                  <button type="button" disabled={busy} onClick={() => void mutate(`/${encodeURIComponent(asset.id)}`, 'DELETE', { revision: asset.revision }, '记录已删除，可在列表中恢复')}>删除记录</button></>}
+              </div>
+            </details>
+          </li>;
         })}</ul>}
       </>}
     </div>, document.body)}
