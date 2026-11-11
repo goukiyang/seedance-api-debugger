@@ -597,3 +597,11 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 
 [原单UX13](../../tasks/todo/2026-11-08-character-fusion.md#ux13-实际交付与发布收口)；[私有发布摘要](2026-11-08-character-fusion-prototype/implementation/ux13/release-summary.json)绑定v0.143.0/b8e9c6a04/-ijST2R-fJuDZQZV-9Ccp，保源码、构建、原生/关联复用与当前计价、公网及健康证据入口。`implementation/ux13/deploy/`沿旧成功控制源做本次输入绑定，未修改发布引擎；未下载环境、DB或用户媒体，不提交私有控制材料。多选/辅助母体/旧卡片与自定义卡片/双语/保存恢复的实际效果仍待用户手验。
 <!-- /FUSION-UX13-MATERIALS-20261110 -->
+
+<!-- FUSION-UX14-PLAN-MATERIALS-20261111 -->
+### 角色融合 UX14：词库与 LLM 控制规划（2026-11-11）
+
+- 决策、现状证据、风险及工作包统一见[原工单 UX14](../../tasks/todo/2026-11-08-character-fusion.md#fusion-ux14-catalog-agent-plan)，本索引不另存方案副本。
+- 沿用 [UX09 工作台示意](2026-11-08-character-fusion-prototype/implementation/ux09/workbench-overview-v2.png)与[旧卡片层级示意](2026-11-08-character-fusion-prototype/implementation/ux05/character-fusion-hierarchy-preview-v3.png)，保护原卡片和既有流程；它们不是本轮新增页面或聊天交互的实测/批准证据。
+- [UX13 发布摘要](2026-11-08-character-fusion-prototype/implementation/ux13/release-summary.json)只作已有版本交付证据。开源官方文档/manifest 链接及未验证的依赖、模型协议边界见原单 §6；本轮没有新截图、模型样本或发布证据。
+<!-- /FUSION-UX14-PLAN-MATERIALS-20261111 -->
