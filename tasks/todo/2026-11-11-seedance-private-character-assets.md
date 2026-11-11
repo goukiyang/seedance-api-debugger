@@ -215,3 +215,27 @@
 | `src/app/api/codex/config/route.ts`、`src/lib/release.ts`、`package.json`/lock | 描述新输入合同、真实v0.144.0版本与用户更新摘要。 |
 
 发布专用脚本及完整日志在第10节固定私有stage与本地资料`release/`下；不把生产配置、数据库备份、token或原片整包提交到Git。
+
+
+<!-- ARK-CHARACTER-ASSET01-THUMBNAIL12-20261111 -->
+## 12. 下拉按角色缩略图直接选用（2026-11-11）
+
+用户追加明确要求：以后在下拉中按角色缩略图直接选择。本轮只修「角色资产」面板与其缩略图选项映射，业务基线为已部署 v0.144.0 的后继记录提交 `cf1a3bd8a`。主控接续发布 v0.144.1；不改 API、schema、CAS、计费、生成输入或发布脚本，不新增收费调用、AK/SK 或供应商素材查询。
+
+### 12.1 本次实现与来源
+
+- 默认展开紧凑角色缩略图网格，桌面三列、手机两列；点击原生封面按钮直接调用原 `onJoin`，选中显示勾与“已加入”，容量、停用/删除和在途锁仍拦。普通页仍须显式选 IP 型号，卡片明确显示“切换 IP 线路并使用”，不静默换型号/线路。
+- 搜索、新增及刷新保持；每卡的编辑、停用/启用、软删除/恢复、复制 ID 与上游未核验说明保留在次级管理区。无图展示“未设置缩略图”及「设置缩略图」，有图可「更换缩略图」；图片加载失败只回到“缩略图暂不可用”占位，不回退为原图或生成视频帧。
+- 新增/编辑表单中的文字缩略图 select 改为站内缩略图按钮网格，支持选择、勾选反馈和“不设置”；只改变表单的 `thumbnailReferenceImageId`，仍由原显式保存和 CAS 生效，失败保输入。当前缩略图不在本次素材中时保留原选项，使用目录 DTO 已授权的 `thumbnailUrl`，无法读取时显示占位。
+- 源码核对确认 `GeneratePageClient` 仅挂载共用 composer，实际 `useWorkspace` 位于 `GenerationComposer`。本次复用既有 `referenceLabels` 中已使用的受保护 thumbnail URL，按 `reference_image:<id>` 的真实 contentKey 匹配传给面板，不按图号猜图，不新造 URL。因此不需修改 GeneratePageClient，也没有把 `asset://` 作为图片链接。
+
+仅三个业务文件：`src/components/CharacterAssetPanel.tsx`、`GenerationComposer.tsx`、`character-assets.css`。原定位/关闭层、保存草稿和手机 sheet 保留；DOM 使用原生按钮、fieldset/legend、aria-pressed 与独立的管理 details，没有嵌套按钮或选择即保存。
+
+### 12.2 检查与手验边界
+
+两份改动 TSX 根及其导入类型的窄 `tsc` 检查通过，复用此前匹配 schema 的独立 generated client；首次窄配置漏载 `next-env.d.ts` 引起 CSS 声明缺失，补齐检查配置后通过，未改业务类型或依赖。两个改动 TSX 文件的直接 ESLint exit 0（5 条既有 Hook 依赖提醒及 1 条原生 `<img>` 建议，无错误），PostCSS 解析及 `git diff --check` 通过；没有重跑与本改动无关的 18/23 组模拟、浏览器、截图或收费生成。
+
+源码/DOM语义已自行核对：选角色只沿原 join，选缩略图只改未保存字段，管理按钮独立，失败图片不再试读原图，停用/删除卡仍可管理恢复。待用户手验：下拉卡片大小/手机密度、鼠标与键盘选图、无图/图片失败占位、设置/更换缩略图保存与冲突、普通页明确切 IP、已加入及容量/在途锁反馈。
+
+当前仍未取得火山资产本身的原图；推理 Key 不支持管理 GetAsset 查询，不新增 AK、不抓供应商图，也不把已生成视频帧冒作资产原图。无缩略图的记录可用有权的站内图片设置识别封面，不影响已有私域引用生成。本轮未新增任务外发现。
+<!-- /ARK-CHARACTER-ASSET01-THUMBNAIL12-20261111 -->
