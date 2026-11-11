@@ -597,3 +597,7 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 <!-- FUSION-UX11-MATERIALS-20261110 -->
 - 2026-11-10 角色融合UX11类目/中英/手选与抽卡统一发布：[安全汇总](2026-11-08-character-fusion-prototype/implementation/ux11/release-summary.json)，v0.142.0/08a49383b，完整工程与公网/服务健康有证，功能待用户手验。原32项审计及实施状态沿[原角色融合单UX10–UX11](../../tasks/todo/2026-11-08-character-fusion.md#ux10-类目与选项关系审计2026-11-10)；原参考图、UX08/UX09方案继续复用。无环境、数据库、私有价格行、用户媒体或凭据导出。
 <!-- /FUSION-UX11-MATERIALS-20261110 -->
+
+<!-- FUSION-UX15-MATERIALS-20261111 -->
+- 2026-11-11 角色融合 UX15 扩展词库与 LLM 控制：原[工单收口](../../tasks/todo/2026-11-08-character-fusion.md#fusion-ux15-release)、[发布摘要](2026-11-08-character-fusion-prototype/implementation/ux15/release-summary.json)、[33文件差量](2026-11-08-character-fusion-prototype/implementation/ux15/fusion-catalog-agent-v0.145.0.diff)；原工程/发布元证保正式根私有 `implementation/ux15/attempt02/evidence/`。v0.145.0 已部署，手验及真实模型质量待验；不含凭据、DB原件或媒体。
+<!-- /FUSION-UX15-MATERIALS-20261111 -->

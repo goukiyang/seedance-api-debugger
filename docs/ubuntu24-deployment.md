@@ -546,3 +546,13 @@ attempt01缺baseline.build，创建候选/Next/切服务前退出；失败原证
 
 唯一真实4秒IP任务已成功、本地/公开保存/原片下载及实际20点/冻结0核对；没有浏览器验收。详[原单§10](../tasks/todo/2026-11-11-seedance-private-character-assets.md#10-保护发布与一次实际任务闭环)及[发布摘要](materials/2026-11-11-seedance-private-character-assets/release-summary.json)，已部署，待用户手动验收。
 <!-- /ARK-CHARACTER-ASSET01-DEPLOY-20261111 -->
+
+<!-- FUSION-UX15-DEPLOY-20261111 -->
+### 2026-11-11 角色融合 UX15 v0.145.0
+
+已部署，待用户手动验收。主源 `b2a4afa63c6c71550287f5a30594b38dfdd0e634` / BUILD `uWJv_QJSKrQaWse2KqXTx`，继承最新 v0.144.2 / `541334e9e2050cdd3cafca3e9489f9c452415efc`；兼容回退 `b0348ffc56734fd97b625287fe0ee147ef427fcf` / v0.145.0+points-pricing-guard.1 / BUILD `aMXonkkV_rnXcd8s9oXHF`，两版均本源完整类型/Next构建通过，9门关闭、reader保留，启动守卫通过。
+
+固定 stage `/data/video-api-debugger/release-staging/fusion-catalog-agent-ux15-20261111/attempt02`；`2026-11-11T12:16:43Z` 公网及54项资源、7服务/4 timer、7匿名401通过，12:17:28Z内外 health200。只新增5表/13索引/18DDL，旧 schema/行保持；一致备份和配置在该私有stage，未还原数据库/改价格/私有策略。程序恢复沿同stage `program-recovery.sh release-input.json`，须先核无后继发布及实际所有者；仅切已构建兼容程序，不删表、不回数据，未实切演练。旧源/旧回退不是新格式下的任意恢复目标。
+
+工程11组、闭环风险、具体证据及手验边界沿[原工单](../tasks/todo/2026-11-08-character-fusion.md#fusion-ux15-release)和[发布摘要](materials/2026-11-08-character-fusion-prototype/implementation/ux15/release-summary.json)。本次无浏览器、真实模型/收费请求、媒体生成或自动功能验收。
+<!-- /FUSION-UX15-DEPLOY-20261111 -->

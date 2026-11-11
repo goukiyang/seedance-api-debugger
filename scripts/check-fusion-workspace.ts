@@ -7,8 +7,8 @@ import { randomUUID } from 'node:crypto';
 import { defaults, parseSettings, generateBatch, textFor, csvFor, validateGeneration } from '../src/lib/character-fusion/engine';
 import { builtinCatalogue, hydrateCatalogueSettings } from '../src/lib/character-fusion/catalogue';
 import type { FusionCatalogue, FusionCategory, FusionTerm } from '../src/lib/character-fusion/catalogue-model';
-import { type FusionCommand } from '../src/lib/character-fusion/actions';
-import { bindFusionAgentCommands, parseFusionAgentProposal, proposeFusionAgent } from '../src/lib/character-fusion/agent-adapter.server';
+import { applyFusionCommands, type FusionCommand, type FusionWorkspace } from '../src/lib/character-fusion/actions';
+import { bindFusionAgentCommands, fusionAgentScene, parseFusionAgentProposal, proposeFusionAgent } from '../src/lib/character-fusion/agent-adapter.server';
 import { settingsChanges, mergeWorkspaceState } from '../src/app/tools/character-fusion/workspace-client';
 import { emptyWorkspaceState } from '../src/lib/character-fusion/actions';
 
@@ -29,6 +29,23 @@ async function main() {
     assert.equal(oldRows.length, legacy.count);
     assert(textFor(oldRows[0], legacy).includes('巨掌'));
     checks.push('旧格式配方、原多选及固定种子真实提示词引擎');
+
+    const nativeWorkspace: FusionWorkspace = { id: 'engineering-native-scene', name: '原生卡片场景', version: 1,
+      archived: false, updatedAt: new Date(0).toISOString(), state: emptyWorkspaceState(), rows: [] };
+    const nativeScene = fusionAgentScene(nativeWorkspace);
+    assert.equal(nativeScene.settings.customCards.length, 0);
+    for (const id of ['dimension:source', 'dimension:concept', 'trait:primaryPersonality']) assert(nativeScene.cardControls.some(card => card.id === id && card.joined));
+    const exaggerationControl = nativeScene.cardControls.find(card => card.id === 'trait:exaggeration');
+    assert(exaggerationControl?.multi && !exaggerationControl.joined);
+    assert.deepEqual(exaggerationControl.selectionPath, ['catalogue', 'traits', 'exaggeration']);
+    const requested = bindFusionAgentCommands([{ type: 'patchSettings', changes: [{ path: ['count'], value: 4 }, { path: ['lang'], value: 'both' }] }, { type: 'generate', mode: 'replace' }], nativeWorkspace, 61);
+    const nativeApplied = applyFusionCommands(nativeWorkspace, { opId: 'engineering-native-language', baseVersion: 1, commands: requested }, builtinCatalogue());
+    assert.equal(nativeApplied.state.settings.count, 4); assert.equal(nativeApplied.state.settings.lang, 'both'); assert.equal(nativeApplied.rows.length, 4);
+    for (const row of nativeApplied.rows) { const prompt = textFor(row, nativeApplied.state.settings); assert.match(prompt, /[a-zA-Z]{4,}/); assert.match(prompt, /[\u4e00-\u9fff]/); }
+    const invalidLanguage = bindFusionAgentCommands([{ type: 'patchSettings', changes: [{ path: ['lang'], value: 'zh-en' }] }], nativeWorkspace, 62);
+    assert.throws(() => applyFusionCommands(nativeWorkspace, { opId: 'engineering-invalid-language', baseVersion: 1, commands: invalidLanguage }, builtinCatalogue()), /配方设置无效/);
+    assert.equal(nativeWorkspace.state.settings.lang, 'zh'); assert.equal(nativeWorkspace.rows.length, 0);
+    checks.push('原生已加入卡片场景、属性多选控制路径、4条双语实际生成及错误语言枚举原子拒绝');
 
     const originalCatalogue = builtinCatalogue();
     assert.deepEqual(originalCatalogue, builtinCatalogue());
