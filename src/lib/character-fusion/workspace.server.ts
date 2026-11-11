@@ -3,7 +3,7 @@ import type { CharacterFusionWorkspace, CharacterFusionResult, CharacterFusionOp
 import { prisma, retrySqliteBusy } from '@/lib/prisma';
 import { builtinCatalogue, hydrateCatalogueSettings } from './catalogue';
 import { parseFusionSettings } from './actions';
-import { settingsForRow, type FusionSettings } from './engine';
+import { settingsForRow, textFor, type FusionSettings } from './engine';
 import type { FusionRecipe } from './recipes';
 import { assertCharacterFusionWritesEnabled } from './build-mode';
 import { FusionError, isRecord, parseOperationId, parseFusionOperationRequest, parseWorkspaceState, emptyWorkspaceState, applyFusionCommands, fusionDocumentDelta, sameFusionValue, type FusionWorkspace, type FusionWorkspaceRow, type FusionUndo, type FusionWorkspaceState } from './actions';
@@ -62,7 +62,8 @@ export async function getWorkspace(actor: FusionActor, id: string, query: Worksp
     const result = await tx.characterFusionResult.findUnique({ where: { workspace_id_row_id: { workspace_id: id, row_id: query.rowId } } });
     if (!result) throw new FusionError('目标结果不存在。', 404, 'FUSION_NOT_FOUND');
     const resolved = await resolveWorkspaceRow(tx, actor, id, resultDto(result));
-    return { ...page, rowSettings: { rowId: result.row_id, settings: settingsForRow(resolved.catalogueSnapshot?.settings || page.workspace.state.settings, resolved) } }; }));
+    const settings = settingsForRow(resolved.catalogueSnapshot?.settings || page.workspace.state.settings, resolved);
+    return { ...page, rowSettings: { rowId: result.row_id, version: result.version, settings, body: { zh: textFor(resolved, { ...settings, lang: 'zh' }), en: textFor(resolved, { ...settings, lang: 'en' }) } } }; }));
 }
 export async function listFusionWorkspaces(actor: FusionActor, query: { archived?: boolean; q?: string; cursor?: string; limit?: number } = {}) {
   await requireActiveFusionUser(prisma, actor);
