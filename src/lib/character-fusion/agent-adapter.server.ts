@@ -205,7 +205,7 @@ export async function proposeFusionAgent(options: {
       proposal = parseFusionAgentProposal(content);
       if (!proposal.reads.length && proposal.commands.length) {
         const commands = bindFusionAgentCommands(proposal.commands, options.workspace, 0);
-        for (const command of commands) if (command.type === 'patchSettings') for (const change of command.changes) {
+        for (const command of commands) if (command.type === 'patchSettings') for (const change of command.changes || []) {
           const path = change.path;
           if (path[0] !== 'catalogue' || path[1] !== 'dynamic' || path[2] !== 'selections') continue;
           const lists = path.length === 4 && isRecord(change.value) ? ['values', 'excluded', 'must', 'candidates'].map(key => (change.value as Record<string, unknown>)[key])
