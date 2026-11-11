@@ -1,11 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '支持私域角色资产',
+  title: '按缩略图选择角色',
   outline: [
-    '视频素材区可管理角色资产，支持新增、编辑和删除恢复',
-    '选择已入库角色即可作为参考素材，Asset ID 随时可换',
-    '角色与普通图片共用图片编号，保留提示词和生成记录'
+    '打开角色下拉，点缩略图即可加入本次',
+    '角色封面可按图设置或更换，新增与管理仍可就地完成',
+    '保留原有图片编号、线路选择和生成记录'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
