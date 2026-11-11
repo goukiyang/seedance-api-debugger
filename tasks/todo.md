@@ -1339,3 +1339,11 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 <!-- FUSION-UX15-EXEC-TODO-20261111 -->
 - [x] 角色融合 UX15 CATALOG01/AGENT01 已实现并保护部署 **v0.145.0**（代码 b2a4afa63，基线 v0.144.2）。原卡片操作保留，扩库/多选/LLM共用执行并进入真实提示词；11组隔离工程检查、双候选完整类型/构建、服务/资源/鉴权及纯新增5表保护完成，代码/回退分支已推送。闭环风险复核与原证见[原单收口](todo/2026-11-08-character-fusion.md#fusion-ux15-release)；**待用户手动验收**A01–A14/真实模型质量，不冒功能通过。
 <!-- /FUSION-UX15-EXEC-TODO-20261111 -->
+
+<!-- FUSION-UX16-LIVE-TODO-20261111 -->
+- [x] 角色融合UX16：已修复真实LLM暴露的枚举/卡片场景/上下文/主题大类及单条修改问题，保护部署 **v0.145.3**（ffafd6ed1）。当前账号gpt-6.1-sol真实验收通过双语抽卡、多选入每条结果、保留/单条主题、LLM草稿经预览确认入库再用于新结果，以及刷新/双视图一致性；14组工程与完整构建/健康通过。原证及未覆盖范围见[原单UX16](todo/2026-11-08-character-fusion.md#fusion-ux16-live-acceptance)。一次未复现文档切换另记待核；触屏/其它型号未冒验收。
+<!-- /FUSION-UX16-LIVE-TODO-20261111 -->
+
+<!-- FUSION-UX17-PERSISTENT-DOCUMENTS-TODO-20261111 -->
+- [x] 角色融合UX17：常驻输入、新建/继续、跨文档草稿与结果隔离及刷新已按用户本轮要求真实测通；原话“大只佬，马里奥身型”由gpt-6.1-sol自动落实六项身型卡片，8条中英结果逐条验证，继续只改第2条且其余7条/身体/全局设置保持。已部署v0.145.5 / d339d3d3，15组工程及构建/健康通过；仅本轮指定流程实测通过，其它模型/实机与原历史清单仍按手验边界。见[原单UX17](todo/2026-11-08-character-fusion.md#fusion-ux17-persistent-documents)与[实测8方案](https://sd2.youdooart.com/tools/character-fusion?doc=cmwcdio7w005kba2ooordwlpb)。
+<!-- /FUSION-UX17-PERSISTENT-DOCUMENTS-TODO-20261111 -->

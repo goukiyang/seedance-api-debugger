@@ -601,3 +601,19 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 <!-- FUSION-UX15-MATERIALS-20261111 -->
 - 2026-11-11 角色融合 UX15 扩展词库与 LLM 控制：原[工单收口](../../tasks/todo/2026-11-08-character-fusion.md#fusion-ux15-release)、[发布摘要](2026-11-08-character-fusion-prototype/implementation/ux15/release-summary.json)、[33文件差量](2026-11-08-character-fusion-prototype/implementation/ux15/fusion-catalog-agent-v0.145.0.diff)；原工程/发布元证保正式根私有 `implementation/ux15/attempt02/evidence/`。v0.145.0 已部署，手验及真实模型质量待验；不含凭据、DB原件或媒体。
 <!-- /FUSION-UX15-MATERIALS-20261111 -->
+
+<!-- FUSION-UX16-MATERIALS-20261111 -->
+## 角色融合 UX16 真实 LLM 验收（2026-11-11）
+
+当前账号gpt-6.1-sol的双语抽卡、多选、保留/单条调整、LLM提词→本人预览确认→实际新词生成及刷新/双视图核心流程已通过；修复已部署v0.145.3。统一事实见[原单UX16](../../tasks/todo/2026-11-08-character-fusion.md#fusion-ux16-live-acceptance)，[验收文档](https://sd2.youdooart.com/tools/character-fusion?doc=cmwc3p6330018f1ikt6b73jh9)。
+
+[1451真实回合](2026-11-08-character-fusion-prototype/implementation/ux16/live-1451-cases.private.json)、[1453局部修改](2026-11-08-character-fusion-prototype/implementation/ux16/theme-live-1453.private.json)、[LLM草稿至结果](2026-11-08-character-fusion-prototype/implementation/ux16/llm-draft-to-results-1453.private.json)、[刷新/双视图](2026-11-08-character-fusion-prototype/implementation/ux16/final-refresh-and-views.private.json)、[最终构建/部署元证](2026-11-08-character-fusion-prototype/implementation/ux16/followup02/evidence/)。均为正式根私有原证，不含凭据、数据库或媒体；未复现文档切换线索沿原单与统一发现入口。
+<!-- /FUSION-UX16-MATERIALS-20261111 -->
+
+<!-- FUSION-UX17-MATERIALS-20261111 -->
+## 角色融合 UX17 常驻窗口与自然语言实测（2026-11-11）
+
+v0.145.5 已部署；当前账号gpt-6.1-sol的原话“大只佬，马里奥身型”自动应用六项身体卡片并生成8条双语，新建/继续/跨文档/草稿/刷新/局部调整及保存中停止已按本轮要求测通。[原单与范围](../../tasks/todo/2026-11-08-character-fusion.md#fusion-ux17-persistent-documents)，[实测8方案](https://sd2.youdooart.com/tools/character-fusion?doc=cmwcdio7w005kba2ooordwlpb)。
+
+[语义逐条断言](2026-11-08-character-fusion-prototype/implementation/ux17/mario-semantic-assertions.private.json)、[继续与局部修改](2026-11-08-character-fusion-prototype/implementation/ux17/final-closure-assertions.private.json)、[最终刷新](2026-11-08-character-fusion-prototype/implementation/ux17/final-refreshed-state.private.json)、[保存中停止](2026-11-08-character-fusion-prototype/implementation/ux17/stop-during-save-proof-02.private.json)、[手机模拟常驻](2026-11-08-character-fusion-prototype/implementation/ux17/mobile-sticky-bottom.private.json)、[1454工程部署](2026-11-08-character-fusion-prototype/implementation/ux17/evidence/)、[1455工程部署](2026-11-08-character-fusion-prototype/implementation/ux17/followup01/evidence/)。原始JSON/截图仅正式根私有保存，不含凭据/数据库/媒体原件，不强制纳入Git；其它模型/实机触控未测，不能泛化。
+<!-- /FUSION-UX17-MATERIALS-20261111 -->

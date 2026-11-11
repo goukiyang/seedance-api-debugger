@@ -556,3 +556,26 @@ attempt01缺baseline.build，创建候选/Next/切服务前退出；失败原证
 
 工程11组、闭环风险、具体证据及手验边界沿[原工单](../tasks/todo/2026-11-08-character-fusion.md#fusion-ux15-release)和[发布摘要](materials/2026-11-08-character-fusion-prototype/implementation/ux15/release-summary.json)。本次无浏览器、真实模型/收费请求、媒体生成或自动功能验收。
 <!-- /FUSION-UX15-DEPLOY-20261111 -->
+
+<!-- FUSION-UX16-DEPLOY-20261111 -->
+## 角色融合 LLM 真实验收修复 v0.145.3（2026-11-11）
+
+已从实际健康adbc/v0.145.2保护发布 `ffafd6ed1d8fa8c29ad3253d1524c0fd19954930` / v0.145.3 / BUILD `SQZzOAm0j3pGyjlwLTJM7`，资产缩略图上传保留。stage：`/data/video-api-debugger/release-staging/fusion-llm-theme-ux16-20261111/attempt02`；build-resume-exit与cutover-exit均0，完整类型/Next、14组融合工程及必要native/费率检查通过，15:00:40Z公网54资源/8匿名401，15:01:23Z内外健康/7服务/4timer正常且无发布控制器。
+
+兼容guard复用 `bbbcc1f9b6a311de9ea1fa83d5d8c50525615d68` / v0.145.1+points-pricing-guard.1 / BUILD `wFBPdtkUEn_EQ74oygoGx`，证据仍在`fusion-llm-live-ux16-20261111/attempt01`；原精确9门guardBase为90fb/v0.145.1，compiled buildFiles锁保持，未把1452冒原开关对照基源。回退用本stage `program-recovery.sh release-input.json`，只回程序/配置，保持久数据与原请求，不恢复旧数据库。
+
+本批无DDL/schema/依赖/数据格式变更；三项迁移仅只读核形，价格/私有策略/持久链接不变，停旧writer与一致备份已完成。实页验收另有当前账号gpt-6.1-sol真实证据，部署元证自身functionalAcceptance=false仍保持原义；范围、失败与后续重验见[原单UX16](../tasks/todo/2026-11-08-character-fusion.md#fusion-ux16-live-acceptance)，[私有最终工程/发布元证](materials/2026-11-08-character-fusion-prototype/implementation/ux16/followup02/evidence/)。
+<!-- /FUSION-UX16-DEPLOY-20261111 -->
+
+<!-- FUSION-UX17-DEPLOY-20261111 -->
+## 角色融合常驻文档与口语体型 v0.145.4 / v0.145.5（2026-11-11）
+
+- v0.145.4：`121328db431d6cb492c30e50597bc4a0e666a1a7` / BUILD `XJhNjCBt5grBkc3DeBlIB`，16:17:19Z部署、16:18:28Z健康；stage `/data/video-api-debugger/release-staging/fusion-persistent-documents-ux17-20261111/attempt01`。
+- v0.145.5：接续该健康基线，仅助手语义指导词和版本4文件，`d339d3d345b8a6f14984e235f5673f16f02ca9c8` / BUILD `g6h9hDpP96p8vhiBFvM4-`，17:13:53Z部署、17:14:30Z内外health200；stage `/data/video-api-debugger/release-staging/fusion-mario-body-ux17-20261111/attempt01`。构建`sd2-fusion-mario-ux17-build-20261111.service`、发布`sd2-fusion-mario-ux17-release-20261111.service`均exit0/已结束，54资源、8匿名401、7服务/4timer通过。15组融合工程、完整类型/Next、必要native/linked/费率检查通过，原生证据按依赖真实字节复用。
+
+两轮无schema/DDL/依赖/数据格式变化，原迁移仅只读复核，价格和PG私有策略相等；停旧writer、一致数据库保护及配置备份已完成，无自动数据恢复。兼容guard沿原UX16证据`bbbcc1f9b6a311de9ea1fa83d5d8c50525615d68` / `wFBPdtkUEn_EQ74oygoGx`，其精确9门基源仍90fb/v1451，不冒称与最新网页同源构建。
+
+已核定程序恢复入口：1455上述stage的 `bash program-recovery.sh release-input.json`，恢复本轮核定的配置并切换到上述9门关闭的兼容guard（bbbcc1f9），保留当前生产数据/账本/素材/原操作，不还原旧数据库；健康1454产物另行保留，不冒充该脚本的实际目标；运行前须先核本轮控制器已结束和当前实际部署归属，不能覆盖后来的发布。
+
+[原单UX17真实验收](../tasks/todo/2026-11-08-character-fusion.md#fusion-ux17-persistent-documents)另证本轮指定模型/文档功能通过，部署元证的functionalAcceptance=false原义不改。[1454元证](materials/2026-11-08-character-fusion-prototype/implementation/ux17/evidence/)、[1455元证](materials/2026-11-08-character-fusion-prototype/implementation/ux17/followup01/evidence/)只复制批准的JSON，不复制DB、env或配置备份。
+<!-- /FUSION-UX17-DEPLOY-20261111 -->
