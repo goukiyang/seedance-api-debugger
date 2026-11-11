@@ -97,9 +97,12 @@ async function main() {
           rounds++;
           if (rounds === 1) return JSON.stringify({ reply: '先查询全部要求', reads: ['圆润', '矮胖', '壮硕', '大头', '短腿', '胆小', '勇敢', '职业'].map(q => ({ kind: 'catalogue', q, limit: 30 })) });
           if (rounds === 2) {
+            assert.equal(messages.length, 3);
             assert(messages.some(message => typeof message.content === 'string' && message.content.includes('proposalError')));
             return JSON.stringify({ reply: '拆开查询', reads: [{ kind: 'catalogue', q: '矮胖', limit: 30 }] });
           }
+          assert.equal(messages.length, 3);
+          assert(messages.some(message => typeof message.content === 'string' && message.content.includes('toolResults')));
           return JSON.stringify({ reply: '按原要求生成', commands: [{ type: 'generate', mode: 'replace' }] });
         }, read: async () => { reads++; return { terms: [] }; },
       });
@@ -111,6 +114,12 @@ async function main() {
         read: async () => { invalidReads++; return {}; },
       }));
       assert.equal(invalidRounds, 6); assert.equal(invalidReads, 0);
+      assert.throws(() => bindFusionAgentCommands([{ type: 'patchSettings', changes: [{ path: ['rules', 'source'], value: [{ label: '海獭', status: 'must' }] }] }], nativeWorkspace, 0), /合法大类/);
+      let ruleRounds = 0;
+      const repairedRules = await proposeFusionAgent({ workspace: nativeWorkspace, message: '使用合法动物母体', complete: async () => ++ruleRounds === 1
+        ? JSON.stringify({ reply: '错误地使用具体词', commands: [{ type: 'patchSettings', changes: [{ path: ['rules', 'source'], value: [{ label: '海獭', status: 'must' }] }] }] })
+        : JSON.stringify({ reply: '使用合法大类', commands: [{ type: 'patchSettings', changes: [{ path: ['boss', 'source'], value: '动物' }] }] }), read: async () => { throw new Error('No reads needed'); } });
+      assert.equal(ruleRounds, 2); assert.equal(repairedRules.iterations, 2);
       assert.equal(nativeWorkspace.rows.length, 0);
       checks.push('真实八查询反例可在原六次预算内纠正，非法查询不执行且持续错误有界结束');
     }

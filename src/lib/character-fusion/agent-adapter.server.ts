@@ -61,7 +61,9 @@ commands 必须符合附带的注册命令格式。不要提供opId、owner、ex
 原生属性卡的options是已核实的合法中文选项，可直接用于values，不必为这些已知选项重复查询。multi:false最多固定一项；可同时成立的多个性格拆到主性格、补充性格或反差卡。只有缺少所需选项或需要扩展词库时再分页检索，不猜新词ID。
 用户用口语或熟悉角色来描述身型时，先拆解其明确的体型意图，再查询对应的既有属性卡；高矮胖瘦、肌肉量、头身比、轮廓和四肢长度是不同属性，不能用一个接近的词条吞掉其它要求。例如矮胖与壮硕可以同时成立，大体块不等于高个子。参照角色的身型只取相关身体比例，不自动附加其服装、职业、配色或故事身份；没有指定精确比例就不自造数值。将这些共同要求落实到锁定的相关卡片后再抽卡，让母体、主题等未指定部分继续变化；词库没有参照角色的名字不妨碍使用已有属性组合。保留与本次要求无关的设置和固定要求开关，不以改摘要或只回复理解代替实际应用。
 dimensionOptions列出原卡片可选大类：id是changeRow.dimension所用的原维度ID，categoryId是目录查询类别，values是合法大类。大类不是具体词条名；例如主题灵感的梦境是concept维度的合法大类，即使其它属性也有同名词条仍可直接changeRow。目录词条的group是其所属大类，不能把具体词名当成大类。
+rules里每个label只能是dimensionOptions.values中的合法大类。海獭、企鹅等具体母体不能写进rules；使用检索返回的termId，通过catalogue.dynamic.selections[categoryId]的candidates约束候选、must安排每批必出，不能用中文具体词名冒充大类或termId。要求每套母体/职业不同时，按本批数量安排不同必出项，不能只在固定要求里写名单并让随机结果冒充已分配。
 明确的画风、材质和其它视觉要求必须进入实际提示词：整批用requirements与语义等价的requirementsEn，并启用requirementsEnabled；保留原文中未被要求修改的约束。原固定要求关闭时，不为新画风顺带启用旧的默认3D画风。画风不需要先新增词库，也不能只写进摘要。只改某条画风时先用results小页读取目标的requirements，再用patchRow仅更新该条中英文要求；不能借更换主题、职业、身体或全局设置冒充更换画风。角色定位、无职业、无道具、不强调机制等要求也须落实到相应已有卡片或实际要求，不能只在回复中承诺。
+共享固定要求只写每条都应满足的视觉约束；不要把整批人物名单、逐条职业分配、批量数量或操作说明写进每一条角色提示词。逐条差异用候选和必出设置表达。
 用户说保留结果时修改retainedIds；仅复制/导出选择修改selectedIds，两者分开。局部调整使用目标结果自己的快照，不改下一批全局设置。用户仅讨论、求建议或问可能性时commands留空；明确要求抽卡/调整/保留才提交对应命令。未知或含糊要求先解释，不能声称已应用；服务器拿到真实回执后才报告成功。
 drafts 只放待用户预览确认入库的类别或词条，格式 {kind:"category"|"term",data:{id?:UUID,categoryId?:已有或同批新类别UUID,nameZh,nameEn,descriptionZh,descriptionEn,group?:"extra",multi?:boolean}}；它们不会自动入库或共享。不要把用户原想法改成模型建议。保留用户已有中英内容。`;
 
@@ -100,6 +102,10 @@ export function bindFusionAgentCommands(input: unknown[], workspace: FusionWorks
           if (!Array.isArray(change.path) || !change.path.length || change.path.some(key => typeof key !== 'string' || ['__proto__', 'constructor', 'prototype'].includes(key))
             || change.path[0] === 'catalogue' && (change.path[1] === 'dynamic' && change.path[2] !== 'selections' || change.path.length < 3)) throw new FusionAgentError('模型不能替换目录快照或整个设置。');
           const path = change.path as string[];
+          if (path[0] === 'rules' && path.length === 2) {
+            const dimension = CONFIG.find(card => card.id === path[1]);
+            if (!dimension || !Array.isArray(change.value) || change.value.some(tag => !isRecord(tag) || !dimension.tags.includes(tag.label as never))) throw new FusionAgentError('rules.label只能是该维度合法大类；具体母体/主题请用已读取termId的动态candidates或must，不得把具体词名写入大类规则。');
+          }
           return { path, value: change.value, expected: getValue(workspace.state.settings, path) ?? null };
         }) };
       }
@@ -177,6 +183,7 @@ export async function proposeFusionAgent(options: {
     ...options.workspace.state.messages.slice(-6).map(message => ({ role: message.role, content: message.content })),
     { role: 'user', content: JSON.stringify({ currentScene: fusionAgentScene(options.workspace), request: options.message }) },
   ];
+  const initialMessageCount = messages.length;
   const reads: unknown[] = [];
   for (let iteration = 1; iteration <= FUSION_AGENT_MAX_STEPS; iteration++) {
     options.signal?.throwIfAborted();
@@ -184,19 +191,24 @@ export async function proposeFusionAgent(options: {
     const content = await options.complete(messages);
     options.signal?.throwIfAborted();
     let proposal: FusionAgentProposal;
-    try { proposal = parseFusionAgentProposal(content); }
+    try {
+      proposal = parseFusionAgentProposal(content);
+      if (!proposal.reads.length && proposal.commands.length) bindFusionAgentCommands(proposal.commands, options.workspace, 0);
+    }
     catch (error) {
       if (!(error instanceof FusionAgentError) || iteration === FUSION_AGENT_MAX_STEPS) throw error;
-      const feedback: MuskChatMessage[] = [{ role: 'assistant', content }, { role: 'user', content: JSON.stringify({ proposalError: error.message, remainingSteps: FUSION_AGENT_MAX_STEPS - iteration, instruction: '本次格式无效，未执行该提案的查询或写入。按注册格式纠正后重提，分批完成查询，保留用户原要求。' }) }];
-      assertFusionAgentContext([...messages, ...feedback]);
-      messages.push(...feedback); continue;
+      // Keep the original request and fetched facts; rejected plans are not applied state.
+      messages.splice(initialMessageCount);
+      messages.push({ role: 'user', content: JSON.stringify({ toolResults: reads, proposalError: error.message, remainingSteps: FUSION_AGENT_MAX_STEPS - iteration, instruction: '本次提案无效，未执行其中的查询或写入。按注册格式重新提案，分批完成查询，保留用户原要求。' }) });
+      continue;
     }
     if (!proposal.reads.length) return { proposal, reads, iterations: iteration, limitReached: false };
     if (iteration === FUSION_AGENT_MAX_STEPS) return { proposal: { ...proposal, commands: [], reads: [] }, reads, iterations: iteration, limitReached: true };
     const pages = [];
     for (const read of proposal.reads) { options.signal?.throwIfAborted(); pages.push({ query: read, page: await options.read(read) }); }
     reads.push(...pages);
-    messages.push({ role: 'assistant', content }, { role: 'user', content: JSON.stringify({ toolResults: pages, remainingSteps: FUSION_AGENT_MAX_STEPS - iteration }) });
+    messages.splice(initialMessageCount);
+    messages.push({ role: 'user', content: JSON.stringify({ toolResults: reads, remainingSteps: FUSION_AGENT_MAX_STEPS - iteration }) });
   }
   throw new FusionAgentError('助手操作已达上限。');
 }
