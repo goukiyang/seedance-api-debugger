@@ -37,12 +37,13 @@ export function assertVideoPromptGroupSurface(body: Record<string, unknown>) {
   const refs = parseVideoPromptGroupRefs(body.video_prompt_groups);
   if (refs.length && !VIDEO_PROMPT_GROUP_WRITES_ENABLED) throw new VideoPromptGroupError('此版本只保留提示词组历史读取，请更新后继续，原输入保留', 426, 'VIDEO_PROMPT_GROUP_READER_ONLY');
   if (refs.length && (body.video_prompt_groups_contract !== VIDEO_GROUP_CONTRACT
-    || body.creation_contract_version !== 2 || body.entry !== 'ordinary'
-    || !['seedance', 'h3'].includes(String(body.provider || 'seedance'))
+    || body.creation_contract_version !== 2
+    || !(body.entry === 'ordinary' && ['seedance', 'h3'].includes(String(body.provider || 'seedance'))
+      || body.entry === 'ip' && String(body.provider || 'volcengine_ip') === 'volcengine_ip')
     || ['canvas_references', 'canvas_document_id', 'canvas_node_id', 'multiview_generation', 'multiview_action',
       'template_studio_run_id', 'template_id', 'agent_run_id', 'roleMediaContext'].some(key => body[key] != null && body[key] !== '')
     || body.action !== undefined && body.action !== 'generate')) {
-    throw new VideoPromptGroupError('当前入口尚不能执行提示词组，请返回普通视频生成页，原输入保留', 426, 'VIDEO_PROMPT_GROUP_CONTRACT_REQUIRED');
+    throw new VideoPromptGroupError('当前入口尚不能执行提示词组，请返回视频生成页，原输入保留', 426, 'VIDEO_PROMPT_GROUP_CONTRACT_REQUIRED');
   }
   return refs;
 }

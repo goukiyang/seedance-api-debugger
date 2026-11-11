@@ -1,7 +1,7 @@
 <!-- ARK-CHARACTER-ASSET01-MATERIALS-20261111 -->
-## 私域角色资产入口原图（2026-11-11）
+## 私域角色资产入口与交付证据（2026-11-11）
 
-[原工单](../../tasks/todo/2026-11-11-seedance-private-character-assets.md)；[用户红框截图原件](2026-11-11-seedance-private-character-assets/codex-clipboard-d499faa9-4bef-40c4-b7ec-dea9668b6960.png)已从本次附件复制并核字节一致，用于定位素材区右上「角色资产」管理入口。本次只归档与补方案，非真实新功能截图；未公开上传、未发送MJ、未生成或收费。实际应用与手验尚未进行。
+[原工单](../../tasks/todo/2026-11-11-seedance-private-character-assets.md)；[用户红框截图原件](2026-11-11-seedance-private-character-assets/codex-clipboard-d499faa9-4bef-40c4-b7ec-dea9668b6960.png)为用户附件本地归档，核字节一致，非新功能验收截图，未公开上传。v0.144.0实际发布与一次真实4秒任务结果见[部署摘要](2026-11-11-seedance-private-character-assets/release-summary.json)和[脱敏实际请求结构](2026-11-11-seedance-private-character-assets/provider-request.redacted.json)。完整私有日志/原片保存在本目录release下；无密钥入库，未发送MJ，界面与成片效果待用户手验。
 <!-- /ARK-CHARACTER-ASSET01-MATERIALS-20261111 -->
 
 <!-- FUSION-UX12-MATERIALS-20261110 -->

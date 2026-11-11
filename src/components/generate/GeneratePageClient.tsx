@@ -2905,7 +2905,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         ...(params.pricingQuoteToken ? { pricing_quote_token: params.pricingQuoteToken, pricing_fingerprint_version: 2 } : {}),
         ...(typeof params.quotedEstimatedCost === 'number' ? { max_estimated_cost: params.quotedEstimatedCost } : {}),
         prompt: params.prompt,
-        ...(!isIpSurface && params.videoPromptGroups?.length ? { video_prompt_groups: params.videoPromptGroups, video_prompt_groups_contract: 1 } : {}),
+        ...(params.videoPromptGroups?.length ? { video_prompt_groups: params.videoPromptGroups, video_prompt_groups_contract: 1 } : {}),
         generation_mode: params.generationMode,
         ratio: params.ratio,
         duration: params.duration,
@@ -3668,6 +3668,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         {(imageResultRequested === false || Boolean(imageResultHandoff)) && <GenerationComposer
           videoRedesign={normalVideoRedesign}
           videoSurface={normalVideoRedesign ? isIpSurface ? 'ip' : 'normal' : undefined}
+          allowVideoPromptGroups={!hideExternalIpInternalControls}
           videoModelChoices={normalVideoRedesign ? videoModelChoices : undefined}
           modeSwitchBlocker={modeSwitchBlocker}
           modeSwitchInitializing={parentReuseInitializing}

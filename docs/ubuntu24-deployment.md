@@ -535,3 +535,14 @@ stage：`/data/video-api-debugger/release-staging/template-editor-entry-20261110
 
 attempt01缺baseline.build，创建候选/Next/切服务前退出；失败原证保留，attempt02补齐实际基线后成功。装备设计新旧定义差异和未覆盖边界见[原单§11](../tasks/todo/2026-11-09-template-current-input.md#11-tpl-editor04-原模板复用草稿及装备设计排查2026-11-10)。入口 https://sd2.youdooart.com/template-studio?type=image 。发布窗已交回后继。
 <!-- /TPL-EDITOR04-RELEASE-20261110 -->
+
+
+<!-- ARK-CHARACTER-ASSET01-DEPLOY-20261111 -->
+## 2026-11-11 私域角色资产 v0.144.0
+
+主源 `428c425739cf63a2cad9f43f092d6b1538c4b023` / BUILD `p9rZvxSRRS7FkgPUwJ5X3`，相容guard `fb2dbdb050a51e6e0e186787501863c181014184` / BUILD `Yxw1jVGLULCDIvK9QgCI7`，两者本次完整构建通过。阶段 `/data/video-api-debugger/release-staging/character-assets-20261111/attempt01`，pair `e32d2e50-4628-4f41-81aa-c1e70049c966`；2026-11-11 08:42:09 UTC保护部署完成，7服务4timer/51公网资源/4匿名401通过，2h视频交付看护保留。
+
+只有 `prisma/migrations/20261111090000_owner_character_assets/migration.sql` 新增CharacterAsset表及2显式索引；自然退出writer、一致备份和原价格保护通过后由锁定helper执行3DDL，不跑全仓migrate deploy，不回旧数据。备用版本与main共享新隐私/历史读取，保留原六个写关闭并关闭第七CHARACTER_ASSET_WRITES_ENABLED。固定恢复：`bash /data/video-api-debugger/release-staging/character-assets-20261111/attempt01/program-recovery.sh /data/video-api-debugger/release-staging/character-assets-20261111/attempt01/release-input.json`，只回程序/配置指针，不恢复新表、账本、媒体或回执；旧79ab不再作为本批回退源。
+
+唯一真实4秒IP任务已成功、本地/公开保存/原片下载及实际20点/冻结0核对；没有浏览器验收。详[原单§10](../tasks/todo/2026-11-11-seedance-private-character-assets.md#10-保护发布与一次实际任务闭环)及[发布摘要](materials/2026-11-11-seedance-private-character-assets/release-summary.json)，已部署，待用户手动验收。
+<!-- /ARK-CHARACTER-ASSET01-DEPLOY-20261111 -->
