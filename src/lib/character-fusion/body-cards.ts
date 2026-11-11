@@ -1,4 +1,4 @@
-import type { FusionCard } from './cards';
+import { cardValues, type FusionCard } from './cards';
 
 export const BODY_HEAD_RATIO_ID = 'card-body-head-ratio';
 export const BODY_CARDS: readonly FusionCard[] = [
@@ -26,7 +26,7 @@ export const BODY_CARDS: readonly FusionCard[] = [
     ].map(([label, en]) => ({ label, en, status: 'default' as const })),
   },
   {
-    id: 'card-body-exaggeration', title: '夸张部位', titleEn: 'Exaggerated body part', value: '巨掌', joined: false, locked: false,
+    id: 'card-body-exaggeration', title: '夸张部位', titleEn: 'Exaggerated body part', value: '巨掌', joined: false, locked: false, multi: true,
     tags: [
       ['巨头', 'an oversized head'], ['巨肩', 'oversized shoulders'], ['巨胸', 'an oversized chest'], ['巨腹', 'an oversized belly'],
       ['巨臂', 'oversized arms'], ['巨掌', 'oversized hands with large palms'], ['巨腿', 'oversized legs'], ['巨脚', 'oversized feet'], ['无', 'no exaggerated body part'],
@@ -36,11 +36,12 @@ export const BODY_CARDS: readonly FusionCard[] = [
 
 // Presets enter saved settings only after an explicit edit or join; old recipes stay unchanged.
 export function catalogueCards(cards: FusionCard[]) {
-  return [...cards, ...BODY_CARDS.filter(preset => !cards.some(card => card.id === preset.id))];
+  return [...cards.map(bodyCard), ...BODY_CARDS.filter(preset => !cards.some(card => card.id === preset.id))];
 }
+const bodyCard = (card: FusionCard): FusionCard => card.id === 'card-body-exaggeration' ? { ...card, multi: true, values: card.values || [card.value] } : card;
 
 export function updateCard(cards: FusionCard[], id: string, update: (card: FusionCard) => FusionCard) {
-  if (cards.some(card => card.id === id)) return cards.map(card => card.id === id ? update(card) : card);
+  if (cards.some(card => card.id === id)) return cards.map(card => card.id === id ? update(bodyCard(card)) : card);
   const preset = BODY_CARDS.find(card => card.id === id);
   if (!preset) return cards;
   if (cards.length >= 16) throw new Error('扩展卡片已达 16 张，请先移除一张不需要的自定义卡片，再启用身形卡片。');
@@ -50,7 +51,7 @@ export function updateCard(cards: FusionCard[], id: string, update: (card: Fusio
 export function bodyCombination(cards: FusionCard[], language: 'zh' | 'en' | 'both') {
   const chosen = BODY_CARDS.flatMap(preset => cards.filter(card => card.id === preset.id && card.joined));
   if (!chosen.length) return '';
-  const cn = chosen.map(card => card.id === 'card-body-type' ? `${card.value}型` : card.value).join(' × ');
-  const en = chosen.map(card => card.tags.find(tag => tag.label === card.value)?.en || '').join(' × ');
+  const cn = chosen.map(card => cardValues(card).map(value => card.id === 'card-body-type' ? `${value}型` : value).join('、')).join(' × ');
+  const en = chosen.map(card => cardValues(card).map(value => card.tags.find(tag => tag.label === value)?.en || '').join(', ')).join(' × ');
   return language === 'zh' ? cn : language === 'en' ? en : `${cn}\n\n[ENGLISH]\n${en}`;
 }

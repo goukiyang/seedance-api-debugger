@@ -1,11 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '角色融合保留卡片与分组视图',
+  title: '角色融合支持多选组合',
   outline: [
-    '默认卡片布局，保留展开、拖动、锁定与移出',
-    '可切换分组视图，已选内容和抽卡规则保持一致',
-    '记住选择的呈现方式，新增卡片后可直接看到'
+    '职业、机制和身形等可组合的选项共同用于生成',
+    '支持主母体加入辅助融合元素，保留中英文完整设定',
+    '保留原卡片操作，固定组合、随机抽取与互斥选择更清楚'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

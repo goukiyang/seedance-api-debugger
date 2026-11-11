@@ -1,8 +1,9 @@
 import { englishDetail } from './english';
-import { parseCardDraft, type FusionCard } from './cards';
+import { parseCardDraft, cardValues, type FusionCard } from './cards';
 import { TRAITS, parseCatalogue, concreteOptions, type CatalogueSettings } from './catalogue';
 import { chooseConcrete, decorateRow, type Design } from './design';
 import { BODY_HEAD_RATIO_ID } from './body-cards';
+import { choicesConflict, drawChoices } from './selection';
 import { CONFIG, DEFAULT_REQUIREMENTS, SOURCES, CONCEPTS, MECHANISMS, PERSONALITIES, LEGACY_TAGS, DETAIL_ALTS, EN_LABEL, SOURCE_EN, CONCEPT_EN, PROP_EN } from './vocabulary';
 
 export { CONFIG, DEFAULT_REQUIREMENTS };
@@ -22,7 +23,7 @@ export type FusionRow = {
   detail: Partial<Record<Dimension, string>>; advanced: boolean; isBoss?: boolean;
   design?: Design;
   translations?: Array<{ dimension: Dimension; label: string; en: string }>;
-  role?: string; cards?: Array<{ id: string; title: string; titleEn: string; label: string; en: string }>;
+  role?: string; cards?: Array<{ id: string; title: string; titleEn: string; label: string; en: string; values?: { zh: string; en: string }[]; multi?: boolean }>;
 };
 export const COUNTS = [4, 8, 12, 16, 24, 32];
 export const CORE = CONFIG.filter(c => !('optional' in c));
@@ -61,7 +62,8 @@ export function parseSettings(input: unknown): FusionSettings {
   const cards = (s.cards || []).map(c => {
     const draft = parseCardDraft(c);
     if (!/^card-[a-zA-Z0-9-]{1,80}$/.test(c.id) || typeof c.joined !== 'boolean' || typeof c.locked !== 'boolean' || !draft.tags.some(t => t.label === c.value)) throw new Error('扩展卡片选择无效。');
-    return { ...draft, id: c.id, joined: c.joined, value: c.value, locked: c.locked };
+    if (c.values !== undefined && (!Array.isArray(c.values) || c.values.length > draft.tags.length || new Set(c.values).size !== c.values.length || c.values.some(value => !draft.tags.some(tag => tag.label === value)) || c.values.some((value, i) => c.values!.slice(i + 1).some(other => choicesConflict({ multi: c.multi === true }, value, other))))) throw new Error('扩展卡片多选无效。');
+    return { ...draft, id: c.id, joined: c.joined, value: c.value, locked: c.locked, ...(c.values !== undefined ? { values: [...c.values] } : {}) };
   });
   if (new Set(cards.map(c => c.id)).size !== cards.length) throw new Error('扩展卡片重复。');
   return reconcile({ rules, boss, bossLocks, bossDimensions: [...s.bossDimensions], requirements: s.requirements, count: s.count, lang: s.lang,
@@ -97,22 +99,31 @@ export function refreshBoss(s: FusionSettings, rnd = Math.random, only?: Dimensi
   const catalogue = parseCatalogue(s.catalogue);
   if (!only) for (const t of TRAITS) {
     const state = catalogue.traits[t.id]; if (!state?.enabled || state.locked) continue;
-    const pool = t.options.filter(o => !state.excluded.includes(o.zh));
-    catalogue.traits[t.id] = { ...state, values: pool.length ? [pick(pool, rnd).zh] : [] };
+    catalogue.traits[t.id] = { ...state, values: drawChoices(t.options.filter(o => !state.excluded.includes(o.zh)).map(o => o.zh), t, rnd) };
   }
   for (const [id, detail] of Object.entries(catalogue.details)) if (detail && !detail.locked && (!only || only === id)) {
     const pool = concreteOptions(id, boss[id as Dimension]);
     if (pool.length) catalogue.details[id] = { value: pick(pool, rnd).zh, locked: false };
   }
-  return { ...s, boss, catalogue, cards: s.cards.map(c => c.joined && !c.locked && !only ? { ...c, value: pick(c.tags.filter(t => t.status !== 'exclude'), rnd)?.label || c.value } : c) };
+  return { ...s, boss, catalogue, cards: s.cards.map(c => {
+    if (!c.joined || c.locked || only) return c;
+    const values = drawChoices(c.tags.filter(t => t.status !== 'exclude').map(t => t.label), { multi: Boolean(c.multi) }, rnd);
+    return { ...c, value: values[0] || c.value, ...(c.multi ? { values } : {}) };
+  }) };
 }
 export function validateGeneration(s: FusionSettings) {
   for (const definition of TRAITS) {
     const state = s.catalogue?.traits[definition.id]; if (!state?.enabled) continue;
+    const policy = s.catalogue?.traits.equipmentPolicy;
+    if (definition.id.startsWith('equipment') && definition.id !== 'equipmentPolicy' && policy?.enabled && policy.locked && policy.values.includes('无道具')) continue;
     if (!definition.options.some(o => !state.excluded.includes(o.zh))) return `${definition.title}已全部排除。`;
-    if (state.must.length > s.count) return `${definition.title}必出项超过本批数量。`;
+    if (!state.locked && state.must.length > s.count) return `${definition.title}必出项超过本批数量。`;
+    if (state.must.some(value => state.excluded.includes(value))) return `${definition.title}的必出项已被排除。`;
+    if (state.locked && state.values.some((value, i) => state.values.slice(i + 1).some(other => choicesConflict(definition, value, other)))) return `${definition.title}原选择中有互斥项，内容已保留，请调整后生成。`;
     if (state.locked && (!state.values.length || state.values.some(v => state.excluded.includes(v)) || state.must.some(v => !state.values.includes(v)))) return `${definition.title}固定项与规则冲突。`;
   }
+  const fusion = s.catalogue?.sourceFusion;
+  if (fusion?.enabled && fusion.locked && (!fusion.values.length || fusion.values.some(value => !allowed(s, 'source').some(group => concreteOptions('source', group).some(option => option.zh === value))))) return '辅助母体的固定选择与母体类别规则冲突，请调整选择或规则。';
   for (const [id, detail] of Object.entries(s.catalogue?.details || {})) if (detail?.locked) {
     const category = CONFIG.find(c => c.id === id)?.tags.find(label => concreteOptions(id, label).some(o => o.zh === detail.value));
     if (!category || !allowed(s, id as Dimension).includes(category) || required(s, id as Dimension).some(v => v !== category)) return `具体选项「${detail.value}」与类别规则冲突，请解锁或调整规则。`;
@@ -120,8 +131,8 @@ export function validateGeneration(s: FusionSettings) {
   for (const c of s.cards.filter(c => c.joined)) {
     if (!c.tags.some(t => t.status !== 'exclude')) return `${c.title}已全部排除，请保留一个选项。`;
     const must = c.tags.filter(t => t.status === 'must');
-    if (must.length > s.count) return `${c.title}的本批必出项超过生成数量。`;
-    if (c.locked && (!c.tags.some(t => t.label === c.value && t.status !== 'exclude') || must.some(t => t.label !== c.value))) return `${c.title}的固定项与规则冲突，请解锁或调整本批必出项。`;
+    if (!c.locked && must.length > s.count) return `${c.title}的本批必出项超过生成数量。`;
+    if (c.locked && (!cardValues(c).length || cardValues(c).some(value => !c.tags.some(t => t.label === value && t.status !== 'exclude')) || must.some(t => !cardValues(c).includes(t.label)))) return `${c.title}的固定项与规则冲突，请解锁或调整本批必出项。`;
   }
   for (const c of CONFIG) {
     if (!s.bossDimensions.includes(c.id)) { if (optional(c.id)) continue; return `请将${c.title}加入角色组合。`; }
@@ -188,7 +199,7 @@ export function bossRow(s: FusionSettings, others: FusionRow[], seed = Date.now(
   for (const c of CORE) if (!s.bossDimensions.includes(c.id) || !allowed(s, c.id).includes(s.boss[c.id])) throw new Error(`角色组合需要加入并选择${c.title}。`);
   const category = { ...s.boss };
   for (const c of ADDONS) if (!s.bossDimensions.includes(c.id)) category[c.id] = '';
-  for (const c of s.cards.filter(c => c.joined)) if (!c.tags.some(t => t.label === c.value && t.status !== 'exclude')) throw new Error(`请为${c.title}选择可用标签。`);
+  for (const c of s.cards.filter(c => c.joined)) if (!cardValues(c).length || cardValues(c).some(value => !c.tags.some(t => t.label === value && t.status !== 'exclude'))) throw new Error(`请为${c.title}选择可用标签。`);
   return uniqueName(decorateRow(chooseConcrete({ ...makeRow(category, seed), role: s.role, translations: translationsFor(s, category), cards: cardChoices(s, 0, seeded(seed), true) }, s, true), s, seeded(seed), 0, true), others);
 }
 function translationsFor(s: Pick<FusionSettings, 'rules'>, category: Categories, prior: FusionRow['translations'] = []): NonNullable<FusionRow['translations']> {
@@ -197,13 +208,14 @@ function translationsFor(s: Pick<FusionSettings, 'rules'>, category: Categories,
 function cardChoices(s: FusionSettings, index: number, rnd: () => number, manual = false): NonNullable<FusionRow['cards']> {
   return s.cards.filter(c => c.joined).map(c => {
     const must = c.tags.filter(t => t.status === 'must');
-    const tag = manual || c.locked ? c.tags.find(t => t.label === c.value)! : must[index] || pick(c.tags.filter(t => t.status !== 'exclude'), rnd);
-    return { id: c.id, title: c.title, titleEn: c.titleEn, label: tag.label, en: tag.en };
+    const selected = manual || c.locked ? cardValues(c) : drawChoices(c.tags.filter(t => t.status !== 'exclude').map(t => t.label), { multi: Boolean(c.multi) }, rnd, must[index]?.label);
+    const values = selected.map(value => { const tag = c.tags.find(t => t.label === value)!; return { zh: tag.label, en: tag.en }; });
+    return { id: c.id, title: c.title, titleEn: c.titleEn, label: values.map(value => value.zh).join('、'), en: values.map(value => value.en).join(', '), ...(c.multi ? { values, multi: true } : {}) };
   });
 }
 export function missingRequired(s: FusionSettings, rows: FusionRow[]) {
   return [...TRAITS.flatMap(t => s.catalogue?.traits[t.id]?.enabled ? s.catalogue.traits[t.id].must.filter(label => !rows.some(row => row.design?.traits[t.id]?.some(v => v.zh === label))).map(label => `${t.title}：${label}`) : []), ...CONFIG.filter(c => !optional(c.id) || s.bossDimensions.includes(c.id)).flatMap(c => required(s, c.id).filter(label => !rows.some(r => r.category[c.id] === label)).map(label => `${c.title}：${label}`)),
-    ...s.cards.filter(c => c.joined).flatMap(c => c.tags.filter(t => t.status === 'must' && !rows.some(r => r.cards?.some(v => v.id === c.id && v.label === t.label))).map(t => `${c.title}：${t.label}`))];
+    ...s.cards.filter(c => c.joined).flatMap(c => c.tags.filter(t => t.status === 'must' && !rows.some(r => r.cards?.some(v => v.id === c.id && (v.values ? v.values.some(value => value.zh === t.label) : v.label === t.label)))).map(t => `${c.title}：${t.label}`))];
 }
 export function changeRow(s: FusionSettings, rows: FusionRow[], id: string, change?: { dimension: Dimension; value: string }, seed = Date.now()) {
   const error = validateGeneration(s); if (error) throw new Error(error);
@@ -226,22 +238,22 @@ export function changeRow(s: FusionSettings, rows: FusionRow[], id: string, chan
     } else if (!soleRequired) category[c.id] = pick(allowed(s, c.id), rnd) || '';
   }
   const row = uniqueName(chooseConcrete(makeRow(category, seed, change ? old : undefined, change?.dimension), s), others);
-  const cards = change ? old.cards : old.cards?.map(value => {
-    const card = s.cards.find(c => c.id === value.id && c.joined);
-    const tag = card?.locked ? card.tags.find(t => t.label === card.value) : card ? pick(card.tags.filter(t => t.status !== 'exclude'), rnd) : undefined;
-    return tag ? { ...value, label: tag.label, en: tag.en } : value;
-  });
+  const cards = change ? old.cards : cardChoices(s, 0, rnd);
   return rows.map(r => r.id === id ? uniqueName(decorateRow({ ...row, id, advanced: old.advanced, isBoss: old.isBoss, role: old.role, cards, translations: translationsFor(s, category, old.translations) }, s, seeded(seed), 0, false, change ? old.design : undefined), others) : r);
 }
 export function settingsForRow(s: FusionSettings, row: FusionRow): FusionSettings {
   const catalogue = parseCatalogue(s.catalogue);
   catalogue.traits = Object.fromEntries(TRAITS.map(t => [t.id, { enabled: Boolean((row.design?.chosen || row.design?.traits)?.[t.id]), locked: true, values: (row.design?.chosen || row.design?.traits)?.[t.id]?.map(v => v.zh).filter(label => t.options.some(o => o.zh === label)) || [], excluded: [], must: [] }]));
   catalogue.details = {};
+  catalogue.sourceFusion = { enabled: Boolean(row.design?.sources?.length), locked: true, values: row.design?.sources?.map(value => value.zh) || [], excluded: [], must: [] };
   for (const id of ['source', 'concept', 'equipment', 'signature', 'entity', 'physique'] as Dimension[]) {
     const value = id === 'source' ? row.source.name : id === 'concept' ? row.concept.name : row.detail[id];
     if (value && concreteOptions(id, row.category[id]).some(o => o.zh === value)) catalogue.details[id] = { value, locked: true };
   }
-  return { ...s, boss: { ...row.category }, bossLocks: Object.fromEntries(CONFIG.map(c => [c.id, true])) as FusionSettings['bossLocks'], bossDimensions: CONFIG.filter(c => row.category[c.id]).map(c => c.id), catalogue, cards: (row.cards || []).map(v => { const prior = s.cards.find(c => c.id === v.id); return { ...(prior || { id: v.id, title: v.title, titleEn: v.titleEn, tags: [{ label: v.label, en: v.en, status: 'default' as const }] }), value: v.label, joined: true, locked: true }; }), role: row.role || '', requirements: row.design?.requirements.zh ?? s.requirements, requirementsEn: row.design?.requirements.en ?? s.requirementsEn, requirementsEnabled: row.design ? Boolean(row.design.requirements.zh) : s.requirementsEnabled };
+  return { ...s, boss: { ...row.category }, bossLocks: Object.fromEntries(CONFIG.map(c => [c.id, true])) as FusionSettings['bossLocks'], bossDimensions: CONFIG.filter(c => row.category[c.id]).map(c => c.id), catalogue, cards: (row.cards || []).map(v => {
+    const prior = s.cards.find(c => c.id === v.id), values = v.values || [{ zh: v.label, en: v.en }];
+    return { ...(prior || { id: v.id, title: v.title, titleEn: v.titleEn, tags: values.map(value => ({ label: value.zh, en: value.en, status: 'default' as const })) }), multi: Boolean(v.multi), value: values[0].zh, values: v.multi ? values.map(value => value.zh) : undefined, joined: true, locked: true };
+  }), role: row.role || '', requirements: row.design?.requirements.zh ?? s.requirements, requirementsEn: row.design?.requirements.en ?? s.requirementsEn, requirementsEnabled: row.design ? Boolean(row.design.requirements.zh) : s.requirementsEnabled };
 }
 export function reviseRow(s: FusionSettings, rows: FusionRow[], id: string) {
   const error = validateGeneration(s); if (error) throw new Error(error);

@@ -1,17 +1,19 @@
 import { CONFIG, SOURCES, CONCEPTS, SOURCE_EN, CONCEPT_EN, LEGACY_TAGS, DETAIL_ALTS } from './vocabulary';
 import { englishDetail } from './english';
+import { choicesConflict, drawChoices, type SelectionPolicy } from './selection';
 
 export type Pair = { zh: string; en: string };
 export type TraitState = { enabled: boolean; locked: boolean; values: string[]; excluded: string[]; must: string[] };
-export type CatalogueSettings = { details: Partial<Record<string, { value: string; locked: boolean }>>; traits: Record<string, TraitState> };
-export type Trait = { id: string; title: string; en: string; group: 'fusion' | 'body' | 'extra'; multi: boolean; options: Pair[] };
-const trait = (id: string, title: string, en: string, group: Trait['group'], entries: string, multi = false): Trait => ({ id, title, en, group, multi, options: entries.split(';').map(entry => { const [zh, en] = entry.split('|'); return { zh, en }; }) });
+export type CatalogueSettings = { details: Partial<Record<string, { value: string; locked: boolean }>>; traits: Record<string, TraitState>; sourceFusion?: TraitState };
+export type Trait = SelectionPolicy & { id: string; title: string; en: string; group: 'fusion' | 'body' | 'extra'; options: Pair[] };
+const trait = (id: string, title: string, en: string, group: Trait['group'], entries: string, multi = false): Trait => ({ id, title, en, group, multi, randomMax: ['occupation', 'mechanismPrinciple', 'equipmentReach'].includes(id) ? 1 : multi ? 3 : 1,
+  ...(id === 'assembly' ? { incompatible: [['独立站位', '并体融合'], ['独立站位', '骑乘共体']] as [string, string][] } : {}), options: entries.split(';').map(entry => { const [zh, en] = entry.split('|'); return { zh, en }; }) });
 
 export const TRAITS: Trait[] = [
   trait('primaryPersonality', '主性格', 'Primary personality', 'fusion', '开朗|cheerful;乐观|optimistic;机敏|quick-witted;坚持原则|principled;温柔|gentle;可靠|dependable;外向|extroverted;冷静|calm;理智|rational;好奇|curious;内向|introverted;安静|quiet;幽默|humorous;古怪|eccentric;好胜|competitive;慢热|slow to warm up;谨慎|cautious'),
-  trait('mechanismPrinciple', '机制原理', 'Functional principle', 'fusion', '结构变形|structural transformation;生物共生|biological symbiosis;重力作用|gravity manipulation;空间变化|spatial manipulation;能量转换|energy conversion;机械传动|mechanical transmission;磁力作用|magnetic interaction;不强调机制|no emphasized mechanism'),
+  trait('mechanismPrinciple', '机制原理', 'Functional principle', 'fusion', '结构变形|structural transformation;生物共生|biological symbiosis;重力作用|gravity manipulation;空间变化|spatial manipulation;能量转换|energy conversion;机械传动|mechanical transmission;磁力作用|magnetic interaction;不强调机制|no emphasized mechanism', true),
   trait('mechanismMotion', '动作与结构形式', 'Motion and structural forms', 'fusion', '展开|unfolding;折叠|folding;伸缩|extension and retraction;收纳|stowage;弹射|spring-driven launch;旋转|rotation;牵引|traction;联动|linked motion;拼装|modular assembly;状态切换|state switching', true),
-  trait('occupation', '职业与身份', 'Occupation', 'fusion', '邮差|courier;修理匠|repair specialist;烘焙师|baker;园艺师|gardener;医生|doctor;研究员|researcher;探险家|explorer;领航员|navigator;守护者|guardian;商人|merchant;表演者|performer;运动员|athlete;无职业设定|no occupational identity'),
+  trait('occupation', '职业与身份', 'Occupation', 'fusion', '邮差|courier;修理匠|repair specialist;烘焙师|baker;园艺师|gardener;医生|doctor;研究员|researcher;探险家|explorer;领航员|navigator;守护者|guardian;商人|merchant;表演者|performer;运动员|athlete;无职业设定|no occupational identity', true),
   trait('culture', '文化语境', 'Cultural context', 'fusion', '远古文明|ancient civilization;街头文化|street culture;节庆民俗|festival folklore;美食文化|food culture;戏曲|Chinese opera', true),
   trait('world', '世界背景', 'World setting', 'fusion', '海洋|ocean world;深海|deep-sea world;太空|outer space;森林|forest;梦境|dream world;童话|fairy-tale world', true),
   trait('activity', '活动主题', 'Activity', 'fusion', '探索|exploration;科研|scientific research;竞技运动|competitive sport;旅行|travel;生活日常|everyday life', true),
@@ -42,13 +44,14 @@ export const TRAITS: Trait[] = [
   trait('consciousness', '意识数量', 'Number of minds', 'extra', '单一意识|one mind;双意识共体|two minds in one body;多意识共体|multiple minds in one body'),
   trait('equipmentPolicy', '道具方式', 'Prop policy', 'extra', '自动关联|theme-related props;无道具|no external props'),
   trait('equipmentUse', '道具用途', 'Equipment purpose', 'extra', '防护|protection;辅助工具|assistance;反馈|feedback;解锁|unlocking;探索|exploration;移动|locomotion;导航|navigation;生活|everyday use;收纳携行|storage and carrying', true),
-  trait('equipmentReach', '道具距离', 'Equipment range', 'extra', '近战|close-range use;远程|ranged use;非战斗|non-combat use'),
+  trait('equipmentReach', '道具距离', 'Equipment range', 'extra', '近战|close-range use;远程|ranged use;非战斗|non-combat use', true),
   trait('equipmentStructure', '道具结构', 'Equipment structure', 'extra', '复合功能|multiple functions;折叠|folding;伸缩|telescoping;可拆卸|detachable', true),
   trait('signatureArea', '特征部位', 'Signature location', 'extra', '口部|mouth;面部|face;头部|head;躯干|torso;肢体|limbs;末端|extremities;结构表面|structural surface', true),
   trait('signatureKind', '特征类型', 'Signature type', 'extra', '局部缺损|local missing section;伤痕旧迹|old scar;左右不对称|left-right asymmetry;图形斑纹|graphic pattern;修补痕迹|repair marks;表面磨损|surface wear;异色标记|different-colored marking;材质肌理|material texture', true),
 ];
 export const emptyTrait = (): TraitState => ({ enabled: false, locked: false, values: [], excluded: [], must: [] });
 export const emptyCatalogue = (): CatalogueSettings => ({ details: {}, traits: {} });
+export const sourceFusionOptions = (): Pair[] => Object.keys(SOURCES).flatMap(group => concreteOptions('source', group));
 export const displayGroup = (label: string) => ({ '植物': '植物与菌菇', '乐器': '乐器与声音设备', '神话': '神话生灵', '工业': '工业装置', '天文': '天体与天象', '职业': '职业母体（原有选项）', '土星环': '土星环（带环行星原型）' }[label] || label);
 export function concreteOptions(id: string, category: string): Pair[] {
   if (id === 'source') return ((SOURCES as Record<string, Array<{ name: string }>>)[category] || []).map(x => ({ zh: x.name, en: (SOURCE_EN as Record<string, string>)[x.name] }));
@@ -71,8 +74,14 @@ export function parseCatalogue(input: unknown): CatalogueSettings {
     const definition = TRAITS.find(t => t.id === id);
     if (!definition || !state || typeof state.enabled !== 'boolean' || typeof state.locked !== 'boolean') throw new Error('属性选择无效。');
     for (const values of [state.values, state.excluded, state.must]) if (!Array.isArray(values) || values.length > definition.options.length || new Set(values).size !== values.length || values.some(v => !definition.options.some(o => o.zh === v))) throw new Error(`${definition.title}选项无效。`);
-    if (!definition.multi && state.values.length > 1 || state.values.some(v => v.startsWith('无')) && state.values.length > 1) throw new Error(`${definition.title}包含互斥选项。`);
+    if (state.values.some((value, i) => state.values.slice(i + 1).some(other => choicesConflict({ ...definition, incompatible: undefined }, value, other)))) throw new Error(`${definition.title}包含互斥选项。`);
     next.traits[id] = { enabled: state.enabled, locked: state.locked, values: [...state.values], excluded: [...state.excluded], must: [...state.must] };
+  }
+  if (c.sourceFusion !== undefined) {
+    const state = c.sourceFusion, options = sourceFusionOptions();
+    if (!state || typeof state.enabled !== 'boolean' || typeof state.locked !== 'boolean') throw new Error('辅助母体设置无效。');
+    for (const values of [state.values, state.excluded, state.must]) if (!Array.isArray(values) || values.length > options.length || new Set(values).size !== values.length || values.some(value => !options.some(option => option.zh === value))) throw new Error('辅助母体选项无效。');
+    next.sourceFusion = { enabled: state.enabled, locked: state.locked, values: [...state.values], excluded: [...state.excluded], must: [...state.must] };
   }
   return next;
 }
@@ -84,13 +93,7 @@ export function resolveTraits(catalogue: CatalogueSettings | undefined, random: 
     let values: string[];
     if ((manual || s.locked) && s.values.length) values = s.values;
     else if (pool.length) {
-      const first = s.must[index] || pool[Math.floor(random() * pool.length)].zh;
-      values = [first];
-      if (t.multi && !first.startsWith('无')) {
-        const rest = pool.filter(o => o.zh !== first && !o.zh.startsWith('无'));
-        const count = Math.floor(random() * Math.min(3, rest.length + 1));
-        for (let i = 0; i < count && rest.length; i++) values.push(rest.splice(Math.floor(random() * rest.length), 1)[0].zh);
-      }
+      values = drawChoices(pool.map(option => option.zh), t, random, s.must[index]);
     } else values = [];
     result[t.id] = values.map(value => t.options.find(o => o.zh === value)!);
   }

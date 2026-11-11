@@ -4,14 +4,16 @@ import { LockKeyhole, UnlockKeyhole, Plus, X, RefreshCw } from 'lucide-react';
 import { CONFIG, allowed, reconcile, type Dimension, type FusionSettings } from '@/lib/character-fusion/engine';
 import { TRAITS, concreteOptions, displayGroup, emptyCatalogue, emptyTrait, type TraitState } from '@/lib/character-fusion/catalogue';
 import RuleCard from './rule-card';
+import ChoicePills from './choice-pills';
+import { toggleChoice } from '@/lib/character-fusion/selection';
 import styles from './studio.module.css';
 
 export type CatalogueView = { presentation: 'cards' | 'groups'; expanded: string[]; order: string[] };
 export const defaultCatalogueView = (): CatalogueView => ({ presentation: 'cards', expanded: [], order: [] });
 export function toggleCategoryLock(settings: FusionSettings, id: Dimension): FusionSettings {
-  const catalogue = settings.catalogue || emptyCatalogue(), locked = settings.bossLocks[id] || catalogue.details[id]?.locked;
+  const catalogue = settings.catalogue || emptyCatalogue(), locked = settings.bossLocks[id] || catalogue.details[id]?.locked || id === 'source' && catalogue.sourceFusion?.enabled && catalogue.sourceFusion.locked;
   const details = { ...catalogue.details }; if (details[id]) details[id] = { ...details[id]!, locked: false };
-  return { ...settings, bossLocks: { ...settings.bossLocks, [id]: !locked }, catalogue: { ...catalogue, details } };
+  return { ...settings, bossLocks: { ...settings.bossLocks, [id]: !locked }, catalogue: { ...catalogue, details, ...(id === 'source' && catalogue.sourceFusion?.enabled ? { sourceFusion: { ...catalogue.sourceFusion, locked: !locked } } : {}) } };
 }
 
 
@@ -49,13 +51,16 @@ export default function CatalogueEditor({ settings, onChange, view, onViewChange
   const selectTrait = (id: string, label: string) => {
     const definition = TRAITS.find(t => t.id === id)!;
     changeTrait(id, s => {
-      const values = definition.multi && !label.startsWith('无') ? s.values.filter(v => !v.startsWith('无')).includes(label) ? s.values.filter(v => v !== label && !v.startsWith('无')) : [...s.values.filter(v => !v.startsWith('无')), label] : [label];
-      return { ...s, enabled: true, locked: values.length > 0, values, excluded: s.excluded.filter(v => v !== label) };
+      const values = toggleChoice(s.locked ? s.values : [], label, definition);
+      return { ...s, enabled: values.length > 0, locked: values.length > 0, values, excluded: s.excluded.filter(v => v !== label) };
     });
   };
   const basePicker = (id: Dimension) => {
     const definition = CONFIG.find(c => c.id === id)!, joined = settings.bossDimensions.includes(id);
     const detail = catalogue.details[id], fixed = settings.bossLocks[id] || Boolean(detail?.locked);
+    const fusion = catalogue.sourceFusion || emptyTrait();
+    const fusionOptions = allowed(settings, 'source').flatMap(group => concreteOptions('source', group)).filter(option => option.zh !== (catalogue.details.source?.locked ? catalogue.details.source.value : undefined));
+    const fusionSummary = !fusion.enabled ? '' : fusion.locked ? ` ＋ ${fusion.values.slice(0, 2).join('、')}${fusion.values.length > 2 ? ` +${fusion.values.length - 2}` : ''}` : ' ＋ 随机融合';
     const groups = (fixed ? [settings.boss[id]] : allowed(settings, id)).map(label => ({ label, options: concreteOptions(id, label) })).filter(g => g.options.length);
     const updateGroup = (value: string) => {
       const details = { ...catalogue.details }; delete details[id];
@@ -69,11 +74,18 @@ export default function CatalogueEditor({ settings, onChange, view, onViewChange
           const group = groups.find(g => g.options.some(o => o.zh === value))!;
           onChange({ ...settings, boss: { ...settings.boss, [id]: group.label }, bossLocks: { ...settings.bossLocks, [id]: true }, bossDimensions: Array.from(new Set([...settings.bossDimensions, id])), catalogue: { ...catalogue, details: { ...details, [id]: { value, locked: true } } } });
         }}><option value="">在类别范围内随机</option>{groups.map(g => <optgroup label={displayGroup(g.label)} key={g.label}>{g.options.map(o => <option value={o.zh} key={o.zh}>{displayGroup(o.zh)}</option>)}</optgroup>)}</select>{detail?.locked && <small>已固定具体选项</small>}{id === 'concept' && settings.catalogue?.traits.occupation?.enabled && <small>职业按独立设置；参考实例保留。</small>}</label>}
+        {id === 'source' && <details className={styles.catalogueMore}><summary>辅助融合元素 · 可多选{fusion.enabled && ` · ${fusion.locked ? `${fusion.values.length}项` : '随机1–3项'}`}</summary>
+          <div className={styles.choiceMeta}><span>主母体保留，所选元素共同融入同一角色</span><button type="button" aria-pressed={fusion.enabled && !fusion.locked} onClick={() => onChange({ ...settings, catalogue: { ...catalogue, sourceFusion: { ...fusion, enabled: true, locked: false, values: [] } } })}>随机1–3项</button><button type="button" onClick={() => onChange({ ...settings, catalogue: { ...catalogue, sourceFusion: { ...fusion, enabled: false } } })}>不加入</button></div>
+          <ChoicePills label="辅助融合元素" multi options={fusionOptions.map(option => ({ label: option.zh }))} values={fusion.enabled && fusion.locked ? fusion.values : []} onSelect={label => {
+            const values = toggleChoice(fusion.locked ? fusion.values : [], label, { multi: true });
+            onChange({ ...settings, catalogue: { ...catalogue, sourceFusion: { ...fusion, values, enabled: values.length > 0, locked: values.length > 0 } } });
+          }} />
+        </details>}
       </div>
     );
     if (cards) return card(`catalogue-${id}`, {
-      title: id === 'source' ? '造型母体' : '主题灵感', tags: settings.rules[id], joined, locked: fixed || Boolean(detail?.locked),
-      summary: detail?.locked ? displayGroup(detail.value) : fixed ? `${displayGroup(settings.boss[id])} · 类内随机` : '随机',
+      title: id === 'source' ? '造型母体' : '主题灵感', tags: settings.rules[id], joined, locked: fixed || Boolean(detail?.locked) || id === 'source' && fusion.enabled && fusion.locked,
+      summary: (detail?.locked ? displayGroup(detail.value) : fixed ? `${displayGroup(settings.boss[id])} · 类内随机` : '随机') + (id === 'source' ? fusionSummary : ''),
       onLock: () => toggleBaseLock(id), onJoin: () => onChange({ ...settings, bossDimensions: joined ? settings.bossDimensions.filter(value => value !== id) : [...settings.bossDimensions, id] }),
       onCycle: () => { const pool = allowed(settings, id); if (pool.length) updateGroup(pool[(pool.indexOf(settings.boss[id]) + 1) % pool.length]); },
       onTag: (label, status) => onChange(reconcile({ ...settings, rules: { ...settings.rules, [id]: settings.rules[id].map(tag => tag.label === label ? { ...tag, status } : tag) } })),
@@ -87,15 +99,20 @@ export default function CatalogueEditor({ settings, onChange, view, onViewChange
     const t = TRAITS.find(t => t.id === id)!, s = catalogue.traits[id] || emptyTrait();
     const legacyDimension = id === 'primaryPersonality' ? 'personality' : ['mechanismPrinciple', 'mechanismMotion'].includes(id) ? 'mechanism' : undefined;
     const inherited = !s.enabled && legacyDimension && settings.bossDimensions.includes(legacyDimension);
+    const noProps = id.startsWith('equipment') && id !== 'equipmentPolicy' && catalogue.traits.equipmentPolicy?.enabled && catalogue.traits.equipmentPolicy.locked && catalogue.traits.equipmentPolicy.values.includes('无道具');
+    const summary = s.locked ? `${s.values.slice(0, 2).join('、')}${s.values.length > 2 ? ` +${s.values.length - 2}` : ''}${t.multi ? ` · ${s.values.length}项` : ''}` : `随机${t.randomMax === 1 ? '1项' : '1–3项'}`;
     const controls = (
-      <div className={styles.catalogueValues}>{inherited && legacyDimension && <p className={styles.hint}>原卡片：{settings.bossLocks[legacyDimension] ? settings.boss[legacyDimension] : '按原规则随机'}；在这里选择后覆盖同一属性。</p>}<div className={styles.pills}><button type="button" aria-pressed={s.enabled && !s.locked} onClick={() => changeTrait(id, v => ({ ...v, enabled: true, locked: false }))}><RefreshCw size={13} />随机</button>{t.options.filter(o => !s.excluded.includes(o.zh)).map(o => <button type="button" key={o.zh} aria-pressed={s.enabled && s.locked && s.values.includes(o.zh)} onClick={() => selectTrait(id, o.zh)}>{o.zh}</button>)}</div>
+      <div className={styles.catalogueValues}>{inherited && legacyDimension && <p className={styles.hint}>原卡片：{settings.bossLocks[legacyDimension] ? settings.boss[legacyDimension] : '按原规则随机'}；在这里选择后覆盖同一属性。</p>}
+        <div className={styles.choiceMeta}><span>{t.multi ? '可多选，所选项共同生效' : '单选'}{s.enabled && s.locked ? ` · 已固定${s.values.length}项` : ''}</span><button type="button" disabled={Boolean(noProps)} aria-pressed={s.enabled && !s.locked} onClick={() => changeTrait(id, v => ({ ...v, enabled: true, locked: false, values: [] }))}><RefreshCw size={13} />随机{t.randomMax === 1 ? '1项' : '1–3项'}</button></div>
+        {noProps && <p className={styles.hint}>当前明确无道具，这些选择保留但不用于生成。</p>}
+        <ChoicePills label={t.title} multi={t.multi} disabled={Boolean(noProps)} options={t.options.filter(o => !s.excluded.includes(o.zh)).map(option => ({ label: option.zh }))} values={s.enabled && s.locked ? s.values : []} onSelect={label => selectTrait(id, label)} />
         {!cards && <details className={styles.facetRules}><summary>规则{s.excluded.length + s.must.length > 0 && ` · ${s.must.length}必出 / ${s.excluded.length}排除`}</summary><div className={styles.tags}>{t.options.map(o => <label key={o.zh}><span className={styles.srOnly}>{t.title}：{o.zh}规则</span><select value={s.excluded.includes(o.zh) ? 'exclude' : s.must.includes(o.zh) ? 'must' : 'default'} onChange={e => changeTrait(id, v => ({ ...v, excluded: [...v.excluded.filter(x => x !== o.zh), ...(e.target.value === 'exclude' ? [o.zh] : [])], must: [...v.must.filter(x => x !== o.zh), ...(e.target.value === 'must' ? [o.zh] : [])] }))}><option value="default">{o.zh} · 可用</option><option value="must">{o.zh} · 本批必出</option><option value="exclude">{o.zh} · 排除</option></select></label>)}</div></details>}
       </div>
     );
     if (cards) return card(`catalogue-${id}`, {
       title: t.title, tags: t.options.map(option => ({ label: option.zh, en: option.en, status: s.excluded.includes(option.zh) ? 'exclude' as const : s.must.includes(option.zh) ? 'must' as const : 'default' as const })),
       joined: s.enabled, locked: s.locked, lockDisabled: !s.values.length,
-      summary: s.locked ? s.values.join('、') : '随机',
+      summary: noProps ? `${summary} · 无道具时不使用` : summary,
       onLock: () => changeTrait(id, value => ({ ...value, locked: !value.locked })),
       onJoin: () => changeTrait(id, value => ({ ...value, enabled: !value.enabled, locked: value.values.length > 0 && value.locked })),
       onCycle: t.multi ? undefined : () => changeTrait(id, value => { const pool = t.options.filter(option => !value.excluded.includes(option.zh)); if (!pool.length) return value; return { ...value, enabled: true, locked: true, values: [pool[(pool.findIndex(option => option.zh === value.values[0]) + 1) % pool.length].zh] }; }),
