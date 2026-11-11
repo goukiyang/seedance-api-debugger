@@ -48,6 +48,13 @@ try {
       'Character asset recovery source must be the full writable main');
     changes[characterModePath] = bytes.replace(before, 'export const CHARACTER_ASSET_WRITES_ENABLED: boolean = false;') + '\n';
   }
+  const groupModePath = 'src/lib/video/prompt-groups-build-mode.ts';
+  if (git(['ls-tree', '--name-only', source, '--', groupModePath]) === groupModePath) {
+    const bytes = read(groupModePath);
+    const before = 'export const VIDEO_PROMPT_GROUP_WRITES_ENABLED = true;';
+    assert.ok(bytes.includes(before), 'Prompt group recovery source must be the full writable main');
+    changes[groupModePath] = bytes.replace(before, 'export const VIDEO_PROMPT_GROUP_WRITES_ENABLED = false;') + '\n';
+  }
   for (const [file, bytes] of Object.entries(changes)) {
     const blob = git(['hash-object', '-w', '--stdin'], { input: bytes });
     git(['update-index', '--add', '--cacheinfo', `100644,${blob},${file}`], { env });

@@ -1,11 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '按缩略图选择角色',
+  title: '修复视频提示词组选用',
   outline: [
-    '打开角色下拉，点缩略图即可加入本次',
-    '角色封面可按图设置或更换，新增与管理仍可就地完成',
-    '保留原有图片编号、线路选择和生成记录'
+    '视频提示词组固定显示，Seedance 2.5 和 IP 线路均可选用',
+    '切换型号与线路保留已选组，实际生成使用同一组选用内容',
+    '保留组版本、权限、私密内容和原任务记录'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
