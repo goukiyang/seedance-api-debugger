@@ -50,7 +50,7 @@ async function main() {
     checks.push('原生已加入卡片场景、属性多选控制路径、4条双语实际生成及错误语言枚举原子拒绝');
     {
     const conceptOptions = nativeScene.dimensionOptions.find(option => option.id === 'concept');
-    assert(conceptOptions); assert.equal(conceptOptions.categoryId, 'dimension:concept'); assert(conceptOptions.values.includes('梦境'));
+    assert(conceptOptions); assert.equal(conceptOptions.categoryId, 'dimension:concept'); assert(conceptOptions.values.some(value => value === '梦境'));
     const dreamTerm = sceneCatalogue.terms.find(term => term.categoryId === 'dimension:concept' && term.data?.group === '梦境');
     assert(dreamTerm);
     const dreamPage = fusionAgentCataloguePage({ catalogue: { ...sceneCatalogue, terms: [dreamTerm] }, nextCursor: null, total: 1 }, { categoryId: 'dimension:concept' });
@@ -61,7 +61,7 @@ async function main() {
     const localApplied = applyFusionCommands(rowWorkspace, { opId: 'engineering-theme-group', baseVersion: rowWorkspace.version, commands: localCommands }, sceneCatalogue);
     const changedTarget = localApplied.rows[1];
     assert.equal(changedTarget.category.concept, '梦境'); assert.equal(changedTarget.version, target.version + 1);
-    assert.deepEqual(changedTarget.source, target.source); assert.deepEqual(changedTarget.traits, target.traits);
+    assert.deepEqual(changedTarget.source, target.source); assert.deepEqual(changedTarget.design?.traits, target.design?.traits);
     assert.deepEqual(Object.fromEntries(Object.entries(changedTarget.category).filter(([key]) => key !== 'concept')), Object.fromEntries(Object.entries(target.category).filter(([key]) => key !== 'concept')));
     assert.deepEqual(localApplied.rows.filter(row => row.id !== target.id), rowWorkspace.rows.filter(row => row.id !== target.id));
     assert.deepEqual(localApplied.state.retainedIds, [rowWorkspace.rows[0].id]);
