@@ -2,6 +2,7 @@ import type { MuskChatMessage } from '@/lib/integrations/musk';
 import { randomUUID } from 'node:crypto';
 import { CONFIG, COUNTS } from './engine';
 import { TRAITS } from './catalogue';
+import type { FusionCatalogue } from './catalogue-model';
 import { parseFusionCommands, settingsFingerprint, type FusionCommand, type FusionWorkspace } from './actions';
 
 export const FUSION_AGENT_MAX_STEPS = 6;
@@ -10,6 +11,17 @@ export class FusionAgentError extends Error {
   constructor(message: string, readonly status = 400, readonly code = 'fusion_agent_invalid') { super(message); }
 }
 export type FusionAgentRead = { kind: 'catalogue'; categoryId?: string; q?: string; cursor?: string; limit?: number } | { kind: 'results'; cursor?: string; limit?: number };
+/** Keep query metadata relevant; repeated full category lists can exhaust the model context. */
+export function fusionAgentCataloguePage(page: { catalogue: FusionCatalogue; nextCursor: string | null; total: number }, query: { categoryId?: string; q?: string }) {
+  const returnedCategories = new Set(page.catalogue.terms.map(term => term.categoryId));
+  const q = (query.q || '').trim().toLocaleLowerCase();
+  const categories = page.catalogue.categories.filter(category => category.enabled && (query.categoryId ? category.id === query.categoryId
+    : !q || returnedCategories.has(category.id) || [category.nameZh, category.nameEn, category.descriptionZh, category.descriptionEn, ...category.aliases, ...category.tags].some(value => value.toLocaleLowerCase().includes(q))));
+  return { version: page.catalogue.version, nextCursor: page.nextCursor, total: page.total,
+    categories: categories.map(category => ({ id: category.id, nameZh: category.nameZh, nameEn: category.nameEn, generationKind: category.generationKind, multi: category.multi, randomMax: category.randomMax })),
+    terms: page.catalogue.terms.map(term => ({ id: term.id, categoryId: term.categoryId, nameZh: term.nameZh, nameEn: term.nameEn, descriptionZh: term.descriptionZh, descriptionEn: term.descriptionEn })) };
+}
+
 export type FusionAgentProposal = { reply: string; reads: FusionAgentRead[]; commands: unknown[]; drafts: unknown[] };
 
 /** Text is a proposal, never executable code. The workspace boundary validates commands. */

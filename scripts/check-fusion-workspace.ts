@@ -8,7 +8,7 @@ import { defaults, parseSettings, generateBatch, textFor, csvFor, validateGenera
 import { builtinCatalogue, hydrateCatalogueSettings } from '../src/lib/character-fusion/catalogue';
 import type { FusionCatalogue, FusionCategory, FusionTerm } from '../src/lib/character-fusion/catalogue-model';
 import { applyFusionCommands, type FusionCommand, type FusionWorkspace } from '../src/lib/character-fusion/actions';
-import { bindFusionAgentCommands, fusionAgentScene, parseFusionAgentProposal, proposeFusionAgent } from '../src/lib/character-fusion/agent-adapter.server';
+import { bindFusionAgentCommands, fusionAgentCataloguePage, fusionAgentScene, parseFusionAgentProposal, proposeFusionAgent } from '../src/lib/character-fusion/agent-adapter.server';
 import { settingsChanges, mergeWorkspaceState } from '../src/app/tools/character-fusion/workspace-client';
 import { emptyWorkspaceState } from '../src/lib/character-fusion/actions';
 
@@ -46,6 +46,22 @@ async function main() {
     assert.throws(() => applyFusionCommands(nativeWorkspace, { opId: 'engineering-invalid-language', baseVersion: 1, commands: invalidLanguage }, builtinCatalogue()), /配方设置无效/);
     assert.equal(nativeWorkspace.state.settings.lang, 'zh'); assert.equal(nativeWorkspace.rows.length, 0);
     checks.push('原生已加入卡片场景、属性多选控制路径、4条双语实际生成及错误语言枚举原子拒绝');
+    const lookupCatalogue = builtinCatalogue(), projectedCategories: number[] = []; let lookupRounds = 0;
+    const lookupResult = await proposeFusionAgent({ workspace: nativeWorkspace, message: '查询巨掌和巨脚',
+      complete: async () => ++lookupRounds === 1 ? JSON.stringify({ reply: '先查两个词', reads: [{ kind: 'catalogue', q: '巨掌' }, { kind: 'catalogue', q: '巨脚' }], commands: [], drafts: [] })
+        : JSON.stringify({ reply: '已读到两项', reads: [], commands: [], drafts: [] }),
+      read: async read => {
+        if (read.kind !== 'catalogue') throw new Error('本场景只查询词库');
+        const matchingTerms = lookupCatalogue.terms.filter(term => term.nameZh === read.q);
+        const page = fusionAgentCataloguePage({ catalogue: { ...lookupCatalogue, terms: matchingTerms }, nextCursor: null, total: matchingTerms.length }, read);
+        assert.equal(page.total, 1); assert.equal(page.terms[0].nameZh, read.q); projectedCategories.push(page.categories.length); return page;
+      },
+    });
+    assert.equal(lookupResult.iterations, 2); assert.equal(lookupRounds, 2); assert.deepEqual(projectedCategories, [1, 1]);
+    const browse = fusionAgentCataloguePage({ catalogue: { ...lookupCatalogue, terms: lookupCatalogue.terms.slice(0, 20) }, nextCursor: 'engineering-cursor', total: lookupCatalogue.terms.length }, {});
+    assert.equal(browse.categories.length, lookupCatalogue.categories.filter(category => category.enabled).length);
+    assert.equal(browse.nextCursor, 'engineering-cursor'); assert.equal(browse.total, lookupCatalogue.terms.length); assert.equal(browse.terms.length, 20);
+    checks.push('双关键词目录读取不重复全类别、上下文可继续提案，原词条/总数/游标与目录浏览保持');
 
     const originalCatalogue = builtinCatalogue();
     assert.deepEqual(originalCatalogue, builtinCatalogue());
