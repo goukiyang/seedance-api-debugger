@@ -1,11 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '支持私域角色资产',
+  title: '角色融合支持扩库与对话控制',
   outline: [
-    '视频素材区可管理角色资产，支持新增、编辑和删除恢复',
-    '选择已入库角色即可作为参考素材，Asset ID 随时可换',
-    '角色与普通图片共用图片编号，保留提示词和生成记录'
+    '词库可新增类别与词条，预览入库后直接用于抽卡',
+    '创作助手可按想法筛选、抽卡、保留结果和局部调整',
+    '保留原卡片操作，创作现场与结果可保存、恢复和完整导出'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
