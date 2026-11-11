@@ -66,6 +66,7 @@ commands 必须符合附带的注册命令格式。不要提供opId、owner、ex
 dimensionOptions列出原卡片可选大类：id是changeRow.dimension所用的原维度ID，categoryId是目录查询类别，values是合法大类。大类不是具体词条名；例如主题灵感的梦境是concept维度的合法大类，即使其它属性也有同名词条仍可直接changeRow。目录词条的group是其所属大类，不能把具体词名当成大类。
 按本批数量检索足够的合法候选即可，例如4套不同母体只需4个已核实的候选，不要求扫描完整目录。已有足够候选就提交；需要特定未找到内容时用关键词或原样nextCursor继续分页，不把未读内容说成已检索。
 rules里每个label只能是dimensionOptions.values中的合法大类。海獭、企鹅等具体母体不能写进rules；使用检索返回的termId，通过catalogue.dynamic.selections[categoryId]的candidates约束候选、must安排每批必出，不能用中文具体词名冒充大类或termId。要求每套母体/职业不同时，按本批数量安排不同必出项，不能只在固定要求里写名单并让随机结果冒充已分配。
+termId是不可改写的引用，必须原样复用，不自行编码、解码、缩写或夹入中文。继续追加且只换画风时，保留未要求变化的现有候选、固定、排除与本批必出，只修改明确要求的字段并使用generate.append。
 明确的画风、材质和其它视觉要求必须进入实际提示词：整批用requirements与语义等价的requirementsEn，并启用requirementsEnabled；保留原文中未被要求修改的约束。原固定要求关闭时，不为新画风顺带启用旧的默认3D画风。画风不需要先新增词库，也不能只写进摘要。只改某条画风时先用results小页读取目标的requirements，再用patchRow仅更新该条中英文要求；不能借更换主题、职业、身体或全局设置冒充更换画风。角色定位、无职业、无道具、不强调机制等要求也须落实到相应已有卡片或实际要求，不能只在回复中承诺。
 共享固定要求只写每条都应满足的视觉约束；不要把整批人物名单、逐条职业分配、批量数量或操作说明写进每一条角色提示词。逐条差异用候选和必出设置表达。
 用户说保留结果时修改retainedIds；仅复制/导出选择修改selectedIds，两者分开。局部调整使用目标结果自己的快照，不改下一批全局设置。用户仅讨论、求建议或问可能性时commands留空；明确要求抽卡/调整/保留才提交对应命令。未知或含糊要求先解释，不能声称已应用；服务器拿到真实回执后才报告成功。
@@ -193,6 +194,7 @@ export async function proposeFusionAgent(options: {
   ];
   const initialMessageCount = messages.length;
   const reads: unknown[] = [];
+  const knownTerms = new Map((options.workspace.state.settings.catalogue?.dynamic?.snapshot.terms || []).map(term => [term.id, term.categoryId]));
   for (let iteration = 1; iteration <= FUSION_AGENT_MAX_STEPS; iteration++) {
     options.signal?.throwIfAborted();
     assertFusionAgentContext(messages);
@@ -201,7 +203,16 @@ export async function proposeFusionAgent(options: {
     let proposal: FusionAgentProposal;
     try {
       proposal = parseFusionAgentProposal(content);
-      if (!proposal.reads.length && proposal.commands.length) bindFusionAgentCommands(proposal.commands, options.workspace, 0);
+      if (!proposal.reads.length && proposal.commands.length) {
+        const commands = bindFusionAgentCommands(proposal.commands, options.workspace, 0);
+        for (const command of commands) if (command.type === 'patchSettings') for (const change of command.changes) {
+          const path = change.path;
+          if (path[0] !== 'catalogue' || path[1] !== 'dynamic' || path[2] !== 'selections') continue;
+          const lists = path.length === 4 && isRecord(change.value) ? ['values', 'excluded', 'must', 'candidates'].map(key => (change.value as Record<string, unknown>)[key])
+            : path.length === 5 && ['values', 'excluded', 'must', 'candidates'].includes(path[4]) ? [change.value] : [];
+          if (lists.some(list => Array.isArray(list) && list.some(id => typeof id !== 'string' || knownTerms.get(id) !== path[3]))) throw new FusionAgentError('模型词条引用未核实或被改写，请从已读目录原样复用词条编号；需要其它词条须先检索。本次未写入。');
+        }
+      }
     }
     catch (error) {
       if (!(error instanceof FusionAgentError) || iteration === FUSION_AGENT_MAX_STEPS) throw error;
@@ -213,7 +224,14 @@ export async function proposeFusionAgent(options: {
     if (!proposal.reads.length) return { proposal, reads, iterations: iteration, limitReached: false };
     if (iteration === FUSION_AGENT_MAX_STEPS) return { proposal: { ...proposal, commands: [], reads: [] }, reads, iterations: iteration, limitReached: true };
     const pages = [];
-    for (const read of proposal.reads) { options.signal?.throwIfAborted(); pages.push({ query: read, page: await options.read(read) }); }
+    for (const read of proposal.reads) {
+      options.signal?.throwIfAborted();
+      const page = await options.read(read);
+      if (read.kind === 'catalogue' && isRecord(page) && Array.isArray(page.terms)) for (const term of page.terms) {
+        if (isRecord(term) && typeof term.id === 'string') knownTerms.set(term.id, typeof term.categoryId === 'string' ? term.categoryId : read.categoryId || '');
+      }
+      pages.push({ query: read, page });
+    }
     reads.push(...pages);
     messages.splice(initialMessageCount);
     messages.push({ role: 'user', content: JSON.stringify({ toolResults: reads, remainingSteps: FUSION_AGENT_MAX_STEPS - iteration }) });

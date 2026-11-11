@@ -136,7 +136,7 @@ export async function executeWorkspaceOperation(actor: FusionActor, id: string, 
     const needsRows = request.commands.some(command => ['generate', 'addCurrent', 'changeRow', 'reviseRow', 'patchRow', 'removeRows', 'importDraft', 'undo'].includes(command.type));
     const storedRows = needsRows ? await tx.characterFusionResult.findMany({ where: { workspace_id: id }, orderBy: [{ position: 'asc' }, { id: 'asc' }] }) : [];
     const originalCurrent = workspaceDto(workspace, storedRows.map(resultDto));
-    const targetIds = new Set(request.commands.flatMap(command => command.type === 'changeRow' || command.type === 'reviseRow' ? [command.rowId] : []));
+    const targetIds = new Set(request.commands.flatMap(command => command.type === 'changeRow' || command.type === 'reviseRow' || command.type === 'patchRow' && command.patch.requirements ? [command.rowId] : []));
     const resolvedRows = [];
     for (const row of originalCurrent.rows) resolvedRows.push(targetIds.has(row.id) ? await resolveWorkspaceRow(tx, actor, id, row) : row);
     const current = { ...originalCurrent, rows: resolvedRows };

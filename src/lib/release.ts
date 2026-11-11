@@ -5,7 +5,7 @@ const notice = {
   outline: [
     '画风、角色和身体要求一起进入方案',
     '多类别检索与翻页更顺畅',
-    '单条改画风，保留其余结果和当前设置'
+    '单条画风可持续重抽，追加新风格保留旧方案'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

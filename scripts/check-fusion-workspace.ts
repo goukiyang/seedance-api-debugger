@@ -132,7 +132,27 @@ async function main() {
       },
     });
     assert.equal(pageRounds, 3);
-    checks.push('双关键词目录读取不重复全类别、上下文可继续提案，原词条/总数/游标与目录浏览保持');
+    {
+      const term = lookupCatalogue.terms.find(term => term.categoryId === 'dimension:concept')!;
+      const malformedId = 'builtin:dimension:concept:%E6%B6%82%E鸦%E5%BF%AB%E9%80%92%E5%91%98';
+      let referenceRounds = 0, referenceReads = 0;
+      const corrected = await proposeFusionAgent({ workspace: nativeWorkspace, message: '保留原方案，追加剪纸风方案',
+        complete: async messages => {
+          if (++referenceRounds === 1) return JSON.stringify({ reply: '先读取合法词条', reads: [{ kind: 'catalogue', categoryId: term.categoryId, q: term.nameZh, limit: 1 }] });
+          if (referenceRounds === 3) assert((messages[messages.length - 1].content as string).includes('词条引用'));
+          return JSON.stringify({ reply: '追加方案', commands: [{ type: 'patchSettings', changes: [{ path: ['catalogue', 'dynamic', 'selections', term.categoryId], value: { enabled: true, locked: false, values: [], excluded: [], must: [term.id], candidates: [referenceRounds === 2 ? malformedId : term.id] } }] }, { type: 'generate', mode: 'append' }] });
+        },
+        read: async query => {
+          referenceReads++; if (query.kind !== 'catalogue') throw new Error('本场景只查询词库');
+          return fusionAgentCataloguePage({ catalogue: { ...lookupCatalogue, terms: [term] }, nextCursor: null, total: 1 }, query);
+        },
+      });
+      assert.equal(referenceRounds, 3); assert.equal(referenceReads, 1);
+      const applied = applyFusionCommands(nativeWorkspace, { opId: 'engineering-corrected-reference', baseVersion: 1, commands: bindFusionAgentCommands(corrected.proposal.commands, nativeWorkspace, 650) }, lookupCatalogue);
+      assert.equal(applied.rows.length, nativeWorkspace.state.settings.count);
+      assert(applied.rows.every(row => row.concept.name === term.nameZh));
+    }
+    checks.push('双关键词目录读取不重复全类别、上下文可继续提案、模型抄错词条编号可有界纠正，原词条/总数/游标与目录浏览保持');
 
     {
       let rounds = 0, reads = 0;
@@ -274,7 +294,28 @@ async function main() {
     const undone = await repository.executeWorkspaceOperation(actor, id, { opId: 'engineering-undo', baseVersion: merged.workspace.version, commands: [{ type: 'undo', operationId: 'engineering-merge' }] });
     assert.equal(undone.workspace.state.summary, '当前摘要');
     assert.equal(undone.workspace.state.settings.lang, patch.workspace.state.settings.lang);
-    checks.push('真实临时SQLite：本人归属、原号原子回执/幂等、不同载荷拒绝、字段CAS合并、冲突与局部撤销');
+    {
+      const styleState = emptyWorkspaceState();
+      Object.assign(styleState.settings, { count: 4, lang: 'both', requirementsEnabled: true, requirements: '赛博朋克，霓虹金属', requirementsEn: 'Cyberpunk, neon lighting and metallic materials' });
+      styleState.settings.catalogue!.traits.stature = { enabled: true, locked: true, values: ['瘦长'], excluded: [], must: [] };
+      const styleDocument = await repository.createFusionWorkspace(actor, { opId: 'engineering-persisted-style-create', name: '持久化单条画风', state: styleState });
+      const initial = await repository.executeWorkspaceOperation(actor, styleDocument.workspace.id, { opId: 'engineering-persisted-style-generate', baseVersion: 1, commands: [{ type: 'generate', mode: 'replace', seed: 910 }] });
+      const target = initial.workspace.rows[1], originalReference = target.catalogueSnapshot!.settingsRef;
+      assert(originalReference && !target.catalogueSnapshot!.settings);
+      await repository.executeWorkspaceOperation(actor, styleDocument.workspace.id, { opId: 'engineering-persisted-style-patch', baseVersion: initial.workspace.version, commands: [{ type: 'patchRow', rowId: target.id, expectedVersion: target.version, patch: { requirements: { zh: '蒸汽朋克，霓虹金属', en: 'Steampunk, neon lighting and metallic materials' } } }] });
+      const freshStyle = (await repository.getWorkspace(actor, styleDocument.workspace.id)).workspace;
+      const styled = freshStyle.rows.find(row => row.id === target.id)!;
+      const rerolled = await repository.executeWorkspaceOperation(actor, styleDocument.workspace.id, { opId: 'engineering-persisted-style-reroll', baseVersion: freshStyle.version, commands: [{ type: 'changeRow', rowId: target.id, expectedVersion: styled.version, seed: 911 }] });
+      const changed = rerolled.workspace.rows.find(row => row.id === target.id)!;
+      assert.equal(changed.design!.requirements.zh, '蒸汽朋克，霓虹金属');
+      assert.match(changed.catalogueSnapshot!.body.en, /Steampunk/);
+      assert.doesNotMatch(changed.catalogueSnapshot!.body.en, /Cyberpunk/);
+      assert.notEqual(styled.catalogueSnapshot!.settingsRef!.configurationId, originalReference.configurationId);
+      assert.deepEqual(rerolled.workspace.rows.filter(row => row.id !== target.id), initial.workspace.rows.filter(row => row.id !== target.id));
+      assert.deepEqual(rerolled.workspace.state.settings, initial.workspace.state.settings);
+      assert.deepEqual((await repository.getWorkspace(actor, styleDocument.workspace.id)).workspace, rerolled.workspace);
+    }
+    checks.push('真实临时SQLite：本人归属、原号原子回执/幂等、不同载荷拒绝、字段CAS合并、冲突、局部撤销与持久单条画风后重抽');
     {
       const originalDocument = (await repository.getWorkspace(actor, id)).workspace;
       const freshState = { ...emptyWorkspaceState(), settings: { ...structuredClone(originalDocument.state.settings), count: 4, lang: 'both' as const } };
