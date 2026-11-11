@@ -1,11 +1,12 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '角色融合多场景创作',
+  title: '角色融合对话工作台',
   outline: [
-    '画风、角色和身体要求一起进入方案',
-    '多类别检索与翻页更顺畅',
-    '单条画风可持续重抽，追加新风格保留旧方案'
+    '原卡片与常驻对话共同创作，方案按批次整理',
+    '新创作、沿用组合与继续各有清楚入口',
+    '本批要求、单条调整与后续固定分开生效',
+    '对话撤销与新词入库接续实际抽卡'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
