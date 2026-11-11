@@ -220,7 +220,7 @@
 <!-- ARK-CHARACTER-ASSET01-THUMBNAIL12-20261111 -->
 ## 12. 下拉按角色缩略图直接选用（2026-11-11）
 
-用户追加明确要求：以后在下拉中按角色缩略图直接选择。该三文件实现与下拉箭头已保存在不可变提交 `c6c1f41fa7b7005015596304bbfb7b6aa87542d7`，曾按用户优先级从提示词组急修撤出。提示词组 v0.144.1已部署后，本节现已在其线上源 `56ab5da038b38324837119b05e119446b93e9066` 上恢复实施，待主控 v0.144.2发布；缩略图交互尚未上线。Panel/CSS恢复c6完整字节，Composer仅恢复原授权缩略图 URL 映射，保留全部提示词组修复。未改 API、schema、CAS、计费、生成输入或发布脚本，未新增收费调用、AK/SK 或供应商素材查询。
+用户追加明确要求：以后在下拉中按角色缩略图直接选择。该三文件实现与下拉箭头已保存在不可变提交 `c6c1f41fa7b7005015596304bbfb7b6aa87542d7`，曾按用户优先级从提示词组急修撤出。提示词组 v0.144.1已部署后，本节现已在其线上源 `56ab5da038b38324837119b05e119446b93e9066` 上恢复实施，并已于2026-11-11T10:59:21Z部署v0.144.2；缩略图交互待用户手验。Panel/CSS恢复c6完整字节，Composer仅恢复原授权缩略图 URL 映射，保留全部提示词组修复。未改 API、schema、CAS、计费、生成输入或发布脚本，未新增收费调用、AK/SK 或供应商素材查询。
 
 ### 12.1 本次实现与来源
 
@@ -239,13 +239,23 @@
 
 当前仍未取得火山资产本身的原图；推理 Key 不支持管理 GetAsset 查询，不新增 AK、不抓供应商图，也不把已生成视频帧冒作资产原图。无缩略图的记录可用有权的站内图片设置识别封面，不影响已有私域引用生成。本轮未新增任务外发现。
 
-### 12.3 提示词组上线后的恢复（实施待发布）
+### 12.3 提示词组上线后的恢复
 
 本次仅恢复已批准的 `428→c6c1f41f` 三UI文件净差量，不重做设计或扩展功能。写入前确认Panel/CSS与428逐字节相同，恢复后与c6逐字节相同；Composer差异仅一处thumbnailUrl映射，所有提示词组能力、选择/草稿保留及请求合同代码均与56线上源一致。缩略图来源仍为已有授权referenceLabels与目录DTO；无图/失败占位、显式切IP、容量/停用/在途锁及次级管理保持。
 
-仅进行恢复差异检查、TSX语法解析与CSS解析，不重跑已匹配原实现的类型/窄lint及无关模拟，不做浏览器、截图或收费调用。完整候选构建和部署由主控接续；§12.2手验项仍待用户检查。本次不提交Git、不改版本/发布材料；主控接续聚焦提交与v0.144.2。
-<!-- /ARK-CHARACTER-ASSET01-THUMBNAIL12-20261111 -->
+仅进行恢复差异检查、TSX语法解析与CSS解析，不重跑已匹配原实现的类型/窄lint及无关模拟，不做浏览器、截图或收费调用。恢复工作包交给主控后，主控已接续完成聚焦提交、完整候选构建和v0.144.2部署，实际结果见下节；§12.2手验项仍待用户检查。
+### 12.4 实际发布结果
 
+2026-11-11T10:59:21Z **v0.144.2 已部署，待用户手动验收**。主源 `541334e9e2050cdd3cafca3e9489f9c452415efc`／BUILD `ZD2wem-SWZ1sVQdXyUkkt`，已推送并核远端。完整继承已上线的56ab提示词组修复；恢复源继续使用原3633／`H6ik79dYs3XsO_FP-Yeii`及其原构建/reader证据，不冒新构建。服务器阶段 `/data/video-api-debugger/release-staging/character-assets-thumbnail-after-pg-20261111/attempt01`。
+
+- 精确Git导出2502文件，56ab→541净差量只含三UI和package/lock/release.ts共6文件；无后台、schema、计费或传输改动。
+- 完整TypeScript、改动lint、Next含内置types/lint通过；17原生记录按未变输入复用，17关联记录中16复用、1项projects检查刷新，fresh计价通过。build与cutover均exit 0；无新的生成/浏览器/截图验收。
+- 6启动检查、7服务、4timer、51公网资源及4匿名401通过，实际公网版本0.144.2；PG完整36目标发送策略、价格、原数据链接和2小时video-delivery看护保持，无DDL或业务数据恢复。
+- CodeGraph对应实际541源及指纹`9136ffff2594f2b24a1531f0d0df9d9f05f874fb46dcfad3e0b20247f324d3ce`已READY，2065文件、0missing/hashMismatch/parseError；本轮局部调用关系另以源码核对，不把准备成功冒结构查询通过。
+
+详[发布摘要](../../docs/materials/2026-11-11-seedance-private-character-assets/thumbnail-release-summary.json)。实际下拉/手机布局、鼠标键盘选图、封面保存及生成仍按§12.2由用户手验；当前推理配置仍不能读取火山资产原图，识别封面使用有权的站内图片。未新增任务外问题。
+
+<!-- /ARK-CHARACTER-ASSET01-THUMBNAIL12-20261111 -->
 
 <!-- ARK-CHARACTER-ASSET01-PROMPTGROUP13-20261111 -->
 ## 13. 提示词组固定可用与 2.5 / IP 创建链修复（2026-11-11）
@@ -285,5 +295,34 @@
 - 首次检查因补充旧回执误由新candidate读取而 exit 1；修正两处读取作用域后，resume02因上次隔离准备留下的目录所有者状态再次 exit 1。均未切版。保存原helper、日志及回执，只上收候选根和 `.role-tests` 顶层、保留冲突stderr、使用全新隔离run；resume03 exit 0，最终两次完整Next和cutover有独立原证。原失败记录未覆盖，不误记为未部署。
 - 程序恢复已修为只依赖完整guard与锁定manifest，不要求故障main物理目录可读；保全部writer自然退出、后发发布/配置漂移保护，不回业务数据。2小时视频交付看护与费用、原请求、素材保护保持。
 
-详[发布摘要](../../docs/materials/2026-11-11-seedance-private-character-assets/prompt-groups-release-summary.json)。普通/IP型号切换、所选组保留、仅选组输入及实际成片仍待用户手验。按用户顺序，此项上线后已接续 §12 缩略图UI，另行发布0.144.2；不把尚未发布的缩略图混入0.144.1。未新增任务外问题。
+详[发布摘要](../../docs/materials/2026-11-11-seedance-private-character-assets/prompt-groups-release-summary.json)。普通/IP型号切换、所选组保留、仅选组输入及实际成片仍待用户手验。按用户顺序，此项上线后才接续 §12 缩略图UI，并已另行完成0.144.2发布（§12.4）；0.144.1仍只包含提示词组急修。未新增任务外问题。
 <!-- /ARK-CHARACTER-ASSET01-PROMPTGROUP13-20261111 -->
+
+
+<!-- ARK-CHARACTER-ASSET01-THUMB-UPLOAD14-20261111 -->
+## 14. 角色缩略图直接上传（2026-11-11）
+
+用户明确要求：缩略图增加直接上传入口，新增和编辑角色都可上传、更换；显式保存后显示在角色下拉中，Asset ID仍可替换。沿原角色表单和现有站内图选项补入口，不改变已有提示词组、角色生成引用、素材编号或历史。
+
+### 14.1 已核路径与边界
+
+- 实际线上已是v0.145.0／b2a4afa63／uWJv_QJSKrQaWse2KqXTx，已包含本单1441/1442修复。新隔离工作区`character-thumbnail-upload-20261111`从该健康源建立，正式根其它脏改不参与；当前另有UX16占用同一构建/发布窗口，后续必须继承其最终健康145.1及实际guard，不从旧1442切回。当前只做本地代码与工程检查。
+- 复用通用`uploadFileToHistory`及其按owner/epoch、原请求/票据与真实字节进度；它只返回Asset ID。角色保存需要ReferenceImage ID，不能直接混用。现有workspace/codex上传引用会添加生成素材，普通图集POST会重复建引用，均不作为本次封面登记路径。
+- 在角色模块补一个窄的本人封面登记步骤：同事务鲜核active本人账号、本人active图片和保护素材读取权限，确定性私有个人album/ref、null workspace/project，返回稳定ReferenceImage ID与原授权thumbnail地址。重复核对仍为同一引用，不新建表、不关联WorkspaceAsset，不恢复已删除/失权对象，不借同名共享图集扩范围。沿现有角色写门及保存时权限/CAS检查。
+- 新增/编辑表单使用同一上传/更换控件，保原封面与文字输入；区分上传、封面准备和已保存。真实完成并准备好官方缩略图后才更新草稿，显式保存才改角色。上传未知保原File/票据核对，上传已完成而登记失败只重试同一Asset登记；账号/会话/编辑目标变化不套用迟到结果。关闭不自动保存，取消编辑不永久删除本人上传历史或旧图片。
+
+### 14.2 交付检查安排
+
+完成本轮差量的必要隔离工程与完整候选构建/版本/服务/公网检查，复用未变输入的既有原证；不真实上传用户文件、不额外收费生成、不自动浏览器或功能验收。发布只回程序/配置，不回业务数据；保当前融合5表与reader、原私密发送配置、价格、原请求和2小时看护。新增/编辑上传、换图预览、失败恢复及保存后下拉展示仍由用户手验。实施/工程/推送/上线分别补记真实结果。
+
+### 14.3 实施与定向工程结果
+
+业务修改已完成：`CharacterAssetPanel.tsx`、`character-assets.css`、`src/lib/character-assets/service.ts`、新增`src/app/api/character-assets/thumbnail/route.ts`，以及定向工程脚本`character-thumbnail-upload-engineering.mjs`。新增/编辑共用直接上传/更换，原封面保留到受保护缩略图解码完成；登记仅建确定性本人私有ref，保存才关联角色。生成Composer、共享上传器/reference-import、schema及模型/费用链均未修改。有效共享拦截、撤销/过期共享不误拦；原删除/失权ref不复活。
+
+- 12项实际模块/回调隔离工程通过：真实临时SQLite事务核owner/status/type/大小/read权限、私有album/ref/幂等/无workspace写、写暂停、API鉴权输入与原角色CAS；实际Panel回调核新增/编辑、ready关闭重开、同File未知恢复、上传后同Asset登记重试、decode失败/超时、账号epoch和编辑目标/文件对话框迟到结果。原证位于本任务私有`release/thumbnail-upload01/local/engineering.json`，10个源SHA均核同；script SHA `ce15ef20ee7cc0fab9859b4d0228ac90573df6a21fd0010be3f3d01e54b4312c`。
+- 使用当前schema独立生成client完成窄TypeScript检查exit0；窄ESLint exit0（两warning）、TSX语法/PostCSS/差异检查通过，未修改共享依赖或generated client。TypeScript5.9.3／Prisma5.22.0。
+- 工程隔离为temporarySqlite=true；networkAttempts/realUploads/modelCalls/browserRuns/productionDatabaseAccess/productionWrites均0。没有真实用户文件上传、浏览器功能验收或收费调用。
+- 新工作区CodeGraph已同步2085文件，实际结构查询找到新登记函数；实施检查完成不冒已上线。等待UX16实际健康后继与当前发布窗口释放，再在该有效新基线上完成主候选完整构建、版本/健康与保护发布。功能仍由用户手验。
+
+本地已合入对方已推送的UX16候选`90fb0a812790ab3bceb358f5c7cfee91b844e6c4`（1451），本轮准备1452；该合并没有修改本轮10个工程源哈希，原12项证据继续有效，不重跑。正式窗口及实际上线元证仍待对方交回，未启动本轮服务器候选或切版。
+<!-- /ARK-CHARACTER-ASSET01-THUMB-UPLOAD14-20261111 -->
