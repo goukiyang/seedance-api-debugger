@@ -1,11 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '角色融合支持扩库与对话控制',
+  title: '角色融合对话执行修复',
   outline: [
-    '词库可新增类别与词条，预览入库后直接用于抽卡',
-    '创作助手可按想法筛选、抽卡、保留结果和局部调整',
-    '保留原卡片操作，创作现场与结果可保存、恢复和完整导出'
+    '创作助手正确识别已加入的原生卡片',
+    '双语、生成数量与多选使用工作台的真实设置',
+    '保留原卡片呈现和操作'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
