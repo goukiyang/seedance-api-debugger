@@ -591,3 +591,9 @@ U5浏览器评论原文“增加红点系统，生成还未看的，在这块增
 <!-- FUSION-UX11-MATERIALS-20261110 -->
 - 2026-11-10 角色融合UX11类目/中英/手选与抽卡统一发布：[安全汇总](2026-11-08-character-fusion-prototype/implementation/ux11/release-summary.json)，v0.142.0/08a49383b，完整工程与公网/服务健康有证，功能待用户手验。原32项审计及实施状态沿[原角色融合单UX10–UX11](../../tasks/todo/2026-11-08-character-fusion.md#ux10-类目与选项关系审计2026-11-10)；原参考图、UX08/UX09方案继续复用。无环境、数据库、私有价格行、用户媒体或凭据导出。
 <!-- /FUSION-UX11-MATERIALS-20261110 -->
+
+<!-- FUSION-UX13-MATERIALS-20261110 -->
+## 角色融合多选组合实施与发布（2026-11-10）
+
+[原单UX13](../../tasks/todo/2026-11-08-character-fusion.md#ux13-实际交付与发布收口)；[私有发布摘要](2026-11-08-character-fusion-prototype/implementation/ux13/release-summary.json)绑定v0.143.0/b8e9c6a04/-ijST2R-fJuDZQZV-9Ccp，保源码、构建、原生/关联复用与当前计价、公网及健康证据入口。`implementation/ux13/deploy/`沿旧成功控制源做本次输入绑定，未修改发布引擎；未下载环境、DB或用户媒体，不提交私有控制材料。多选/辅助母体/旧卡片与自定义卡片/双语/保存恢复的实际效果仍待用户手验。
+<!-- /FUSION-UX13-MATERIALS-20261110 -->

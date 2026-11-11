@@ -535,3 +535,11 @@ stage：`/data/video-api-debugger/release-staging/template-editor-entry-20261110
 
 attempt01缺baseline.build，创建候选/Next/切服务前退出；失败原证保留，attempt02补齐实际基线后成功。装备设计新旧定义差异和未覆盖边界见[原单§11](../tasks/todo/2026-11-09-template-current-input.md#11-tpl-editor04-原模板复用草稿及装备设计排查2026-11-10)。入口 https://sd2.youdooart.com/template-studio?type=image 。发布窗已交回后继。
 <!-- /TPL-EDITOR04-RELEASE-20261110 -->
+
+<!-- FUSION-UX13-RELEASE-20261110 -->
+## 2026-11-10 角色融合多选组合
+
+已部署，待用户手动验收：`b8e9c6a04102984c5d96c245ca2c5119d59a0340`／v0.143.0／BUILD`-ijST2R-fJuDZQZV-9Ccp`，继承94321fd71/1424。完整Linux类型/目标lint/Next通过，2487导出blob核对；17原生+16关联复用、1关联工程新跑及鲜计价通过，build0/cutover0。2026-11-11T04:57:35Z公网58资源/4匿名401，04:59:03Z七服务四timer及内外网health、发布controller0；无浏览器或收费/自动功能验收。
+
+stage`/data/video-api-debugger/release-staging/fusion-multiselect-ux13-20261110/attempt01`，pair`4db60f92-87e1-44dc-9e34-8e61f4219d11`。保guard79ab/zxSx原成功成品与时间，一致SQLite/配置备份齐，费用全字段d03c、私密策略及数据链接保持；迁移只读继承，无DDL/回业务数据/原请求重发。恢复沿本stage已绑定的`program-recovery.sh release-input.json`，先核当前所有者，只回程序/配置指针，未演练生产回退；窗口已释放。[原单UX13](../tasks/todo/2026-11-08-character-fusion.md#ux13-实际交付与发布收口)及[私有摘要](materials/2026-11-08-character-fusion-prototype/implementation/ux13/release-summary.json)。
+<!-- /FUSION-UX13-RELEASE-20261110 -->

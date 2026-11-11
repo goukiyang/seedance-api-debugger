@@ -158,3 +158,9 @@ TPL-CURRENT01的实际独立checkout初始化CodeGraph约50分钟仍未完成，
 
 R02扩查补证：准备入口虽返回READY，独立checkout的git-common-dir不符合适配器限定，实际SQLite缺少current-inputs/tasks/batches/shared-contract四个后端文件。studio.tsx和PrivateDefinitionEditor.tsx已有记录且与当时源SHA一致，前端结构查询可用；不能据此声称后端索引恢复。缺口按定向源码接续，未扩改全局工具。
 <!-- /TPL-CURRENT01-TOOL-20261109 -->
+
+<!-- FUSION-UX13-LIVE-CAPTURE-20261110 -->
+## D-20261110-LIVE-CAPTURE-VIDEO-WRITER 通用发布捕获未识别合法视频交付服务（已确认工具缺陷）
+
+角色融合UX13实施前，既有`ops/sd2-release-live-capture.mjs`在v0.142.4/94321fd71上报`An unmanaged process shares the role source`。只读核对/proc/cgroup确认新增同源进程均属于正式`sd2-video-delivery.service`，非未受管理writer；该捕获仅计六角色和periodic，遗漏此合法定时服务。既有成功固定发布脚本已包含video-delivery的配置保护、timer停启和旧writer自然排空，本轮沿该入口核真实源/进程，并保留原保护；不修改通用捕获或发布引擎、不扩大为发布体系改造。后续维护通用入口时补合法服务识别及对应进程检查，不能简单移除同源writer检查。[本轮原单](todo/2026-11-08-character-fusion.md#ux13-实施与发布接续)。
+<!-- /FUSION-UX13-LIVE-CAPTURE-20261110 -->
