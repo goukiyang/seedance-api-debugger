@@ -1,3 +1,4 @@
+import { normalizeArkAssetId } from '@/lib/character-assets/inputs';
 import type {
   CreateVideoInput,
   GenerationMode,
@@ -178,6 +179,10 @@ function addUrlItems(
     throw new Error(`${kind}数量超过当前模型上限 ${limit}，请减少素材后再提交。`);
   }
   for (const url of usableUrls) {
+    if (/^asset:/i.test(url)) {
+      if (type !== 'image_url' || role !== 'reference_image') throw new Error('私域角色仅支持全能参考图片，不支持首尾帧、视频或音频');
+      normalizeArkAssetId(url);
+    }
     if (type === 'image_url') content.push({ type, image_url: { url }, role });
     if (type === 'video_url') content.push({ type, video_url: { url }, role });
     if (type === 'audio_url') content.push({ type, audio_url: { url }, role });

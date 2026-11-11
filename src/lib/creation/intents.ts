@@ -1,3 +1,4 @@
+import { videoReferenceImageInputs, resolveVideoCharacterReferences } from '@/lib/character-assets/video-reference.server';
 import { enhanceVideoSourcePricing, assertEnhanceVideoSourceTaskAllowed } from '@/lib/tasks/enhance-video-create';
 import { assertNoPreparationRejection, originalPreparationRejection } from './preparation-receipts';
 import { writeCreationOperation } from './receipts';
@@ -24,12 +25,13 @@ import { assertVideoPromptGroupSurface } from '@/lib/video/prompt-groups';
 const INPUT_FIELDS = ['video_prompt_groups', 'video_prompt_groups_contract', 'provider', 'model', 'generation_mode', 'prompt', 'ratio', 'duration', 'resolution', 'seed',
   'generate_audio', 'return_last_frame', 'watermark', 'draft', 'resolution_approval_confirmed',
   'reference_image_urls', 'reference_video_urls', 'reference_audio_urls', 'first_frame_url', 'last_frame_url', 'frame_image_urls',
-  'reference_image_ids', 'canvas_references', 'video_feishu', 'reference_album_ids', 'template_studio_run_id', 'template_studio_assets',
+  'reference_image_ids', 'reference_image_inputs', 'character_asset_references', 'canvas_references', 'video_feishu', 'reference_album_ids', 'template_studio_run_id', 'template_studio_assets',
   'source_task_id', 'source_draft_task_id', 'tool_version', 'fps', 'multiview_generation', 'multiview_settings', 'multiview_action',
   'canvas_document_id', 'canvas_node_id', 'workspace_id', 'preset_id', 'lora_id', 'audio_prompt', 'music_prompt',
   'scene', 'video_url', 'template_id', 'agent_run_id', 'selected_agent_plan_key', 'agent_prompt_snapshot', 'final_prompt_snapshot', 'prompt_user_edited', 'roleMediaContext', 'first_frame_asset_id', 'last_frame_asset_id', 'template_studio_parameters', 'omni_reference_task_type', 'promptMentions'] as const;
 export function normalizeVideoCreationSpec(body: Record<string, unknown>): VideoCreationSpec {
   assertVideoPromptGroupSurface(body);
+  videoReferenceImageInputs(body);
   if (Buffer.byteLength(JSON.stringify(body)) > 262144) throw new CreationError('创作输入过大', 400, 'creation_input_invalid');
   const action = body.action || 'generate', entry = body.entry || 'ordinary';
   if (!['generate', 'enhance', 'draft_upgrade'].includes(String(action))
@@ -103,6 +105,9 @@ export async function prepareVideoCreationIntent(user: SessionUser, body: Record
   body = applyCanvasReferenceInputs(body, await resolveCanvasReferenceInputs(user, body, prisma, { target: 'video' }));
   const actionInput = await resolveMultiviewActionVideoInput(user, body);
   if (actionInput) body = actionInput.body;
+  const characterReferences = await resolveVideoCharacterReferences(user, body);
+  if (characterReferences !== undefined) body = { ...body, character_asset_references: characterReferences };
+  else delete body.character_asset_references;
   const spec = normalizeVideoCreationSpec(body), inputHash = creationSpecHash(spec);
   const context = await readCreationContext(user, spec.project_id, spec.video_card_id);
   const parentId = creationParent(spec);
@@ -132,6 +137,7 @@ export async function prepareVideoCreationIntent(user: SessionUser, body: Record
     await assertProjectActiveInTransaction(tx, user, spec.project_id);
     await resolveCanvasReferenceInputs(user, body, tx, { target: 'video' });
     await resolveMultiviewActionVideoInput(user, body, tx);
+    await resolveVideoCharacterReferences(user, body, tx);
     const current = await tx.videoCreationIntent.findUnique({ where: { owner_id_request_id: { owner_id: user.id, request_id: requestId } } });
     await assertNoPreparationRejection(tx, user.id, requestId, body);
     const data = { action: spec.action, entry: spec.entry, project_id: spec.project_id, legacy_card_id: spec.video_card_id,
@@ -224,6 +230,8 @@ export async function acceptVideoCreationIntent(tx: Prisma.TransactionClient, us
   }
   if (intent.revision !== body.intent_revision || (!isBatch && !['ready', 'awaiting_approval', 'prepared'].includes(intent.state))
     || isBatch && intent.state !== 'batch_active' || intent.state === 'closed') throw new CreationError('原创作请求已结束或变化，未重新生成');
+  const currentCharacters = await resolveVideoCharacterReferences(user, body, tx);
+  if (currentCharacters !== undefined) body = { ...body, character_asset_references: currentCharacters };
   const spec = creationSubmissionSpec(body, intent);
   await resolveCanvasReferenceInputs(user, body, tx, { target: 'video' });
   await resolveMultiviewActionVideoInput(user, body, tx, body.multiview_action !== undefined);

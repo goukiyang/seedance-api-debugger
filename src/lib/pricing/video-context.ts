@@ -1,3 +1,4 @@
+import { resolveVideoCharacterReferences } from '@/lib/character-assets/video-reference.server';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -134,10 +135,12 @@ async function resolveContext(user: SessionUser, body: Record<string, unknown>,
     && JSON.stringify(parseMultiviewSettingsBinding(body.multiview_settings)) !== JSON.stringify(multiviewSettings)) {
     throw new PricingChargeError('已保存设置与报价绑定不一致，未提交生成');
   }
+  const characterReferences = await resolveVideoCharacterReferences(user, body, db);
   const fingerprint = pricingFingerprint({ v: 1, actorId: user.id, projectId, videoCardId, payer,
     provider: body.provider || 'seedance', model: body.model, resolution: body.resolution, duration: body.duration,
     ratio: body.ratio || null, sourceDraftTaskId: body.source_draft_task_id || null, purpose, referenceVideo, referenceVideoFingerprint, templateBinding,
     ...(canvasInput ? { canvas_references: canvasInput.references } : {}),
+    ...(characterReferences === undefined ? {} : { reference_image_inputs: body.reference_image_inputs, characterAssetReferences: characterReferences, prompt: body.prompt }),
     ...(multiviewSettings ? { multiviewSettings } : {}),
     ...(groups ? { videoPromptGroups: { fingerprint: groups.fingerprint,
       seed: body.seed ?? -1, generateAudio: body.generate_audio ?? true, returnLastFrame: body.return_last_frame ?? false,

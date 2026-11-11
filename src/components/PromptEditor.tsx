@@ -33,6 +33,7 @@ interface Props {
   onPreviewReference?: (label: string) => void;
   mentionCandidates?: PromptMentionCandidate[];
   onMentionSelect?: (candidate: PromptMentionCandidate) => Promise<string | null | undefined> | string | null | undefined;
+  insertReferenceRequest?: { id: number; label: string } | null;
 }
 
 const PROMPT_TEXTAREA_MAX_HEIGHT = 320;
@@ -79,6 +80,7 @@ export function PromptEditor({
   onPreviewReference,
   mentionCandidates = [],
   onMentionSelect,
+  insertReferenceRequest,
 }: Props) {
   const { confirm, productDialog } = useProductDialog();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -169,11 +171,11 @@ export function PromptEditor({
     });
   }, []);
 
-  const insertMainReference = useCallback((label: string) => {
+  const insertMainReference = useCallback((label: string, preserveSelected = false) => {
     const marker = `@${label}`;
     const textarea = textareaRef.current;
     const start = textarea?.selectionStart ?? value.length;
-    const end = textarea?.selectionEnd ?? start;
+    const end = preserveSelected ? start : textarea?.selectionEnd ?? start;
     const { next, cursor } = insertTextAtRange(value, marker, start, end);
     if (next.length > MAX_GENERATION_PROMPT_CHARS) {
       setLimitNotice(promptLimitMessage(next.length));
@@ -184,6 +186,13 @@ export function PromptEditor({
     onInsertReferenceLabel?.(label);
     focusTextareaAt(textareaRef, cursor);
   }, [focusTextareaAt, onChange, onInsertReferenceLabel, value]);
+
+  const appliedInsertRequest = useRef<number | null>(null);
+  useEffect(() => {
+    if (!insertReferenceRequest || appliedInsertRequest.current === insertReferenceRequest.id) return;
+    appliedInsertRequest.current = insertReferenceRequest.id;
+    if (!new RegExp(`@${insertReferenceRequest.label}(?!\\d)`).test(value)) insertMainReference(insertReferenceRequest.label, true);
+  }, [insertReferenceRequest, insertMainReference, value]);
 
   const insertDraftReference = useCallback((label: string) => {
     const marker = `@${label}`;

@@ -1,3 +1,4 @@
+import { videoReferenceImageInputs, resolveVideoCharacterReferences, orderedVideoImageUrls, validateOrderedImagePrompt } from '@/lib/character-assets/video-reference.server';
 import { CreationError, isCreationV2 } from '@/lib/creation/contract';
 import { assertVideoCreationReady } from '@/lib/creation/context';
 import { acceptVideoCreationIntent } from '@/lib/creation/intents';
@@ -77,6 +78,7 @@ import { assertProjectActiveInTransaction } from '@/lib/projects/permissions';
 import { assertCanEditCanvasDocument } from '@/lib/canvas-documents';
 import {
   authenticateCodexVideoApi,
+  prepareCodexVideoCreation,
   CodexApiAuthError,
   hasCodexApiAuthSignal,
   webRequestSource,
@@ -457,11 +459,19 @@ export async function POST(request: NextRequest) {
     return errorJson('账号已被禁用，无法生成', 403);
   }
 
-  const receivedBody = await request.json();
+  let receivedBody = await request.json();
+  if (!receivedBody || typeof receivedBody !== 'object' || Array.isArray(receivedBody)) return errorJson('视频输入无效', 400);
+  const characterRequestFingerprint = videoPricingBusinessFingerprint(receivedBody);
   try { if (parseVideoPromptGroupRefs(receivedBody.video_prompt_groups).length) return NextResponse.json({ error: '提示词组仅支持普通视频生成页，未提交本次生成' }, { status: 426 }); }
   catch { return NextResponse.json({ error: '提示词组选择无效，未提交本次生成' }, { status: 400 }); }
   if (typeof receivedBody.idempotency_key === 'string' && receivedBody.idempotency_key) {
     const original = await prisma.videoTask.findUnique({ where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: receivedBody.idempotency_key } } });
+    const savedCharacterRequest = parseJsonRecord(original?.params_json)?.characterRequestFingerprint;
+    if (original && savedCharacterRequest) {
+      await assertCanViewTask(user, original);
+      if (savedCharacterRequest !== characterRequestFingerprint) return NextResponse.json({ error: '原请求内容不同，请查询原任务', code: 'IDEMPOTENCY_PAYLOAD_MISMATCH', existing_task_id: original.id }, { status: 409 });
+      return ipDeduplicatedTaskResponse(original);
+    }
     if (original?.request_fingerprint?.startsWith('pricing-v2:')
       && receivedBody.canvas_video_batch === undefined && !receivedBody.idempotency_key.startsWith('cvb:')) {
       await assertCanViewTask(user, original);
@@ -471,6 +481,10 @@ export async function POST(request: NextRequest) {
   }
   const volcengineSettings = await getVolcengineIpApiSettings();
   if (!isVolcengineIpApiReady(volcengineSettings)) return errorJson('请先在 API 整合页配置并启用火山 IP 生成 API', 500);
+  if (hasCodexApiAuthSignal(request) && receivedBody.reference_image_inputs !== undefined) {
+    try { receivedBody = await prepareCodexVideoCreation(user, { ...receivedBody, provider: 'volcengine_ip', entry: 'ip', model: receivedBody.model || volcengineSettings.default_model }); }
+    catch (error) { if (error instanceof CreationError || error instanceof AuthError) return NextResponse.json({ error: error.message, code: error instanceof CreationError ? error.code : 'character_input_invalid' }, { status: error.status }); throw error; }
+  }
   let restoredBatch: Awaited<ReturnType<typeof restoreCanvasVideoBatchCreate>>;
   try { restoredBatch = await restoreCanvasVideoBatchCreate(user, receivedBody, 'ip'); }
   catch (error) {
@@ -485,6 +499,20 @@ export async function POST(request: NextRequest) {
     try { canvasInputs = await resolveCanvasReferenceInputs(user, { ...body, provider: 'volcengine_ip', model: body.model || volcengineSettings.default_model }, prisma, { target: 'video' }); Object.assign(body, applyCanvasReferenceInputs(body, canvasInputs)); }
     catch (error) { if (error instanceof AuthError) return errorJson(error.message, error.status); throw error; }
   }
+  let characterReferences: Awaited<ReturnType<typeof resolveVideoCharacterReferences>>;
+  let imageInputs: ReturnType<typeof videoReferenceImageInputs>;
+  try {
+    const characterBody = { ...body, provider: 'volcengine_ip', entry: 'ip', model: body.model || volcengineSettings.default_model };
+    imageInputs = videoReferenceImageInputs(characterBody);
+    characterReferences = await resolveVideoCharacterReferences(user, characterBody);
+    if (imageInputs !== undefined) {
+      if (body.creation_contract_version !== 2) throw new AuthError('角色资产请使用当前创作流程，原输入已保留', 426);
+      body.provider = 'volcengine_ip';
+      body.entry = 'ip';
+      body.reference_image_inputs = imageInputs;
+      body.character_asset_references = characterReferences;
+    }
+  } catch (error) { if (error instanceof AuthError) return errorJson(error.message, error.status); throw error; }
   const creationBody = structuredClone(body);
   let creationV2 = false;
   try { creationV2 = isCreationV2(body); if (creationV2) await assertVideoCreationReady(); }
@@ -493,6 +521,7 @@ export async function POST(request: NextRequest) {
   let response: NextResponse;
   try { response = await runCanvasAdmission(); }
   catch (error) {
+    if (error instanceof AuthError) return errorJson(error.message, error.status);
     if (error instanceof CreationError) return NextResponse.json({ error: error.message, code: error.code, field: error.field, action: error.action }, { status: error.status });
     if (!(error instanceof CanvasVideoBatchError)) throw error;
     response = NextResponse.json({ error: error.message, code: error.code, ...error.details }, { status: error.status });
@@ -842,6 +871,8 @@ export async function POST(request: NextRequest) {
         : [],
   );
 
+  if (imageInputs !== undefined) requestedReferenceImageIds = imageInputs.filter(item => item.kind === 'site_image').map(item => item.referenceImageId);
+
   let requestedReferenceImageUrls = uniquePreserveOrder(
     Array.isArray(body.reference_image_urls)
       ? body.reference_image_urls
@@ -861,7 +892,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `单次生成最多选择 ${referenceMediaCapabilities.imageLimit} 张参考图` }, { status: 400 });
   }
 
-  const implicitWorkspaceImages = !canvasInputs && requestedReferenceImageIds.length === 0 && requestedReferenceImageUrls.length === 0
+  const implicitWorkspaceImages = imageInputs === undefined && !canvasInputs && requestedReferenceImageIds.length === 0 && requestedReferenceImageUrls.length === 0
     ? await prisma.workspaceAsset.findMany({
         where: { workspace_id: workspaceId, asset: { type: 'image' } },
         orderBy: { sort_order: 'asc' },
@@ -890,6 +921,7 @@ export async function POST(request: NextRequest) {
     projectId: project.id,
     videoCardId: videoCardId,
     videoBranchId: requestedVideoBranchId,
+    ...(imageInputs === undefined ? {} : { reference_image_inputs: imageInputs, characterAssetReferences: characterReferences }),
     referenceImageIds: requestedReferenceImageIds,
     referenceImageUrls: requestedReferenceImageUrls,
     implicitWorkspaceImages: implicitWorkspaceImages.map((item) => ({
@@ -916,6 +948,7 @@ export async function POST(request: NextRequest) {
   };
   const requestFingerprint = generationRequestFingerprint(fingerprintPayload);
   sourceMetadata.request_fingerprint = requestFingerprint;
+  if (characterReferences?.length) sourceMetadata.private_character_assets = true;
   if (idempotencyKey) {
     const existing = await prisma.videoTask.findUnique({
       where: { user_id_idempotency_key: { user_id: user.id, idempotency_key: idempotencyKey } },
@@ -1049,10 +1082,10 @@ export async function POST(request: NextRequest) {
 
   const generationReferenceImageIds = requestedReferenceImageIds.length > 0
     ? requestedReferenceImageIds
-    : requestedReferenceImageUrls.length > 0
+    : imageInputs !== undefined ? [] : requestedReferenceImageUrls.length > 0
       ? []
       : body.canvas_references !== undefined ? [] : workspaceReferenceImageIds;
-  if (!(body.promptMentions != null && new RegExp('@图[0-9]+(?![\\p{N}A-Za-z_])', 'u').test(body.prompt)) && /图\d+/.test(body.prompt) && generationReferenceImageIds.length > 0
+  if (imageInputs === undefined && !(body.promptMentions != null && new RegExp('@图[0-9]+(?![\\p{N}A-Za-z_])', 'u').test(body.prompt)) && /图\d+/.test(body.prompt) && generationReferenceImageIds.length > 0
     && (generationReferenceImageIds.length !== workspaceReferenceImageIds.length
       || generationReferenceImageIds.some((id, index) => id !== workspaceReferenceImageIds[index]))) {
     return errorJson('提示词引用了工作台图号，但本次图片列表或顺序与工作台不同。请先在工作台整理素材后再提交，避免图号错位。', 400);
@@ -1080,7 +1113,7 @@ export async function POST(request: NextRequest) {
       canvasInputs ? [] : generationReferenceImageIds,
       canvasInputs ? canvasInputs.orderedImageUrls : requestedReferenceImageUrls,
       user.id,
-      Boolean(canvasInputs),
+      Boolean(canvasInputs) || imageInputs !== undefined,
     ));
   } catch (error) {
     console.error('[IpTasksCreate] Reference image preparation failed:', error);
@@ -1112,7 +1145,8 @@ export async function POST(request: NextRequest) {
       if (firstFrameUrl || lastFrameUrl || frameImageUrls.length > 0) {
         return errorJson('全能参考模式请使用参考图列表，不要同时传入首尾帧或多帧参数。', 400);
       }
-      referenceImageUrls = preparedImages.map((img) => img.originalUrl);
+      referenceImageUrls = imageInputs === undefined ? preparedImages.map((img) => img.originalUrl)
+        : orderedVideoImageUrls(imageInputs, preparedImages.map(img => img.originalUrl), characterReferences || []);
       break;
     case 'first_last_frame': {
       if (!firstFrameUrl) firstFrameUrl = preparedImages[0]?.originalUrl;
@@ -1243,7 +1277,8 @@ export async function POST(request: NextRequest) {
 
   // --- Prompt validation + rendering ---
   const hasCanvasBindings = body.promptMentions != null && new RegExp('@图[0-9]+(?![\\p{N}A-Za-z_])', 'u').test(body.prompt);
-  const promptValidation = hasCanvasBindings ? { valid: true, missing: [] } : await validatePromptReferences(body.prompt, workspaceId);
+  if (imageInputs !== undefined) validateOrderedImagePrompt(body.prompt, imageInputs.length);
+  const promptValidation = imageInputs !== undefined || hasCanvasBindings ? { valid: true, missing: [] } : await validatePromptReferences(body.prompt, workspaceId);
   if (!promptValidation.valid) {
     return NextResponse.json(
       { error: 'PROMPT_REFERENCE_ERROR', message: `prompt 中引用的图号不存在: ${promptValidation.missing.join(', ')}` },
@@ -1252,7 +1287,9 @@ export async function POST(request: NextRequest) {
   }
   let promptRendered: string, assetMapping: Record<string, string>;
   try {
-    const rendered = hasCanvasBindings
+    const rendered = imageInputs !== undefined
+      ? { promptRendered: body.prompt, assetMapping: Object.fromEntries(referenceImageUrls.map((url, index) => [`图片${index + 1}`, url])) }
+      : hasCanvasBindings
       ? await compileCanvasVideoPrompt(user, body.prompt, body.promptMentions, generationReferenceImageIds, preparedImages, finalReferenceImageUrls)
       : await renderPromptWithAssets(body.prompt, workspaceId, generationMode);
     ({ promptRendered, assetMapping } = rendered);
@@ -1296,15 +1333,18 @@ export async function POST(request: NextRequest) {
     generationMode,
     promptRaw: body.prompt,
     input: providerInput,
+    ...(imageInputs === undefined ? {} : { promptRenderedOverride: promptRendered, assetMappingOverride: {} }),
     providerPayloadJson: JSON.stringify({
       ...providerPayload,
       requested_parameters: sourceMetadata.requested_parameters,
       effective_parameters: sourceMetadata.effective_parameters,
-      reference_count: preparedImages.length,
+      reference_count: imageInputs?.length ?? preparedImages.length,
+      ...(imageInputs === undefined ? {} : { reference_image_inputs: imageInputs, character_asset_references: characterReferences }),
     }),
     contentOverride: content,
   });
   const taskParams = {
+    ...(imageInputs === undefined ? {} : { reference_image_inputs: imageInputs, characterAssetReferences: characterReferences, characterRequestFingerprint }),
     ...(creationBody.video_feishu === undefined ? {} : { video_feishu: creationBody.video_feishu }),
     ...(canvasInputs ? { canvas_references: canvasInputs.references } : {}),
     requestedModel,
@@ -1360,6 +1400,7 @@ export async function POST(request: NextRequest) {
   try {
     const result = await prisma.$transaction(async (tx) => {
       await resolveCanvasReferenceInputs(user, { ...body, provider: 'volcengine_ip', model: selectedModel }, tx, { target: 'video' });
+      await resolveVideoCharacterReferences(user, { ...body, provider: 'volcengine_ip', entry: 'ip', model: selectedModel }, tx);
       await assertMultiviewRequestFence(tx, user.id, idempotencyKey);
       await assertProjectActiveInTransaction(tx, user, project.id);
       await assertLegacyCreationSourceLocks(tx, user, creationBody, project.id);

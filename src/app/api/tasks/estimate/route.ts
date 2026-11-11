@@ -1,3 +1,4 @@
+import { resolveVideoCharacterReferences } from '@/lib/character-assets/video-reference.server';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser, errorJson } from '@/lib/auth/api-helpers';
 import { AuthError } from '@/lib/auth/session';
@@ -124,6 +125,7 @@ async function estimate(request: NextRequest, body?: Record<string, unknown>) {
 
   try {
     if (body) {
+      await resolveVideoCharacterReferences(user, { ...body, provider, model: parsedModel.model });
       const refs = assertVideoPromptGroupSurface(body);
       if (refs.length && (hasCodexApiAuthSignal(request) || !body.project_id)) throw new VideoPromptGroupError('请选择普通视频创作项目后报价', 400);
     }

@@ -5,6 +5,7 @@ import DraftUpgradeAction from '@/components/creation/DraftUpgradeAction';
 import VideoCreationHistory from '@/components/creation/VideoCreationHistory';
 import { VideoFeishuStatus } from '@/components/generate/VideoFeishuStatus';
 import { PromptGroupHistory } from '@/components/generate/PromptGroupPicker';
+import type { ReferenceImageInput } from '@/lib/character-assets/types';
 import type { VideoPromptGroupRef } from '@/lib/video/prompt-groups';
 
 import { MultiviewEntry } from '@/components/MultiviewEntry';
@@ -53,6 +54,8 @@ import type { DisplayUser } from '@/lib/users/display';
 import { useVideoPricing } from '@/lib/pricing/use-video-pricing';
 
 interface VideoTask {
+  reference_image_inputs?: ReferenceImageInput[];
+  character_asset_references?: Array<{ characterAssetId: string; revision: number; name: string; assetId: string; uri: string; position: number }>;
   video_prompt_groups?: VideoPromptGroupRef[];
   id: string;
   provider: string;
@@ -259,7 +262,7 @@ function ReferenceImageDebug({ task, refImagesDebug, providerPayload }: Referenc
     return null;
   }
 
-  const referenceImages = parseJsonArray(task.reference_image_urls);
+  const referenceImages = parseJsonArray(task.reference_image_urls).filter(url => !url.startsWith('asset://'));
 
   return (
     <div className="task-debug-block">
@@ -1663,7 +1666,9 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
     );
   }
 
-  const referenceImages = parseJsonArray(task.reference_image_urls);
+  const allReferenceImageUrls = parseJsonArray(task.reference_image_urls);
+  const referenceImages = allReferenceImageUrls.filter(url => !url.startsWith('asset://'));
+  const referenceImagePosition = (url: string, fallback: number) => allReferenceImageUrls.indexOf(url) >= 0 ? allReferenceImageUrls.indexOf(url) + 1 : fallback;
   const referenceVideos = parseJsonArray(task.reference_video_urls);
   const referenceAudios = parseJsonArray(task.reference_audio_urls);
   const frameImages = parseJsonArray(task.frame_image_urls);
@@ -2280,6 +2285,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
                   <CopyTextButton key={task.id} text={task.prompt} className="btn btn-secondary"
                     label={task.video_prompt_groups?.length ? '复制个人描述' : '复制提示词'} />
                 )}
+                {task.character_asset_references?.length ? <CopyTextButton text={JSON.stringify({ provider: 'volcengine_ip', model: task.model, prompt: task.prompt, generation_mode: task.generation_mode, ratio: task.ratio, duration: task.duration, resolution: task.resolution, seed: task.seed, generate_audio: task.generate_audio, return_last_frame: task.return_last_frame, watermark: task.watermark, reference_image_inputs: task.reference_image_inputs, character_asset_references: task.character_asset_references }, null, 2)} className="btn btn-secondary" label="复制生成设置" /> : null}
                 {taskActionHref ? <Link href={taskActionHref} className="btn btn-secondary" onClick={isEnhanceTask ? undefined : handleTaskReuseClick}>
                   <RotateCcw size={16} aria-hidden="true" />
                   {taskActionLabel}
@@ -2305,6 +2311,13 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
             <details className="task-inline-details">
               <summary>查看完整提示词和参数</summary>
               <div className="task-prompt-box">{task.prompt || '无提示词'}</div>
+              {task.character_asset_references?.length ? <div className="task-reference-list">
+                <div className="task-muted-label">本次角色引用（提交时版本）</div>
+                {task.character_asset_references.map(reference => <div key={reference.characterAssetId}>
+                  <strong>图片{reference.position} · {reference.name}</strong> · 版本 {reference.revision} · <code>{reference.assetId}</code>
+                  <CopyTextButton text={reference.assetId} label="复制 Asset ID" className="btn btn-ghost btn-sm" />
+                </div>)}
+              </div> : null}
               <div className="task-param-grid">
                 {[...parameterItems, ...advancedParameterItems].map((item) => (
                   <div key={item.label} className="task-param-item">
@@ -2323,8 +2336,8 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
                     <div className="task-reference-grid">
                       {referenceImages.slice(0, 6).map((url, i) => (
                         <a key={url + i} className="task-reference-thumb" href={url} target="_blank" rel="noopener noreferrer" title={url}>
-                          <img src={url} alt={`参考图片 ${i + 1}`} />
-                          <span>图 {i + 1}</span>
+                          <img src={url} alt={`参考图片 ${referenceImagePosition(url, i + 1)}`} />
+                          <span>图 {referenceImagePosition(url, i + 1)}</span>
                         </a>
                       ))}
                     </div>
@@ -2334,7 +2347,7 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
                         <div className="task-reference-list">
                           {referenceImages.slice(6).map((url, i) => (
                             <a key={url + i} href={url} target="_blank" rel="noopener noreferrer">
-                              图 {i + 7} · {truncateUrl(url)}
+                              图 {referenceImagePosition(url, i + 7)} · {truncateUrl(url)}
                             </a>
                           ))}
                         </div>

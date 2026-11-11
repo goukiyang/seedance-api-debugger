@@ -22,6 +22,9 @@ import type { WorkspaceReadResult } from '@/lib/hooks/useWorkspace';
 import type { ComposerReuseState } from '@/lib/navigation/task-reuse-intent';
 import { ImageSetToolbar } from '@/components/ImageSetToolbar';
 import { ReferenceStrip } from '@/components/ReferenceStrip';
+import { CharacterAssetPanel, useCharacterAssetDirectory } from '@/components/CharacterAssetPanel';
+import type { CharacterAssetDTO, ReferenceImageInput } from '@/lib/character-assets/types';
+import { readClientReferenceInputs, referenceInputKey, rebindReferenceMarkers } from '@/lib/character-assets/client-inputs';
 import { PromptEditor } from '@/components/PromptEditor';
 import type { PromptMentionCandidate } from '@/components/PromptMentionPopover';
 import { ComposerStatusLine } from '@/components/ComposerStatusLine';
@@ -420,6 +423,8 @@ interface Props {
     reuseKey: number;
     prompt: string;
     videoPromptGroups?: VideoPromptGroupRef[];
+    referenceImageInputs?: ReferenceImageInput[];
+    characterAssetReferences?: TaskReuseInputBackup['fields']['characterAssetReferences'];
     generationMode: GenerationMode;
     ratio: VideoRatio;
     duration: VideoDuration;
@@ -467,6 +472,7 @@ interface Props {
     watermark: boolean;
     resolutionApprovalConfirmed: boolean;
     referenceImageIds: string[];
+    referenceImageInputs?: ReferenceImageInput[];
     referenceVideoUrls: string[];
     referenceAudioUrls: string[];
     templateId: string | null;
@@ -679,6 +685,51 @@ export function GenerationComposer({
   const [watermark, setWatermark] = useState(false);
   const [selectedModel, setSelectedModel] = useState(modelOptions[0]?.id || '');
   const [draftMode, setDraftMode] = useState(false);
+  const [referenceImageInputs, setReferenceImageInputs] = useState<ReferenceImageInput[] | undefined>();
+  const [referenceImageIssue, setReferenceImageIssue] = useState<string | null>(null);
+  const [characterAssetReferences, setCharacterAssetReferences] = useState<TaskReuseInputBackup['fields']['characterAssetReferences']>();
+  const [insertReferenceRequest, setInsertReferenceRequest] = useState<{ id: number; label: string } | null>(null);
+  const characterOwner = workspace.workspace?.owner_id || null;
+  const characterDirectory = useCharacterAssetDirectory(characterOwner, Boolean(videoSurface && !templateEnabled && !studioHandoff));
+  const restoreReferenceInputs = useCallback((raw: unknown, issue?: string | null, snapshots?: TaskReuseInputBackup['fields']['characterAssetReferences']) => {
+    const readableSnapshots = Array.isArray(snapshots) ? snapshots.filter(item => item && typeof item.characterAssetId === 'string'
+      && Number.isSafeInteger(item.revision) && typeof item.name === 'string' && typeof item.assetId === 'string'
+      && typeof item.uri === 'string' && Number.isSafeInteger(item.position)) : undefined;
+    const snapshotIssue = snapshots !== undefined && (!readableSnapshots || readableSnapshots.length !== snapshots.length)
+      || issue != null && typeof issue !== 'string' ? '原角色快照无法读取，选择和提示词已保留。请清除失效引用后重新选择。' : null;
+    setCharacterAssetReferences(readableSnapshots);
+    try { setReferenceImageInputs(readClientReferenceInputs(raw)); setReferenceImageIssue(snapshotIssue || (typeof issue === 'string' ? issue : null)); }
+    catch (cause) { setReferenceImageInputs([]); setReferenceImageIssue(cause instanceof Error ? cause.message : '原角色引用无法读取，请清除失效引用后重新选择。'); }
+  }, []);
+  const orderedReferenceInputs = useMemo<ReferenceImageInput[]>(() => {
+    const sites: ReferenceImageInput[] = workspace.assets.filter(asset => asset.type === 'image' && asset.referenceImageId
+      && (!studioHandoff || studioRoleForAsset(asset.assetId, asset.role, studioHandoff) === 'reference'))
+      .sort((left, right) => imageResultHandoff ? Number(right.role === 'first_frame') - Number(left.role === 'first_frame') : 0)
+      .map(asset => ({ kind: 'site_image', referenceImageId: asset.referenceImageId! }));
+    if (!referenceImageInputs) return sites;
+    const retained = referenceImageInputs;
+    const included = new Set(retained.map(referenceInputKey));
+    return [...retained, ...sites.filter(input => !included.has(referenceInputKey(input)))];
+  }, [referenceImageInputs, workspace.assets, studioHandoff, imageResultHandoff]);
+  const selectedCharacters = useMemo(() => orderedReferenceInputs.filter((input): input is Extract<ReferenceImageInput, {kind:'ark_asset'}> => input.kind === 'ark_asset'), [orderedReferenceInputs]);
+  const characterIssueFor = useCallback((input: Extract<ReferenceImageInput, {kind:'ark_asset'}>) => {
+    if (!characterDirectory.ready) return characterDirectory.error || '正在核对角色目录，请稍候';
+    if (characterDirectory.error) return characterDirectory.error;
+    const record = characterDirectory.assets.find(asset => asset.id === input.characterAssetId);
+    if (!record) return '记录不可用或无访问权限，请移除后重新选择';
+    if (record.deletedAt) return '记录已删除，请恢复后显式更新，或从本次移除';
+    if (!record.enabled) return '记录已停用，请启用后显式更新，或从本次移除';
+    if (record.revision !== input.revision) return '角色版本已变化，请显式更新或从本次移除';
+    return null;
+  }, [characterDirectory.ready, characterDirectory.error, characterDirectory.assets]);
+  const missingSiteReferences = referenceImageInputs?.filter((input): input is Extract<ReferenceImageInput, {kind:'site_image'}> => input.kind === 'site_image' && !workspace.assets.some(asset => asset.type === 'image' && asset.referenceImageId === input.referenceImageId)) || [];
+  const characterBlocker = referenceImageIssue || (missingSiteReferences.length && !workspace.loading ? '部分原图片不在当前参考区，原编号已保留。请重新读取素材，或显式移除失效图片引用。' : null) || (selectedCharacters.length ? videoSurface !== 'ip'
+    ? '私域角色仅支持 IP 线路，请明确选择 IP 型号切换后使用。'
+    : generationMode !== 'all_in_one_reference' ? '角色资产仅支持全能参考，请切回全能参考或移除角色；当前选择已保留。'
+    : orderedReferenceInputs.length > seedanceReferenceMediaCapabilities(selectedModel).imageLimit ? `图片与角色合计最多 ${seedanceReferenceMediaCapabilities(selectedModel).imageLimit} 项，请移除多余参考。`
+    : workspace.assets.some(asset => asset.type === 'image' && !asset.referenceImageId) ? '部分图片尚未准备完成，请等待站内图片引用就绪后使用角色。'
+    : selectedCharacters.map(characterIssueFor).find(Boolean) || null : null);
+
   const [resolutionApprovalConfirmed, setResolutionApprovalConfirmed] = useState(false);
   const [studioSettingsReady, setStudioSettingsReady] = useState(false);
   const [imageResultDraftReady, setImageResultDraftReady] = useState(false);
@@ -768,12 +819,12 @@ export function GenerationComposer({
     if (!snapshot) return null;
     const restoreTarget = onCaptureInputRecoveryTarget?.();
     const backup: TaskReuseInputBackup = { version: 1, hadInput: Boolean(prompt.trim() || videoPromptGroups.length || snapshot.items.length || settingsTouchedRef.current), workspace: snapshot,
-      fields: { prompt, videoPromptGroups, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, resolutionApprovalConfirmed, draftMode, unapplied,
+      fields: { prompt, videoPromptGroups, referenceImageInputs: referenceImageInputs === undefined ? undefined : orderedReferenceInputs, referenceImageIssue, characterAssetReferences, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, resolutionApprovalConfirmed, draftMode, unapplied,
         model: selectedModel, provider: selectedProvider, auxiliary: selectedAuxiliary, projectId: recoveryContextRef.current?.().projectId || '',
         videoBranchId: recoveryContextRef.current?.().videoBranchId || '', videoCardId: selectedVideoCardId || '' } };
     return { workspace: snapshot, backup, restoreFields: () => {
       settingsTouchedRef.current = true; appliedVideoCardDefaultsRef.current = selectedVideoCardId || null;
-      setPrompt(prompt); setVideoPromptGroups(videoPromptGroups); setGenerationMode(generationMode); setRatio(ratio); setDuration(duration); setResolution(resolution); setSeed(seed);
+      setPrompt(prompt); setVideoPromptGroups(videoPromptGroups); restoreReferenceInputs(referenceImageInputs, referenceImageIssue, characterAssetReferences); setGenerationMode(generationMode); setRatio(ratio); setDuration(duration); setResolution(resolution); setSeed(seed);
       setGenerateAudio(generateAudio); setReturnLastFrame(returnLastFrame); setWatermark(watermark); setDraftMode(draftMode);
       setUnapplied(unapplied);
       setResolutionApprovalConfirmed(resolutionApprovalConfirmed); setSelectedModel(selectedModel);
@@ -784,7 +835,7 @@ export function GenerationComposer({
     } };
   }, [workspace.captureRecovery, selectedVideoCardId, prompt, videoPromptGroups, generationMode, ratio, duration, resolution, seed, generateAudio,
     returnLastFrame, watermark, draftMode, resolutionApprovalConfirmed, selectedModel, selectedProvider, selectedAuxiliary, onProviderChange, onModelChange, onAuxiliaryChange,
-    currentReferenceAlbumId, currentReferenceAlbumName, onCaptureInputRecoveryTarget, unapplied]);
+    currentReferenceAlbumId, currentReferenceAlbumName, onCaptureInputRecoveryTarget, unapplied, referenceImageInputs, orderedReferenceInputs, referenceImageIssue, characterAssetReferences, restoreReferenceInputs]);
   const captureInputRecovery = useCallback(() => {
     const value = makeInputRecovery();
     if (!value) { setInputRecoveryIssue(true); setInputRecoveryMessage('当前输入或素材尚未确认，未替换；请先完成素材准备后重试。'); return false; }
@@ -805,7 +856,7 @@ export function GenerationComposer({
       const restoreTarget = onCaptureInputRecoveryTarget?.({ projectId: value.projectId || '', videoCardId: value.videoCardId || '', videoBranchId: value.videoBranchId || '' });
       setInputRecovery({ workspace: { ...backup.workspace, epoch: session.epoch }, backup, restoreFields: () => {
         settingsTouchedRef.current = true;
-        setPrompt(value.prompt); setVideoPromptGroups(parseVideoPromptGroupRefs(value.videoPromptGroups)); setGenerationMode(value.generationMode as GenerationMode); setRatio(value.ratio as VideoRatio);
+        setPrompt(value.prompt); restoreReferenceInputs(value.referenceImageInputs, value.referenceImageIssue, value.characterAssetReferences); setVideoPromptGroups(parseVideoPromptGroupRefs(value.videoPromptGroups)); setGenerationMode(value.generationMode as GenerationMode); setRatio(value.ratio as VideoRatio);
         setDuration(value.duration as VideoDuration); setResolution(value.resolution as VideoResolution); setSeed(value.seed);
         setGenerateAudio(value.generateAudio === true); setReturnLastFrame(value.returnLastFrame === true); setWatermark(value.watermark === true); setResolutionApprovalConfirmed(false);
         setDraftMode(videoSurface === 'ip' ? false : value.draftMode === true); setUnapplied(value.unapplied);
@@ -818,7 +869,7 @@ export function GenerationComposer({
       if (completed?.applied.inputReplaced) setRecoveryBinding({ record: completed, side: 'undo', signature: '' });
       setInputRecoveryMessage('');
     } catch { /* Optional recovery never replaces current input during initialization. */ }
-  }, [workspace.workspace, workspace.loading, onModelChange, onProviderChange, onAuxiliaryChange, onCaptureInputRecoveryTarget, videoSurface]);
+  }, [workspace.workspace, workspace.loading, onModelChange, onProviderChange, onAuxiliaryChange, onCaptureInputRecoveryTarget, videoSurface, restoreReferenceInputs]);
   useEffect(() => {
     if (!completedTaskReuse || !inputRecovery || !completedTaskReuse.applied.inputReplaced
       || inputRecovery.workspace.ownerId !== completedTaskReuse.accountId
@@ -833,13 +884,13 @@ export function GenerationComposer({
   const [ordinaryDraftLoaded, setOrdinaryDraftLoaded] = useState('');
   const applyModeFields = useCallback((value: TaskReuseInputBackup['fields']) => {
     settingsTouchedRef.current = true; appliedInitialSettingsRef.current = true;
-    setPrompt(value.prompt); setVideoPromptGroups(videoSurface === 'ip' ? [] : parseVideoPromptGroupRefs(value.videoPromptGroups));
+    setPrompt(value.prompt); restoreReferenceInputs(value.referenceImageInputs, value.referenceImageIssue, value.characterAssetReferences); setVideoPromptGroups(videoSurface === 'ip' ? [] : parseVideoPromptGroupRefs(value.videoPromptGroups));
     setGenerationMode(value.generationMode as GenerationMode); setRatio(value.ratio as VideoRatio); setDuration(value.duration as VideoDuration);
     setResolution(value.resolution as VideoResolution); setSeed(value.seed); setGenerateAudio(value.generateAudio); setReturnLastFrame(value.returnLastFrame);
     setWatermark(value.watermark); setDraftMode(videoSurface === 'ip' ? false : value.draftMode === true); setResolutionApprovalConfirmed(false);
     setUnapplied(value.unapplied); setSelectedModel(value.model); onModelChange?.(value.model);
     if (videoSurface !== 'ip' && value.auxiliary != null) onAuxiliaryChange?.(value.auxiliary);
-  }, [videoSurface, onModelChange, onAuxiliaryChange]);
+  }, [videoSurface, onModelChange, onAuxiliaryChange, restoreReferenceInputs]);
   const makeModeRecovery = useCallback((draft: ModeInputDraft, current: WorkspaceInputRecovery): InputRecovery | null => {
     if (draft.workspace && (draft.workspace.ownerId !== current.ownerId || draft.workspace.tabId !== current.tabId || draft.workspace.workspaceId !== current.workspaceId)) return null;
     const snapshot = draft.workspace ? { ...draft.workspace, epoch: current.epoch } : current;
@@ -906,7 +957,7 @@ export function GenerationComposer({
           && typeof saved.ratio === 'string' && typeof saved.resolution === 'string' && Number.isFinite(saved.duration) && saved.duration > 0
           && Number.isFinite(saved.seed) && typeof saved.model === 'string') {
           const restoredGroups = parseVideoPromptGroupRefs(saved.videoPromptGroups);
-          settingsTouchedRef.current = true; setPrompt(saved.prompt); setVideoPromptGroups(videoSurface === 'ip' ? [] : restoredGroups); setGenerationMode(saved.generationMode); setRatio(saved.ratio);
+          settingsTouchedRef.current = true; setPrompt(saved.prompt); restoreReferenceInputs(saved.referenceImageInputs, saved.referenceImageIssue, saved.characterAssetReferences); setVideoPromptGroups(videoSurface === 'ip' ? [] : restoredGroups); setGenerationMode(saved.generationMode); setRatio(saved.ratio);
           setDuration(saved.duration); setResolution(saved.resolution); setSeed(saved.seed); setGenerateAudio(saved.generateAudio === true);
           setReturnLastFrame(saved.returnLastFrame === true); setWatermark(saved.watermark === true); setResolutionApprovalConfirmed(false);
           setDraftMode(videoSurface === 'ip' ? false : saved.draftMode === true);
@@ -916,7 +967,7 @@ export function GenerationComposer({
       }
     } catch { /* Invalid optional local data never blocks a new draft. */ }
     setOrdinaryDraftLoaded(ordinaryDraftKey);
-  }, [ordinaryDraftKey, ordinaryDraftLoaded, preferencesReady, studioHandoff, imageResultHandoff, reuseDraft, interactionLocked, onModelChange, modeSwitchReady, videoSurface]);
+  }, [ordinaryDraftKey, ordinaryDraftLoaded, preferencesReady, studioHandoff, imageResultHandoff, reuseDraft, interactionLocked, onModelChange, modeSwitchReady, videoSurface, restoreReferenceInputs]);
   useEffect(() => {
     if (!ordinaryDraftKey || ordinaryDraftLoaded !== ordinaryDraftKey || !modeSwitchReady || studioHandoff || imageResultHandoff || interactionLocked
       || reuseDraft && reportedReuseAppliedRef.current !== `${reuseDraft.taskId}:${reuseDraft.reuseKey}`) return;
@@ -924,12 +975,12 @@ export function GenerationComposer({
       try {
         const complete = makeInputRecovery();
         if (complete && creationContextKey) writeVideoInputDraft(localStorage, creationContextKey, complete.backup);
-        else if (!videoSurface) localStorage.setItem(ordinaryDraftKey, JSON.stringify({ version: 2, prompt, videoPromptGroups, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, draftMode, unapplied, model: selectedModel }));
+        else if (!videoSurface) localStorage.setItem(ordinaryDraftKey, JSON.stringify({ version: 2, prompt, videoPromptGroups, referenceImageInputs, referenceImageIssue, characterAssetReferences, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, draftMode, unapplied, model: selectedModel }));
       }
       catch { setInputRecoveryIssue(true); setInputRecoveryMessage('本次输入暂时无法记住，请保留页面；已提交任务不受影响。'); }
     }, 200);
     return () => clearTimeout(timer);
-  }, [ordinaryDraftKey, ordinaryDraftLoaded, studioHandoff, imageResultHandoff, interactionLocked, reuseDraft, prompt, videoPromptGroups, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, draftMode, selectedModel, unapplied, makeInputRecovery, creationContextKey, modeSwitchReady, videoSurface]);
+  }, [ordinaryDraftKey, ordinaryDraftLoaded, studioHandoff, imageResultHandoff, interactionLocked, reuseDraft, prompt, videoPromptGroups, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, draftMode, selectedModel, unapplied, makeInputRecovery, creationContextKey, modeSwitchReady, videoSurface, referenceImageInputs, referenceImageIssue, characterAssetReferences]);
   const readRecoveryScope = () => typeof recoveryScopeRef.current === 'function' ? recoveryScopeRef.current() : recoveryScopeRef.current;
   const readUndoScope = (): TaskReuseUndoScope | null => {
     const target = recoveryContextRef.current?.(), current = workspace.workspace;
@@ -1104,8 +1155,8 @@ export function GenerationComposer({
   }, [studioHandoff, workspace.assets]);
 
   const validation = useMemo(() => {
-    return checkPrompt(prompt, imageReferenceAssets.length, duration);
-  }, [prompt, imageReferenceAssets.length, duration]);
+    return checkPrompt(prompt, selectedCharacters.length ? orderedReferenceInputs.length : imageReferenceAssets.length, duration);
+  }, [prompt, imageReferenceAssets.length, duration, selectedCharacters.length, orderedReferenceInputs.length]);
 
   const referenceMediaPreflightBlocker = useMemo(() => {
     const issue = validateSeedanceReferenceMediaPreflight({
@@ -1152,6 +1203,7 @@ export function GenerationComposer({
   const submitBlockerState = useMemo(() => {
     const reason = (() => {
     if (!modeSwitchReady) return { message: '正在接续当前输入，请保留页面', tone: 'progress' as const };
+    if (characterBlocker) return characterBlocker;
     if (videoSurface && !modelOptions.some(option => option.id === selectedModel)) return '当前型号不可用，原参数已保留，请明确选择可用型号。';
     if (imageResultHandoff) {
       if (!imageResultDraftReady || workspace.loading) return { message: '正在恢复这次图片接续草稿', tone: 'progress' as const };
@@ -1255,7 +1307,7 @@ export function GenerationComposer({
       return `智能多帧模式至少需要 3 个图片参考，当前 ${imageReferenceAssets.length} 个`;
     }
     if (!validation.valid) {
-      return `提示词引用了图${validation.maxMissing}，但当前只有 ${imageReferenceAssets.length} 个图片参考`;
+      return `提示词引用了图${validation.maxMissing}，但当前只有 ${selectedCharacters.length ? orderedReferenceInputs.length : imageReferenceAssets.length} 个图片参考`;
     }
     if (need1080pApproval && !resolutionApprovalConfirmed) {
       return '1080p 生成需要先确认审批通过。';
@@ -1266,7 +1318,7 @@ export function GenerationComposer({
     return null;
     })();
     return typeof reason === 'string' ? { message: reason, tone: 'error' as const } : reason;
-  }, [modeSwitchReady, videoSurface, promptGroupsEnabled, durationBlocker, prompt, videoRedesign, videoPromptGroups, hasUploadingMaterial, hasFailedMaterial, workspace.pendingWorkspaceAttach, workspace.assets, workspace.loading, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker, draftMode, seedanceDraft, studioHandoff, imageResultHandoff, imageResultDraftReady, isRestoringStudioSettings, studioUnsupportedReason, ratio, duration, resolution, selectedProvider, selectedModel, reuseDraft?.model, modelOptions]);
+  }, [modeSwitchReady, characterBlocker, videoSurface, promptGroupsEnabled, durationBlocker, prompt, videoRedesign, videoPromptGroups, hasUploadingMaterial, hasFailedMaterial, workspace.pendingWorkspaceAttach, workspace.assets, workspace.loading, imageReferenceAssets.length, generationMode, need1080pApproval, resolutionApprovalConfirmed, validation, referenceMediaPreflightBlocker, draftMode, seedanceDraft, studioHandoff, imageResultHandoff, imageResultDraftReady, isRestoringStudioSettings, studioUnsupportedReason, ratio, duration, resolution, selectedProvider, selectedModel, reuseDraft?.model, modelOptions, orderedReferenceInputs.length, selectedCharacters.length]);
   const submitBlocker = submitBlockerState?.message || null;
 
   const composerStatus = useMemo(() => {
@@ -1296,6 +1348,7 @@ export function GenerationComposer({
   const videoPricing = useVideoPricing({ provider: pricingProvider || selectedProvider || 'seedance',
     model: pricingModelId || selectedModel, resolution, duration, context: (pricingProvider || selectedProvider) === 'volcengine_ip' ? undefined : {
       project_id: pricingProjectId, video_card_id: selectedVideoCardId, ratio,
+      ...(referenceImageInputs !== undefined ? { reference_image_inputs: orderedReferenceInputs } : {}),
       ...(promptGroupsEnabled && videoPromptGroups.length ? { video_prompt_groups: videoPromptGroups, video_prompt_groups_contract: 1,
         creation_contract_version: 2, entry: 'ordinary', prompt, generation_mode: generationMode, seed,
         generate_audio: generateAudio, return_last_frame: returnLastFrame, watermark, lora_id: selectedAuxiliary || undefined,
@@ -1334,7 +1387,7 @@ export function GenerationComposer({
   }, [validation.referencedFigures]);
 
   const referenceLabels = useMemo(() => {
-    return imageReferenceAssets.map((asset, index) => {
+    const siteLabels = imageReferenceAssets.map((asset, index) => {
       const label = `图片${index + 1}`;
       const titleParts = [
         label,
@@ -1354,7 +1407,18 @@ export function GenerationComposer({
         contentKey,
       };
     });
-  }, [imageReferenceAssets]);
+    if (referenceImageInputs === undefined) return siteLabels;
+    return orderedReferenceInputs.map((input, index) => {
+      if (input.kind === 'site_image') {
+        const assetIndex = imageReferenceAssets.findIndex(asset => asset.referenceImageId === input.referenceImageId);
+        return { ...(siteLabels[assetIndex] || { title: '失效图片引用', thumbnailUrl: undefined, previewUrl: undefined, contentKey: undefined }), label: `图片${index + 1}` };
+      }
+      const asset = characterDirectory.assets.find(item => item.id === input.characterAssetId);
+      const snapshot = characterAssetReferences?.find(item => item.characterAssetId === input.characterAssetId && item.revision === input.revision);
+      return { label: `图片${index + 1}`, title: `${snapshot?.name || asset?.name || '角色资产'} · 角色`,
+        thumbnailUrl: asset?.revision === input.revision ? asset.thumbnailUrl || undefined : undefined, previewUrl: undefined, contentKey: undefined };
+    });
+  }, [imageReferenceAssets, referenceImageInputs, orderedReferenceInputs, characterDirectory.assets, characterAssetReferences]);
 
   const muskReady = muskConfig?.ready === true && modelAvailable('text', muskConfig.default_model || '');
   const moduleBuilderDisabled = moduleBuilderBusy || muskConfigLoading || !muskReady;
@@ -1375,7 +1439,8 @@ export function GenerationComposer({
         description: '主体库下一批开放，当前先用图集复用',
       },
       ...imageReferenceAssets.map((asset, index): PromptMentionCandidate => {
-        const label = `图片${index + 1}`;
+        const orderedIndex = orderedReferenceInputs.findIndex(input => input.kind === 'site_image' && input.referenceImageId === asset.referenceImageId);
+        const label = `图片${orderedIndex < 0 ? index + 1 : orderedIndex + 1}`;
         const titleParts = [
           asset.fileName,
           asset.referenceAlbumName ? `来自 ${asset.referenceAlbumName}` : null,
@@ -1392,6 +1457,11 @@ export function GenerationComposer({
           assetId: asset.assetId,
         };
       }),
+      ...selectedCharacters.map((input): PromptMentionCandidate => {
+        const index = orderedReferenceInputs.findIndex(item => referenceInputKey(item) === referenceInputKey(input));
+        const label = `图片${index + 1}`, reference = referenceLabels[index];
+        return { id: referenceInputKey(input), type: 'image', token: `@${label}`, label, title: reference?.title || '角色资产', thumbnailUrl: reference?.thumbnailUrl, description: characterIssueFor(input) || '角色资产' };
+      }),
       {
         id: 'source:history',
         type: 'source',
@@ -1407,7 +1477,7 @@ export function GenerationComposer({
         description: '我的图集、项目图集、公共图集',
       },
     ];
-  }, [imageReferenceAssets]);
+  }, [imageReferenceAssets, orderedReferenceInputs, selectedCharacters, referenceLabels, characterIssueFor]);
 
   const currentReferenceImageIds = useMemo(() => {
     return workspace.assets
@@ -1523,6 +1593,7 @@ export function GenerationComposer({
     appliedReuseDraftRef.current = reuseKey; settingsTouchedRef.current = true;
     if (reuseDraft.model && modelOptions.length && !modelOptions.some(option => option.id === reuseDraft.model)) { onReuseDraftApplied?.(reuseDraft.taskId, reuseDraft.reuseKey, 'unsupported', '原模型当前不可用，服务器素材已恢复，当前参数未替换。'); return; }
     setPrompt(reuseDraft.prompt);
+    restoreReferenceInputs(reuseDraft.referenceImageInputs, null, reuseDraft.characterAssetReferences);
     setVideoPromptGroups(parseVideoPromptGroupRefs(reuseDraft.videoPromptGroups));
     setGenerationMode(reuseDraft.generationMode);
     setRatio(reuseDraft.ratio);
@@ -1545,7 +1616,7 @@ export function GenerationComposer({
       if (!result.applied) { onReuseDraftApplied?.(reuseDraft.taskId, reuseDraft.reuseKey, 'read_failed', result.error || '服务器已完成，参考区读取尚未确认；可以重新读取同一结果。'); return; }
       setReuseReadCompleteKey(reuseKey);
     }).catch(() => onReuseDraftApplied?.(reuseDraft.taskId, reuseDraft.reuseKey, 'read_failed', '服务器已完成，参考区暂不可读。'));
-  }, [reuseDraft, studioHandoff, require1080pApproval, workspace, modelOptions, onModelChange, runWorkspaceOperation]);
+  }, [reuseDraft, studioHandoff, require1080pApproval, workspace, modelOptions, onModelChange, runWorkspaceOperation, restoreReferenceInputs, onReuseDraftApplied]);
 
   useEffect(() => {
     if (!reuseDraft || !onReuseDraftApplied || studioHandoff || workspace.loading || workspace.error) return;
@@ -1638,7 +1709,7 @@ export function GenerationComposer({
   // ============================================================================
   // Handlers
   // ============================================================================
-  const selectVideoModel = (id: string) => {
+  const selectVideoModel = (id: string, referenceOverride?: { inputs: ReferenceImageInput[]; snapshots: TaskReuseInputBackup['fields']['characterAssetReferences']; insertLabel?: string }) => {
     const choice = videoModelChoices?.find(option => option.id === id);
     if (!choice || choice.disabled || !videoSurface) return;
     if (interactionLocked || isSubmitting || inputRecoveryBusy || inputRecoveryPair) return;
@@ -1652,6 +1723,17 @@ export function GenerationComposer({
     const before = makeInputRecovery(), revision = reuseEditRevisionRef.current;
     if (!before || !creationContextKey) { setInputRecoveryIssue(true); setInputRecoveryMessage('当前素材尚未确认，未切换线路。'); return; }
     try {
+      if (referenceOverride) {
+        let nextPrompt = before.backup.fields.prompt;
+        if (referenceOverride.insertLabel && !new RegExp(`@${referenceOverride.insertLabel}(?!\\d)`).test(nextPrompt)) {
+          const textarea = generationComposerRef.current?.querySelector<HTMLTextAreaElement>('.composer-prompt-textarea');
+          const start = textarea?.selectionStart ?? nextPrompt.length;
+          const marker = `@${referenceOverride.insertLabel}`;
+          nextPrompt = `${nextPrompt.slice(0, start)}${marker}${nextPrompt.slice(start)}`;
+          if (nextPrompt.length > MAX_GENERATION_PROMPT_CHARS) throw new Error('提示词已达长度上限，请先留出图片引用位置后再切换。');
+        }
+        before.backup.fields = { ...before.backup.fields, prompt: nextPrompt, referenceImageInputs: referenceOverride.inputs, characterAssetReferences: referenceOverride.snapshots };
+      }
       const handoff = prepareVideoModeSwitch(localStorage, creationContextKey, videoSurface, before.backup, choice, revision, crypto.randomUUID(), feishuEnabled);
       const now = uploadSession();
       if (now.ownerId !== before.workspace.ownerId || now.epoch !== before.workspace.epoch || reuseEditRevisionRef.current !== revision) throw new Error('账号或当前输入已变化，未切换线路。');
@@ -1698,7 +1780,8 @@ export function GenerationComposer({
       returnLastFrame,
       watermark,
       resolutionApprovalConfirmed: need1080pApproval ? resolutionApprovalConfirmed : false,
-      referenceImageIds: workspace.assets
+      ...(referenceImageInputs !== undefined ? { referenceImageInputs: orderedReferenceInputs } : {}),
+      referenceImageIds: referenceImageInputs !== undefined ? orderedReferenceInputs.filter((input): input is Extract<ReferenceImageInput, {kind:'site_image'}> => input.kind === 'site_image').map(input => input.referenceImageId) : workspace.assets
         .filter((asset) => asset.type === 'image' && (!studioHandoff || studioRoleForAsset(asset.assetId, asset.role, studioHandoff) === 'reference'))
         .sort((left, right) => imageResultHandoff ? Number(right.role === 'first_frame') - Number(left.role === 'first_frame') : 0)
         .map((asset) => asset.referenceImageId)
@@ -1772,6 +1855,7 @@ export function GenerationComposer({
     need1080pApproval,
     resolutionApprovalConfirmed,
     workspace.assets,
+    referenceImageInputs, orderedReferenceInputs,
     selectedTemplate?.id,
     agentRunId,
     selectedPlanKey,
@@ -1787,10 +1871,11 @@ export function GenerationComposer({
   const handlePromptChange = useCallback((nextPrompt: string) => {
     markReuseInputChanged();
     setPrompt(nextPrompt);
+    if (referenceImageIssue?.startsWith('素材顺序已变化')) setReferenceImageIssue(null);
     if (agentPromptSnapshot !== null && nextPrompt !== agentPromptSnapshot) {
       setPromptUserEdited(true);
     }
-  }, [agentPromptSnapshot, markReuseInputChanged]);
+  }, [agentPromptSnapshot, markReuseInputChanged, referenceImageIssue]);
 
   const toggleModifier = useCallback((modifier: string) => {
     markReuseInputChanged();
@@ -1982,20 +2067,56 @@ export function GenerationComposer({
     await runWorkspaceOperation(() => onCollectionNew(name));
   }, [onCollectionNew, runWorkspaceOperation]);
 
+  const changeReferenceOrder = useCallback((next: ReferenceImageInput[]) => {
+    markReuseInputChanged();
+    const result = rebindReferenceMarkers(prompt, orderedReferenceInputs, next);
+    setPrompt(result.prompt); setReferenceImageIssue(result.issue); setReferenceImageInputs(next);
+  }, [markReuseInputChanged, prompt, orderedReferenceInputs]);
   const handleRemove = useCallback(async (assetId: string) => {
-    await runWorkspaceOperation(() => workspace.removeAsset(assetId));
-  }, [runWorkspaceOperation, workspace]);
+    if (assetId.startsWith('character:') || assetId.startsWith('site:')) {
+      changeReferenceOrder(orderedReferenceInputs.filter(input => referenceInputKey(input) !== assetId)); return;
+    }
+    const asset = workspace.assets.find(item => item.assetId === assetId);
+    if (referenceImageInputs === undefined) { await runWorkspaceOperation(() => workspace.removeAsset(assetId)); return; }
+    const removed = await runWorkspaceOperation(async () => { await workspace.removeAsset(assetId); return workspace.refresh(); });
+    if (referenceImageInputs && asset?.referenceImageId && removed.applied && !removed.workspace?.assets.some(item => item.assetId === assetId)) changeReferenceOrder(orderedReferenceInputs.filter(input => input.kind !== 'site_image' || input.referenceImageId !== asset.referenceImageId));
+  }, [runWorkspaceOperation, workspace, referenceImageInputs, orderedReferenceInputs, changeReferenceOrder]);
 
   const handleReorder = useCallback(async (newOrder: Array<{ assetId: string; sortOrder: number }>) => {
-    await runWorkspaceOperation(() => workspace.reorderAssets(newOrder));
-  }, [runWorkspaceOperation, workspace]);
+    const siteOrder = newOrder.filter(item => workspace.assets.some(asset => asset.assetId === item.assetId));
+    await runWorkspaceOperation(() => workspace.reorderAssets(siteOrder.map((item, index) => ({ ...item, sortOrder: index }))));
+    if (referenceImageInputs) {
+      const next = newOrder.flatMap(item => {
+        if (item.assetId.startsWith('character:') || item.assetId.startsWith('site:')) return orderedReferenceInputs.filter(input => referenceInputKey(input) === item.assetId);
+        const asset = workspace.assets.find(asset => asset.assetId === item.assetId);
+        return asset?.type === 'image' && asset.referenceImageId ? [{ kind: 'site_image' as const, referenceImageId: asset.referenceImageId }] : [];
+      });
+      changeReferenceOrder(next);
+    }
+  }, [runWorkspaceOperation, workspace, referenceImageInputs, orderedReferenceInputs, changeReferenceOrder]);
 
+  const retainReplacementPosition = useCallback((assetId: string, result: WorkspaceReadResult, nextAssetId?: string) => {
+    const old = workspace.assets.find(asset => asset.assetId === assetId);
+    if (!referenceImageInputs || !old?.referenceImageId || !result.applied || !result.workspace) return;
+    const index = workspace.assets.findIndex(asset => asset.assetId === assetId);
+    const replacement = nextAssetId ? result.workspace.assets.find(asset => asset.assetId === nextAssetId) : result.workspace.assets[index];
+    if (!replacement?.referenceImageId || result.workspace.assets.some(asset => asset.assetId === assetId)) return;
+    const next: ReferenceImageInput[] = referenceImageInputs.map(input => input.kind === 'site_image' && input.referenceImageId === old.referenceImageId
+      ? { kind: 'site_image', referenceImageId: replacement.referenceImageId! } : input);
+    if (new Set(next.map(referenceInputKey)).size !== next.length) {
+      setReferenceImageIssue('替换结果与本次另一张图片重复，原选择与提示词已保留。请移除失效图片引用并核对图号后重新选择。');
+      return;
+    }
+    setReferenceImageInputs(next);
+  }, [workspace.assets, referenceImageInputs]);
   const handleReplace = useCallback(async (assetId: string, file: File) => {
+    if (!workspace.assets.some(asset => asset.assetId === assetId)) return;
     await runWorkspaceOperation(async () => {
       await workspace.replaceAsset(assetId, file);
+      if (referenceImageInputs !== undefined) retainReplacementPosition(assetId, await workspace.refresh());
       await refreshReferenceAlbums();
     });
-  }, [runWorkspaceOperation, workspace, refreshReferenceAlbums]);
+  }, [runWorkspaceOperation, workspace, refreshReferenceAlbums, retainReplacementPosition, referenceImageInputs]);
 
   const handlePreview = useCallback((src: string, type?: WorkspaceAssetItem['type'], title?: string, poster?: string, contentKey?: ContentKey) => {
     if (!type) return;
@@ -2033,7 +2154,7 @@ export function GenerationComposer({
     const existingLabelByReferenceId = new Map<string, string>();
     imageReferenceAssets.forEach((asset, index) => {
       if (asset.referenceImageId) {
-        existingLabelByReferenceId.set(asset.referenceImageId, `图片${index + 1}`);
+        existingLabelByReferenceId.set(asset.referenceImageId, `图片${orderedReferenceInputs.findIndex(input => input.kind === 'site_image' && input.referenceImageId === asset.referenceImageId) + 1 || index + 1}`);
       }
     });
 
@@ -2046,7 +2167,7 @@ export function GenerationComposer({
       return assetType == null || assetType === 'image';
     });
     imageIdsToAdd.forEach((id, index) => {
-      labelByReferenceId.set(id, `图片${imageReferenceAssets.length + index + 1}`);
+      labelByReferenceId.set(id, `图片${Math.max(imageReferenceAssets.length, orderedReferenceInputs.length) + index + 1}`);
     });
 
     const labelsToInsert = uniqueReferenceImageIds
@@ -2058,7 +2179,7 @@ export function GenerationComposer({
     }
     await refreshReferenceAlbums();
     return labelsToInsert;
-  }, [workspace, imageReferenceAssets, refreshReferenceAlbums, runWorkspaceOperation]);
+  }, [workspace, imageReferenceAssets, orderedReferenceInputs, refreshReferenceAlbums, runWorkspaceOperation]);
 
   const handleAddReferenceImages = useCallback(async (
     referenceImageIds: string[],
@@ -2089,7 +2210,7 @@ export function GenerationComposer({
 
     const existingLabelByAssetId = new Map<string, string>();
     imageReferenceAssets.forEach((asset, index) => {
-      existingLabelByAssetId.set(asset.assetId, `图片${index + 1}`);
+      existingLabelByAssetId.set(asset.assetId, `图片${orderedReferenceInputs.findIndex(input => input.kind === 'site_image' && input.referenceImageId === asset.referenceImageId) + 1 || index + 1}`);
     });
 
     const idsToAdd = uniqueAssetIds.filter((id) => !existingLabelByAssetId.has(id));
@@ -2101,7 +2222,7 @@ export function GenerationComposer({
       return assetType == null || assetType === 'image';
     });
     imageIdsToAdd.forEach((id, index) => {
-      labelByAssetId.set(id, `图片${imageReferenceAssets.length + index + 1}`);
+      labelByAssetId.set(id, `图片${Math.max(imageReferenceAssets.length, orderedReferenceInputs.length) + index + 1}`);
     });
     const labelsToInsert = uniqueAssetIds
       .map((id) => labelByAssetId.get(id))
@@ -2112,7 +2233,7 @@ export function GenerationComposer({
       await refreshReferenceAlbums();
     }
     return labelsToInsert;
-  }, [workspace, imageReferenceAssets, refreshReferenceAlbums, runWorkspaceOperation]);
+  }, [workspace, imageReferenceAssets, orderedReferenceInputs, refreshReferenceAlbums, runWorkspaceOperation]);
 
   const handleAddUploadedAssets = useCallback(async (
     assetIds: string[],
@@ -2177,6 +2298,52 @@ export function GenerationComposer({
     setCurrentReferenceAlbumName(name);
     await refreshReferenceAlbums();
   }, [workspace, refreshReferenceAlbums, runWorkspaceOperation]);
+
+  const characterPreviews = useMemo(() => Object.fromEntries(selectedCharacters.map(input => {
+    const asset = characterDirectory.assets.find(item => item.id === input.characterAssetId);
+    const snapshot = characterAssetReferences?.find(item => item.characterAssetId === input.characterAssetId && item.revision === input.revision);
+    return [referenceInputKey(input), { asset: asset?.revision === input.revision ? asset : undefined,
+      name: snapshot?.name || asset?.name || '角色资产', issue: characterIssueFor(input) || undefined }];
+  })), [selectedCharacters, characterDirectory.assets, characterAssetReferences, characterIssueFor]);
+  const visualReferenceAssets = useMemo<WorkspaceAssetItem[]>(() => {
+    if (referenceImageInputs === undefined) return workspace.assets;
+    // These view models exist only in ReferenceStrip; no character is stored as an uploaded file.
+    const images = orderedReferenceInputs.flatMap((input, index): WorkspaceAssetItem[] => {
+      if (input.kind === 'site_image') {
+        const asset = workspace.assets.find(item => item.referenceImageId === input.referenceImageId);
+        return asset ? [asset] : [{ id: referenceInputKey(input), assetId: referenceInputKey(input), referenceImageId: input.referenceImageId,
+          sortOrder: index, role: null, type: 'image', originalUrl: '', thumbnailUrl: null, fileName: '失效图片引用', width: null, height: null, fileSize: 0, mimeType: '', createdAt: new Date(0) }];
+      }
+      const key = referenceInputKey(input), preview = characterPreviews[key];
+      return [{ id: key, assetId: key, sortOrder: index, role: null, type: 'image', originalUrl: '',
+        thumbnailUrl: preview.asset?.thumbnailUrl || null, fileName: preview.name, width: null, height: null,
+        fileSize: 0, mimeType: '', createdAt: new Date(0) }];
+    });
+    return [...images, ...workspace.assets.filter(asset => asset.type !== 'image')];
+  }, [workspace.assets, orderedReferenceInputs, referenceImageInputs, characterPreviews]);
+  const joinCharacter = (asset: CharacterAssetDTO, targetChoice?: string) => {
+    if (interactionLocked || isSubmitting || inputRecoveryBusy || inputRecoveryPair || !modeSwitchReady) return;
+    const existing = selectedCharacters.find(input => input.characterAssetId === asset.id);
+    const inputs: ReferenceImageInput[] = existing ? orderedReferenceInputs : [...orderedReferenceInputs, { kind: 'ark_asset', characterAssetId: asset.id, revision: asset.revision }];
+    const position = inputs.findIndex(input => input.kind === 'ark_asset' && input.characterAssetId === asset.id) + 1;
+    const snapshots = existing ? characterAssetReferences : [...(characterAssetReferences || []), { characterAssetId: asset.id, revision: asset.revision,
+      name: asset.name, assetId: asset.assetId, uri: `asset://${asset.assetId}`, position }];
+    if (videoSurface !== 'ip') {
+      if (!targetChoice) return;
+      selectVideoModel(targetChoice, { inputs, snapshots, insertLabel: existing ? undefined : `图片${position}` }); return;
+    }
+    if (existing) return;
+    markReuseInputChanged(); setReferenceImageInputs(inputs); setCharacterAssetReferences(snapshots);
+    setInsertReferenceRequest({ id: Date.now(), label: `图片${position}` });
+  };
+  const updateSelectedCharacter = (input: Extract<ReferenceImageInput, {kind:'ark_asset'}>) => {
+    const asset = characterDirectory.assets.find(item => item.id === input.characterAssetId);
+    if (!asset || asset.deletedAt || !asset.enabled || interactionLocked || isSubmitting) return;
+    markReuseInputChanged();
+    setReferenceImageInputs(orderedReferenceInputs.map(item => item.kind === 'ark_asset' && item.characterAssetId === asset.id ? { ...item, revision: asset.revision } : item));
+    setCharacterAssetReferences(current => [...(current || []).filter(item => item.characterAssetId !== asset.id), { characterAssetId: asset.id, revision: asset.revision,
+      name: asset.name, assetId: asset.assetId, uri: `asset://${asset.assetId}`, position: orderedReferenceInputs.findIndex(item => referenceInputKey(item) === referenceInputKey(input)) + 1 }]);
+  };
 
   // ============================================================================
   // Render
@@ -2549,13 +2716,14 @@ export function GenerationComposer({
               onReplace={handleReplace}
               onPreview={handlePreview}
               onOpenHistory={() => setShowUploadedImagePicker(true)}
-              onReplaceFromLibrary={setReplaceTargetId}
+              onReplaceFromLibrary={assetId => { if (workspace.assets.some(asset => asset.assetId === assetId)) setReplaceTargetId(assetId); }}
               generationMode={generationMode}
               loading={workspace.loading}
             />
           </details>
         ) : (
           <>
+            <div className="character-assets-heading">
             <details className={videoRedesign ? 'video-composer-albums' : 'video-composer-albums-legacy'} open={videoRedesign ? undefined : true}>
             <summary>{videoRedesign ? <>图集与素材集<ChevronDown size={14} /></> : null}</summary>
             <ImageSetToolbar
@@ -2573,11 +2741,21 @@ export function GenerationComposer({
               loading={workspace.loading}
             />
             </details>
+            {videoSurface && !studioHandoff && <CharacterAssetPanel ownerId={characterOwner} directory={characterDirectory}
+              selectedIds={selectedCharacters.map(input => input.characterAssetId)} isIp={videoSurface === 'ip'}
+              disabled={interactionLocked || isSubmitting || inputRecoveryBusy || Boolean(inputRecoveryPair)}
+              capacity={Math.max(0, seedanceReferenceMediaCapabilities(selectedModel).imageLimit - orderedReferenceInputs.length)}
+              switchChoices={(videoModelChoices || []).filter(choice => choice.surface === 'ip').map(choice => ({ ...choice, disabled: choice.disabled || Boolean(modeSwitchBlocker), disabledReason: choice.disabledReason || modeSwitchBlocker || undefined }))}
+              thumbnails={workspace.assets.filter(asset => asset.type === 'image' && asset.referenceImageId).map(asset => ({ id: asset.referenceImageId!, name: asset.fileName }))}
+              onJoin={joinCharacter} />}
+            </div>
             <ReferenceStrip
               accessibleOrdering={videoRedesign}
               addLabel={videoRedesign ? '素材' : undefined}
               model={selectedModel}
-              assets={workspace.assets}
+              assets={visualReferenceAssets}
+              characterPreviews={characterPreviews}
+              onInsertReference={label => setInsertReferenceRequest({ id: Date.now(), label })}
               arrivedIds={referenceArrival.arrived}
               uploadStatuses={workspace.uploadStatuses}
               onUpload={(file, onProgress) => runWorkspaceOperation(() => workspace.uploadAsset(file, onProgress))}
@@ -2586,13 +2764,27 @@ export function GenerationComposer({
               onReplace={handleReplace}
               onPreview={handlePreview}
               onOpenHistory={() => setShowUploadedImagePicker(true)}
-              onReplaceFromLibrary={setReplaceTargetId}
+              onReplaceFromLibrary={assetId => { if (workspace.assets.some(asset => asset.assetId === assetId)) setReplaceTargetId(assetId); }}
               generationMode={generationMode}
               loading={workspace.loading}
             />
           </>
         )}
 
+        {missingSiteReferences.length > 0 && !workspace.loading && <div className="character-assets-selection-warning" role="alert">部分原图片不在当前参考区，原编号已保留。
+          <button type="button" disabled={interactionLocked || isSubmitting} onClick={() => void refreshWorkspaceForParent()}>重新读取素材</button>
+          <button type="button" disabled={interactionLocked || isSubmitting} onClick={() => changeReferenceOrder(orderedReferenceInputs.filter(input => input.kind !== 'site_image' || !missingSiteReferences.some(missing => missing.referenceImageId === input.referenceImageId)))}>移除失效图片引用</button></div>}
+        {referenceImageIssue && <div className="character-assets-selection-warning" role="alert">{referenceImageIssue}
+          {!referenceImageIssue.startsWith('素材顺序已变化') && <button type="button" disabled={interactionLocked || isSubmitting} onClick={() => {
+            markReuseInputChanged(); setReferenceImageInputs(undefined); setCharacterAssetReferences(undefined); setReferenceImageIssue(null);
+          }}>清除失效引用</button>}</div>}
+        {selectedCharacters.map(input => {
+          const issue = characterIssueFor(input), asset = characterDirectory.assets.find(item => item.id === input.characterAssetId);
+          if (!issue) return null;
+          return <div key={input.characterAssetId} className="character-assets-selection-warning" role="status">{characterPreviews[referenceInputKey(input)].name}：{issue}
+            {asset && asset.enabled && !asset.deletedAt && asset.revision !== input.revision && <button type="button" disabled={interactionLocked || isSubmitting} onClick={() => updateSelectedCharacter(input)}>更新为当前版本</button>}
+            <button type="button" disabled={interactionLocked || isSubmitting} onClick={() => void handleRemove(referenceInputKey(input))}>从本次移除</button></div>;
+        })}
         {referenceMediaPreflightBlocker && (
           <div className="reference-media-quality-warning">
             {referenceMediaPreflightBlocker}
@@ -2628,6 +2820,7 @@ export function GenerationComposer({
         ) : (
           <PromptEditor
             compactVideo={videoRedesign}
+            insertReferenceRequest={insertReferenceRequest}
             validationMessage={ordinaryPromptMissing && promptAttempted ? '请填写本次要求或选择提示词组' : null}
             value={prompt}
             onChange={handlePromptChange}
@@ -2857,7 +3050,11 @@ export function GenerationComposer({
         onConfirmSelection={async (items: PickerItem[]) => {
           const nextId = items[0]?.assetId;
           if (items.length !== 1 || !nextId) return { success: false, message: '请选择一项素材' };
-          await runWorkspaceOperation(async () => { await workspace.replaceAssetWithLibrary(replaceTargetId, nextId); await refreshReferenceAlbums(); });
+          await runWorkspaceOperation(async () => {
+            await workspace.replaceAssetWithLibrary(replaceTargetId, nextId);
+            if (referenceImageInputs !== undefined) retainReplacementPosition(replaceTargetId, await workspace.refresh(), nextId);
+            await refreshReferenceAlbums();
+          });
           referenceArrival.mark([items[0].referenceImageId || nextId]);
           setReplaceTargetId(null);
           return { success: true };
@@ -2871,14 +3068,14 @@ export function GenerationComposer({
         purpose={`video-${generationMode}`}
         acceptedTypes={generationMode === 'all_in_one_reference' ? ['image', 'video', 'audio'] : ['image']}
         typeLimits={{
-          image: Math.max(0, (generationMode === 'first_last_frame' ? 2 : seedanceReferenceMediaCapabilities(selectedModel).imageLimit) - workspace.assets.filter(a => a.type === 'image').length),
+          image: Math.max(0, (generationMode === 'first_last_frame' ? 2 : seedanceReferenceMediaCapabilities(selectedModel).imageLimit) - Math.max(workspace.assets.filter(a => a.type === 'image').length, orderedReferenceInputs.length)),
           video: Math.max(0, seedanceReferenceMediaCapabilities(selectedModel).videoLimit - workspace.assets.filter(a => a.type === 'video').length),
           audio: Math.max(0, seedanceReferenceMediaCapabilities(selectedModel).audioLimit - workspace.assets.filter(a => a.type === 'audio').length),
         }}
         currentCount={workspace.assets.length}
         currentAssetIds={workspace.assets.map((asset) => asset.assetId)}
         currentReferenceImageIds={currentReferenceImageIds}
-        avatarTarget={workspace.workspace ? { kind: 'workspace', id: workspace.workspace.id, currentAssetIds: workspace.assets.map(a=>a.assetId), capacity: Math.max(0,(generationMode==='first_last_frame'?2:seedanceReferenceMediaCapabilities(selectedModel).imageLimit)-imageReferenceAssets.length), imageLimit: generationMode==='first_last_frame'?2:seedanceReferenceMediaCapabilities(selectedModel).imageLimit, sourceSignature: JSON.stringify([workspace.workspace.id,generationMode,selectedModel,prompt,workspace.assets.map(a=>[a.assetId,a.role,a.referenceImageId])]), role: generationMode==='first_last_frame'?(workspace.assets.some(a=>a.role==='first_frame')?'last_frame':'first_frame'):'reference_image' } : undefined}
+        avatarTarget={workspace.workspace ? { kind: 'workspace', id: workspace.workspace.id, currentAssetIds: workspace.assets.map(a=>a.assetId), capacity: Math.max(0,(generationMode==='first_last_frame'?2:seedanceReferenceMediaCapabilities(selectedModel).imageLimit)-Math.max(imageReferenceAssets.length, orderedReferenceInputs.length)), imageLimit: generationMode==='first_last_frame'?2:seedanceReferenceMediaCapabilities(selectedModel).imageLimit, sourceSignature: JSON.stringify([workspace.workspace.id,generationMode,selectedModel,prompt,workspace.assets.map(a=>[a.assetId,a.role,a.referenceImageId])]), role: generationMode==='first_last_frame'?(workspace.assets.some(a=>a.role==='first_frame')?'last_frame':'first_frame'):'reference_image' } : undefined}
         onAvatarApplied={async () => {
           const result = await refreshWorkspaceForParent();
           if (!result.applied) throw new Error(result.error || '参考区已变化，图片已保留，请在当前参考区重新读取。');
@@ -2888,7 +3085,7 @@ export function GenerationComposer({
         onConfirm={handleAddUploadedAssets}
         onConfirmSelection={async (items: PickerItem[]) => {
           const newItems = items.filter(item => !workspace.assets.some(a => a.assetId === item.assetId || a.referenceImageId && a.referenceImageId === item.referenceImageId));
-          const labelList = newItems.filter(item => item.type === 'image').map((_, index) => `图片${imageReferenceAssets.length + index + 1}`);
+          const labelList = newItems.filter(item => item.type === 'image').map((_, index) => `图片${Math.max(imageReferenceAssets.length, orderedReferenceInputs.length) + index + 1}`);
           const next = appendReferenceMarkers(prompt, labelList);
           if (next.length > MAX_GENERATION_PROMPT_CHARS) throw new Error(`${GENERATION_PROMPT_LIMIT_MESSAGE}，无法自动插入 @图片 标记`);
           await runWorkspaceOperation(() => workspace.addLibrarySelection(newItems.map(item => item.referenceImageId ? { referenceImageId: item.referenceImageId } : { assetId: item.assetId })));

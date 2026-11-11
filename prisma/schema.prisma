@@ -356,6 +356,7 @@ model User {
   sealed_video_cards      VideoCard[]          @relation("VideoCardSealer")
   reference_albums        ReferenceAlbum[]     @relation("ReferenceAlbumOwner")
   reference_images        ReferenceImage[]     @relation("ReferenceImageOwner")
+  character_assets        CharacterAsset[]
   created_album_shares    AlbumShare[]         @relation("AlbumShareCreator")
   owned_projects          Project[]            @relation("ProjectOwner")
   created_projects        Project[]            @relation("ProjectCreator")
@@ -2211,6 +2212,30 @@ model ProviderAccountSnapshot {
   @@index([source])
   @@index([fetched_at])
   @@index([created_at])
+}
+
+// Owner-private Ark directory; upstream status stays unknown until separately verified.
+model CharacterAsset {
+  id                           String    @id @default(cuid())
+  owner_id                     String
+  provider                     String    @default("volcengine_ark")
+  asset_id                     String
+  name                         String
+  group_id                     String?
+  project_name                 String?
+  notes                        String?
+  thumbnail_reference_image_id String?
+  enabled                      Boolean   @default(true)
+  revision                     Int       @default(1)
+  deleted_at                   DateTime?
+  created_at                   DateTime  @default(now())
+  updated_at                   DateTime  @updatedAt
+
+  owner User @relation(fields: [owner_id], references: [id], onDelete: Cascade)
+
+  // Deleted IDs stay reserved; restoration uses the original record and revision.
+  @@unique([owner_id, provider, asset_id])
+  @@index([owner_id, deleted_at, updated_at])
 }
 
 // ============================================================================

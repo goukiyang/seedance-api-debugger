@@ -1,3 +1,5 @@
+import { parseReferenceImageInputs } from '@/lib/character-assets/inputs';
+import { resolveVideoCharacterReferences } from '@/lib/character-assets/video-reference.server';
 import { NextRequest, NextResponse } from 'next/server';
 import { isPrivateMultiviewTask, isPrivateMultiviewActionTask } from '@/lib/video/multiview-task-privacy';
 import { videoPromptGroupTaskRefs } from '@/lib/video/prompt-groups';
@@ -357,6 +359,14 @@ export async function POST(
     }
 
     const taskParams = parseParams(task.params_json);
+    const imageInputs = parseReferenceImageInputs(taskParams.reference_image_inputs);
+    const hasCharacterInputs = imageInputs?.some(item => item.kind === 'ark_asset') === true;
+    let characterReuseError: string | undefined;
+    if (hasCharacterInputs) {
+      try {
+        await resolveVideoCharacterReferences(user, { provider: 'volcengine_ip', entry: 'ip', model: task.model, generation_mode: task.generation_mode, reference_image_inputs: imageInputs });
+      } catch (error) { characterReuseError = error instanceof Error ? error.message : '原角色当前无法使用'; }
+    }
     const warnings = new Set<string>();
     const candidates: ReuseCandidate[] = [];
     const requestedParameters = parseRecord(taskParams.requested_parameters);
@@ -509,7 +519,7 @@ export async function POST(
       warnings.add('原任务没有可用的素材顺序快照，已按任务字段顺序恢复素材。');
     }
 
-    readStoredUrls(task.reference_image_urls, '参考图片', 'reference_image', candidates, warnings);
+    readStoredUrls(hasCharacterInputs ? JSON.stringify(parseJsonArray(task.reference_image_urls).filter(url => !url.startsWith('asset://'))) : task.reference_image_urls, '参考图片', 'reference_image', candidates, warnings);
     readStoredUrls(task.reference_video_urls, '参考视频', 'reference_video', candidates, warnings);
     readStoredUrls(task.reference_audio_urls, '参考音频', 'reference_audio', candidates, warnings);
     if (task.first_frame_url) candidates.push({ url: task.first_frame_url, role: 'first_frame' });
@@ -538,7 +548,7 @@ export async function POST(
       const url = contentUrl(item);
       const type = item.type === 'image_url' ? 'image' : item.type === 'video_url' ? 'video' : item.type === 'audio_url' ? 'audio' : '';
       const role = roleForType(item.role, type);
-      if (url && role) candidates.push({ url, role });
+      if (url && role && !(hasCharacterInputs && url.startsWith('asset://'))) candidates.push({ url, role });
     }
 
     const allCandidateAssetIds = uniquePreserveOrder([
@@ -675,7 +685,7 @@ export async function POST(
       warnings.add(`有 ${skippedReferences} 项历史素材缺失、已停用或当前账号无权使用，未加入工作区。`);
     }
     const restoredCounts = {
-      image: preparedItems.filter((item) => item.role === 'reference_image' || item.role === 'first_frame' || item.role === 'last_frame').length,
+      image: (imageInputs?.filter(item => item.kind === 'ark_asset').length || 0) + preparedItems.filter((item) => item.role === 'reference_image' || item.role === 'first_frame' || item.role === 'last_frame').length,
       video: preparedItems.filter((item) => item.role === 'reference_video').length,
       audio: preparedItems.filter((item) => item.role === 'reference_audio').length,
     };
@@ -702,6 +712,7 @@ export async function POST(
     // Parameter recovery does not require mutating the reference workspace.
     // This same authorized projection also explains the definite no-write 409.
     const draft = {
+      ...(imageInputs === undefined ? {} : { reference_image_inputs: imageInputs, characterAssetReferences: taskParams.characterAssetReferences }),
       ...(promptGroupRefs.length ? { video_prompt_groups: promptGroupRefs } : {}),
       task_id: task.id,
       provider,
@@ -721,12 +732,12 @@ export async function POST(
       video_branch_id: task.video_branch_id,
       video_card: task.video_card,
     };
-    if (hasSourceMaterials && (preparedItems.length === 0 || skippedReferences > 0)) {
+    if (characterReuseError || hasSourceMaterials && (preparedItems.length === 0 && !hasCharacterInputs || skippedReferences > 0)) {
       const rejected = await finishTaskReuseOperation(user, params.id, operationRequest, { sourceStamp: taskReuseSourceStamp(task), items: [], payload: {
           draft, restored_references: preparedItems.length, skipped_references: skippedReferences,
           inputWarnings: Array.from(warnings),
         },
-        rejection: { code: 'REUSE_ASSETS_UNAVAILABLE', message: '原任务部分或全部素材无法安全恢复，当前工作区未更改。', status: 409 } });
+        rejection: { code: 'REUSE_ASSETS_UNAVAILABLE', message: characterReuseError || '原任务部分或全部素材无法安全恢复，当前工作区未更改。', status: 409 } });
       return NextResponse.json(rejected.body, { status: rejected.status, headers: taskReusePrivateHeaders });
     }
     const unsupported = !provider || !model || !VALID_GENERATION_MODES.has(generationMode)

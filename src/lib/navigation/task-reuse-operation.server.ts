@@ -1,3 +1,4 @@
+import { resolveVideoCharacterReferences } from '@/lib/character-assets/video-reference.server';
 import 'server-only';
 import { createHash } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
@@ -140,6 +141,8 @@ export async function finishTaskReuseOperation(user: SessionUser, sourceTaskId: 
             status = 'rejected'; httpStatus = input.rejection.status;
             payload = { ...input.payload, code: input.rejection.code, error: input.rejection.message, message: input.rejection.message };
           } else {
+            const draft = input.payload.draft;
+            if (draft && typeof draft === 'object' && !Array.isArray(draft)) await resolveVideoCharacterReferences(user, { ...draft, provider: 'volcengine_ip', entry: 'ip' }, tx);
             mark('authorize_items');
             await assertItems(tx, user, input.items);
             mark('replace_items');

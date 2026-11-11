@@ -1,3 +1,4 @@
+import { videoReferenceImageInputs } from '@/lib/character-assets/video-reference.server';
 import { NextRequest, NextResponse } from 'next/server';
 import { freezeWorkMethodUse } from '@/lib/works/method-reference';
 import { freezeVideoRetry, dispatchFrozenVideoRetry, SafeVideoPending } from '@/lib/generation-retry/video';
@@ -731,6 +732,8 @@ export async function POST(request: NextRequest) {
   } | null = null;
   let receivedBody = await request.json();
   if (!receivedBody || typeof receivedBody !== 'object' || Array.isArray(receivedBody)) return errorJson('视频输入无效', 400);
+  try { videoReferenceImageInputs({ ...receivedBody, provider: 'seedance', entry: 'ordinary' }); }
+  catch (error) { if (error instanceof AuthError) return errorJson(error.message, error.status); throw error; }
   if (typeof receivedBody.idempotency_key === 'string' && receivedBody.idempotency_key) {
     const original = await prisma.videoTask.findUnique({ where: { user_id_idempotency_key: {
       user_id: user.id, idempotency_key: receivedBody.idempotency_key,

@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { ArrowLeft, ArrowRight } from 'lucide-react';
+import { ArrowLeft, ArrowRight, UsersRound } from 'lucide-react';
+import type { CharacterAssetDTO } from '@/lib/character-assets/types';
 import type { WorkspaceAssetItem, UploadStatus, FrameRole } from '@/types';
 import { UploadProgressIndicator } from '@/components/UploadProgressIndicator';
 import { ReferenceThumb } from '@/components/ReferenceThumb';
@@ -29,6 +30,9 @@ interface Props {
   generationMode?: string;
   model?: string | null;
   loading?: boolean;
+  /** Visual-only character rows never enter workspace upload or file operations. */
+  characterPreviews?: Record<string, { asset?: CharacterAssetDTO; name: string; issue?: string }>;
+  onInsertReference?: (label: string) => void;
 }
 
 type ReferenceUploadProgress = {
@@ -109,6 +113,8 @@ export function ReferenceStrip({
   generationMode,
   model,
   loading = false,
+  characterPreviews,
+  onInsertReference,
 }: Props) {
   const mediaLimits = seedanceReferenceMediaCapabilities(model);
   const [orderedAssets, setOrderedAssets] = useState<WorkspaceAssetItem[]>(assets);
@@ -441,7 +447,7 @@ export function ReferenceStrip({
               onDragLeave={() => {
                 setDropReplaceKey((current) => current === itemKey ? null : current);
               }}
-              onDrop={(e) => void handleReplaceDrop(e, asset)}
+              onDrop={(e) => { if (characterPreviews?.[asset.assetId]) { e.preventDefault(); e.stopPropagation(); return; } void handleReplaceDrop(e, asset); }}
               onClickCapture={handleClickCapture}
               onDragStart={(e) => e.preventDefault()}
               className={[
@@ -455,15 +461,24 @@ export function ReferenceStrip({
               data-material-arrived={Boolean(arrivedIds?.includes(asset.assetId) || asset.referenceImageId && arrivedIds?.includes(asset.referenceImageId)) || undefined}
               title={lowResolutionTitle}
             >
-              <ReferenceThumb
+              {characterPreviews?.[asset.assetId] ? <div className="ref-thumb">
+                <button type="button" className="character-reference-thumb" title={characterPreviews[asset.assetId].issue || `${characterPreviews[asset.assetId].name}，插入图片引用`}
+                  onClick={() => onInsertReference?.(`图片${displayAssets.slice(0, idx + 1).filter(item => item.type === 'image').length}`)}>
+                  {characterPreviews[asset.assetId].asset?.thumbnailUrl ? <img src={characterPreviews[asset.assetId].asset?.thumbnailUrl || ''} alt="" draggable={false} /> : <UsersRound size={23} />}
+                  <span>{characterPreviews[asset.assetId].name}</span>
+                </button>
+                <div className="ref-thumb-label">图{displayAssets.slice(0, idx + 1).filter(item => item.type === 'image').length}</div>
+                {characterPreviews[asset.assetId].issue && <span className="ref-thumb-warning-badge">需核对</span>}
+                <button type="button" className="ref-thumb-remove" aria-label={`移除${characterPreviews[asset.assetId].name}`} onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); void onRemove(asset.assetId); }}>×</button>
+              </div> : <ReferenceThumb
                 asset={asset}
-                index={idx}
+                index={displayAssets.slice(0, idx + 1).filter(item => item.type === asset.type).length - 1}
                 uploadStatus={uploadStatus}
                 frameRole={frameRole}
                 onRemove={onRemove}
                 onReplace={handleReplaceClick}
                 onPreview={onPreview}
-              />
+              />}
               {isLowResolution && <span className="ref-thumb-warning-badge">低清</span>}
               {accessibleOrdering && displayAssets.length > 1 && <div className="ref-order-actions">
                 {[-1, 1].map(step => <button type="button" key={step} title={step < 0 ? '前移素材' : '后移素材'} aria-label={step < 0 ? '前移素材' : '后移素材'}

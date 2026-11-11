@@ -1,3 +1,4 @@
+import { projectCharacterAssetTask } from '@/lib/character-assets/privacy';
 import type { Prisma } from '@prisma/client';
 import { taskThumbnailProjection, type TaskThumbnailProjectionSource } from './task-thumbnail-projection';
 import { parseMultiviewActionBinding, type MultiviewActionBinding } from './multiview-action-contract';
@@ -126,7 +127,7 @@ function relation(value: unknown, keys: string[]) {
 
 /** Positive allowlist for every browser surface, including the task owner. */
 export function projectPrivateMultiviewTask<T extends object & TaskProtectionSource>(task: T): T {
-  if (!isPrivateMultiviewTask(task)) return hasVideoPromptGroups(task) ? projectVideoPromptGroupTask(task) : task;
+  if (!isPrivateMultiviewTask(task)) return hasVideoPromptGroups(task) ? projectVideoPromptGroupTask(task) : projectCharacterAssetTask(task);
   const source = task as Record<string, unknown>;
   const result: Record<string, unknown> = {};
   for (const key of scalarKeys) if (source[key] !== undefined && scalar(source[key])) result[key] = source[key];
@@ -206,7 +207,7 @@ export function projectVideoPromptGroupTask<T extends object & TaskProtectionSou
 /** Partial legacy DTOs must not acquire the newly selected internal column. */
 export function projectSelectedMultiviewTask<T extends object & TaskProtectionSource>(task: T): Omit<T, 'source_metadata_json'> {
   if (isPrivateMultiviewTask(task) || hasVideoPromptGroups(task)) return projectPrivateMultiviewTask(task);
-  const { source_metadata_json: _protection, ...publicFields } = task;
+  const { source_metadata_json: _protection, ...publicFields } = projectCharacterAssetTask(task);
   return publicFields;
 }
 

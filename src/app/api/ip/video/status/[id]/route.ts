@@ -1,3 +1,5 @@
+import { authenticateCodexVideoApi, hasCodexApiAuthSignal, CodexApiAuthError } from '@/lib/integrations/codex';
+import { projectCharacterAssetTask, hasCharacterAssetReferences } from '@/lib/character-assets/privacy';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { AuthError, getSession } from '@/lib/auth/session';
@@ -11,6 +13,10 @@ import { finalizeVideoTaskStatus } from '@/lib/video/task-finalizer';
 import { taskThumbnailProjection } from '@/lib/video/task-thumbnail-projection';
 
 export const dynamic = 'force-dynamic';
+const responseHeaders = { 'Cache-Control': 'private, no-store', Vary: 'Cookie, Authorization' };
+function ipStatusJson(body: unknown, init?: { status?: number }) {
+  return NextResponse.json(body, { ...init, headers: responseHeaders });
+}
 
 const IP_TASK_STATUS_INCLUDE = {
   project: { select: { id: true, name: true, type: true } },
@@ -92,11 +98,19 @@ function serializeTaskForIpStatus<T extends {
   created_at: Date;
   updated_at: Date;
   completed_at: Date | null;
-}>(task: T, options: { external?: boolean } = {}) {
+}>(task: T, options: { external?: boolean; viewerId?: string } = {}) {
+  const source = task as T & { user_id?: string | null; owner_user_id?: string | null; params_json?: string | null; source_metadata_json?: string | null };
+  const ownCharacters = options.viewerId === (source.owner_user_id || source.user_id) && hasCharacterAssetReferences(source);
+  let frozenCharacters: unknown = undefined, imageInputs: unknown = undefined;
+  if (ownCharacters && source.params_json) {
+    try { const saved = JSON.parse(source.params_json); frozenCharacters = saved.characterAssetReferences; imageInputs = saved.reference_image_inputs; } catch { /* Unreadable frozen input is not reconstructed from the mutable directory. */ }
+  }
+  task = (ownCharacters ? task : projectCharacterAssetTask(task)) as T;
   const visibleTask = (
     options.external ? redactIpTaskForExternal(task as T & Record<string, unknown>) : task
   ) as T;
   return {
+    ...(ownCharacters ? { character_asset_references: frozenCharacters, reference_image_inputs: imageInputs } : {}),
     id: visibleTask.id,
     provider: visibleTask.provider,
     model: visibleTask.model ?? null,
@@ -168,24 +182,26 @@ export async function GET(
     const taskId = params.id;
     const forceProviderRefresh = request.nextUrl.searchParams.get('refresh') === 'true'
       || request.nextUrl.searchParams.get('force_refresh') === 'true';
-    const user = await getSession();
-    if (!user) {
-      return NextResponse.json({ error: '未登录', message: '请先登录' }, { status: 401 });
+    const user = hasCodexApiAuthSignal(request) ? (await authenticateCodexVideoApi(request)).user : await getSession();
+    if (!user || user.status !== 'active') {
+      return ipStatusJson({ error: '未登录', message: '请先登录' }, { status: 401 });
     }
 
+    const expectedActor = request.headers.get('x-app-session-user');
+    if (expectedActor && expectedActor !== user.id) return ipStatusJson({ error: '账号已变化，请切回原账号查询原任务' }, { status: 409 });
     const task = await prisma.videoTask.findUnique({
       where: { id: taskId },
       include: IP_TASK_STATUS_INCLUDE,
     });
 
     if (!task) {
-      return NextResponse.json(
+      return ipStatusJson(
         { error: 'Task not found', message: `Task ${taskId} not found` },
         { status: 404 },
       );
     }
     if (task.provider !== VOLCENGINE_IP_VIDEO_PROVIDER) {
-      return NextResponse.json(
+      return ipStatusJson(
         { error: '任务不是 IP 生成任务', message: '请使用普通任务状态接口查询此任务' },
         { status: 400 },
       );
@@ -195,13 +211,13 @@ export async function GET(
       await assertCanViewTask(user, task);
     } catch (error) {
       if (error instanceof AuthError) {
-        return NextResponse.json({ error: '权限不足', message: error.message }, { status: error.status });
+        return ipStatusJson({ error: '权限不足', message: error.message }, { status: error.status });
       }
       throw error;
     }
 
     if (!task.provider_task_id) {
-      return NextResponse.json(serializeTaskForIpStatus(task, { external: isExternalUser(user) }));
+      return ipStatusJson(serializeTaskForIpStatus(task, { external: isExternalUser(user), viewerId: user.id }));
     }
 
     const finalizeResult = await finalizeVideoTaskStatus(taskId, {
@@ -217,24 +233,26 @@ export async function GET(
     });
 
     if (!responseTask || !finalizeResult.task) {
-      return NextResponse.json(
+      return ipStatusJson(
         { error: 'Task not found', message: `Task ${taskId} not found` },
         { status: 404 },
       );
     }
 
     if (finalizeResult.providerError) {
-      return NextResponse.json({
-        ...serializeTaskForIpStatus(responseTask, { external: isExternalUser(user) }),
-        error_message: safeVolcengineIpUserMessage(responseTask.error_message)
+      const serialized = serializeTaskForIpStatus(responseTask, { external: isExternalUser(user), viewerId: user.id });
+      return ipStatusJson({
+        ...serialized,
+        error_message: safeVolcengineIpUserMessage(serialized.error_message)
           || '火山任务状态同步失败，请稍后重试。',
       });
     }
 
-    return NextResponse.json(serializeTaskForIpStatus(responseTask, { external: isExternalUser(user) }));
+    return ipStatusJson(serializeTaskForIpStatus(responseTask, { external: isExternalUser(user), viewerId: user.id }));
   } catch (error) {
+    if (error instanceof CodexApiAuthError || error instanceof AuthError) return ipStatusJson({ error: error.message }, { status: error.status });
     console.error('[IpVideoStatus] Get task status error:', error);
-    return NextResponse.json(
+    return ipStatusJson(
       { error: 'Internal server error', message: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 },
     );

@@ -1,11 +1,15 @@
 import { parseTaskReuseOperationRequest, taskReuseReceiptKey, type TaskReuseContext, type TaskReuseOperationRequest, type TaskReuseOperationStatus } from './task-reuse-intent';
 import type { WorkspaceInputRecovery } from '@/lib/hooks/useWorkspace';
 import { parseVideoPromptGroupRefs, type VideoPromptGroupRef } from '@/lib/video/prompt-groups';
+import type { ReferenceImageInput } from '@/lib/character-assets/types';
 export type TaskReuseInputBackup = { version: 1; hadInput?: boolean; workspace: WorkspaceInputRecovery; fields: {
   prompt: string; generationMode: string; ratio: string; duration: number; resolution: string; seed: number;
   generateAudio: boolean; returnLastFrame: boolean; watermark: boolean; resolutionApprovalConfirmed: boolean;
   model: string; provider?: string | null; auxiliary?: string | null; projectId?: string; videoCardId?: string; videoBranchId?: string;
   videoPromptGroups?: VideoPromptGroupRef[];
+  referenceImageInputs?: ReferenceImageInput[];
+  characterAssetReferences?: Array<{ characterAssetId: string; revision: number; name: string; assetId: string; uri: string; position: number }>;
+  referenceImageIssue?: string | null;
   draftMode?: boolean;
   unapplied?: { videoPromptGroups?: VideoPromptGroupRef[]; draftMode?: boolean; auxiliary?: string | null; feishu?: boolean; h3?: boolean };
 } };
@@ -75,10 +79,10 @@ export function taskReuseUndoMatches(record: CompletedTaskReuse, current: TaskRe
     && record.applied.workspaceBridgeKey === current.workspaceBridgeKey
     && ['projectId', 'videoCardId', 'videoBranchId'].every(key => (target[key as keyof TaskReuseTarget] || '') === current[key as keyof TaskReuseTarget]);
 }
-export function hasTaskReuseInput(backup: TaskReuseInputBackup) { return backup.hadInput === true || Boolean(backup.fields.prompt.trim() || backup.workspace.items.length || backup.fields.videoPromptGroups?.length); }
+export function hasTaskReuseInput(backup: TaskReuseInputBackup) { return backup.hadInput === true || Boolean(backup.fields.prompt.trim() || backup.workspace.items.length || backup.fields.videoPromptGroups?.length || backup.fields.referenceImageInputs?.length || backup.fields.referenceImageIssue); }
 export function taskReuseInputSignature(backup: TaskReuseInputBackup) {
   const fields = backup.fields;
-  return JSON.stringify([['prompt', 'generationMode', 'ratio', 'duration', 'resolution', 'seed', 'generateAudio', 'returnLastFrame', 'watermark', 'resolutionApprovalConfirmed', 'model', 'provider', 'auxiliary', 'draftMode', 'unapplied']
+  return JSON.stringify([['prompt', 'generationMode', 'ratio', 'duration', 'resolution', 'seed', 'generateAudio', 'returnLastFrame', 'watermark', 'resolutionApprovalConfirmed', 'model', 'provider', 'auxiliary', 'draftMode', 'unapplied', 'referenceImageInputs', 'referenceImageIssue', 'characterAssetReferences']
     .map(key => fields[key as keyof typeof fields] ?? null), [...backup.workspace.items].sort((a, b) => a.sortOrder - b.sortOrder || a.assetId.localeCompare(b.assetId))
     .map(item => [item.assetId, item.referenceImageId || null, item.role || null, item.sortOrder]), fields.videoPromptGroups || []]);
 }

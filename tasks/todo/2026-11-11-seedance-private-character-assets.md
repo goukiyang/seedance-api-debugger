@@ -1,7 +1,7 @@
 # Seedance 私域角色资产接入与管理入口
 
 版本：v1.0.0 / R01。日期：2026-11-11（America/New_York）。
-状态：需求、界面方案与关联风险已核对；业务实现、模拟验证、真实生成和部署未开始。
+状态：已获用户“落地”授权；业务实施与聚焦模拟已完成，工程检查与原号读取鉴权窄检查已完成；正式候选构建、保护部署及唯一真实测试由主控接续，功能仍待用户手验。
 入口：[固定 todo](../todo.md)。本轮按用户“明确需求后查缺补漏、查闭环和风险”“在红框位置补新增、编辑、删除等入口”补充原需求，不把方案写成已实现。
 
 ## 1. 目标与已确认范围
@@ -105,13 +105,13 @@
 
 官方依据（2026-11-11读取）：[创建任务 API](https://docs.volcengine.com/docs/ark/create-video-generation-task-api?lang=zh)明确 asset URI、2.0/2.5 的 reference_image 与模式互斥；[GetAsset](https://docs.volcengine.com/docs/ark/get-asset-api?lang=zh)明确仅 Access Key 鉴权、ProjectName、Processing/Active/Failed，以及 HTTP 200 仍可能为 Failed；[私域虚拟人像指南](https://docs.volcengine.com/docs/ark/private-virtual-avatar-library-guide-preview?lang=zh)由只读助手查得项目隔离约束，主线程本次抓取该指南两次超时，不以该抓取失败判产品问题。公开资料未核到“素材不存在/跨项目”的专用推理错误码，实施不臆造。
 
-## 6. 实施落点与顺序（尚未执行）
+## 6. 实施落点与顺序（实施证据见 §9）
 
 - [x] 锁定红框入口、通用可替换需求与原附件；核对实际线上提交、官方通道配置和核心源码。
 - [x] 明确增删改选、分层、状态、编号、模式、权限、恢复、费用及历史保护；记录缺证。
-- [ ] 在最新健康源建立隔离实施分支；新增最小角色登记模型及相容增量迁移、服务端目录服务和受鉴权 CRUD API（拟 `/api/character-assets` 与 `/:id`）。迁移不回填、改写老资产或业务记录。
-- [ ] 在 `GenerationComposer` / `GeneratePageClient` 的素材头部和 `ReferenceStrip` / `PromptEditor` 接入共用管理面板及有序选择；复用现有层/表单，并扩展 `src/lib/navigation/task-reuse-client.ts` 的 ModeInputDraft 和既有模式切换。拟新增面板文件，名称随现有目录安排，不重写整个 composer。
-- [ ] 扩展 `src/lib/creation/` 与客户端创建 hook、IP create、引用编译/快照、复用 DTO 和任务详情，使新字段全程保留；官方 provider 只补资产类型校验与错误映射。普通 create 的私域输入不支持时明确拒绝，不转发给网关。
+- [x] 在最新健康源建立隔离实施分支；新增最小角色登记模型及相容增量迁移、服务端目录服务和受鉴权 CRUD API（拟 `/api/character-assets` 与 `/:id`）。迁移不回填、改写老资产或业务记录。
+- [x] 在 `GenerationComposer` / `GeneratePageClient` 的素材头部和 `ReferenceStrip` / `PromptEditor` 接入共用管理面板及有序选择；复用现有层/表单，并扩展 `src/lib/navigation/task-reuse-client.ts` 的 ModeInputDraft 和既有模式切换。拟新增面板文件，名称随现有目录安排，不重写整个 composer。
+- [x] 扩展 `src/lib/creation/` 与客户端创建 hook、IP create、引用编译/快照、复用 DTO 和任务详情，使新字段全程保留；官方 provider 只补资产类型校验与错误映射。普通 create 的私域输入不支持时明确拒绝，不转发给网关。
 - [ ] 完成对应模拟/工程检查，核对实际差异；必要发布沿现有受保护发布流程，新增 schema 的备用 reader 必须可运行，只回程序不回业务数据。
 - [ ] 有条件执行一次真实测试并观察原任务到终态/交付；未满足条件则只保留该项缺口，继续不依赖它的工程交付。
 
@@ -125,10 +125,43 @@
 - 用户手验：红框可达、搜索/新增/编辑/停用/删除撤销、加入/移除/排序、刷新恢复、手机/键盘/关闭返回、失败和冲突提示、切换线路不丢提示词/素材。源码或构建不冒这些操作通过。
 - 真实测试沿用户本次授权：只创建一次、时长不超过 15 秒；使用已配置通道、有权的普通 Codex 服务账号/项目及正常点数链，先核本次费用和权限，不冒用管理员作生成所有者。API Key 已配置不等于全部条件满足；未知不重试创建，原号追查。记录真实请求（隐藏密钥）、task/Request ID、终态、费用与本地结果；没有实际请求时只给“结构示例”，不得称“已发送”。
 
-## 8. 本轮收口与仍缺证据
+## 8. 方案阶段收口与仍缺证据（保留历史）
 
 已完成需求与入口方案补充、相关源码/运行配置/官方接口核对和原图归档。未修改业务代码、生产配置或数据，未执行构建、浏览器功能验收、收费生成或部署。
 
 本次 ID 的 Image 类型、Active 当前状态、Ark ProjectName、与已配置 Key 的实际同项目权限尚未独立核实；只有现有推理 Key 配置的布尔证据。缺少管理查询凭据不伪装成已查询，也不新增 AK/SK 权限；不影响手动登记/请求结构的实施准备，但阻止声称该角色已可生成。真实任务与用户效果仍待后续实际证据。
 
 本轮新发现的线索与问题：未新增任务外事项；上述缺项均在本工单范围内。旧工作区/早期记录误判已当场纠正，经验仅登记本项目，不新增全局规则。
+
+
+<!-- ARK-CHARACTER-ASSET01-IMPLEMENTATION-20261111 -->
+## 9. 已授权工程实施与交付（2026-11-11）
+
+用户后续明确要求“落地”，本节接续前期方案，保留上文方案阶段事实。工程工作区为 `/Volumes/Data/Projects/video-api-debugger-worktrees/seedance-private-character-plan-20261111`，实施分支 `codex/seedance-private-character-assets-20261111`，基于线上 b8e9c6a0 的计划提交 971631aa；未在正式根脏改上实现业务，也未操作生产配置或数据。
+
+### 9.1 共享影响与实施结果
+
+- 实施前核对普通/IP 共用 composer、创建意图/报价/受理、原请求回执、素材上传及复用的共享边界。采用可选有序判别输入，不改变未带新字段的旧请求；普通网关入口明确拒绝私域输入，官方 mapper 仅允许合法 `asset://asset-…` 作为 `reference_image`，不下载/探测/转 base64，也不创建假的媒体文件。
+- 红框位置已接「角色资产」管理面板，普通与 IP 页同位可达；本人新增、编辑、搜索、复制 ID、停用启用、软删除恢复及可选授权缩略图共用一个面板。状态显示“未核验”，失败和 CAS 冲突保编辑输入。普通页须明确选择 IP 型号并点击“切换 IP 线路并使用”，沿已有模式草稿交接保提示词、项目、素材及参数。
+- 普通图片与角色共用有序图片编号、模型总额度、素材条排序/移除及引用入口。自动插入/改序仅处理明确的 `@图片N`，自动插入也保留当前选中的原文字，其余原文保持；模糊文字图号、坏草稿、缺失普通图、版本变化及首尾帧混用保留现场并阻断，要求显式修正，不清输入冒成功。
+- `reference_image_inputs` 及服务端冻结的 `character_asset_references` 进入创建 spec、输入/报价业务 hash、IP 请求指纹、事务受理、任务 params 和供应商快照；目录在准备和受理事务重新核 owner/revision。原号去重先于目录的新鲜检查，已受理或未知任务不因目录编辑而换角色、换号、解冻或重发。
+- 复用沿原事务/回执重核当前 owner 与修订，并保冻结角色名、Asset ID、顺序及旧版本；无权、删除、停用或过期修订不冒完整恢复。任务所有者可在原详情查看提交时角色引用、复制 Asset ID 和生成设置；`asset://` 不作为图片缩略图。中央任务 DTO 与 IP list/status 对非所有者剥离私域参数/URI，含只选 URI 列的局部 DTO；公开作品与普通通知沿原安全投影，不新增配方外发。
+- IP status 与 IP request-status 的原号 GET 最小复用现有 Codex bearer 鉴权，保同账号/provider/原 key 过滤与 `assertCanViewTask`；无效 bearer 不回落 Cookie，返回 private/no-store 与 Cookie/Authorization Vary，空查询仍 `safeToResubmit:false`。原 `volcengine_ark` 状态/结算/转存及两小时视频交付看护未改；没有新增 AK/SK、上游素材上传/删除、资产组/共享平台或账号配置。
+
+### 9.2 增量表与相容 reader
+
+新增单表 [CharacterAsset 迁移](../../prisma/migrations/20261111090000_owner_character_assets/migration.sql)，字段为 owner/provider、Asset ID、名称、可选组/项目/备注/缩略图、enabled、revision、deleted_at 与创建/更新时间；索引为 owner/provider/asset_id 唯一键及 owner/deleted_at/updated_at 查询键。软删除保留原唯一键，撤销恢复原 ID。仅增表、不回填或修改旧 SeedanceAsset/媒体/账本/历史。
+
+目录服务使用参数化 raw SQL，实际旧 Prisma 5.22 reader 无 CharacterAsset delegate 仍可读取新表；缺表明确 `503 CHARACTER_ASSET_SCHEMA_REQUIRED`，不运行时懒建表。发布只执行本次锁定 SQL，不能用全仓 migrate deploy 补历史。`CHARACTER_ASSET_WRITES_ENABLED` 位于 `src/lib/character-assets/build-mode.ts`；相容 guard 从完整新源码构建，保原六个写开关并关闭此第七项。目录写/恢复及私域新创建/prepare/accept 关闭，GET/历史/状态继续可读。未补丁旧 79ab 会在 IP DTO 露 URI，不能作本批回退 reader；程序回退不回目录/任务/账务数据。
+
+### 9.3 工程证据与边界
+
+- `node scripts/character-assets-engineering.mjs`：18 组离线模拟通过。执行真实目录 API/SQLite SQL、旧 Prisma raw reader、Codex linked owner 隔离、软删恢复、DateTime/Boolean、同 revision 并发一次成功一次冲突、模式/总数、2.0/2.5 实际 provider fetch body、prepare/accept/hash/原回执冻结、隐私、草稿交接及写暂停。全局 fetch 拦截证明真实网络/生成/生产写均为 0。
+- `node --check scripts/character-assets-engineering.mjs`、`prisma validate --schema prisma/schema.prisma`、`git diff --check` 通过。服务端和任务详情 15 文件窄 lint exit 0，仅原任务详情的三个既有 `<img>` 提醒；目录七文件窄 lint exit 0。客户端最终七文件窄 lint exit 0（11 条既有 Hook 依赖提醒与两条授权缩略图的原生 `<img>` 建议，无错误）。匹配当前 schema 的独立 Prisma client 下，`tsc --project .role-tests/character-assets-types/tsconfig.json --noEmit --incremental false --pretty false` exit 0；后续仅补两处自动插入保选中文字、两条 IP 原号 GET 鉴权，沿对应极窄检查验证，完整最终类型仍由候选构建内置检查覆盖。
+- `node scripts/character-assets-ip-auth-engineering.mjs`：23 组额外极窄模拟通过，执行两份完整实际 GET 模块，覆盖 bearer 普通 owner、错误 token 不回落 Cookie、同账号/原号/provider 过滤、原权限拒绝、未知不重提与 private/no-store/Vary；附被测源码 SHA-256。此处鉴权密码学、数据库、供应商/finalizer 为明确 mock，不冒真实线上效果。两文件直接 ESLint exit 0；自动角色插入保选中文字的两路径确定输入断言及两文件直接 ESLint exit 0（5 条既有 Hook 提醒）。
+- 两个复用的既有 generated Prisma client 都落后当前源码 schema：第一份缺 Work，第二份缺 WorkRecommendationEvent/Job/Result；不能把这类差异说成业务类型通过。仅在被忽略的 `.role-tests/character-assets-types` 生成独立匹配类型，临时 tsconfig 映射 `@prisma/client`，不修改共享 node_modules 或连接数据库。
+- CodeGraph 第一次准备因源文件在实施中变化退出；源码稳定后恢复成功（工程工作区 2063 文件、0 parseErrors/0 hashMismatch），真实 context 查询返回有序编译入口及 IP POST 关系，关键结论回源码核对。提交后的最终增量索引状态随 Git 交付。
+- 主控的 `node scripts/pricing-compatible-guard-engineering.mjs` 四个真实临时 Git 场景已通过，覆盖新源七开关与旧源六开关兼容；本批复用有效证据，未重跑。
+
+这些证据属于工程模拟与代码检查；没有加载完整 IP HTTP 成功链、浏览器/手机功能验收或本轮真实生成。正式候选 Next/内置矩阵、迁移备份/停止 writer/保护部署、普通 Codex 本人项目的一次不超过 15 秒真实测试由主控接续，未知只查原号；用户界面效果仍待手动验收。本轮未新增任务外发现。
+<!-- /ARK-CHARACTER-ASSET01-IMPLEMENTATION-20261111 -->

@@ -71,6 +71,7 @@ import {
 import { readTaskReuseClientRecord, saveTaskReuseClientRecord, finishTaskReuseClientRecord, taskReuseOperationQuery, sameTaskReuseResultItems, taskReuseReplacedInput, type CompletedTaskReuse, type TaskReuseClientRecord, type TaskReuseInputBackup, type VideoModelChoice } from '@/lib/navigation/task-reuse-client';
 import { TaskReuseStatus, type ReuseUndoAction } from './TaskReuseStatus';
 import type { WorkspaceReadResult } from '@/lib/hooks/useWorkspace';
+import type { ReferenceImageInput } from '@/lib/character-assets/types';
 
 // ============================================================================
 // Types
@@ -131,6 +132,7 @@ type GenerationSubmitParams = {
   watermark: boolean;
   resolutionApprovalConfirmed: boolean;
   referenceImageIds?: string[];
+  referenceImageInputs?: ReferenceImageInput[];
   referenceVideoUrls?: string[];
   referenceAudioUrls?: string[];
   templateId?: string | null;
@@ -286,6 +288,8 @@ interface ProjectOption {
 }
 
 interface ReuseDraft {
+  referenceImageInputs?: ReferenceImageInput[];
+  characterAssetReferences?: TaskReuseInputBackup['fields']['characterAssetReferences'];
   videoPromptGroups?: VideoPromptGroupRef[];
   model?: string | null;
   taskId: string;
@@ -2050,6 +2054,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           task_id?: string;
           prompt?: string;
           video_prompt_groups?: VideoPromptGroupRef[];
+          reference_image_inputs?: ReferenceImageInput[];
+          characterAssetReferences?: TaskReuseInputBackup['fields']['characterAssetReferences'];
           generation_mode?: GenerationMode;
           ratio?: VideoRatio;
           duration?: VideoDuration;
@@ -2182,7 +2188,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       const backup = activeReuseRecord.current?.backup;
       const after: TaskReuseInputBackup | null = backup ? { ...backup,
         workspace: { ...backup.workspace, items: Array.isArray(data.workspace_assets) ? data.workspace_assets as TaskReuseInputBackup['workspace']['items'] : backup.workspace.items },
-        fields: { ...backup.fields, prompt: data.draft.prompt, videoPromptGroups: parseVideoPromptGroupRefs(data.draft.video_prompt_groups), model: data.draft.model || backup.fields.model,
+        fields: { ...backup.fields, prompt: data.draft.prompt, referenceImageInputs: data.draft.reference_image_inputs, characterAssetReferences: data.draft.characterAssetReferences, referenceImageIssue: null, videoPromptGroups: parseVideoPromptGroupRefs(data.draft.video_prompt_groups), model: data.draft.model || backup.fields.model,
           provider: data.draft.provider || backup.fields.provider, generationMode: data.draft.generation_mode || backup.fields.generationMode,
           ratio: data.draft.ratio || backup.fields.ratio, duration: data.draft.duration ?? backup.fields.duration, resolution: data.draft.resolution || backup.fields.resolution,
           seed: data.draft.seed ?? backup.fields.seed, generateAudio: data.draft.generate_audio ?? backup.fields.generateAudio,
@@ -2213,6 +2219,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         reuseKey,
         prompt: data.draft.prompt,
         videoPromptGroups: parseVideoPromptGroupRefs(data.draft.video_prompt_groups),
+        referenceImageInputs: data.draft.reference_image_inputs,
+        characterAssetReferences: data.draft.characterAssetReferences,
         generationMode: data.draft.generation_mode || 'all_in_one_reference',
         ratio: data.draft.ratio || '16:9',
         duration: data.draft.duration || 5,
@@ -2914,6 +2922,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         continuation: new URLSearchParams(window.location.search).get('continuation_task_id')
           ? { mode: 'continue', parent_task_id: new URLSearchParams(window.location.search).get('continuation_task_id') } : { mode: 'new' }, baseline_task_id: creationBaselineId || null,
         reference_image_ids: params.referenceImageIds || [],
+        ...(params.referenceImageInputs !== undefined ? { reference_image_inputs: params.referenceImageInputs } : {}),
         reference_video_urls: params.referenceVideoUrls || [],
         reference_audio_urls: params.referenceAudioUrls || [],
         template_id: params.templateId || null,

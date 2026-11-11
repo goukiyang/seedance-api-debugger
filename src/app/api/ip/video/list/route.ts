@@ -1,3 +1,4 @@
+import { projectCharacterAssetTask } from '@/lib/character-assets/privacy';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth/session';
@@ -99,6 +100,7 @@ export async function GET(request: NextRequest) {
         provider_final_amount_minor: true,
         provider_official_amount_micros: true,
         provider_final_amount_micros: true,
+        source_metadata_json: true,
         reference_image_ids: true,
         reference_image_urls: true,
         created_at: true,
@@ -134,7 +136,8 @@ export async function GET(request: NextRequest) {
     const external = isExternalUser(user);
     return NextResponse.json({
       tasks: tasks.map((task) => {
-        const visibleTask = external ? redactIpTaskForExternal(task) : task;
+        const { source_metadata_json: _private, ...safeTask } = projectCharacterAssetTask(task);
+        const visibleTask = external ? redactIpTaskForExternal(safeTask) : safeTask;
         return {
         ...visibleTask,
         result_video_url: null,
@@ -144,7 +147,7 @@ export async function GET(request: NextRequest) {
           result_video_url: null,
           result_last_frame_url: null,
         }),
-        error_message: safeVolcengineIpUserMessage(task.error_message),
+        error_message: safeVolcengineIpUserMessage(visibleTask.error_message),
       };
       }),
       pagination: {
