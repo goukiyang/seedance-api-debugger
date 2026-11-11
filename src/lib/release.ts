@@ -1,11 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '角色缩略图直接上传',
+  title: '角色融合对话调整更准确',
   outline: [
-    '新增、编辑角色时可直接上传或更换缩略图',
-    '上传后预览，保存后在下拉中按图选择',
-    '上传或封面准备失败时保留输入并可继续处理'
+    '助手可区分主题大类与具体词条',
+    '只改某条主题时保留母体、性格和身形',
+    '原卡片、多选及扩展词库继续参与抽卡'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
