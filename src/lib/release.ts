@@ -1,11 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '角色融合支持多选组合',
+  title: '支持私域角色资产',
   outline: [
-    '职业、机制和身形等可组合的选项共同用于生成',
-    '支持主母体加入辅助融合元素，保留中英文完整设定',
-    '保留原卡片操作，固定组合、随机抽取与互斥选择更清楚'
+    '视频素材区可管理角色资产，支持新增、编辑和删除恢复',
+    '选择已入库角色即可作为参考素材，Asset ID 随时可换',
+    '角色与普通图片共用图片编号，保留提示词和生成记录'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
