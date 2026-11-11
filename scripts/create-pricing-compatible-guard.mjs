@@ -55,6 +55,13 @@ try {
     assert.ok(bytes.includes(before), 'Prompt group recovery source must be the full writable main');
     changes[groupModePath] = bytes.replace(before, 'export const VIDEO_PROMPT_GROUP_WRITES_ENABLED = false;') + '\n';
   }
+  const fusionModePath = 'src/lib/character-fusion/build-mode.ts';
+  if (git(['ls-tree', '--name-only', source, '--', fusionModePath]) === fusionModePath) {
+    const bytes = read(fusionModePath);
+    const before = 'export const CHARACTER_FUSION_WRITES_ENABLED: boolean = true;';
+    assert.ok(bytes.includes(before), 'Character fusion recovery source must be the full writable main');
+    changes[fusionModePath] = bytes.replace(before, 'export const CHARACTER_FUSION_WRITES_ENABLED: boolean = false;') + '\n';
+  }
   for (const [file, bytes] of Object.entries(changes)) {
     const blob = git(['hash-object', '-w', '--stdin'], { input: bytes });
     git(['update-index', '--add', '--cacheinfo', `100644,${blob},${file}`], { env });
