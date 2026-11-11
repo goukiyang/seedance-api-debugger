@@ -48,7 +48,7 @@ export default function CatalogueEditor({ settings, onChange, view, onViewChange
   const toggleExpanded = (id: string) => updateView({ expanded: ui.expanded.includes(id) ? ui.expanded.filter(value => value !== id) : [...ui.expanded, id] });
   const card = (id: string, props: Omit<React.ComponentProps<typeof RuleCard>, 'id' | 'expanded' | 'onToggle' | 'onDrop' | 'onMove' | 'collapseRules' | 'selection'> & { summary: string }, controls: React.ReactNode) => {
     const { summary, ...rest } = props, detailId = `${instanceId}-${id}`;
-    return <RuleCard key={id} {...rest} id={id} controlId={detailId} expanded={ui.expanded.includes(id)} collapseRules onToggle={() => toggleExpanded(id)} onDrop={source => moveCard(source, id)} onMove={direction => moveBy(id, direction)} selection={<button className={styles.catalogueChoice} aria-expanded={ui.expanded.includes(id)} aria-controls={detailId} onClick={() => toggleExpanded(id)}>{summary}</button>}>{controls}</RuleCard>;
+    return <RuleCard key={id} {...rest} id={id} controlId={detailId} expanded={ui.expanded.includes(id)} collapseRules onToggle={() => toggleExpanded(id)} onDrop={source => moveCard(source, id)} onMove={direction => moveBy(id, direction)} selection={<button className={styles.catalogueChoice} aria-expanded={ui.expanded.includes(id)} aria-controls={detailId} onClick={() => toggleExpanded(id)}>{rest.joined ? summary : '未加入，展开可选'}</button>}>{controls}</RuleCard>;
   };
   const catalogue = settings.catalogue || emptyCatalogue();
   const toggleBaseLock = (id: Dimension) => onChange(toggleCategoryLock(settings, id));
@@ -94,7 +94,7 @@ export default function CatalogueEditor({ settings, onChange, view, onViewChange
       summary: (detail?.locked ? displayGroup(detail.value) : fixed ? `${displayGroup(settings.boss[id])} · 类内随机` : '随机') + (id === 'source' ? fusionSummary : ''),
       onLock: () => toggleBaseLock(id), onJoin: () => onChange({ ...settings, bossDimensions: joined ? settings.bossDimensions.filter(value => value !== id) : [...settings.bossDimensions, id] }),
       onCycle: () => { const pool = allowed(settings, id); if (pool.length) updateGroup(pool[(pool.indexOf(settings.boss[id]) + 1) % pool.length]); },
-      onTag: (label, status) => onChange(reconcile({ ...settings, rules: { ...settings.rules, [id]: settings.rules[id].map(tag => tag.label === label ? { ...tag, status } : tag) } })),
+      onTag: (label, status) => onChange(reconcile({ ...settings, rules: { ...settings.rules, [id]: settings.rules[id].map(tag => tag.label === label ? { ...tag, status, definitionOnly: undefined } : tag) } })),
     }, controls);
     return <div key={id} className={styles.catalogueRow}>
       <div className={styles.catalogueLabel}><strong>{id === 'source' ? '造型母体' : id === 'concept' ? '主题灵感' : id === 'personality' ? '主性格' : definition.title}</strong><button className={styles.iconButton} title={fixed ? '解锁类别，允许抽卡更换' : '固定当前类别'} aria-label={`${fixed ? '解锁' : '锁定'}${definition.title}类别`} aria-pressed={fixed} onClick={() => toggleBaseLock(id)}>{fixed ? <LockKeyhole size={15} /> : <UnlockKeyhole size={15} />}</button><small>{joined ? fixed ? '类别固定' : '类别随机' : '未启用'}</small>{id === 'mechanism' && <button className={styles.iconButton} aria-label={joined ? '移出机制' : '加入机制'} onClick={() => onChange({ ...settings, bossDimensions: joined ? settings.bossDimensions.filter(v => v !== id) : [...settings.bossDimensions, id] })}>{joined ? <X size={15} /> : <Plus size={15} />}</button>}</div>

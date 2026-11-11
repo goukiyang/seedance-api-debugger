@@ -1,15 +1,17 @@
 import { englishDetail } from './english';
 import { parseCardDraft, cardValues, type FusionCard } from './cards';
 import { TRAITS, parseCatalogue, concreteOptions, builtinCatalogue, dynamicPool, dynamicPolicy, validateDynamicGeneration, type CatalogueSettings } from './catalogue';
-import { builtinCategoryId, type FusionCategory, type FusionTerm } from './catalogue-model';
+import { builtinCategoryId, builtinTermId, type FusionCategory, type FusionTerm } from './catalogue-model';
 import { chooseConcrete, decorateRow, type Design } from './design';
 import { BODY_HEAD_RATIO_ID } from './body-cards';
-import { choicesConflict, drawChoices } from './selection';
+import { choicesConflict, drawChoices, type SelectionPolicy } from './selection';
+import type { FusionAllocation } from './domain';
+export type { FusionAllocation } from './domain';
 import { CONFIG, DEFAULT_REQUIREMENTS, SOURCES, CONCEPTS, MECHANISMS, PERSONALITIES, LEGACY_TAGS, DETAIL_ALTS, EN_LABEL, SOURCE_EN, CONCEPT_EN, PROP_EN } from './vocabulary';
 
 export { CONFIG, DEFAULT_REQUIREMENTS };
 export type Dimension = typeof CONFIG[number]['id'];
-export type Tag = { label: string; en?: string; status: 'default' | 'must' | 'exclude' };
+export type Tag = { label: string; en?: string; status: 'default' | 'must' | 'exclude'; definitionOnly?: true };
 export type Categories = Record<Dimension, string>;
 export type FusionSettings = {
   rules: Record<Dimension, Tag[]>; requirements: string; count: number; lang: 'zh' | 'en' | 'both';
@@ -22,6 +24,7 @@ export type FusionRowCatalogueSnapshot = { formatVersion: 1; catalogueVersion: s
   selections: Record<string, string[]>; settings?: FusionSettings; settingsRef?: { operationId: string; configurationId: string }; body: { zh: string; en: string } };
 export type FusionRow = {
   id: string; name: string; category: Categories; source: Source; concept: Concept; bridge: string;
+  displayNo?: number; originBatchId?: string;
   mechanism: { cn: string; en: string }; personality: { pose: string; en: string };
   detail: Partial<Record<Dimension, string>>; advanced: boolean; isBoss?: boolean;
   design?: Design;
@@ -29,7 +32,7 @@ export type FusionRow = {
   role?: string; cards?: Array<{ id: string; title: string; titleEn: string; label: string; en: string; values?: { zh: string; en: string }[]; multi?: boolean }>;
   catalogueSnapshot?: FusionRowCatalogueSnapshot;
 };
-export const FUSION_ENGINE_VERSION = 'ux14-1';
+export const FUSION_ENGINE_VERSION = 'ux20-1';
 export const COUNTS = [4, 8, 12, 16, 24, 32];
 export const CORE = CONFIG.filter(c => !('optional' in c));
 export const ADDONS = CONFIG.filter(c => 'optional' in c);
@@ -39,6 +42,21 @@ export function defaults(): FusionSettings {
     requirements: DEFAULT_REQUIREMENTS, requirementsEnabled: false, requirementsEn: '', cards: [], role: '', catalogue: { details: {}, traits: { primaryPersonality: { enabled: true, locked: false, values: [], excluded: [], must: [] } } }, count: 16, lang: 'zh',
     boss: { source: '动物', concept: '海洋探索', mechanism: '展开折叠类', personality: '聪明机敏型', equipment: '', signature: '', entity: '', physique: '' },
     bossLocks: Object.fromEntries(CONFIG.map(c => [c.id, false])) as FusionSettings['bossLocks'], bossDimensions: CORE.map(c => c.id) };
+}
+/** Preserve unique inline definitions without carrying a previous creation's active choices. */
+export function newCreationSettings(settings: FusionSettings): FusionSettings {
+  const previous = parseSettings(settings), base = defaults();
+  base.count = previous.count; base.lang = previous.lang;
+  for (const dimension of CONFIG) {
+    const defaultsByLabel = new Map(base.rules[dimension.id].map(tag => [tag.label, tag]));
+    base.rules[dimension.id] = [...base.rules[dimension.id].map(tag => ({ ...tag, ...(previous.rules[dimension.id].find(old => old.label === tag.label)?.en ? { en: previous.rules[dimension.id].find(old => old.label === tag.label)!.en } : {}) })),
+      ...previous.rules[dimension.id].filter(tag => !defaultsByLabel.has(tag.label)).map(tag => ({ ...tag, status: 'exclude' as const, definitionOnly: true as const }))];
+  }
+  base.cards = previous.cards.map(card => ({ ...card, tags: card.tags.map(tag => ({ ...tag, status: 'default' as const })), joined: false, locked: false,
+    value: card.value, ...(card.multi ? { values: [card.value] } : {}) }));
+  if (previous.catalogue?.dynamic) base.catalogue!.dynamic = { ...structuredClone(previous.catalogue.dynamic), selections: Object.fromEntries(Object.entries(previous.catalogue.dynamic.selections).map(([id, state]) => [id,
+    { enabled: false, locked: false, values: state.values.slice(0, 1), excluded: [], must: [] }])) };
+  return parseSettings(base);
 }
 
 /** Validate the single external boundary used by recipe saves and restored drafts. */
@@ -52,12 +70,12 @@ export function parseSettings(input: unknown): FusionSettings {
   const boss = {} as Categories, bossLocks = {} as FusionSettings['bossLocks'];
   for (const c of CONFIG) {
     const tags = s.rules[c.id];
-    if (!Array.isArray(tags) || tags.length > 80 || tags.length < 1 || tags.some(t => !t || typeof t.label !== 'string'
-      || !t.label.trim() || t.label.length > 30 || !['default', 'must', 'exclude'].includes(t.status))
+    if (!Array.isArray(tags) || tags.length > 160 || tags.length < 1 || tags.some(t => !t || typeof t.label !== 'string'
+      || !t.label.trim() || t.label.length > 30 || !['default', 'must', 'exclude'].includes(t.status) || t.definitionOnly !== undefined && t.definitionOnly !== true)
       || new Set(tags.map(t => t.label.trim())).size !== tags.length
       || typeof s.boss[c.id] !== 'string' || typeof s.bossLocks[c.id] !== 'boolean') throw new Error(`${c.title}规则无效。`);
     if (tags.some(t => t.en !== undefined && (typeof t.en !== 'string' || t.en.length > 180 || /[\u3400-\u9fff]/.test(t.en)))) throw new Error('英文标签无效。');
-    rules[c.id] = tags.map(t => ({ label: t.label.trim(), status: t.status, ...(t.en ? { en: t.en.trim() } : {}) }));
+    rules[c.id] = tags.map(t => ({ label: t.label.trim(), status: t.status, ...(t.en ? { en: t.en.trim() } : {}), ...(t.status === 'exclude' && t.definitionOnly ? { definitionOnly: true as const } : {}) }));
     boss[c.id] = s.boss[c.id]; bossLocks[c.id] = s.bossLocks[c.id];
   }
   if (s.requirementsEnabled !== undefined && typeof s.requirementsEnabled !== 'boolean'
@@ -164,6 +182,7 @@ export function validateGeneration(s: FusionSettings) {
     if (!c.tags.some(t => t.status !== 'exclude')) return `${c.title}已全部排除，请保留一个选项。`;
     const must = c.tags.filter(t => t.status === 'must');
     if (!c.locked && must.length > s.count) return `${c.title}的本批必出项超过生成数量。`;
+    if (c.locked && cardValues(c).some((value, index) => cardValues(c).slice(index + 1).some(other => choicesConflict({ multi: Boolean(c.multi) }, value, other)))) return `${c.title}的固定组合包含互斥选项，请调整后生成。`;
     if (c.locked && (!cardValues(c).length || cardValues(c).some(value => !c.tags.some(t => t.label === value && t.status !== 'exclude')) || must.some(t => !cardValues(c).includes(t.label)))) return `${c.title}的固定项与规则冲突，请解锁或调整本批必出项。`;
   }
   for (const c of CONFIG) {
@@ -229,13 +248,123 @@ function uniqueName(row: FusionRow, others: FusionRow[]) {
   if (row.design && row.name !== base) row = { ...row, design: { ...row.design, sections: row.design.sections.map((p, i) => i === 0 ? { ...p, zh: p.zh.replace(`「${base}」`, `「${row.name}」`) } : p) } };
   return row;
 }
-export function generateBatch(s: FusionSettings, seed = Date.now()) {
+type AllocationAxis = { id: string; title: string; kind: string; terms: FusionTerm[]; pool: FusionTerm[]; fixed?: string[]; must: string[]; groups: string[]; policy: SelectionPolicy };
+function allocationAxes(s: FusionSettings): AllocationAxis[] {
+  const builtin = builtinCatalogue(), dynamic = s.catalogue?.dynamic, axes: AllocationAxis[] = [];
+  for (const [id, state] of Object.entries(dynamic?.selections || {})) {
+    if (!state.enabled) continue;
+    const category = dynamic!.snapshot.categories.find(category => category.id === id)!;
+    const terms = dynamic!.snapshot.terms.filter(term => term.categoryId === id);
+    axes.push({ id, title: category.nameZh, kind: category.generationKind, terms, pool: dynamicPool(category, state, terms), fixed: state.locked ? [...state.values] : undefined,
+      must: [...state.must], groups: CONFIG.some(d => d.id === category.generationKind) ? required(s, category.generationKind as Dimension) : [], policy: dynamicPolicy(category, terms) });
+  }
+  for (const dimension of CONFIG) {
+    if (!s.bossDimensions.includes(dimension.id) || axes.some(axis => axis.kind === dimension.id)) continue;
+    const id = builtinCategoryId(dimension.id), terms = builtin.terms.filter(term => term.categoryId === id);
+    // Inline legacy rule labels remain usable even when they have no formal catalogue entry.
+    for (const tag of s.rules[dimension.id]) if (!terms.some(term => term.data?.group === tag.label)) terms.push({
+      id: builtinTermId(id, tag.label), categoryId: id, version: 'inline-1', enabled: true, scope: 'builtin', ownerId: null,
+      nameZh: tag.label, nameEn: tag.en || dimension.english.toLowerCase(), descriptionZh: tag.label, descriptionEn: tag.en || dimension.english.toLowerCase(),
+      legacyValue: tag.label, aliases: [], tags: [], sortOrder: terms.length, data: { group: tag.label },
+    });
+    const detail = s.catalogue?.details[dimension.id];
+    const pool = terms.filter(term => allowed(s, dimension.id).includes(term.data!.group!) && (!s.bossLocks[dimension.id] || term.data!.group === s.boss[dimension.id]) && (!detail?.locked || (term.legacyValue || term.nameZh) === detail.value));
+    axes.push({ id, title: dimension.title, kind: dimension.id, terms, pool, ...(detail?.locked ? { fixed: pool.map(term => term.id) } : {}), must: [], groups: required(s, dimension.id), policy: { multi: false } });
+  }
+  for (const definition of TRAITS) {
+    if (dynamic?.selections[definition.id] || !s.catalogue?.traits[definition.id]?.enabled) continue;
+    const state = s.catalogue.traits[definition.id], terms = builtin.terms.filter(term => term.categoryId === definition.id);
+    axes.push({ id: definition.id, title: definition.title, kind: 'trait', terms, pool: terms.filter(term => !state.excluded.includes(term.legacyValue || term.nameZh)),
+      fixed: state.locked ? state.values.map(value => builtinTermId(definition.id, value)) : undefined, must: state.must.map(value => builtinTermId(definition.id, value)), groups: [],
+      policy: { ...definition, exclusive: definition.options.filter(option => choicesConflict({ multi: true, exclusive: definition.exclusive }, option.zh, '__other__')).map(option => builtinTermId(definition.id, option.zh)), incompatible: definition.incompatible?.map(([a, b]) => [builtinTermId(definition.id, a), builtinTermId(definition.id, b)]) } });
+  }
+  for (const card of s.cards.filter(card => card.joined && !axes.some(axis => axis.id === card.id))) {
+    const common = { version: 'inline-1', enabled: true, scope: 'builtin' as const, ownerId: null, aliases: [], tags: [], categoryId: card.id };
+    const terms: FusionTerm[] = card.tags.map((tag, sortOrder) => ({ ...common, id: builtinTermId(card.id, tag.label), nameZh: tag.label, nameEn: tag.en, descriptionZh: tag.label, descriptionEn: tag.en, legacyValue: tag.label, sortOrder }));
+    axes.push({ id: card.id, title: card.title, kind: 'card', terms, pool: terms.filter(term => card.tags.find(tag => tag.label === term.nameZh)!.status !== 'exclude'), fixed: card.locked ? cardValues(card).map(value => builtinTermId(card.id, value)) : undefined,
+      must: card.tags.filter(tag => tag.status === 'must').map(tag => builtinTermId(card.id, tag.label)), groups: [], policy: { multi: Boolean(card.multi), exclusive: card.tags.filter(tag => choicesConflict({ multi: true }, tag.label, '__other__')).map(tag => builtinTermId(card.id, tag.label)) } });
+  }
+  return axes;
+}
+function allocationIds(axis: AllocationAxis, values: string[]) {
+  return values.map(value => {
+    const term = axis.terms.find(term => term.id === value || (term.legacyValue || term.nameZh) === value);
+    if (!term || !axis.pool.some(allowed => allowed.id === term.id)) throw new Error(`${axis.title}的本次选择不在有效候选范围内，请调整后生成。`);
+    return term.id;
+  });
+}
+/** The source allocator sees hard constraints first; history is a preference that may relax. */
+export function allocateFusionBatch(s: FusionSettings, seed: number, options: { onceMust?: Record<string, string[]>; diversity?: 'prefer' | 'strict'; avoidSourceTermIds?: string[] } = {}): FusionAllocation {
   const error = validateGeneration(s); if (error) throw new Error(error);
+  const axes = allocationAxes(s), random = seeded(seed), rows: FusionAllocation['rows'] = Array.from({ length: s.count }, () => ({ selections: {} }));
+  for (const id of Object.keys(options.onceMust || {})) if (!axes.some(axis => axis.id === id)) throw new Error('本批必出项所属类别未加入或不可用，请先调整组合。');
+  let diversity: FusionAllocation['diversity'];
+  for (const axis of axes.filter(axis => axis.kind === 'source' || options.onceMust?.[axis.id]?.length)) {
+    const must = Array.from(new Set([...axis.must, ...allocationIds(axis, options.onceMust?.[axis.id] || [])]));
+    if (axis.fixed) {
+      if (must.some(id => !axis.fixed!.includes(id))) throw new Error(`${axis.title}的本批要求与固定组合冲突，请先调整锁定。`);
+      rows.forEach(row => { row.selections[axis.id] = [...axis.fixed!]; });
+      if (axis.kind === 'source') diversity = { availableSourceCount: new Set(axis.fixed).size, repeatedSourceCount: Math.max(0, s.count - new Set(axis.fixed).size), relaxed: s.count > new Set(axis.fixed).size };
+    } else {
+      if (must.length > s.count) throw new Error(`${axis.title}的本批必出项超过生成数量。`);
+      if (must.some(id => !axis.pool.some(term => term.id === id))) throw new Error(`${axis.title}的必出项不在有效候选范围内。`);
+      const required = shuffled(must, random), coveredGroups = new Set(required.map(id => axis.terms.find(term => term.id === id)?.data?.group));
+      for (const group of shuffled(axis.groups, random)) if (!coveredGroups.has(group)) {
+        const term = pick(axis.pool.filter(term => term.data?.group === group), random);
+        if (!term) throw new Error(`${axis.title}的必出类别没有可用词条。`);
+        required.push(term.id); coveredGroups.add(group);
+      }
+      if (required.length > s.count) throw new Error(`${axis.title}的本批必出要求无法在${s.count}条内同时满足。`);
+      if (!axis.pool.length) {
+        if (axis.kind === 'source' && options.diversity !== 'strict' && !required.length) continue;
+        throw new Error(`${axis.title}没有可生成的候选。`);
+      }
+      const used = new Set<string>(), avoided = new Set(options.avoidSourceTermIds || []);
+      rows.forEach((row, index) => {
+        if (axis.kind !== 'source') { row.selections[axis.id] = drawChoices(axis.pool.map(term => term.id), axis.policy, random, required[index]); return; }
+        const preferred = axis.pool.filter(term => !used.has(term.id) && !avoided.has(term.id));
+        const unused = axis.pool.filter(term => !used.has(term.id));
+        const id = required[index] || pick(preferred.length ? preferred : unused.length ? unused : axis.pool, random).id;
+        row.selections[axis.id] = [id]; used.add(id);
+      });
+      if (axis.kind === 'source') diversity = { availableSourceCount: axis.pool.length, repeatedSourceCount: s.count - used.size, relaxed: used.size < s.count || Array.from(used).some(id => avoided.has(id)) };
+    }
+    if (axis.kind === 'source' && options.diversity === 'strict' && diversity && diversity.repeatedSourceCount > 0) throw new Error(`本次未生成：当前范围只有${diversity.availableSourceCount}种可用母体，无法生成${s.count}条母体绝不重复的方案。请减少数量或调整候选范围。`);
+  }
+  return { formatVersion: 1, rows, ...(diversity ? { diversity } : {}) };
+}
+/** Apply one allocation only to the execution copy; freezeRow receives the unchanged constraints. */
+function settingsForAllocation(s: FusionSettings, selections: Record<string, string[]>, axes: AllocationAxis[]): FusionSettings {
+  const next = structuredClone(s);
+  next.catalogue ||= { details: {}, traits: {} };
+  for (const [id, values] of Object.entries(selections)) {
+    const axis = axes.find(axis => axis.id === id); if (!axis) throw new Error('本次分配包含未加入或不可用的类别。');
+    const selected = allocationIds(axis, values);
+    if (!selected.length || axis.fixed && (selected.length !== axis.fixed.length || selected.some(id => !axis.fixed!.includes(id)))
+      || selected.some((id, index) => selected.slice(index + 1).some(other => choicesConflict(axis.policy, id, other)))) throw new Error(`${axis.title}的本次分配与固定或互斥规则冲突。`);
+    const terms = selected.map(id => axis.terms.find(term => term.id === id)!);
+    const state = next.catalogue?.dynamic?.selections[id];
+    if (state) { state.locked = true; state.values = selected; continue; }
+    if (axis.kind === 'trait') { const state = next.catalogue!.traits[id]; state.locked = true; state.values = terms.map(term => term.legacyValue || term.nameZh); continue; }
+    if (axis.kind === 'card') { const card = next.cards.find(card => card.id === id)!; card.locked = true; card.value = terms[0].nameZh; if (card.multi) card.values = terms.map(term => term.nameZh); continue; }
+    const dimension = axis.kind as Dimension;
+    next.boss[dimension] = terms[0].data!.group!; next.bossLocks[dimension] = true;
+    if (concreteOptions(dimension, next.boss[dimension]).some(term => term.zh === terms[0].nameZh)) next.catalogue!.details[dimension] = { value: terms[0].nameZh, locked: true };
+  }
+  return next;
+}
+export function generateBatch(s: FusionSettings, seed = Date.now(), allocation?: FusionAllocation) {
+  const error = validateGeneration(s); if (error) throw new Error(error);
+  if (allocation && (allocation.formatVersion !== 1 || allocation.rows.length !== s.count)) throw new Error('本次分配数量与生成计划不一致，原结果仍保留。');
+  const axes = allocation ? allocationAxes(s) : [];
   const result: FusionRow[] = [];
   chooseCategories(s, seeded(seed)).forEach((category, i) => {
-    const base = chooseConcrete({ ...makeRow(category, seed + i * 257), role: s.role, translations: translationsFor(s, category), cards: cardChoices(s, i, seeded(seed + i)) }, s);
-    result.push(freezeRow(uniqueName(decorateRow(base, s, seeded(seed + i * 397), i), result), s, seed + i * 257));
+    const runtime = allocation ? settingsForAllocation(s, allocation.rows[i].selections, axes) : s;
+    for (const [id] of Object.entries(allocation?.rows[i].selections || {})) { const axis = axes.find(axis => axis.id === id)!; if (CONFIG.some(d => d.id === axis.kind)) category[axis.kind as Dimension] = runtime.catalogue?.dynamic?.selections[id] ? axis.terms.find(term => term.id === runtime.catalogue!.dynamic!.selections[id].values[0])!.data!.group! : runtime.boss[axis.kind as Dimension]; }
+    const base = chooseConcrete({ ...makeRow(category, seed + i * 257), role: s.role, translations: translationsFor(s, category), cards: cardChoices(runtime, i, seeded(seed + i)) }, runtime);
+    result.push(freezeRow(uniqueName(decorateRow(base, runtime, seeded(seed + i * 397), i), result), s, seed + i * 257));
   });
+  const missing = missingRequired(s, result); if (missing.length) throw new Error(`本批必出要求未满足，原结果仍保留：${missing.join('、')}。`);
   return result;
 }
 export function bossRow(s: FusionSettings, others: FusionRow[], seed = Date.now()) {
@@ -285,7 +414,7 @@ export function changeRow(s: FusionSettings, rows: FusionRow[], id: string, chan
   }
   const row = uniqueName(chooseConcrete(makeRow(category, seed, change ? old : undefined, change?.dimension), s), others);
   const cards = change ? old.cards : cardChoices(s, 0, rnd);
-  return rows.map(r => r.id === id ? freezeRow(uniqueName(decorateRow({ ...row, id, advanced: old.advanced, isBoss: old.isBoss, role: old.role, cards, translations: translationsFor(s, category, old.translations) }, s, seeded(seed), 0, false, change ? old.design : undefined), others), change ? originalRowSettings(old) || s : s, seed) : r);
+  return rows.map(r => r.id === id ? freezeRow(uniqueName(decorateRow({ ...row, id, displayNo: old.displayNo, originBatchId: old.originBatchId, advanced: old.advanced, isBoss: old.isBoss, role: old.role, cards, translations: translationsFor(s, category, old.translations) }, s, seeded(seed), 0, false, change ? old.design : undefined), others), change ? originalRowSettings(old) || s : s, seed) : r);
 }
 function originalRowSettings(row: FusionRow): FusionSettings | undefined {
   if (!row.catalogueSnapshot) return undefined;
@@ -302,7 +431,7 @@ export function settingsForRow(s: FusionSettings, row: FusionRow): FusionSetting
   if (catalogue.dynamic && row.catalogueSnapshot) {
     for (const [id, state] of Object.entries(catalogue.dynamic.selections)) {
       const values = row.catalogueSnapshot.selections[id] || [];
-      catalogue.dynamic.selections[id] = { enabled: state.enabled && values.length > 0, locked: true, values: [...values], excluded: [], must: [] };
+      catalogue.dynamic.selections[id] = { ...state, enabled: state.enabled && values.length > 0, locked: true, values: [...values], must: [] };
     }
   }
   for (const id of ['source', 'concept', 'equipment', 'signature', 'entity', 'physique'] as Dimension[]) {
@@ -321,12 +450,24 @@ export function reviseRow(s: FusionSettings, rows: FusionRow[], id: string, seed
   const error = validateGeneration(s); if (error) throw new Error(error);
   const old = rows.find(row => row.id === id); if (!old) throw new Error('这条提示词已不存在。');
   const next = bossRow(s, rows.filter(row => row.id !== id), seed);
-  return rows.map(row => row.id === id ? refreshRowSnapshot({ ...next, id, advanced: old.advanced, isBoss: old.isBoss }) : row);
+  return rows.map(row => row.id === id ? refreshRowSnapshot({ ...next, id, displayNo: old.displayNo, originBatchId: old.originBatchId, advanced: old.advanced, isBoss: old.isBoss }) : row);
 }
 function freezeRow(row: FusionRow, settings: FusionSettings, seed: number): FusionRow {
-  const builtin = builtinCatalogue(), selections: Record<string, string[]> = {};
+  const builtin = builtinCatalogue(), selections: Record<string, string[]> = {}, inlineCategories: FusionCategory[] = [], inlineTerms: FusionTerm[] = [];
   const select = (categoryId: string, labels: string[]) => {
-    const ids = builtin.terms.filter(term => term.categoryId === categoryId && labels.includes(term.legacyValue || term.nameZh)).map(term => term.id);
+    const card = settings.cards.find(card => card.id === categoryId), dimension = CONFIG.find(dimension => builtinCategoryId(dimension.id) === categoryId);
+    const ids = labels.flatMap(label => {
+      const term = builtin.terms.find(term => term.categoryId === categoryId && (term.legacyValue || term.nameZh) === label);
+      if (term) return [term.id];
+      const inline = card?.tags.find(tag => tag.label === label) || dimension && settings.rules[dimension.id].find(tag => tag.label === label);
+      if (!inline) return [];
+      const common = { version: 'inline-1', enabled: true, scope: 'builtin' as const, ownerId: null, aliases: [], tags: [], sortOrder: 0 };
+      if (card && !inlineCategories.some(category => category.id === categoryId) && !builtin.categories.some(category => category.id === categoryId)) inlineCategories.push({ ...common, id: categoryId, legacyId: card.id, nameZh: card.title, nameEn: card.titleEn,
+        descriptionZh: card.title, descriptionEn: card.titleEn, group: 'extra', multi: Boolean(card.multi), randomMax: card.multi ? 3 : 1, generationKind: 'body-card' });
+      const id = builtinTermId(categoryId, label), en = inline.en || dimension?.english.toLowerCase() || label;
+      inlineTerms.push({ ...common, id, categoryId, nameZh: label, nameEn: en, descriptionZh: label, descriptionEn: en, legacyValue: label, ...(dimension ? { data: { group: row.category[dimension.id] } } : {}) });
+      return [id];
+    });
     if (ids.length) selections[categoryId] = ids;
   };
   for (const dimension of CONFIG) select(builtinCategoryId(dimension.id), [dimension.id === 'source' ? row.source.name : dimension.id === 'concept' ? row.concept.name : row.detail[dimension.id] || row.category[dimension.id]]);
@@ -336,6 +477,8 @@ function freezeRow(row: FusionRow, settings: FusionSettings, seed: number): Fusi
   const ids = new Set(Object.values(selections).flat()), categoryIds = new Set(Object.keys(selections));
   const categories = new Map(builtin.categories.filter(category => categoryIds.has(category.id)).map(category => [category.id, category]));
   const terms = new Map(builtin.terms.filter(term => ids.has(term.id)).map(term => [term.id, term]));
+  for (const category of inlineCategories) categories.set(category.id, category);
+  for (const term of inlineTerms) terms.set(term.id, term);
   for (const category of row.design?.dynamic?.categories || []) categories.set(category.id, category);
   for (const term of row.design?.dynamic?.terms || []) terms.set(term.id, term);
   const next = { ...row, catalogueSnapshot: { formatVersion: 1 as const, catalogueVersion: row.design?.dynamic?.version || builtin.version, seed, engineVersion: FUSION_ENGINE_VERSION,

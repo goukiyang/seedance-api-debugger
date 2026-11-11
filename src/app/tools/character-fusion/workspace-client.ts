@@ -6,8 +6,10 @@ import type { FusionWorkspace, FusionWorkspaceState, FusionCommand, FusionOperat
 export type WorkspaceOperation = FusionOperation;
 export type RowsPage = { nextCursor: string | null; total: number };
 export type WorkspaceReceipt = { workspace: FusionWorkspace; operation: FusionOperation; rowsPage?: RowsPage; rowChanges?: { upsert: FusionWorkspaceRow[]; removedIds: string[]; order?: string[] } };
-export type UnappliedProposal = { reply?: string; commands?: unknown[]; drafts?: unknown[] };
-export type OperationLookup = { proposal?: UnappliedProposal; error?: string; status: 'planning' | 'committed' | 'rejected' | 'cancelled' | 'unknown'; workspace?: FusionWorkspace; operation?: FusionOperation; rowsPage?: RowsPage; rowChanges?: WorkspaceReceipt['rowChanges'] };
+export type CreationTarget = { rowId: string; version: number; label: string };
+export type CreationContinuation = { formatVersion: 1; planId: string; sourceOpId: string; catalogueOpId: string; workspaceOpId: string; mode: 'save' | 'generate'; baseVersion: number; workspaceId: string; entries?: unknown[]; phase?: string };
+export type UnappliedProposal = { reply?: string; commands?: unknown[]; drafts?: unknown[]; continuation?: CreationContinuation };
+export type OperationLookup = { proposal?: UnappliedProposal; error?: string; reply?: string; phase?: string; status: 'planning' | 'committed' | 'rejected' | 'cancelled' | 'unknown'; workspace?: FusionWorkspace; operation?: FusionOperation; rowsPage?: RowsPage; rowChanges?: WorkspaceReceipt['rowChanges']; drafts?: unknown[]; continuation?: CreationContinuation };
 export const WORKSPACE_API = '/api/character-fusion/workspaces';
 
 export class FusionRequestError extends Error {
@@ -42,6 +44,7 @@ export function stateCommands(before: FusionWorkspaceState, after: FusionWorkspa
   const commands: FusionCommand[] = [], changes = settingsChanges(before.settings, after.settings);
   if (changes.length) commands.push({ type: 'patchSettings', changes });
   if (before.idea !== after.idea || before.summary !== after.summary) commands.push({ type: 'context', ...(before.idea !== after.idea ? { idea: after.idea } : {}), ...(before.summary !== after.summary ? { summary: after.summary } : {}), expected: { idea: before.idea, summary: before.summary } });
+  if (JSON.stringify(before.intent?.requirements || []) !== JSON.stringify(after.intent?.requirements || [])) commands.push({ type: 'intent', requirements: after.intent?.requirements || [], expected: before.intent || { requirements: [] } });
   if (JSON.stringify(before.selectedIds) !== JSON.stringify(after.selectedIds) || JSON.stringify(before.retainedIds) !== JSON.stringify(after.retainedIds)) commands.push({ type: 'selection', ...(JSON.stringify(before.selectedIds) !== JSON.stringify(after.selectedIds) ? { selectedIds: after.selectedIds, expected: { selectedIds: before.selectedIds } } : {}), ...(JSON.stringify(before.retainedIds) !== JSON.stringify(after.retainedIds) ? { retainedIds: after.retainedIds, expected: { ...(JSON.stringify(before.selectedIds) !== JSON.stringify(after.selectedIds) ? { selectedIds: before.selectedIds } : {}), retainedIds: before.retainedIds } } : {}) });
   return commands;
 }
@@ -59,7 +62,8 @@ export function mergeWorkspaceState(base: FusionWorkspaceState, local: FusionWor
     }
     return b;
   };
-  return { ...merge(base, local, remote) as FusionWorkspaceState, messages: remote.messages };
+  const compatibleRemote = { ...remote, intent: remote.intent ?? base.intent, formatVersion: remote.formatVersion ?? base.formatVersion, summaryMeta: remote.summaryMeta ?? base.summaryMeta, identity: remote.identity ?? base.identity };
+  return { ...merge(base, local, compatibleRemote) as FusionWorkspaceState, messages: remote.messages, formatVersion: compatibleRemote.formatVersion, summaryMeta: compatibleRemote.summaryMeta, identity: compatibleRemote.identity };
 }
 
 export function mergeWorkspaceRows(current: FusionRow[], receipt: Pick<WorkspaceReceipt, 'workspace' | 'rowChanges'>, replace = false, appendPage = false): FusionWorkspaceRow[] {
@@ -74,12 +78,12 @@ export function mergeWorkspaceRows(current: FusionRow[], receipt: Pick<Workspace
 export type WorkspaceConflict = { path: string[]; draft: unknown; remote: unknown };
 export function workspaceConflicts(base: FusionWorkspaceState, local: FusionWorkspaceState, remote: FusionWorkspaceState): WorkspaceConflict[] {
   const walk = (a: unknown, b: unknown, c: unknown, path: string[]): WorkspaceConflict[] => {
-    if (path.join('.') === 'settings.catalogue.dynamic.snapshot' || path[0] === 'messages' || JSON.stringify(a) === JSON.stringify(b) || JSON.stringify(a) === JSON.stringify(c) || JSON.stringify(b) === JSON.stringify(c)) return [];
+    if (path.join('.') === 'settings.catalogue.dynamic.snapshot' || ['messages', 'formatVersion', 'summaryMeta', 'identity'].includes(path[0]) || JSON.stringify(a) === JSON.stringify(b) || JSON.stringify(a) === JSON.stringify(c) || JSON.stringify(b) === JSON.stringify(c)) return [];
     if (b && c && typeof b === 'object' && typeof c === 'object' && !Array.isArray(b) && !Array.isArray(c) && (a === undefined || a === null || typeof a === 'object' && !Array.isArray(a))) {
       const original = (a || {}) as Record<string, unknown>, draft = b as Record<string, unknown>, server = c as Record<string, unknown>;
       return Array.from(new Set([...Object.keys(draft), ...Object.keys(server)])).flatMap(key => walk(original[key], draft[key], server[key], [...path, key]));
     }
     return [{ path, draft: b, remote: c }];
   };
-  return walk(base, local, remote, []);
+  return walk(base, local, { ...remote, intent: remote.intent ?? base.intent }, []);
 }

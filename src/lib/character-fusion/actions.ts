@@ -1,30 +1,34 @@
-import { CONFIG, defaults, parseSettings as parseRawSettings, generateBatch, changeRow, reviseRow, settingsForRow, bossRow, refreshRowSnapshot, type Dimension, type FusionSettings, type FusionRow } from './engine';
+import { CONFIG, COUNTS, defaults, newCreationSettings, parseSettings as parseRawSettings, generateBatch, allocateFusionBatch, changeRow, reviseRow, settingsForRow, bossRow, refreshRowSnapshot, type Dimension, type FusionSettings, type FusionRow } from './engine';
 import type { FusionCatalogue } from './catalogue-model';
 import { hydrateCatalogueSettings, builtinCatalogue } from './catalogue';
+import type { FusionFieldChange, FusionGenerationPlan, FusionAllocation, FusionIntent, FusionSummaryMeta, FusionIdentity, FusionBatchReceipt, FusionEffects } from './domain';
+export type { FusionFieldChange, FusionGenerationPlan, FusionAllocation, FusionIntent, FusionSummaryMeta, FusionIdentity, FusionBatchReceipt, FusionEffects } from './domain';
 
 export type FusionMessage = { role: 'user' | 'assistant'; content: string };
-export type FusionWorkspaceState = { settings: FusionSettings; idea: string; summary: string; messages: FusionMessage[]; selectedIds: string[]; retainedIds: string[] };
+export type FusionWorkspaceState = { settings: FusionSettings; idea: string; summary: string; messages: FusionMessage[]; selectedIds: string[]; retainedIds: string[];
+  formatVersion?: 2; intent?: FusionIntent; summaryMeta?: FusionSummaryMeta; identity?: FusionIdentity };
 export type FusionWorkspaceRow = FusionRow & { version: number };
-export type FusionWorkspace = { id: string; name: string; version: number; state: FusionWorkspaceState; archived: boolean; updatedAt: string; rows: FusionWorkspaceRow[] };
-export type FusionFieldChange = { path: string[]; value: unknown; expected?: unknown };
+export type FusionWorkspace = { id: string; name: string; version: number; state: FusionWorkspaceState; archived: boolean; updatedAt: string; rows: FusionWorkspaceRow[]; batches?: FusionBatchReceipt[] };
 export type FusionCommand =
   | { type: 'patchSettings'; patch?: Partial<FusionSettings>; expected?: Partial<FusionSettings>; changes?: FusionFieldChange[] }
-  | { type: 'generate'; mode: 'append' | 'replace'; seed: number; settingsHash?: string; expectedRows?: Record<string, number> }
+  | { type: 'generate'; mode: 'append' | 'replace'; seed: number; settingsHash?: string; expectedRows?: Record<string, number>; plan?: FusionGenerationPlan; allocation?: FusionAllocation }
   | { type: 'addCurrent'; seed: number }
   | { type: 'patchRow'; rowId: string; expectedVersion?: number; patch: { advanced?: boolean; translations?: FusionRow['translations']; requirements?: { zh: string; en: string } } }
   | { type: 'changeRow'; rowId: string; dimension?: Dimension; value?: string; seed: number; expectedVersion?: number }
   | { type: 'reviseRow'; rowId: string; axis?: string; settings?: FusionSettings; seed: number; expectedVersion?: number }
   | { type: 'removeRows'; rowIds: string[]; expectedVersions?: Record<string, number> }
   | { type: 'selection'; selectedIds?: string[]; retainedIds?: string[]; expected?: { selectedIds?: string[]; retainedIds?: string[] } }
-  | { type: 'context'; idea?: string; summary?: string; messages?: FusionMessage[]; expected?: Partial<Pick<FusionWorkspaceState, 'idea' | 'summary' | 'messages'>> }
+  | { type: 'intent'; requirements: FusionIntent['requirements']; expected?: FusionIntent }
+  | { type: 'context'; idea?: string; summary?: string; summaryMeta?: FusionSummaryMeta; messages?: FusionMessage[]; expected?: Partial<Pick<FusionWorkspaceState, 'idea' | 'summary' | 'summaryMeta' | 'messages'>> }
   | { type: 'importDraft'; state: FusionWorkspaceState; rows: FusionRow[] }
   | { type: 'saveRecipe'; id: string; name: string; settingsHash?: string }
   | { type: 'undo'; operationId: string }
   | { type: 'rename'; name: string; expected?: string }
   | { type: 'archive'; archived: boolean; expected?: boolean };
 export type FusionOperationRequest = { opId: string; baseVersion: number; commands: FusionCommand[] };
-export type FusionOperation = { id: string; opId: string; workspaceId: string | null; status: 'planning' | 'committed' | 'rejected' | 'cancelled'; beforeVersion: number; afterVersion: number; resultIds: string[]; reversible: boolean; createdAt: string };
-export type FusionDocument = Pick<FusionWorkspace, 'name' | 'archived' | 'version' | 'state' | 'rows'>;
+export type FusionOperation = { id: string; opId: string; workspaceId: string | null; status: 'planning' | 'committed' | 'rejected' | 'cancelled'; beforeVersion: number; afterVersion: number; resultIds: string[]; reversible: boolean; createdAt: string;
+  effects?: FusionEffects; batch?: FusionBatchReceipt; reply?: string; undoneBy?: string; turn?: { user: string; assistant: string } };
+export type FusionDocument = Pick<FusionWorkspace, 'name' | 'archived' | 'version' | 'state' | 'rows'> & { generationFacts?: Array<{ allocation: FusionAllocation; plan?: FusionGenerationPlan; rowIds: string[] }> };
 export type FusionUndo = { fields: Array<{ path: string[]; before: unknown; after: unknown }>; rows: Array<{ id: string; before: FusionWorkspaceRow | null; after: FusionWorkspaceRow | null; beforeIndex: number; afterIndex: number }> };
 export class FusionError extends Error {
   constructor(message: string, readonly status = 400, readonly code = 'FUSION_INVALID', readonly details?: unknown) { super(message); }
@@ -61,17 +65,62 @@ function messages(value: unknown): FusionMessage[] {
   if (!Array.isArray(value) || value.length > 20 || value.some(message => !isRecord(message) || !['user', 'assistant'].includes(String(message.role)) || typeof message.content !== 'string' || message.content.length > 6000)) throw new FusionError('最近对话最多20条，每条最多6000字。');
   return value as FusionMessage[];
 }
+function parseIntent(value: unknown): FusionIntent {
+  if (!isRecord(value) || !Array.isArray(value.requirements) || value.requirements.length > 40) throw new FusionError('创作要求无效。');
+  return { requirements: value.requirements.map(item => {
+    if (!isRecord(item)) throw new FusionError('创作要求无效。');
+    if (item.en !== undefined && (typeof item.en !== 'string' || item.en.length > 4000 || /[\u3400-\u9fff]/.test(item.en))) throw new FusionError('创作要求英文无效。');
+    return { text: text(item.text, 2000, '创作要求', false).trim(), ...(item.en !== undefined ? { en: item.en.trim() } : {}), ...(item.sourceOpId !== undefined ? { sourceOpId: parseOperationId(item.sourceOpId) } : {}) };
+  }) };
+}
+function parseSummaryMeta(value: unknown): FusionSummaryMeta {
+  if (!isRecord(value) || value.formatVersion !== 1 || !Number.isSafeInteger(value.stateVersion) || (value.stateVersion as number) < 1 || value.legacy !== undefined && typeof value.legacy !== 'boolean') throw new FusionError('创作备忘来源无效。');
+  return { formatVersion: 1, stateVersion: value.stateVersion as number, ...(value.throughOpId !== undefined ? { throughOpId: parseOperationId(value.throughOpId) } : {}), ...(value.legacy !== undefined ? { legacy: value.legacy as boolean } : {}) };
+}
 export function parseWorkspaceState(value: unknown): FusionWorkspaceState {
   if (!isRecord(value)) throw new FusionError('创作现场无效。');
-  return { settings: parseFusionSettings(value.settings), idea: text(value.idea, 12000, '原始想法'), summary: text(value.summary, 12000, '创作摘要'), messages: messages(value.messages), selectedIds: ids(value.selectedIds), retainedIds: ids(value.retainedIds) };
+  if (value.formatVersion !== undefined && value.formatVersion !== 2) throw new FusionError('此创作现场格式暂不支持，请保留草稿并刷新。');
+  if (value.identity !== undefined && (!isRecord(value.identity) || !Number.isSafeInteger(value.identity.nextDisplayNo) || (value.identity.nextDisplayNo as number) < 1 || !Number.isSafeInteger(value.identity.nextBatchNo) || (value.identity.nextBatchNo as number) < 1)) throw new FusionError('创作编号状态无效。');
+  return { settings: parseFusionSettings(value.settings), idea: text(value.idea, 12000, '原始想法'), summary: text(value.summary, 12000, '创作摘要'), messages: messages(value.messages), selectedIds: ids(value.selectedIds), retainedIds: ids(value.retainedIds),
+    ...(value.formatVersion === 2 ? { formatVersion: 2 } : {}), ...(value.intent !== undefined ? { intent: parseIntent(value.intent) } : {}), ...(value.summaryMeta !== undefined ? { summaryMeta: parseSummaryMeta(value.summaryMeta) } : {}), ...(value.identity !== undefined ? { identity: copy(value.identity) as FusionIdentity } : {}) };
 }
 export function emptyWorkspaceState(): FusionWorkspaceState { return { settings: defaults(), idea: '', summary: '', messages: [], selectedIds: [], retainedIds: [] }; }
+/** New document entry points share definition preservation; neither imports old rows or chat. */
+export function newCreationState(state: FusionWorkspaceState, mode: 'fresh' | 'inherit' = 'fresh'): FusionWorkspaceState {
+  const original = parseWorkspaceState(state);
+  return { ...emptyWorkspaceState(), settings: mode === 'inherit' ? original.settings : newCreationSettings(original.settings),
+    idea: mode === 'inherit' ? original.idea : '', formatVersion: 2, intent: mode === 'inherit' ? copy(original.intent || { requirements: [] }) : { requirements: [] },
+    identity: { nextDisplayNo: 1, nextBatchNo: 1 } };
+}
 function rowInput(value: unknown): FusionRow {
   if (!isRecord(value) || typeof value.id !== 'string' || value.id.length > 180 || !value.id || typeof value.name !== 'string' || !isRecord(value.category) || !isRecord(value.source) || !isRecord(value.concept) || !isRecord(value.mechanism) || !isRecord(value.personality) || !isRecord(value.detail) || typeof value.bridge !== 'string' || typeof value.advanced !== 'boolean') throw new FusionError('承接草稿的结果无效。');
   return value as FusionRow;
 }
 function validPath(value: unknown): asserts value is string[] {
   if (!Array.isArray(value) || !value.length || value.length > 8 || value.some(key => typeof key !== 'string' || !key || ['__proto__', 'prototype', 'constructor'].includes(key))) throw new FusionError('设置字段路径无效。');
+}
+export function parseFusionGenerationPlan(value: unknown): FusionGenerationPlan {
+  if (!isRecord(value) || value.formatVersion !== 1 || !['document', 'batch'].includes(String(value.scope))
+    || value.count !== undefined && !COUNTS.includes(value.count as number)
+    || value.diversity !== undefined && !['prefer', 'strict'].includes(String(value.diversity))) throw new FusionError('本批创作计划无效。');
+  if (value.overlay !== undefined) {
+    if (!Array.isArray(value.overlay) || value.overlay.length > 200) throw new FusionError('本批要求无效。');
+    for (const change of value.overlay) { if (!isRecord(change) || !own(change, 'value')) throw new FusionError('本批要求无效。'); validPath(change.path); }
+  }
+  if (value.onceMust !== undefined) {
+    if (!isRecord(value.onceMust) || Object.keys(value.onceMust).length > 200) throw new FusionError('本批必出项无效。');
+    for (const values of Object.values(value.onceMust)) ids(values, '本批必出项');
+  }
+  if (value.targetRowIds !== undefined) ids(value.targetRowIds, '本批作用对象');
+  return copy(value) as FusionGenerationPlan;
+}
+function parseAllocation(value: unknown): FusionAllocation {
+  if (!isRecord(value) || value.formatVersion !== 1 || !Array.isArray(value.rows) || value.rows.length > 32) throw new FusionError('本次词条分配无效。');
+  for (const row of value.rows) {
+    if (!isRecord(row) || !isRecord(row.selections) || Object.keys(row.selections).length > 200) throw new FusionError('本次词条分配无效。');
+    for (const values of Object.values(row.selections)) ids(values, '本次词条分配');
+  }
+  return copy(value) as FusionAllocation;
 }
 export function parseFusionCommands(value: unknown): FusionCommand[] {
   if (!Array.isArray(value) || !value.length || value.length > 30) throw new FusionError('一次操作须有1–30条命令。');
@@ -84,7 +133,10 @@ export function parseFusionCommands(value: unknown): FusionCommand[] {
         if (raw.patch !== undefined && !isRecord(raw.patch) || raw.expected !== undefined && !isRecord(raw.expected) || raw.changes !== undefined && (!Array.isArray(raw.changes) || raw.changes.length > 200) || !raw.patch && !raw.changes) throw new FusionError('局部设置无效。');
         for (const change of (raw.changes || []) as unknown[]) { if (!isRecord(change) || !own(change, 'value')) throw new FusionError('字段修改无效。'); validPath(change.path); }
         break;
-      case 'generate': if (!['append', 'replace'].includes(String(raw.mode)) || raw.settingsHash !== undefined && typeof raw.settingsHash !== 'string') throw new FusionError('抽卡模式无效。'); if (raw.expectedRows !== undefined && (!isRecord(raw.expectedRows) || Object.values(raw.expectedRows).some(version => !Number.isSafeInteger(version) || (version as number) < 1))) throw new FusionError('结果基础版本无效。'); break;
+      case 'generate':
+        if (!['append', 'replace'].includes(String(raw.mode)) || raw.settingsHash !== undefined && typeof raw.settingsHash !== 'string') throw new FusionError('抽卡模式无效。');
+        if (raw.expectedRows !== undefined && (!isRecord(raw.expectedRows) || Object.values(raw.expectedRows).some(version => !Number.isSafeInteger(version) || (version as number) < 1))) throw new FusionError('结果基础版本无效。');
+        if (raw.plan !== undefined) parseFusionGenerationPlan(raw.plan); if (raw.allocation !== undefined) parseAllocation(raw.allocation); break;
       case 'changeRow': text(raw.rowId, 180, '结果编号', false); if (raw.dimension !== undefined && !CONFIG.some(c => c.id === raw.dimension) || raw.dimension !== undefined && typeof raw.value !== 'string') throw new FusionError('替换维度和值无效。'); break;
       case 'addCurrent': break;
       case 'patchRow':
@@ -99,7 +151,8 @@ export function parseFusionCommands(value: unknown): FusionCommand[] {
         if (raw.selectedIds === undefined && raw.retainedIds === undefined) throw new FusionError('缺少选择内容。');
         if (raw.selectedIds !== undefined) ids(raw.selectedIds); if (raw.retainedIds !== undefined) ids(raw.retainedIds); if (raw.expected !== undefined && !isRecord(raw.expected)) throw new FusionError('选择旧值无效。'); break;
       case 'context':
-        if (raw.idea !== undefined) text(raw.idea, 12000, '原始想法'); if (raw.summary !== undefined) text(raw.summary, 12000, '创作摘要'); if (raw.messages !== undefined) messages(raw.messages); if (raw.expected !== undefined && !isRecord(raw.expected)) throw new FusionError('摘要旧值无效。'); break;
+        if (raw.idea !== undefined) text(raw.idea, 12000, '原始想法'); if (raw.summary !== undefined) text(raw.summary, 12000, '创作摘要'); if (raw.summaryMeta !== undefined) parseSummaryMeta(raw.summaryMeta); if (raw.messages !== undefined) messages(raw.messages); if (raw.expected !== undefined && !isRecord(raw.expected)) throw new FusionError('摘要旧值无效。'); break;
+      case 'intent': parseIntent({ requirements: raw.requirements }); if (raw.expected !== undefined) parseIntent(raw.expected); break;
       case 'importDraft':
         parseWorkspaceState(raw.state); if (!Array.isArray(raw.rows) || raw.rows.length > 500) throw new FusionError('一次最多承接500条草稿结果。'); raw.rows.forEach(rowInput); if (new Set(raw.rows.map((row: FusionRow) => row.id)).size !== raw.rows.length) throw new FusionError('草稿结果编号重复。'); break;
       case 'saveRecipe': text(raw.name, 60, '配方名称', false); if (typeof raw.id !== 'string' || !/^[a-f0-9-]{36}$/i.test(raw.id) || raw.settingsHash !== undefined && typeof raw.settingsHash !== 'string') throw new FusionError('配方保存编号无效。'); break;
@@ -109,7 +162,7 @@ export function parseFusionCommands(value: unknown): FusionCommand[] {
       default: throw new FusionError('不支持的操作类型。');
     }
   }
-  if (value.some(command => command.type === 'undo') && value.length !== 1) throw new FusionError('撤销须单独提交。');
+  if (value.some(command => command.type === 'undo') && (value.filter(command => command.type === 'undo').length !== 1 || value.some(command => !['undo', 'context'].includes(command.type) || command.type === 'context' && command.idea !== undefined))) throw new FusionError('撤销只能与本轮对话记录一起提交。');
   return value as FusionCommand[];
 }
 export function parseFusionOperationRequest(value: unknown): FusionOperationRequest {
@@ -130,13 +183,35 @@ function conflict(path: string[], expected: unknown, current: unknown): never { 
 function compare(stale: boolean, path: string[], current: unknown, hasExpected: boolean, expected: unknown) {
   if ((stale && !hasExpected) || (hasExpected && !sameFusionValue(current, expected))) conflict(path, expected, current);
 }
+function settingsWithIntent(settings: FusionSettings, intent?: FusionIntent): FusionSettings {
+  const extra = intent?.requirements.filter(item => !(settings.requirementsEnabled && settings.requirements.includes(item.text))) || [];
+  if (!extra.length) return settings;
+  const originalZh = settings.requirementsEnabled ? settings.requirements.trim() : '';
+  const originalEn = settings.requirementsEnabled ? settings.requirementsEn.trim() : '';
+  const requirements = [originalZh, ...extra.map(item => item.text)].filter(Boolean).join('\n');
+  const requirementsEn = extra.some(item => !item.en && /[\u3400-\u9fff]/.test(item.text)) || originalZh && !originalEn
+    ? '' : [originalEn, ...extra.map(item => item.en || item.text)].filter(Boolean).join('\n');
+  if (requirements.length > 6000 || requirementsEn.length > 10000) throw new FusionError('明确创作要求与本批设置合并后过长，请精简后生成；原内容仍保留。');
+  return { ...settings, requirements, requirementsEn, requirementsEnabled: true };
+}
 export function fusionDocumentDelta(before: FusionDocument, after: FusionDocument): FusionUndo {
   const fields: FusionUndo['fields'] = [];
   const walk = (a: unknown, b: unknown, path: string[]) => { if (sameFusionValue(a, b)) return; if (isRecord(a) && isRecord(b)) { for (const key of Array.from(new Set([...Object.keys(a), ...Object.keys(b)]))) walk(a[key], b[key], [...path, key]); } else fields.push({ path, before: a ?? null, after: b ?? null }); };
-  walk(before.state, after.state, ['state']); walk(before.name, after.name, ['name']); walk(before.archived, after.archived, ['archived']);
+  for (const key of ['settings', 'idea', 'intent', 'selectedIds', 'retainedIds'] as const) walk(before.state[key], after.state[key], ['state', key]);
+  walk(before.name, after.name, ['name']); walk(before.archived, after.archived, ['archived']);
   const rows: FusionUndo['rows'] = [], a = new Map(before.rows.map((row, i) => [row.id, { row, i }])), b = new Map(after.rows.map((row, i) => [row.id, { row, i }]));
-  for (const id of Array.from(new Set([...Array.from(a.keys()), ...Array.from(b.keys())]))) if (!sameFusionValue(a.get(id)?.row, b.get(id)?.row)) rows.push({ id, before: a.get(id)?.row || null, after: b.get(id)?.row || null, beforeIndex: a.get(id)?.i ?? -1, afterIndex: b.get(id)?.i ?? -1 });
+  const businessRow = (row?: FusionWorkspaceRow) => { if (!row) return row; const { displayNo: _displayNo, originBatchId: _originBatchId, ...business } = row; return business; };
+  for (const id of Array.from(new Set([...Array.from(a.keys()), ...Array.from(b.keys())]))) if (!sameFusionValue(businessRow(a.get(id)?.row), businessRow(b.get(id)?.row))) rows.push({ id, before: a.get(id)?.row || null, after: b.get(id)?.row || null, beforeIndex: a.get(id)?.i ?? -1, afterIndex: b.get(id)?.i ?? -1 });
   return { fields, rows };
+}
+/** Bind definitions before parsing new category references; selection constraints remain intact. */
+function bindFreshDynamicSnapshot(settings: FusionSettings, catalogue: FusionCatalogue) {
+  const dynamic = settings.catalogue?.dynamic;
+  if (!dynamic) return;
+  const categoryIds = Object.keys(dynamic.selections || {});
+  settings.catalogue = { ...settings.catalogue!, dynamic: { formatVersion: 1, selections: dynamic.selections || {}, snapshot: {
+    version: catalogue.version, categories: catalogue.categories.filter(category => categoryIds.includes(category.id)), terms: catalogue.terms.filter(term => categoryIds.includes(term.categoryId)),
+  } } };
 }
 function trustedRowSettings(settings: FusionSettings, original: FusionSettings, fresh: FusionCatalogue): FusionSettings {
   const dynamic = settings.catalogue?.dynamic;
@@ -188,8 +263,9 @@ function rowAdjustmentAxes(settings: FusionSettings, baseline: FusionSettings, a
   return ids;
 }
 /** Deterministic common executor; persistence supplies current rows/catalogue and an optional undo delta. */
-export function applyFusionCommands(current: FusionDocument, request: FusionOperationRequest, catalogue: FusionCatalogue, undo?: FusionUndo): FusionDocument {
+export function applyFusionCommands(current: FusionDocument, request: FusionOperationRequest, catalogue: FusionCatalogue, undo?: FusionUndo, context: { recentSourceIds?: string[] } = {}): FusionDocument {
   const next = copy(current), stale = request.baseVersion !== current.version;
+  delete next.generationFacts;
   if (request.baseVersion > current.version) throw new FusionError('基础版本尚不存在，请重新读取。', 409, 'FUSION_CONFLICT');
   const originalSettingsHash = settingsFingerprint(current.state.settings);
   let batchIndex = 0;
@@ -199,9 +275,7 @@ export function applyFusionCommands(current: FusionDocument, request: FusionOper
         const changes: FusionFieldChange[] = [...(command.patch ? leaves(command.patch as Record<string, unknown>).map(change => ({ ...change, ...(getPath(command.expected, change.path) !== undefined ? { expected: getPath(command.expected, change.path) } : {}) })) : []), ...(command.changes || [])];
         for (const change of changes) { if (!own(defaults(), change.path[0])) throw new FusionError('不支持的设置字段。'); compare(stale, ['settings', ...change.path], getPath(next.state.settings, change.path), own(change, 'expected'), change.expected); setPath(next.state.settings, change.path, change.value); }
         if (next.state.settings.catalogue?.dynamic) {
-          const dynamic = next.state.settings.catalogue.dynamic;
-          const categoryIds = Object.keys(dynamic.selections || {});
-          next.state.settings.catalogue = { ...next.state.settings.catalogue, dynamic: { formatVersion: 1, selections: dynamic.selections || {}, snapshot: { version: catalogue.version, categories: catalogue.categories.filter(category => categoryIds.includes(category.id)), terms: catalogue.terms.filter(term => categoryIds.includes(term.categoryId)) } } };
+          bindFreshDynamicSnapshot(next.state.settings, catalogue);
           next.state.settings.catalogue = hydrateCatalogueSettings(next.state.settings.catalogue, catalogue, next.state.settings);
         }
         const parsed = parseFusionSettings(next.state.settings);
@@ -210,14 +284,38 @@ export function applyFusionCommands(current: FusionDocument, request: FusionOper
       }
       case 'generate': {
         if (stale && command.settingsHash !== originalSettingsHash) conflict(['settings'], command.settingsHash, originalSettingsHash);
-        if (stale && command.mode === 'replace' && !sameFusionValue(command.expectedRows, Object.fromEntries(current.rows.map(row => [row.id, row.version])))) conflict(['rows'], command.expectedRows, Object.fromEntries(current.rows.map(row => [row.id, row.version])));
-        const settings = { ...next.state.settings, catalogue: hydrateCatalogueSettings(next.state.settings.catalogue || { details: {}, traits: {} }, catalogue, next.state.settings) };
-        const generated = generateBatch(settings, command.seed).map((row, index) => ({ ...row, id: `fusion-${request.opId}-${batchIndex}-${index}`, version: 1 }));
-        batchIndex++; next.state.settings = settings; next.rows = command.mode === 'append' ? [...next.rows, ...generated] : [...next.rows.filter(row => next.state.retainedIds.includes(row.id)), ...generated]; break;
+        const targetIds = command.plan?.targetRowIds;
+        if (targetIds?.some(id => !next.rows.some(row => row.id === id))) throw new FusionError('本批作用对象已不存在，请保留输入并重新选择。', 409, 'FUSION_CONFLICT');
+        const replacing = next.rows.filter(row => !targetIds || targetIds.includes(row.id));
+        if (stale && command.mode === 'replace' && replacing.some(row => command.expectedRows?.[row.id] !== row.version)) conflict(['rows'], command.expectedRows, Object.fromEntries(replacing.map(row => [row.id, row.version])));
+        const documentSettings = { ...next.state.settings, catalogue: hydrateCatalogueSettings(next.state.settings.catalogue || { details: {}, traits: {} }, catalogue, next.state.settings) };
+        const batchSettings = copy(documentSettings);
+        for (const change of command.plan?.overlay || []) {
+          if (!own(defaults(), change.path[0])) throw new FusionError('不支持的本批设置字段。');
+          compare(stale, ['settings', ...change.path], getPath(batchSettings, change.path), own(change, 'expected'), change.expected);
+          setPath(batchSettings, change.path, change.value);
+        }
+        if (command.plan?.count !== undefined) batchSettings.count = command.plan.count;
+        bindFreshDynamicSnapshot(batchSettings, catalogue);
+        const parsed = settingsWithIntent(parseFusionSettings(batchSettings), next.state.intent);
+        parsed.catalogue = hydrateCatalogueSettings(parsed.catalogue || { details: {}, traits: {} }, catalogue, parsed);
+        const plannedAllocation = allocateFusionBatch(parsed, command.seed, { onceMust: command.plan?.onceMust, diversity: command.plan?.diversity, avoidSourceTermIds: context.recentSourceIds });
+        const allocation = command.allocation ? { ...command.allocation, diversity: plannedAllocation.diversity } : plannedAllocation;
+        const generated = generateBatch(parsed, command.seed, allocation).map((row, index) => ({ ...row, id: `fusion-${request.opId}-${batchIndex}-${index}`, version: 1 }));
+        for (const [categoryId, values] of Object.entries(command.plan?.onceMust || {})) for (const value of values) {
+          if (!generated.some(row => row.catalogueSnapshot?.selections[categoryId]?.some(id => id === value || row.catalogueSnapshot?.terms.some(term => term.id === id && (term.legacyValue || term.nameZh) === value)))) throw new FusionError('本批必出要求未能进入实际方案，整批未执行，原内容仍保留。');
+        }
+        const sourceIds = generated.flatMap(row => (row.catalogueSnapshot?.categories.filter(category => category.generationKind === 'source') || []).flatMap(category => row.catalogueSnapshot!.selections[category.id] || []));
+        const repeated = generated.length - new Set(sourceIds).size;
+        if (command.plan?.diversity === 'strict' && repeated > 0) throw new FusionError('当前分配无法满足母体绝不重复，整批未执行，请调整范围或数量。');
+        if (allocation.diversity) allocation.diversity = { ...allocation.diversity, repeatedSourceCount: Math.max(0, repeated), relaxed: repeated > 0 || sourceIds.some(id => context.recentSourceIds?.includes(id)) };
+        (next.generationFacts ||= []).push({ allocation, ...(command.plan ? { plan: copy(command.plan) } : {}), rowIds: generated.map(row => row.id) });
+        batchIndex++; next.state.settings = documentSettings;
+        next.rows = command.mode === 'append' ? [...next.rows, ...generated] : [...next.rows.filter(row => next.state.retainedIds.includes(row.id) || targetIds && !targetIds.includes(row.id)), ...generated]; break;
       }
       case 'addCurrent': {
         if (stale) conflict(['settings'], request.baseVersion, current.version);
-        const settings = { ...next.state.settings, catalogue: hydrateCatalogueSettings(next.state.settings.catalogue || { details: {}, traits: {} }, catalogue, next.state.settings) };
+        const settings = settingsWithIntent({ ...next.state.settings, catalogue: hydrateCatalogueSettings(next.state.settings.catalogue || { details: {}, traits: {} }, catalogue, next.state.settings) }, next.state.intent);
         const row = bossRow(settings, next.rows, command.seed); next.rows.push({ ...row, id: `fusion-${request.opId}-${batchIndex++}-current`, version: 1 }); break;
       }
       case 'patchRow': {
@@ -264,11 +362,15 @@ export function applyFusionCommands(current: FusionDocument, request: FusionOper
         next.rows = next.rows.filter(row => !command.rowIds.includes(row.id)); break;
       case 'selection':
         for (const key of ['selectedIds', 'retainedIds'] as const) if (command[key] !== undefined) { compare(stale, [key], next.state[key], command.expected?.[key] !== undefined, command.expected?.[key]); next.state[key] = [...command[key]!]; } break;
+      case 'intent':
+        compare(stale, ['intent'], next.state.intent || { requirements: [] }, command.expected !== undefined, command.expected);
+        next.state.intent = parseIntent({ requirements: command.requirements }); next.state.formatVersion = 2; break;
       case 'context':
-        for (const key of ['idea', 'summary', 'messages'] as const) if (command[key] !== undefined) { compare(stale, [key], next.state[key], command.expected?.[key] !== undefined, command.expected?.[key]); Object.assign(next.state, { [key]: copy(command[key]) }); } break;
+        for (const key of ['idea', 'summary', 'summaryMeta', 'messages'] as const) if (command[key] !== undefined) { compare(stale, [key], next.state[key], command.expected?.[key] !== undefined, command.expected?.[key]); Object.assign(next.state, { [key]: copy(command[key]) }); } break;
       case 'importDraft':
         if (stale || next.rows.length || next.state.idea || next.state.summary || next.state.messages.length || !sameFusionValue(next.state.settings, defaults())) throw new FusionError('仅能显式承接到未编辑的空白文档。', 409, 'FUSION_CONFLICT');
-        next.state = parseWorkspaceState(command.state); next.rows = command.rows.map(row => ({ ...copy(row), version: 1 })); break;
+        next.state = { ...next.state, ...parseWorkspaceState(command.state) };
+        next.rows = command.rows.map(row => { const { displayNo: _displayNo, originBatchId: _originBatchId, ...historical } = copy(row); return { ...historical, version: 1 }; }); break;
       case 'rename': compare(stale, ['name'], next.name, command.expected !== undefined, command.expected); next.name = command.name.trim(); break;
       case 'archive': compare(stale, ['archived'], next.archived, command.expected !== undefined, command.expected); next.archived = command.archived; break;
       case 'saveRecipe':
@@ -279,7 +381,15 @@ export function applyFusionCommands(current: FusionDocument, request: FusionOper
         for (const field of undo.fields) { const actual = getPath(next, field.path); if (!sameFusionValue(actual, field.after)) conflict(field.path, field.after, actual); }
         for (const item of undo.rows) { const actual = next.rows.find(row => row.id === item.id) || null; if (!sameFusionValue(actual, item.after)) conflict(['rows', item.id], item.after, actual); }
         for (const field of undo.fields) setPath(next, field.path, field.before);
-        for (const item of undo.rows) { next.rows = next.rows.filter(row => row.id !== item.id); if (item.before) next.rows.splice(Math.min(item.beforeIndex, next.rows.length), 0, { ...item.before, version: Math.max(item.before.version, item.after?.version || 0) + 1 }); } break;
+        for (const item of undo.rows) {
+          const actual = next.rows.find(row => row.id === item.id);
+          next.rows = next.rows.filter(row => row.id !== item.id);
+          if (item.before) next.rows.splice(Math.min(item.beforeIndex, next.rows.length), 0, { ...item.before,
+            ...(actual?.displayNo !== undefined ? { displayNo: actual.displayNo } : {}), ...(actual?.originBatchId !== undefined ? { originBatchId: actual.originBatchId } : {}),
+            version: Math.max(item.before.version, item.after?.version || 0) + 1 });
+        }
+        if (next.state.summaryMeta) next.state.summaryMeta = { ...next.state.summaryMeta, legacy: true };
+        break;
     }
   }
   if (request.commands.some(command => ['generate', 'addCurrent', 'removeRows', 'importDraft', 'undo'].includes(command.type))) { const live = new Set(next.rows.map(row => row.id)); next.state.selectedIds = next.state.selectedIds.filter(id => live.has(id)); next.state.retainedIds = next.state.retainedIds.filter(id => live.has(id)); } next.version = current.version + 1;

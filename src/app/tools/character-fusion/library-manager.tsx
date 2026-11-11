@@ -6,14 +6,14 @@ import type { FusionCard } from '@/lib/character-fusion/cards';
 import { CONFIG } from '@/lib/character-fusion/engine';
 import { TRAITS } from '@/lib/character-fusion/catalogue';
 import { CHARACTER_FUSION_WRITES_ENABLED } from '@/lib/character-fusion/build-mode';
-import { FusionRequestError, fusionRequest, postFusion, type WorkspaceOperation } from './workspace-client';
+import { FusionRequestError, fusionRequest, postFusion, type WorkspaceOperation, type CreationContinuation, type WorkspaceReceipt } from './workspace-client';
 import styles from './studio.module.css';
 
 type Entry = { kind: 'category' | 'term'; data: Partial<FusionCategory> | Partial<FusionTerm>; expectedVersion?: string };
 type Preview = { version: string; entries: Array<{ index: number; status: 'new' | 'update' | 'duplicate' | 'error'; message?: string; entry?: Entry }>; errors: number; duplicates: number; canImport: boolean };
 type MaintenanceOperation = { opId: string; body: Record<string, unknown> };
 type ImportOperation = { opId: string; scope: 'private' | 'shared'; entries: Entry[]; previewVersion: string };
-type Props = { ownerId: string; admin: boolean; active: boolean; catalogue: FusionCatalogue; cards: FusionCard[]; drafts: unknown[]; onCatalogue: (catalogue: FusionCatalogue) => void; onJoin: (categoryId: string, termId?: string) => void; onOpenCardChat: () => void };
+type Props = { ownerId: string; admin: boolean; active: boolean; catalogue: FusionCatalogue; cards: FusionCard[]; drafts: unknown[]; continuation?: CreationContinuation; onContinuation: (continuation: CreationContinuation | undefined) => void; onWorkspace: (receipt: Pick<WorkspaceReceipt, 'workspace' | 'rowChanges' | 'rowsPage'>) => void; onPreparePlan: () => Promise<boolean>; onCatalogue: (catalogue: FusionCatalogue) => void; onJoin: (categoryId: string, termId?: string) => void; onOpenCardChat: () => void };
 const API = '/api/character-fusion/catalogue';
 const blankForm = () => ({ kind: 'term' as 'category' | 'term', id: '', version: '', categoryId: '', nameZh: '', nameEn: '', descriptionZh: '', descriptionEn: '', aliases: '', tags: '', group: 'extra' as FusionCategory['group'], multi: true, semanticGroup: '', shape: '', shapeEn: '', anchor: '', anchorEn: '', root: '', prop: '', propEn: '', mood: '', moodEn: '', suffix: '', bodyTrait: '', bodyZh: '', bodyEn: '', semanticJson: '' });
 function csvRows(source: string): string[][] {
@@ -45,7 +45,7 @@ function importedEntries(source: string): Entry[] {
     return { kind, data, ...(expectedVersion ? { expectedVersion } : {}) } as Entry;
   });
 }
-export default function LibraryManager({ ownerId, admin, active, catalogue, cards, drafts, onCatalogue, onJoin, onOpenCardChat }: Props) {
+export default function LibraryManager({ ownerId, admin, active, catalogue, cards, drafts, continuation, onContinuation, onWorkspace, onPreparePlan, onCatalogue, onJoin, onOpenCardChat }: Props) {
   const [scope, setScope] = useState<'private' | 'shared'>('private'), [query, setQuery] = useState(''), [categoryId, setCategoryId] = useState('');
   const [results, setResults] = useState<FusionTerm[]>([]), [nextCursor, setNextCursor] = useState<string | null>(null), [total, setTotal] = useState(0), [loading, setLoading] = useState(false);
   const [form, setForm] = useState(blankForm), [source, setSource] = useState(''), [entries, setEntries] = useState<Entry[]>([]), [preview, setPreview] = useState<Preview | null>(null);
@@ -53,7 +53,11 @@ export default function LibraryManager({ ownerId, admin, active, catalogue, card
   const [maintenance, setMaintenance] = useState<MaintenanceOperation | null>(null);
   const [pending, setPending] = useState<ImportOperation | null>(null), [reload, setReload] = useState(0);
   const editor = useRef<HTMLDetailsElement>(null);
+  const [assistantEntries, setAssistantEntries] = useState<Entry[]>([]), [assistantPreview, setAssistantPreview] = useState<Preview | null>(null), [assistantSubmitted, setAssistantSubmitted] = useState(false);
+  const [assistantCanContinue, setAssistantCanContinue] = useState(false);
+  const [assistantCatalogueSaved, setAssistantCatalogueSaved] = useState(false), [assistantPairs, setAssistantPairs] = useState<Record<number, [string, string]>>({});
   const alive = useRef(active); alive.current = active;
+  useEffect(() => { alive.current = active; return () => { alive.current = false; }; }, [active]);
   const key = `sd2-fusion-library:${ownerId}`;
   useEffect(() => {
     try { const saved = JSON.parse(sessionStorage.getItem(key) || 'null'); if (saved) { if (Array.isArray(saved.entries)) setEntries(saved.entries); if (typeof saved.source === 'string') setSource(saved.source); if (saved.form && typeof saved.form.nameZh === 'string') setForm({ ...blankForm(), ...saved.form }); if (saved.scope === 'private' || saved.scope === 'shared' && admin) setScope(saved.scope); if (saved.pending?.opId) setPending(saved.pending); if (saved.maintenance?.opId) setMaintenance(saved.maintenance); } } catch { /* Draft controls remain available. */ }
@@ -74,6 +78,79 @@ export default function LibraryManager({ ownerId, admin, active, catalogue, card
   };
   const refresh = async () => { setLoading(true); setError(''); try { const data = await fusionRequest<{ catalogue: FusionCatalogue }>(API); if (alive.current) { onCatalogue(data.catalogue); setReload(value => value + 1); setNotice('当前目录已更新，已有结果保持原快照。'); } } catch (e) { if (alive.current) setError(e instanceof Error ? e.message : '目录更新失败，当前选择保留。'); } finally { if (alive.current) setLoading(false); } };
   const stage = (next: Entry[]) => { if (next.some(entry => !entry || !['category', 'term'].includes(entry.kind) || !entry.data || typeof entry.data !== 'object' || Array.isArray(entry.data))) { setError('草稿每项需有类别或词条类型及对应字段，请用模板修正后再预览。'); return; } const normalized = next.map(entry => ({ ...entry, data: { ...entry.data, id: entry.data.id || crypto.randomUUID() } })); setEntries(current => [...current, ...normalized]); setPreview(null); setError(''); setNotice('已加入待入库草稿，请先预览。'); };
+  useEffect(() => {
+    if (!continuation || !drafts.length) return;
+    const savedKey = `${key}:plan:${continuation.sourceOpId}`;
+    let restored: { entries?: Entry[]; submitted?: boolean; catalogueSaved?: boolean; pairs?: Record<number, [string, string]> } | null = null;
+    try { restored = JSON.parse(sessionStorage.getItem(savedKey) || 'null'); } catch { /* Server plan and original drafts remain available. */ }
+    setAssistantEntries(restored?.entries || drafts as Entry[]); setAssistantPairs(restored?.pairs || {}); setAssistantSubmitted(Boolean(restored?.submitted) || continuation.phase === 'awaiting_generation'); setAssistantCatalogueSaved(Boolean(restored?.catalogueSaved) || continuation.phase === 'awaiting_generation'); setAssistantPreview(null); setAssistantCanContinue(false);
+  }, [continuation?.sourceOpId, drafts, key]);
+  useEffect(() => {
+    if (!continuation || !assistantEntries.length) return;
+    try { sessionStorage.setItem(`${key}:plan:${continuation.sourceOpId}`, JSON.stringify({ entries: assistantEntries, submitted: assistantSubmitted, catalogueSaved: assistantCatalogueSaved, pairs: assistantPairs })); } catch { /* Editable preview remains on screen. */ }
+  }, [continuation, assistantEntries, assistantSubmitted, assistantCatalogueSaved, assistantPairs, key]);
+  const editAssistantEntry = (index: number, update: Record<string, unknown>) => { setAssistantEntries(current => current.map((entry, i) => i === index ? { ...entry, data: { ...entry.data, ...update } } : entry)); setAssistantPreview(null); };
+  const previewAssistant = async () => {
+    if (!continuation || busy || assistantSubmitted) return; setBusy(true); setError('');
+    try { const result = await postFusion<{ preview: Preview }>('/api/character-fusion/assistant', { action: 'previewCatalogue', workspaceId: continuation.workspaceId, opId: continuation.sourceOpId, entries: assistantEntries }); if (alive.current) setAssistantPreview(result.preview); }
+    catch (e) { if (alive.current) setError(e instanceof Error ? e.message : '预览未完成，编辑草稿保留。'); }
+    finally { if (alive.current) setBusy(false); }
+  };
+  const confirmAssistant = async (continuing = false) => {
+    if (!continuation || busy || !CHARACTER_FUSION_WRITES_ENABLED || (continuing ? !assistantCanContinue : !assistantPreview?.canImport || assistantSubmitted)) return;
+    setBusy(true); setError(''); setAssistantSubmitted(true); setAssistantCanContinue(false);
+    try {
+      if (!await onPreparePlan()) { if (alive.current) { setAssistantSubmitted(false); setError('当前调整尚未保存，未继续入库或生成。编辑稿已保留。'); } return; }
+      const result = await postFusion<Partial<WorkspaceReceipt> & { catalogue?: FusionCatalogue; continuation?: CreationContinuation; catalogueStatus?: string; generationStatus?: string; reply?: string }>('/api/character-fusion/assistant', { action: 'confirmCatalogue', workspaceId: continuation.workspaceId, opId: continuation.sourceOpId, ...(!continuing ? { entries: assistantEntries, previewVersion: assistantPreview?.version } : {}) });
+      if (!alive.current) return;
+      if (result.catalogue) { onCatalogue(result.catalogue); setReload(value => value + 1); }
+      if (result.workspace) onWorkspace({ workspace: result.workspace, rowChanges: result.rowChanges, rowsPage: result.rowsPage });
+      setAssistantCatalogueSaved(result.catalogueStatus === 'committed');
+      setNotice(result.reply || (result.catalogueStatus === 'committed' ? result.generationStatus === 'committed' ? '词条已入库，原批次已生成。' : result.generationStatus === 'not_requested' ? '词条已入库。' : '词条已入库，生成尚未完成，原计划保留。' : '操作结果仍待核对，原计划与编辑稿保留。'));
+      if (result.catalogueStatus === 'committed' && (result.generationStatus === 'committed' || result.generationStatus === 'not_requested')) { try { sessionStorage.removeItem(`${key}:plan:${continuation.sourceOpId}`); } catch { /* Durable receipts are authoritative. */ } onContinuation(undefined); }
+      else if (result.continuation) onContinuation(result.continuation);
+    } catch (e) { if (alive.current) setError(e instanceof Error ? e.message : '入库与生成结果待核对，原计划保留。'); }
+    finally { if (alive.current) setBusy(false); }
+  };
+  const checkAssistant = async () => {
+    if (!continuation || busy) return; setBusy(true); setError('');
+    try {
+      const result = await postFusion<Partial<WorkspaceReceipt> & { catalogue?: FusionCatalogue; catalogueStatus?: string; generationStatus?: string; reply?: string; canContinue?: boolean }>('/api/character-fusion/assistant', { action: 'catalogueStatus', workspaceId: continuation.workspaceId, opId: continuation.sourceOpId });
+      if (!alive.current) return;
+      setAssistantCatalogueSaved(result.catalogueStatus === 'committed'); setAssistantCanContinue(Boolean(result.canContinue));
+      if (result.catalogue) { onCatalogue(result.catalogue); setReload(value => value + 1); }
+      if (result.workspace) onWorkspace({ workspace: result.workspace, rowChanges: result.rowChanges, rowsPage: result.rowsPage });
+      if (result.catalogueStatus === 'committed' && (result.generationStatus === 'committed' || result.generationStatus === 'not_requested')) { onContinuation(undefined); setNotice(result.reply || '原计划结果已确认。'); }
+      else setNotice(result.reply || (result.catalogueStatus === 'committed' ? '词条已入库，生成结果尚未确认。原计划保留。' : '原计划尚未确认，编辑稿保留。'));
+
+    } catch (e) { if (alive.current) setError(e instanceof Error ? e.message : '原计划暂时无法核对。'); }
+    finally { if (alive.current) setBusy(false); }
+  };
+  const cancelAssistantPlan = async () => {
+    if (!continuation || busy) return; setBusy(true); setError('');
+    try {
+      const result = await postFusion<{ status: string; workspace?: WorkspaceReceipt['workspace']; rowsPage?: WorkspaceReceipt['rowsPage']; rowChanges?: WorkspaceReceipt['rowChanges']; error?: string }>('/api/character-fusion/assistant', { action: 'cancel', workspaceId: continuation.workspaceId, opId: continuation.sourceOpId });
+      if (!alive.current) return;
+      if (result.workspace) onWorkspace({ workspace: result.workspace, rowChanges: result.rowChanges, rowsPage: result.rowsPage });
+      if (result.status === 'cancelled') { onContinuation(undefined); setNotice(assistantCatalogueSaved ? '后续计划已取消，已入库词条保留。' : '本次计划已取消，未入库或生成。'); }
+      else setNotice(result.error || '取消状态仍需核对，原计划保留。');
+    } catch (e) { if (alive.current) setError(e instanceof Error ? e.message : '取消状态待核对，原计划保留。'); }
+    finally { if (alive.current) setBusy(false); }
+  };
+  const assistantCategory = (entry: Entry) => catalogue.categories.find(category => category.id === (entry.data as Partial<FusionTerm>).categoryId) || assistantEntries.find(item => item.kind === 'category' && item.data.id === (entry.data as Partial<FusionTerm>).categoryId)?.data as Partial<FusionCategory> | undefined;
+  const assistantTerms = (categoryId?: string) => Array.from(new Map([...catalogue.terms, ...assistantEntries.filter(entry => entry.kind === 'term').map(entry => entry.data as FusionTerm)].filter(term => term.categoryId === categoryId).map(term => [term.id, term])).values());
+  const editAssistantSemantic = (index: number, update: Partial<NonNullable<FusionTerm['data']>>) => { const entry = assistantEntries[index]; editAssistantEntry(index, { data: { ...(entry.data as Partial<FusionTerm>).data, ...update } }); };
+  const assistantRules = (entry: Entry, index: number) => {
+    if (entry.kind === 'category') {
+      const category = entry.data as Partial<FusionCategory>, terms = assistantTerms(category.id), pair = assistantPairs[index] || ['', ''];
+      const name = (id: string) => terms.find(term => term.id === id)?.nameZh || '原词条不可用';
+      return <details><summary>互斥规则</summary><fieldset className={styles.assistantRules}><legend>所选词条不能同时出现</legend>{terms.map(term => <label key={term.id}><input type="checkbox" checked={Boolean(category.exclusive?.includes(term.id))} onChange={event => editAssistantEntry(index, { exclusive: event.target.checked ? [...(category.exclusive || []), term.id] : (category.exclusive || []).filter(id => id !== term.id) })} />{term.nameZh}</label>)}{!terms.length && <small>此类别暂无词条，入库后仍可维护规则。</small>}</fieldset><div className={styles.assistantPairs}>{(category.incompatible || []).map(([a, b], pairIndex) => <div key={pairIndex}><span>{name(a)} 与 {name(b)} 不能同时出现</span><button type="button" aria-label={`移除${name(a)}与${name(b)}的互斥规则`} onClick={() => editAssistantEntry(index, { incompatible: category.incompatible!.filter((_, i) => i !== pairIndex) })}>移除</button></div>)}<div>{([0, 1] as const).map(position => <select key={position} aria-label={position === 0 ? '互斥组合的第一个词' : '互斥组合的第二个词'} value={pair[position]} onChange={event => setAssistantPairs(current => ({ ...current, [index]: position === 0 ? [event.target.value, pair[1]] : [pair[0], event.target.value] }))}><option value="">选择词条</option>{terms.map(term => <option key={term.id} value={term.id}>{term.nameZh}</option>)}</select>)}<button type="button" disabled={!pair[0] || !pair[1] || pair[0] === pair[1]} onClick={() => { editAssistantEntry(index, { incompatible: [...(category.incompatible || []), pair] }); setAssistantPairs(current => ({ ...current, [index]: ['', ''] })); }}>加入互斥组合</button></div></div></details>;
+    }
+    const category = assistantCategory(entry), semantic = (entry.data as Partial<FusionTerm>).data || {};
+    if (!category || category.generationKind === 'trait') return null;
+    const group = <label>原类别范围<select value={semantic.group || ''} onChange={event => editAssistantSemantic(index, { group: event.target.value })}><option value="">选择范围</option>{CONFIG.find(dimension => dimension.id === category.generationKind)?.tags.map(group => <option key={group}>{group}</option>)}</select></label>;
+    return <fieldset className={styles.semanticFields}><legend>生成时采用的具体含义</legend>{category.generationKind !== 'body-card' && group}{category.generationKind === 'source' && ([['shape', '形态描述'], ['shapeEn', '形态英文'], ['anchor', '识别锚点'], ['anchorEn', '锚点英文'], ['root', '命名词根']] as const).map(([field, title]) => <label key={field}>{title}<input value={semantic.source?.[field] || ''} onChange={event => editAssistantSemantic(index, { source: { shape: '', shapeEn: '', anchor: '', anchorEn: '', root: '', ...semantic.source, [field]: event.target.value } })} /></label>)}{category.generationKind === 'concept' && ([['prop', '代表道具'], ['propEn', '道具英文'], ['mood', '情绪与氛围'], ['moodEn', '情绪英文'], ['suffix', '命名后缀']] as const).map(([field, title]) => <label key={field}>{title}<input value={semantic.concept?.[field] || ''} onChange={event => editAssistantSemantic(index, { concept: { prop: '', propEn: '', mood: '', moodEn: '', suffix: '', ...semantic.concept, [field]: event.target.value } })} /></label>)}{category.generationKind === 'body-card' && (semantic.bodyTraits?.length ? semantic.bodyTraits : [{ id: '', zh: '', en: '' }]).map((trait, traitIndex, traits) => <div className={styles.assistantBodyTrait} key={traitIndex}><label>身形属性<select value={trait.id} onChange={event => editAssistantSemantic(index, { bodyTraits: traits.map((value, i) => i === traitIndex ? { ...value, id: event.target.value } : value) })}><option value="">选择属性</option>{TRAITS.filter(trait => trait.group === 'body').map(trait => <option key={trait.id} value={trait.id}>{trait.title}</option>)}</select></label><label>中文描述<input value={trait.zh} onChange={event => editAssistantSemantic(index, { bodyTraits: traits.map((value, i) => i === traitIndex ? { ...value, zh: event.target.value } : value) })} /></label><label>英文描述<input lang="en" value={trait.en} onChange={event => editAssistantSemantic(index, { bodyTraits: traits.map((value, i) => i === traitIndex ? { ...value, en: event.target.value } : value) })} /></label></div>)}</fieldset>;
+  };
   const selectedCategory = catalogue.categories.find(category => category.id === form.categoryId);
   const addForm = () => {
     if (!form.nameZh.trim() || !form.nameEn.trim() || !form.descriptionZh.trim() || !form.descriptionEn.trim() || form.kind === 'term' && !form.categoryId) { setError('请补齐中英名称、生成描述和所属类别。'); return; }
@@ -132,6 +209,7 @@ export default function LibraryManager({ ownerId, admin, active, catalogue, card
     <div className={styles.sectionHead}><div><h2 id="fusion-library-title">词库管理</h2><p>个人内容仅本人可见。入库后可加入当前工作台，已有提示词按原快照保留。</p></div><button disabled={loading} onClick={() => void refresh()}><RefreshCw size={15} />{loading ? '读取中…' : '更新目录'}</button></div>
     {error && <p className={styles.error} role="alert">{error}</p>}{notice && <p className={styles.notice} role="status">{notice}</p>}
     {!CHARACTER_FUSION_WRITES_ENABLED && <p className={styles.hint}>词库当前只读，草稿与已保存目录仍可查看。</p>}
+    {continuation && <section className={styles.assistantLibraryPlan} aria-labelledby="fusion-assistant-plan-title"><div className={styles.sectionHead}><h3 id="fusion-assistant-plan-title">{assistantCatalogueSaved ? '词条已入库，原生成计划保留' : '创作对话中的新词草稿'}</h3><small>本人私有</small></div><div className={styles.assistantEntryList}>{assistantEntries.map((entry, index) => <fieldset key={entry.data.id || index} disabled={assistantSubmitted || busy}><legend>{entry.kind === 'category' ? '新类别' : '词条'} · {entry.data.nameZh || index + 1}</legend><div className={styles.libraryForm}><label>中文名称<input value={entry.data.nameZh || ''} onChange={event => editAssistantEntry(index, { nameZh: event.target.value })} /></label><label>英文名称<input lang="en" value={entry.data.nameEn || ''} onChange={event => editAssistantEntry(index, { nameEn: event.target.value })} /></label><label>中文含义<textarea rows={2} value={entry.data.descriptionZh || ''} onChange={event => editAssistantEntry(index, { descriptionZh: event.target.value })} /></label><label>英文含义<textarea rows={2} lang="en" value={entry.data.descriptionEn || ''} onChange={event => editAssistantEntry(index, { descriptionEn: event.target.value })} /></label>{entry.kind === 'term' ? <label>所属类别<select value={(entry.data as Partial<FusionTerm>).categoryId || ''} onChange={event => editAssistantEntry(index, { categoryId: event.target.value })}>{[...catalogue.categories, ...assistantEntries.filter(item => item.kind === 'category').map(item => item.data as FusionCategory)].map(category => <option key={category.id} value={category.id}>{category.nameZh}</option>)}</select></label> : <><label>设置分组<select value={(entry.data as Partial<FusionCategory>).group || 'extra'} onChange={event => editAssistantEntry(index, { group: event.target.value })}><option value="fusion">融合设定</option><option value="body">身形比例</option><option value="extra">扩展设定</option></select></label><label><input type="checkbox" checked={Boolean((entry.data as Partial<FusionCategory>).multi)} onChange={event => editAssistantEntry(index, { multi: event.target.checked, randomMax: event.target.checked ? 3 : 1 })} />多选组合共同生效</label></>}</div>{assistantRules(entry, index)}{assistantPreview?.entries.find(item => item.index === index)?.message && <p className={styles.error}>{assistantPreview.entries.find(item => item.index === index)?.message}</p>}</fieldset>)}</div><div className={styles.actions}>{assistantSubmitted ? <><button disabled={busy} type="button" onClick={() => void checkAssistant()}>核对原计划结果</button>{assistantCanContinue && <button className={styles.primary} disabled={busy || !CHARACTER_FUSION_WRITES_ENABLED} type="button" onClick={() => void confirmAssistant(true)}>继续原计划</button>}</> : <><button disabled={busy || !assistantEntries.length} type="button" onClick={() => void previewAssistant()}>校验并预览</button><button className={styles.primary} disabled={busy || !assistantPreview?.canImport || !CHARACTER_FUSION_WRITES_ENABLED} type="button" onClick={() => void confirmAssistant()}>{busy ? '正在处理…' : continuation.mode === 'generate' ? '确认入库并继续生成' : '确认入库'}</button></>}<button disabled={busy} type="button" onClick={() => void cancelAssistantPlan()}>取消后续计划</button></div>{assistantPreview && !assistantPreview.canImport && <p className={styles.hint}>请修改提示的问题后重新预览。</p>}</section>}
     <div className={styles.librarySearch}><label><Search size={15} /><input aria-label="搜索词库名称、别名、标签" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索名称、别名、标签" /></label><select aria-label="筛选词库类别" value={categoryId} onChange={event => setCategoryId(event.target.value)}><option value="">全部类别</option>{catalogue.categories.map(category => <option key={category.id} value={category.id}>{category.nameZh}{!category.enabled ? '（已停用）' : ''}</option>)}</select></div>
     <details ref={editor} className={styles.libraryEditor}><summary>新增、导入与助手草稿</summary><div className={styles.libraryScope}><label>入库范围<select value={scope} disabled={!admin || Boolean(pending) || Boolean(maintenance)} onChange={event => { setScope(event.target.value as 'private' | 'shared'); setPreview(null); }}><option value="private">本人私有</option>{admin && <option value="shared">共享给现有授权同事</option>}</select></label>{scope === 'shared' && <small>确认入库后，此批词条会进入共享目录。</small>}</div>
       <form className={styles.libraryForm} onSubmit={event => { event.preventDefault(); addForm(); }}><label>类型<select value={form.kind} onChange={event => setForm({ ...blankForm(), kind: event.target.value as 'category' | 'term' })}><option value="term">词条</option><option value="category">普通描述类别</option></select></label>{form.kind === 'term' ? <label>所属类别<select required value={form.categoryId} onChange={event => setForm({ ...form, categoryId: event.target.value })}><option value="">选择类别</option>{catalogue.categories.filter(category => category.enabled).map(category => <option key={category.id} value={category.id}>{category.nameZh}</option>)}</select></label> : <><label>分组<select value={form.group} onChange={event => setForm({ ...form, group: event.target.value as FusionCategory['group'] })}><option value="fusion">融合设定</option><option value="body">身形比例</option><option value="extra">扩展设定</option></select></label><label><input type="checkbox" checked={form.multi} onChange={event => setForm({ ...form, multi: event.target.checked })} />允许多选组合</label></>}

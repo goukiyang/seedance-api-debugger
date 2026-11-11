@@ -13,7 +13,7 @@ export type CataloguePreviewEntry = { index: number; status: 'new' | 'update' | 
 export type CataloguePreview = { version: string; entries: CataloguePreviewEntry[]; errors: number; duplicates: number; canImport: boolean };
 export type CatalogueManageRequest =
   | { action: 'preview'; scope: 'private' | 'shared'; entries: CatalogueEntry[] }
-  | { action: 'import'; scope: 'private' | 'shared'; entries: CatalogueEntry[]; opId: string; previewVersion: string }
+  | { action: 'import'; scope: 'private' | 'shared'; entries: CatalogueEntry[]; opId: string; previewVersion: string; continuation?: unknown }
   | { action: 'upsert'; scope: 'private' | 'shared'; entry: CatalogueEntry; opId: string }
   | { action: 'rename' | 'disable'; scope: 'private' | 'shared'; kind: 'category' | 'term'; id: string; expectedVersion: string; opId: string; nameZh?: string; nameEn?: string; enabled?: boolean };
 export type FusionDb = Prisma.TransactionClient;
@@ -25,8 +25,8 @@ export async function requireActiveFusionUser(db: FusionDb, actor: FusionActor) 
   return user;
 }
 export function operationDto(row: { id: string; op_id: string; workspace_id: string | null; before_version: number; after_version: number; result_json: string; undo_json: string | null; undone_by: string | null; created_at: Date; status: string }): FusionOperation {
-  const result = JSON.parse(row.result_json) as { resultIds?: string[] };
-  return { id: row.id, opId: row.op_id, workspaceId: row.workspace_id, status: row.status as FusionOperation['status'], beforeVersion: row.before_version, afterVersion: row.after_version, resultIds: result.resultIds || [], reversible: Boolean(row.undo_json && !row.undone_by), createdAt: row.created_at.toISOString() };
+  const result = JSON.parse(row.result_json) as { resultIds?: string[]; effects?: FusionOperation['effects']; batches?: NonNullable<FusionOperation['batch']>[]; reply?: string; turn?: { user: string; assistant: string } };
+  return { id: row.id, opId: row.op_id, workspaceId: row.workspace_id, status: row.status as FusionOperation['status'], beforeVersion: row.before_version, afterVersion: row.after_version, resultIds: result.resultIds || [], reversible: Boolean(row.undo_json && !row.undone_by), createdAt: row.created_at.toISOString(), ...(result.effects ? { effects: result.effects } : {}), ...(result.batches?.[0] ? { batch: result.batches[0] } : {}), ...(result.reply ? { reply: result.reply } : {}), ...(row.undone_by ? { undoneBy: row.undone_by } : {}), ...(result.turn ? { turn: result.turn } : {}) };
 }
 export async function loadFusionCatalogue(db: FusionDb, ownerId: string, sharedOnly = false): Promise<FusionCatalogue> {
   const [categories, terms] = await Promise.all([
@@ -70,6 +70,7 @@ function parseManage(input: unknown): CatalogueManageRequest {
   if (input.action === 'upsert' && !isRecord(input.entry)) throw new FusionError('缺少目录定义。');
   if (['rename', 'disable'].includes(String(input.action)) && (!['category', 'term'].includes(String(input.kind)) || typeof input.id !== 'string' || typeof input.expectedVersion !== 'string')) throw new FusionError('请携带当前目录版本后操作。');
   if (input.action === 'import' && typeof input.previewVersion !== 'string') throw new FusionError('请先预览本批内容。');
+  if (input.action === 'import' && input.continuation !== undefined && (!isRecord(input.continuation) || input.continuation.formatVersion !== 1 || input.scope !== 'private' || typeof input.continuation.sourceOpId !== 'string' || input.continuation.catalogueOpId !== input.opId || JSON.stringify(input.continuation).length > 100000)) throw new FusionError('扩库接续计划关联无效。');
   return input as CatalogueManageRequest;
 }
 function normalizeEntry(entry: unknown, scope: 'private' | 'shared', ownerId: string, catalogue: FusionCatalogue): CatalogueEntry {
@@ -112,8 +113,8 @@ export async function queryCatalogueOperation(actor: FusionActor, opId: string) 
   parseOperationId(opId); await requireActiveFusionUser(prisma, actor);
   const operation = await prisma.characterFusionOperation.findUnique({ where: { owner_id_op_id: { owner_id: actor.id, op_id: opId } } });
   if (!operation || operation.target_kind !== 'catalogue') return { status: 'unknown' as const };
-  const result = JSON.parse(operation.result_json) as { changedIds: string[] };
-  return { status: 'committed' as const, operation: operationDto(operation), changedIds: result.changedIds };
+  const result = JSON.parse(operation.result_json) as { changedIds: string[]; continuation?: unknown };
+  return { status: 'committed' as const, operation: operationDto(operation), changedIds: result.changedIds, ...(result.continuation ? { continuation: result.continuation } : {}) };
 }
 export async function manageFusionCatalogue(actor: FusionActor, input: unknown) {
   const request = parseManage(input);
@@ -127,7 +128,16 @@ export async function manageFusionCatalogue(actor: FusionActor, input: unknown) 
     const prior = await tx.characterFusionOperation.findUnique({ where: { owner_id_op_id: { owner_id: actor.id, op_id: request.opId } } });
     if (prior) {
       if (prior.target_kind !== 'catalogue' || prior.fingerprint !== fingerprint) throw new FusionError('此操作编号已用于其它内容，请查询原回执。', 409, 'FUSION_OPERATION_REUSED');
-      return { catalogue, operation: operationDto(prior), changedIds: (JSON.parse(prior.result_json) as { changedIds: string[] }).changedIds };
+      const original = JSON.parse(prior.result_json) as { changedIds: string[]; continuation?: unknown };
+      return { catalogue, operation: operationDto(prior), changedIds: original.changedIds, ...(original.continuation ? { continuation: original.continuation } : {}) };
+    }
+    if (request.action === 'import' && isRecord(request.continuation)) {
+      const plan = request.continuation;
+      const source = await tx.characterFusionOperation.findUnique({ where: { owner_id_op_id: { owner_id: actor.id, op_id: String(plan.sourceOpId) } } });
+      const original = source ? JSON.parse(source.result_json) as { continuation?: unknown } : undefined;
+      if (!source || source.target_kind !== 'assistant' || source.status !== 'planning' || source.workspace_id !== plan.workspaceId || fusionFingerprint(original?.continuation) !== fusionFingerprint(plan)) throw new FusionError('原扩库计划已结束或发生变化，保留草稿，未入库。', 409, 'FUSION_ASSISTANT_FINISHED');
+      const workspace = await tx.characterFusionWorkspace.findFirst({ where: { id: source.workspace_id!, owner_id: actor.id } });
+      if (!workspace || workspace.version !== plan.baseVersion) throw new FusionError('创作条件或目标版本已变，原扩库计划已保留。', 409, 'FUSION_CONFLICT');
     }
     let raw: CatalogueEntry[];
     if (request.action === 'import') {
@@ -154,7 +164,7 @@ export async function manageFusionCatalogue(actor: FusionActor, input: unknown) 
       changedIds.push(stableId);
     }
     const updated = await loadFusionCatalogue(tx, actor.id);
-    const operation = await tx.characterFusionOperation.create({ data: { owner_id: actor.id, op_id: request.opId, target_kind: 'catalogue', fingerprint, result_json: JSON.stringify({ changedIds, catalogueVersion: updated.version }) } });
-    return { catalogue: updated, operation: operationDto(operation), changedIds };
+    const operation = await tx.characterFusionOperation.create({ data: { owner_id: actor.id, op_id: request.opId, target_kind: 'catalogue', fingerprint, result_json: JSON.stringify({ changedIds, catalogueVersion: updated.version, ...(request.action === 'import' && request.continuation ? { continuation: request.continuation } : {}) }) } });
+    return { catalogue: updated, operation: operationDto(operation), changedIds, ...(request.action === 'import' && request.continuation ? { continuation: request.continuation } : {}) };
   }));
 }

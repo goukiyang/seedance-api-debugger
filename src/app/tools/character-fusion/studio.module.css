@@ -404,16 +404,128 @@
 .conflictDetails pre { max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px; border-radius: 6px; background: var(--bg-input); }
 @media (max-width: 760px) { .conflictDetails > div { grid-template-columns: minmax(0, 1fr); } }
 
-/* Keep the creation input available while the original cards and tool views scroll. */
-.creationChat { position: sticky; top: 8px; z-index: 15; margin: 0 0 20px; padding: 12px 14px; border: 1px solid var(--border-color); background: var(--bg-panel); }
-.creationChat .sectionHead { margin-bottom: 6px; }
-.creationChat .chatMessages { max-height: min(22vh, 180px); }
-.creationChat .chatInput textarea { min-height: 66px; max-height: 160px; }
+/* The work area owns one scroll surface; the composer occupies a real grid row. */
+.page { container-type: inline-size; container-name: fusion-studio; padding-bottom: 20px; }
+.workbench { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; gap: 0; min-width: 0; height: clamp(240px, calc(var(--fusion-viewport-height, 100dvh) - var(--fusion-workbench-top, 220px) - 18px), calc(var(--fusion-viewport-height, 100dvh) - 20px)); }
+.workbenchMain { min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; padding: 4px 8px 24px 0; scroll-padding-block: 12px 24px; }
+.workbenchMain > .library, .workbenchMain > .recipes { padding-top: 4px; }
+.workbenchMain .ruleGrid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.workbenchMain .results { margin-top: 30px; scroll-margin-top: 10px; }
+.workbenchMain .resultRow { scroll-margin-block: 12px; }
+.creationChat { position: static; z-index: auto; min-width: 0; margin: 0; padding: 10px 0 0; border: 0; border-top: 1px solid var(--border-color); border-radius: 0; background: var(--bg-primary); display: flex; flex-direction: column; }
+.chatHeading { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.chatHeading h3 { font-size: 13px; }
+.page .chatExpand { font-size: 12px; min-height: 32px; padding: 4px 6px; color: var(--text-secondary); }
+.chatExpanded .chatExpand svg { transform: rotate(180deg); }
+.chatHistory { display: none; min-height: 0; }
+.chatExpanded .chatHistory { display: flex; flex-direction: column; max-height: min(32dvh, 300px); min-height: 100px; }
+.chatHistoryTools { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 10px; padding: 6px 0; font-size: 11px; }
+.chatHistoryTools > small { flex-basis: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.page .chatHistoryTools button { font-size: 11px; min-height: 30px; padding: 4px 6px; }
+.chatHistoryTools details { position: relative; }
+.chatHistoryTools details > summary { padding: 6px 0; color: var(--text-secondary); }
+.chatHistoryTools details > div { position: absolute; z-index: 4; top: 100%; right: 0; display: grid; gap: 5px; padding: 10px; max-height: 240px; overflow-y: auto; width: 280px; background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 6px; }
+.chatHistoryTools details > div button { text-align: left; justify-content: flex-start; }
+.creationChat .chatMessages { flex: 1; min-height: 0; max-height: none; padding: 4px 4px 8px; }
+.creationChat .chatMessages p { font-size: 12px; }
+.creationChat .userMessage, .creationChat .assistantMessage { padding: 9px; margin-bottom: 8px; }
+.creationChat .assistantMessage { padding-left: 0; }
+.chatComposer { min-width: 0; padding-bottom: env(safe-area-inset-bottom, 0px); }
+.chatTarget { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; min-height: 30px; font-size: 12px; }
+.chatTarget > span { min-width: 0; overflow-wrap: anywhere; }
+.chatTarget > small { margin-left: auto; white-space: nowrap; }
+.page .chatTarget > button { min-height: 30px; padding: 4px; color: var(--text-secondary); }
+.chatStatus { display: flex; align-items: center; gap: 3px 8px; min-width: 0; min-height: 28px; font-size: 11px; color: var(--text-secondary); }
+.chatStatus > span { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.page .chatStatus button { flex-shrink: 0; padding: 4px 6px; min-height: 28px; font-size: 11px; color: var(--tone-info-text); }
+.creationChat .chatInput { display: flex; align-items: flex-end; flex-wrap: nowrap; gap: 8px; padding-top: 5px; }
+.creationChat .chatInput textarea { flex: 1; min-height: 42px; max-height: 128px; resize: none; border: 1px solid var(--border-color); background: var(--bg-input); padding: 9px 10px; }
+.creationChat .longChatInput textarea { max-height: min(40dvh, 340px); }
+.chatSendActions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.page .chatSendActions > button { min-height: 40px; margin: 0; }
+.page .chatSendActions > .iconButton { width: 32px; min-height: 38px; }
+.chatKeyboard { display: block; text-align: right; font-size: 10px !important; padding-top: 4px; }
+.chatError { color: var(--tone-danger-text); font-size: 12px; line-height: 1.5 !important; margin: 5px 0 !important; max-height: 90px; overflow-y: auto; }
+.chatModelNotice, .chatDraftNotice { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; font-size: 12px; }
+.page .chatModelNotice button, .page .chatDraftNotice button { font-size: 12px; min-height: 30px; padding: 4px 6px; color: var(--tone-info-text); }
+.scopeChoices { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; padding: 4px 0; }
+.page .scopeChoices button { font-size: 12px; min-height: 34px; padding: 5px 8px; border-color: var(--border-color); }
+.managementView { grid-template-rows: minmax(0, 1fr); }
+.managementView > .creationChat { display: none; }
+.currentRequirements { margin: 0 0 22px; padding: 8px 0 12px; border-bottom: 1px solid var(--border-color); }
+.currentRequirements > details > summary { display: flex; align-items: baseline; gap: 8px; list-style: none; padding: 5px 0; }
+.currentRequirements > details > summary::-webkit-details-marker { display: none; }
+.currentRequirements summary strong { flex-shrink: 0; font-size: 12px; }
+.currentRequirements summary > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-size: 12px; }
+.currentRequirements summary > small { margin-left: auto; flex-shrink: 0; }
+.currentRequirements ul { display: grid; gap: 7px; padding-left: 18px; margin: 10px 0; font-size: 13px; line-height: 1.6; }
+.currentRequirements > details > div > small { display: block; }
+.currentRequirements .creationContext { display: block; margin: 12px 0 0; }
+.currentRequirements .creationContext label { display: grid; gap: 6px; padding: 8px 0; font-size: 12px; }
+.currentRequirements .creationContext p { font-size: 12px; color: var(--text-secondary); }
+.resultBatch + .resultBatch { margin-top: 26px; }
+.batchHeading { display: flex; align-items: baseline; gap: 10px; margin: 18px 0 10px; }
+.batchHeading h3 { font-size: 14px; font-weight: 600; }
+.stableIdentity { display: block; margin-bottom: 7px; font-variant-numeric: tabular-nums; }
+.chatTargeted { outline: 1px solid var(--tone-info-border); outline-offset: 2px; }
+.page .rowActions button[aria-pressed='true'] { color: var(--tone-info-text); background: var(--tone-info-bg); }
 .documentEntry { display: grid; gap: 3px; min-width: 0; }
 .documentEntry strong { font-size: 13px; font-weight: 500; }
+.documentSummary { line-height: 1.5; overflow-wrap: anywhere; }
 .documentEntry button { justify-self: start; min-height: 24px; padding: 2px 0; }
-@media (max-width: 680px) {
-  .creationChat { top: 0; padding: 10px; }
-  .creationChat .chatMessages { max-height: 120px; }
-  .creationChat .sectionHead p { font-size: 11px; }
+.assistantLibraryPlan { padding: 16px 0 20px; border-bottom: 1px solid var(--border-color); }
+.assistantLibraryPlan .sectionHead { margin-bottom: 10px; }
+.assistantEntryList { display: grid; gap: 16px; margin-bottom: 14px; }
+.assistantEntryList > fieldset { min-width: 0; border: 1px solid var(--border-color); border-radius: 6px; padding: 12px; }
+.assistantEntryList legend { font-size: 12px; padding: 0 5px; }
+.assistantEntryList .libraryForm { padding: 5px 0 10px; }
+.assistantEntryList details { font-size: 12px; color: var(--text-secondary); }
+.assistantRules { display: flex; gap: 8px 14px; flex-wrap: wrap; min-width: 0; margin: 12px 0; padding: 12px; border: 1px solid var(--border-color); border-radius: 6px; }
+.assistantRules label { display: inline-flex; align-items: center; gap: 6px; }
+.assistantPairs { display: grid; gap: 8px; }
+.assistantPairs > div { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.assistantPairs select { max-width: 180px; }
+.assistantBodyTrait { display: grid; gap: 10px; grid-column: 1 / -1; }
+.assistantBodyTrait label { display: grid; gap: 5px; }
+@container fusion-studio (max-width: 899px) { .workbenchMain .ruleGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container fusion-studio (max-width: 560px) { .workbenchMain .ruleGrid { grid-template-columns: minmax(0, 1fr); } }
+@container fusion-studio (min-width: 1280px) {
+  .workbench { grid-template-columns: minmax(0, 1fr) 340px; grid-template-rows: minmax(0, 1fr); gap: 24px; }
+  .creationChat { border-top: 0; border-left: 1px solid var(--border-color); padding: 4px 0 0 18px; min-height: 0; }
+  .chatHeading { padding-bottom: 10px; }
+  .page .chatExpand { display: none; }
+  .chatHistory, .chatExpanded .chatHistory { display: flex; flex-direction: column; flex: 1; min-height: 0; max-height: none; }
+  .chatHistoryTools > small { flex-basis: auto; }
+  .chatComposer { border-top: 1px solid var(--border-color); padding-top: 8px; }
+  .chatStatus { flex-wrap: wrap; }
+  .chatStatus > span { flex-basis: 100%; white-space: normal; max-height: 70px; overflow-y: auto; }
+  .creationChat .chatInput { flex-wrap: wrap; }
+  .creationChat .chatInput textarea { flex-basis: 100%; }
+  .chatSendActions { width: 100%; justify-content: flex-end; }
+  .managementView { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .workbench { min-height: 0; height: clamp(220px, calc(var(--fusion-viewport-height, 100dvh) - var(--fusion-workbench-top, 220px) - 10px), calc(var(--fusion-viewport-height, 100dvh) - 16px)); }
+  .workbenchMain { padding-right: 3px; }
+  .workbenchMain .ruleGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .creationChat { padding-top: 7px; }
+  .chatHeading h3 { font-size: 12px; }
+  .page .chatHeading { min-height: 30px; }
+  .chatTarget { gap: 2px 5px; }
+  .chatTarget > span { max-width: calc(100% - 110px); }
+  .chatTarget > small { font-size: 10px; }
+  .chatStatus { min-height: 28px; }
+  .creationChat .chatInput { gap: 4px; }
+  .creationChat .chatInput textarea { min-height: 44px; }
+  .page .chatSendActions > .iconButton { min-height: 44px; width: 34px; }
+  .chatSendActions > button > span { display: none; }
+  .chatKeyboard { display: none; }
+  .chatHistoryTools { padding-top: 2px; }
+  .chatExpanded .chatHistory { max-height: 27dvh; }
+  .chatExpand { min-height: 36px; }
+  .chatDraftNotice > span { flex: 1; }
+  .assistantEntryList > fieldset { padding: 10px; }
+}
+@media (hover: none), (pointer: coarse) {
+  .page .chatStatus button, .page .chatTarget > button, .page .chatExpand, .page .chatHistoryTools button { min-height: 40px; }
 }

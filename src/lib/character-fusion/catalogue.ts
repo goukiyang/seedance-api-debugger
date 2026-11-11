@@ -226,7 +226,7 @@ function stableCatalogueValue(value: unknown): string {
   return JSON.stringify(value) ?? 'null';
 }
 
-export const dynamicPolicy = (category: FusionCategory, terms: FusionTerm[]): SelectionPolicy => ({ multi: category.multi, randomMax: category.randomMax,
+export const dynamicPolicy = (category: FusionCategory, terms: FusionTerm[]): SelectionPolicy => ({ multi: ['trait', 'body-card'].includes(category.generationKind) && category.multi, randomMax: category.randomMax,
   exclusive: [...(category.exclusive || []), ...terms.filter(term => NO_CHOICES.includes(term.legacyValue || term.nameZh)).map(term => term.id)], incompatible: category.incompatible });
 export const dynamicPool = (category: FusionCategory, state: DynamicTraitState, terms: FusionTerm[]) => terms.filter(term => category.enabled && term.enabled && !state.excluded.includes(term.id) && (state.candidates === undefined || state.candidates.includes(term.id)));
 export const termPair = (term: FusionTerm): Pair => ({ zh: term.legacyValue || term.nameZh, en: term.nameEn, termId: term.id, descriptionZh: term.descriptionZh, descriptionEn: term.descriptionEn });

@@ -11,6 +11,7 @@ import { applyFusionCommands, type FusionCommand, type FusionWorkspace } from '.
 import { assertFusionAgentContext, FUSION_AGENT_SYSTEM, FUSION_AGENT_COMMANDS, bindFusionAgentCommands, fusionAgentCataloguePage, fusionAgentScene, parseFusionAgentProposal, proposeFusionAgent } from '../src/lib/character-fusion/agent-adapter.server';
 import { settingsChanges, mergeWorkspaceState } from '../src/app/tools/character-fusion/workspace-client';
 import { emptyWorkspaceState } from '../src/lib/character-fusion/actions';
+import { checkFusionUx20 } from './check-fusion-ux20';
 
 async function main() {
   if (process.env.FUSION_ENGINEERING_ONLY !== '1') throw new Error('请使用 character-fusion-engineering.mjs 隔离入口。');
@@ -140,7 +141,7 @@ async function main() {
         complete: async messages => {
           if (++referenceRounds === 1) return JSON.stringify({ reply: '先读取合法词条', reads: [{ kind: 'catalogue', categoryId: term.categoryId, q: term.nameZh, limit: 1 }] });
           if (referenceRounds === 3) assert((messages[messages.length - 1].content as string).includes('词条引用'));
-          return JSON.stringify({ reply: '追加方案', commands: [{ type: 'patchSettings', changes: [{ path: ['catalogue', 'dynamic', 'selections', term.categoryId], value: { enabled: true, locked: false, values: [], excluded: [], must: [term.id], candidates: [referenceRounds === 2 ? malformedId : term.id] } }] }, { type: 'generate', mode: 'append' }] });
+          return JSON.stringify({ reply: '追加方案', commands: [{ type: 'generate', mode: 'append', plan: { formatVersion: 1, scope: 'batch', overlay: [{ path: ['catalogue', 'dynamic', 'selections', term.categoryId], value: { enabled: true, locked: false, values: [], excluded: [], must: [term.id], candidates: [referenceRounds === 2 ? malformedId : term.id] } }] } }] });
         },
         read: async query => {
           referenceReads++; if (query.kind !== 'catalogue') throw new Error('本场景只查询词库');
@@ -287,12 +288,13 @@ async function main() {
     assert.deepEqual(context.workspace.state.retainedIds, [picked]);
     assert.deepEqual(context.workspace.state.selectedIds, [picked]);
     const patch = await repository.executeWorkspaceOperation(actor, id, { opId: 'engineering-patch', baseVersion: context.workspace.version, commands: [{ type: 'patchSettings', changes: [{ path: ['lang'], value: 'en', expected: 'zh' }] }] });
-    const merged = await repository.executeWorkspaceOperation(actor, id, { opId: 'engineering-merge', baseVersion: context.workspace.version, commands: [{ type: 'context', summary: '合并后的摘要', expected: { summary: '当前摘要' } }] });
+    const merged = await repository.executeWorkspaceOperation(actor, id, { opId: 'engineering-merge', baseVersion: context.workspace.version, commands: [{ type: 'intent', requirements: [{ text: '探索潮汐世界', en: 'Explore a tidal world' }], expected: { requirements: [] } }, { type: 'context', summary: '合并后的摘要', expected: { summary: '当前摘要' } }] });
     assert.equal(merged.workspace.state.settings.lang, 'en');
     await assert.rejects(() => repository.executeWorkspaceOperation(actor, id, { opId: 'engineering-conflict', baseVersion: context.workspace.version, commands: [{ type: 'patchSettings', changes: [{ path: ['lang'], value: 'both', expected: 'zh' }] }] }));
     assert.equal((await repository.getWorkspace(actor, id)).workspace.version, merged.workspace.version);
     const undone = await repository.executeWorkspaceOperation(actor, id, { opId: 'engineering-undo', baseVersion: merged.workspace.version, commands: [{ type: 'undo', operationId: 'engineering-merge' }] });
-    assert.equal(undone.workspace.state.summary, '当前摘要');
+    assert.equal(undone.workspace.state.intent, undefined);
+    assert.equal(undone.workspace.state.summary, '');
     assert.equal(undone.workspace.state.settings.lang, patch.workspace.state.settings.lang);
     {
       const styleState = emptyWorkspaceState();
@@ -336,7 +338,7 @@ async function main() {
       freshState.settings.catalogue!.traits.exaggeration = { enabled: true, locked: true, values: ['巨掌', '巨脚'], excluded: [], must: [] };
       const createInput = { opId: 'engineering-inherit-new-document', name: '新的角色融合创作', state: freshState };
       const freshDocument = await repository.createFusionWorkspace(actor, createInput);
-      assert.equal(freshDocument.rowsPage.total, 0); assert.deepEqual(freshDocument.workspace.state, freshState);
+      assert.equal(freshDocument.rowsPage.total, 0); assert.deepEqual(freshDocument.workspace.state, { ...freshState, formatVersion: 2, identity: { nextDisplayNo: 1, nextBatchNo: 1 } });
       const freshResult = await repository.executeWorkspaceOperation(actor, freshDocument.workspace.id, { opId: 'engineering-fresh-document-generate', baseVersion: 1, commands: [{ type: 'generate', mode: 'replace', seed: 523 }] });
       assert.equal(freshResult.rowsPage.total, 4);
       for (const row of freshResult.workspace.rows) { const body = textFor(row, freshResult.workspace.state.settings); assert(body.includes('巨掌') && body.includes('巨脚') && body.includes('oversized palms') && body.includes('oversized feet')); }
@@ -353,7 +355,7 @@ async function main() {
     assert(preview.preview?.canImport);
     await assert.rejects(() => library.manageFusionCatalogue(actor, { action: 'preview', scope: 'shared', entries }));
     const imported = await library.manageFusionCatalogue(actor, { action: 'import', scope: 'private', opId: 'engineering-import', previewVersion: preview.preview!.version, entries: preview.preview!.entries.map(entry => entry.entry) });
-    assert(imported.changedIds?.includes(term.id));
+    assert('changedIds' in imported && imported.changedIds?.includes(term.id));
     assert(!(await library.readFusionCatalogue(other)).catalogue.terms.some(value => value.id === term.id));
     const fresh = (await repository.getWorkspace(actor, id)).workspace;
     const dynamic = await repository.executeWorkspaceOperation(actor, id, { opId: 'engineering-dynamic', baseVersion: fresh.version, commands: [{ type: 'patchSettings', changes: [{ path: ['catalogue', 'dynamic', 'selections', category.id], value: { enabled: true, locked: true, values: [term.id], excluded: [], must: [] }, expected: null }] }, { type: 'generate', mode: 'append', seed: 555 }] });
@@ -444,6 +446,10 @@ async function main() {
     const pageIds = pageImport.workspace.rows.map(row => row.id); let cursor = pageImport.rowsPage.nextCursor;
     while (cursor) { const page = await repository.getWorkspace(actor, pagesDoc.workspace.id, { cursor }); assert.equal(page.workspace.version, pageImport.workspace.version); pageIds.push(...page.workspace.rows.map(row => row.id)); cursor = page.rowsPage.nextCursor; }
     assert.equal(pageIds.length, 201); assert.equal(new Set(pageIds).size, 201);
+    const finalHistorical = await repository.getWorkspace(actor, pagesDoc.workspace.id, { displayNo: 201, limit: 1 });
+    assert.equal(finalHistorical.workspace.rows[0].id, 'engineering-history-200');
+    assert.equal(finalHistorical.workspace.rows[0].originBatchId, undefined);
+    assert.equal(finalHistorical.rowsPage.total, 201);
     await repository.executeWorkspaceOperation(actor, pagesDoc.workspace.id, { opId: 'engineering-page-change', baseVersion: pageImport.workspace.version, commands: [{ type: 'context', summary: '读取期间发生真实更新' }] });
     await assert.rejects(() => repository.getWorkspace(actor, pagesDoc.workspace.id, { cursor: pageImport.rowsPage.nextCursor! }));
     checks.push('201条历史分页完整读取、同文档版本绑定、更新后的旧游标明确拒绝');
@@ -461,6 +467,7 @@ async function main() {
     assert.equal((ddl.match(/CREATE TABLE/g) || []).length, 5);
     assert(!/(?:^|;)\s*(?:DROP|ALTER|DELETE|UPDATE)\b/im.test(ddl));
     checks.push('五表迁移仅新增，无旧数据改写语句');
+    checks.push(...await checkFusionUx20({ actor, repository, library, prisma }));
     console.log(JSON.stringify({ passed: true, checks, isolation: { temporarySqlite: true, realFetches: fetchAttempts, realGeneration: 0, browserRuns: 0, productionWrites: 0 } }));
   } finally { await close?.(); await rm(directory, { recursive: true, force: true }); }
 }
