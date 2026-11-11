@@ -1,0 +1,54 @@
+{
+  "version": "0.144.1",
+  "source": "56ab5da038b38324837119b05e119446b93e9066",
+  "build": "AKcfrbYiND6eQc9UsrHtn",
+  "deployedAt": "2026-11-11T10:35:49.064034+00:00",
+  "guard": {
+    "readerContract": "works-method-reader.1",
+    "cutoutReaderContract": "cutout-owner-reader.1",
+    "bodyPairReaderContract": "character-body-pair-reader.1",
+    "recipeReaderContract": "character-lab-recipe-reader.1",
+    "contextReaderContract": "character-independent-context.1",
+    "gridReaderContract": "character-explicit-grid.1",
+    "source": "363368ed192d9a89c6ff8c9659b0b175624e53c9",
+    "version": "0.144.1+points-pricing-guard.1",
+    "build": "H6ik79dYs3XsO_FP-Yeii"
+  },
+  "stage": "/data/video-api-debugger/release-staging/video-prompt-groups-ip-20261111/attempt01",
+  "pair": "49e56866-4456-4a77-a41c-b9d5688828fe",
+  "fullMainAndGuardBuildsPassed": true,
+  "promptGroupEngineering": {
+    "mainChecks": 18,
+    "guardReaderChecks": 5,
+    "guardSimulated": false
+  },
+  "publicAssets": 51,
+  "anonymous401": 4,
+  "services": 7,
+  "timers": 4,
+  "cutoverExit": 0,
+  "initialBuildExit": 1,
+  "resume02Exit": 1,
+  "resume03Exit": 0,
+  "failedAttemptsRetained": true,
+  "schemaChanges": false,
+  "paidRequests": 0,
+  "browserRuns": 0,
+  "functionalAcceptance": false,
+  "privateArkPolicy": {
+    "revision": "video-prompt-groups-ark-20261111-01",
+    "oldDestinations": 35,
+    "newDestinations": 36,
+    "addedDestinations": 1,
+    "models": [
+      "doubao-seedance-2-0-260128",
+      "doubao-seedance-2-0-fast-260128",
+      "doubao-seedance-2-0-mini-260615",
+      "doubao-seedance-2-5-260628"
+    ],
+    "credentialsChanged": false,
+    "readPermissionsChanged": false
+  },
+  "publicProofSha256": "0cb89a62020c9f1f806d911022b74cff3b7a706a24ea21dbfa3fa19df566308b",
+  "sourcePairContractSha256": "16850d06290a907ae8980df13b45f15172497fd675a64d0475c1a09ea5997df5"
+}
