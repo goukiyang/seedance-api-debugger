@@ -199,16 +199,16 @@ export function bossRow(s: FusionSettings, others: FusionRow[], seed = Date.now(
   for (const c of CORE) if (!s.bossDimensions.includes(c.id) || !allowed(s, c.id).includes(s.boss[c.id])) throw new Error(`角色组合需要加入并选择${c.title}。`);
   const category = { ...s.boss };
   for (const c of ADDONS) if (!s.bossDimensions.includes(c.id)) category[c.id] = '';
-  for (const c of s.cards.filter(c => c.joined)) if (!cardValues(c).length || cardValues(c).some(value => !c.tags.some(t => t.label === value && t.status !== 'exclude'))) throw new Error(`请为${c.title}选择可用标签。`);
+  for (const c of s.cards.filter(c => c.joined && c.locked)) if (!cardValues(c).length || cardValues(c).some(value => !c.tags.some(t => t.label === value && t.status !== 'exclude'))) throw new Error(`请为${c.title}选择可用标签。`);
   return uniqueName(decorateRow(chooseConcrete({ ...makeRow(category, seed), role: s.role, translations: translationsFor(s, category), cards: cardChoices(s, 0, seeded(seed), true) }, s, true), s, seeded(seed), 0, true), others);
 }
 function translationsFor(s: Pick<FusionSettings, 'rules'>, category: Categories, prior: FusionRow['translations'] = []): NonNullable<FusionRow['translations']> {
   return CONFIG.flatMap(c => { const label = category[c.id], en = s.rules[c.id].find(t => t.label === label)?.en || prior.find(t => t.dimension === c.id && t.label === label)?.en; return en ? [{ dimension: c.id, label, en }] : []; });
 }
-function cardChoices(s: FusionSettings, index: number, rnd: () => number, manual = false): NonNullable<FusionRow['cards']> {
+function cardChoices(s: FusionSettings, index: number, rnd: () => number, _manual = false): NonNullable<FusionRow['cards']> {
   return s.cards.filter(c => c.joined).map(c => {
     const must = c.tags.filter(t => t.status === 'must');
-    const selected = manual || c.locked ? cardValues(c) : drawChoices(c.tags.filter(t => t.status !== 'exclude').map(t => t.label), { multi: Boolean(c.multi) }, rnd, must[index]?.label);
+    const selected = c.locked ? cardValues(c) : drawChoices(c.tags.filter(t => t.status !== 'exclude').map(t => t.label), { multi: Boolean(c.multi) }, rnd, must[index]?.label);
     const values = selected.map(value => { const tag = c.tags.find(t => t.label === value)!; return { zh: tag.label, en: tag.en }; });
     return { id: c.id, title: c.title, titleEn: c.titleEn, label: values.map(value => value.zh).join('、'), en: values.map(value => value.en).join(', '), ...(c.multi ? { values, multi: true } : {}) };
   });

@@ -85,13 +85,13 @@ export function parseCatalogue(input: unknown): CatalogueSettings {
   }
   return next;
 }
-export function resolveTraits(catalogue: CatalogueSettings | undefined, random: () => number, index: number, manual = false): Record<string, Pair[]> {
+export function resolveTraits(catalogue: CatalogueSettings | undefined, random: () => number, index: number, _manual = false): Record<string, Pair[]> {
   const result: Record<string, Pair[]> = {};
   for (const t of TRAITS) {
     const s = catalogue?.traits[t.id]; if (!s?.enabled) continue;
     const pool = t.options.filter(o => !s.excluded.includes(o.zh));
     let values: string[];
-    if ((manual || s.locked) && s.values.length) values = s.values;
+    if (s.locked && s.values.length) values = s.values;
     else if (pool.length) {
       values = drawChoices(pool.map(option => option.zh), t, random, s.must[index]);
     } else values = [];

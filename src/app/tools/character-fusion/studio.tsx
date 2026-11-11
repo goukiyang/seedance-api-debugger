@@ -288,7 +288,7 @@ export default function CharacterFusionStudio({ ownerId }: { ownerId: string }) 
   const picked = rows.filter(row => selected.includes(row.id));
   const generationProblem = validateGeneration(settings);
   const missingCore = CORE.filter(c => !settings.bossDimensions.includes(c.id));
-  const manualReady = !missingCore.length && settings.bossDimensions.every(id => allowed(settings, id).includes(settings.boss[id]) || ADDONS.some(c => c.id === id) && settings.boss[id] === '') && settings.cards.filter(c => c.joined).every(c => cardValues(c).length > 0 && cardValues(c).every(value => c.tags.some(t => t.label === value && t.status !== 'exclude')));
+  const manualReady = !missingCore.length && settings.bossDimensions.every(id => allowed(settings, id).includes(settings.boss[id]) || ADDONS.some(c => c.id === id) && settings.boss[id] === '') && settings.cards.filter(c => c.joined).every(c => !c.locked || cardValues(c).length > 0 && cardValues(c).every(value => c.tags.some(t => t.label === value && t.status !== 'exclude')));
   const needsEnglish = missingEnglish(settings) || rows.some(row => textFor(row, { ...settings, lang: 'en' }).includes('英文尚待补齐'));
   const modelStatus = modelError || modelAvailability.reason || (!loadingModels && !modelReady ? '请选择已开放的 API 模型，当前选择和输入已保留。' : '');
   if (!active) return <main className={styles.page}><p role="status">正在确认当前账号…</p></main>;

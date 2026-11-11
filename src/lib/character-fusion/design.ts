@@ -188,7 +188,7 @@ export function decorateRow(row: FusionRow, s: FusionSettings, random: () => num
   const sourceName = translated(SOURCE_EN, row.source.name), conceptName = translated(CONCEPT_EN, row.concept.name);
   const fusion = s.catalogue?.sourceFusion;
   const fusionPool = Object.entries(SOURCES).filter(([group]) => s.rules.source.some(rule => rule.label === group && rule.status !== 'exclude')).flatMap(([, sources]) => sources.map(source => source.name)).filter(name => name !== row.source.name && !fusion?.excluded.includes(name));
-  const sourceNames = retained ? (retained.sources || []).map(value => value.zh) : !fusion?.enabled ? [] : (fusion.locked || manual) && fusion.values.length ? fusion.values : drawChoices(fusionPool, { multi: true }, random);
+  const sourceNames = retained ? (retained.sources || []).map(value => value.zh) : !fusion?.enabled ? [] : fusion.locked && fusion.values.length ? fusion.values : drawChoices(fusionPool, { multi: true }, random);
   const sources = sourceNames.filter(name => name !== row.source.name).map(name => pair(name, translated(SOURCE_EN, name)));
   const hasTheme = ['culture', 'world', 'activity', 'technology'].some(id => resolved[id]);
   const themeDefaults: Record<string, Record<string, string[]>> = {
