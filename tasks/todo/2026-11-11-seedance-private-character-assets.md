@@ -1,7 +1,7 @@
 # Seedance 私域角色资产接入与管理入口
 
 版本：v1.0.0 / R01。日期：2026-11-11（America/New_York）。
-状态：已获用户“落地”授权；业务实施与聚焦模拟已完成，工程检查与原号读取鉴权窄检查已完成；正式候选构建、保护部署及唯一真实测试由主控接续，功能仍待用户手验。
+状态：v0.144.0已受保护部署；一次4秒真实IP任务生成、原片保存/下载和20点结算已核对，冻结0；界面与成片效果待用户手动验收。
 入口：[固定 todo](../todo.md)。本轮按用户“明确需求后查缺补漏、查闭环和风险”“在红框位置补新增、编辑、删除等入口”补充原需求，不把方案写成已实现。
 
 ## 1. 目标与已确认范围
@@ -112,8 +112,8 @@
 - [x] 在最新健康源建立隔离实施分支；新增最小角色登记模型及相容增量迁移、服务端目录服务和受鉴权 CRUD API（拟 `/api/character-assets` 与 `/:id`）。迁移不回填、改写老资产或业务记录。
 - [x] 在 `GenerationComposer` / `GeneratePageClient` 的素材头部和 `ReferenceStrip` / `PromptEditor` 接入共用管理面板及有序选择；复用现有层/表单，并扩展 `src/lib/navigation/task-reuse-client.ts` 的 ModeInputDraft 和既有模式切换。拟新增面板文件，名称随现有目录安排，不重写整个 composer。
 - [x] 扩展 `src/lib/creation/` 与客户端创建 hook、IP create、引用编译/快照、复用 DTO 和任务详情，使新字段全程保留；官方 provider 只补资产类型校验与错误映射。普通 create 的私域输入不支持时明确拒绝，不转发给网关。
-- [ ] 完成对应模拟/工程检查，核对实际差异；必要发布沿现有受保护发布流程，新增 schema 的备用 reader 必须可运行，只回程序不回业务数据。
-- [ ] 有条件执行一次真实测试并观察原任务到终态/交付；未满足条件则只保留该项缺口，继续不依赖它的工程交付。
+- [x] 完成对应模拟/工程检查，核对实际差异；必要发布沿现有受保护发布流程，新增 schema 的备用 reader 必须可运行，只回程序不回业务数据。
+- [x] 有条件执行一次真实测试并观察原任务到终态/交付；未满足条件则只保留该项缺口，继续不依赖它的工程交付。
 
 ## 7. 验证与交付边界
 
@@ -165,3 +165,53 @@
 
 这些证据属于工程模拟与代码检查；没有加载完整 IP HTTP 成功链、浏览器/手机功能验收或本轮真实生成。正式候选 Next/内置矩阵、迁移备份/停止 writer/保护部署、普通 Codex 本人项目的一次不超过 15 秒真实测试由主控接续，未知只查原号；用户界面效果仍待手动验收。本轮未新增任务外发现。
 <!-- /ARK-CHARACTER-ASSET01-IMPLEMENTATION-20261111 -->
+
+
+<!-- ARK-CHARACTER-ASSET01-RELEASE-20261111 -->
+## 10. 保护发布与一次实际任务闭环
+
+### 10.1 已部署的产物
+
+业务提交 `744c9bd9013a5a32a6f384628d1387ce48fdd0b0`、版本/main `428c425739cf63a2cad9f43f092d6b1538c4b023`（v0.144.0），已推送并核远端。主 BUILD `p9rZvxSRRS7FkgPUwJ5X3`；备用 `fb2dbdb050a51e6e0e186787501863c181014184`（0.144.0+points-pricing-guard.1），BUILD `Yxw1jVGLULCDIvK9QgCI7`。两个版本均本次串行完整 Next/type/lint 构建通过，不借旧 guard 的构建证明。主版本原生/关联34项中25项匹配原证、9项按变更刷新通过，admin pure因schema新增另行刷新；备用 native、计价与精确版本 reader 证据全新取得。
+
+工程工作区干净源导出各2501文件，未混入正式根其他脏改、密钥、数据库或用户媒体。CodeGraph 实际同步到版本提交，2064文件、无待同步/hash mismatch/parse error；真实 caller 查询核实七个引用消费者。main→guard 仅七文件、七写开关及版本变化，隐私/历史 reader 相同。
+
+2026-11-11 08:42:09 UTC 完成受保护切换：7服务、4timer、51项实际生成页/任务页静态资源、4项匿名401检查通过，公网 `/api/release` 返回0.144.0，health返回ok。发布窗口已收口；[部署摘要](../../docs/materials/2026-11-11-seedance-private-character-assets/release-summary.json)保留实际身份与证据边界。入口：[视频生成](https://sd2.youdooart.com/generate)、[IP生成](https://sd2.youdooart.com/generate/ip)。已部署，待用户手动验收。
+
+### 10.2 数据及恢复保护
+
+私有发布阶段 `/data/video-api-debugger/release-staging/character-assets-20261111/attempt01`；pair `e32d2e50-4628-4f41-81aa-c1e70049c966`。原11个writer自然退出，无强杀/超时；一致SQLite备份后仅执行本次锁定的3个DDL，08:41:48 UTC新增CharacterAsset表与2显式索引，原schema和旧数据不改。原Works迁移只读核验，不重复执行；不跑全仓migrate deploy，价格保护字段前后一致，2小时视频交付看护鲜核仍为2h。
+
+固定程序恢复入口：`bash /data/video-api-debugger/release-staging/character-assets-20261111/attempt01/program-recovery.sh /data/video-api-debugger/release-staging/character-assets-20261111/attempt01/release-input.json`。恢复只切本次新guard程序和配置指针，保留新表、媒体、点数、账本及回执；不回业务数据、不使用缺隐私reader的旧79ab。源码/构建/启动守卫已核对，本轮未在生产演练回退。
+
+### 10.3 一次真实任务
+
+沿本次用户授权，使用既有普通内部Codex账号本人personal项目，通过真实目录API登记裸ID（HTTP201，服务端仍显示未核验），再经IP Bearer v2入口创建一次4秒/480p/无音频任务。鲜报价及费用上限20点，原请求号 `1237dbdf-1562-4f1e-a421-3c96cb5ba774`；站内任务 `cmwbvf30t0009ulv9d99occnn`，上游任务 `cgt-20261111164225-06ca8`。创建HTTP200并受理，后续只GET原号/原任务，无换号、重复创建或额外飞书发送。
+
+任务终态succeeded，原片本地与公开保存均成功；只读账本核对实际20点、剩余冻结0点、两条正常冻结/结算记录，上游创建记录精确1条。已下载887045字节原片并用ffprobe核对H.264、864×496、24fps、实际4.041667秒（不超过15秒）；没有裁切、转码或重新生成。原片SHA256 `b4a85db2362034f6144e85415b0acd6019a74899e4926b161784c0c92c3b2a77`。
+
+[实际提交结构（隐藏密钥）](../../docs/materials/2026-11-11-seedance-private-character-assets/provider-request.redacted.json)来自该任务冻结快照和持久client_request_id，结合已绑定mapper核对，不冒充网络抓包：content文本后为image_url，URL为本次`asset://asset-20261111133644-8q2nk`，role为reference_image，和提示词`@图片1`一致。2.0已实际生成；2.5及替换不同ID由离线模拟覆盖，未再收费生成。
+
+测试原片：v1.0.0 · R01 · 原片（4秒，效果待用户手验）。本地资料路径 `docs/materials/2026-11-11-seedance-private-character-assets/release/real-test/character-asset-test-v1.0.0-R01-original.mp4`；不把网页版本当原片自身版本。测试目录记录归专用Codex账号，未向其他账号自动公开/预填。实际使用：本人刷新视频生成页，在右上「角色资产」新增姓名与可替换Asset ID，加入本次；普通页沿明确的「切换IP线路并使用」。
+
+### 10.4 手验及余项
+
+仍待用户手验：红框实际位置、手机/键盘、搜索/增改/停用/软删撤销、混排编号、刷新恢复、切线路保输入、视觉角色一致性及成片效果。本次工程和单个真实API任务不冒全部界面验收。
+
+未执行GetAsset/ListAssets管理查询，未申请新AK/SK；供应商管理状态仍显示未核验。真实生成证明本次已配置Key能够引用本次Asset ID，不泛化为所有资产/项目永远可用，不将管理API的Active当前值冒已查询。本轮未新增任务外问题。
+<!-- /ARK-CHARACTER-ASSET01-RELEASE-20261111 -->
+
+
+## 11. 修改文件与功能对应
+
+| 文件/目录 | 本次功能 |
+|---|---|
+| `src/components/CharacterAssetPanel.tsx`、`character-assets.css`、`GenerationComposer.tsx` | 素材区右上入口、本人目录搜索/新增/编辑/停用/删除恢复与小屏面板。 |
+| `src/components/generate/GeneratePageClient.tsx`、`ReferenceStrip.tsx`、`PromptEditor.tsx`、`src/lib/navigation/task-reuse-client.ts` | 普通图片/角色混排及统一图号、保原文插入、显式切IP和草稿恢复。 |
+| `prisma/schema.prisma`、本次唯一migration、`src/lib/character-assets/`、`src/app/api/character-assets/` | owner目录、ID规范化、版本冲突、授权缩略图、软删恢复、冻结引用与写暂停。 |
+| `src/lib/creation/intents.ts`、`src/lib/pricing/video-context.ts`、`src/app/api/{ip/tasks/create,tasks/create,tasks/estimate}/route.ts`、`src/lib/provider/volcengine-ip.ts` | v2准备/报价/受理同一输入、实际content、2.0/2.5映射、普通网关拒绝私域误传及清楚错误。 |
+| `src/lib/video/multiview-task-privacy.ts`、`src/lib/navigation/task-reuse-operation.server.ts`、`src/app/api/tasks/[id]/reuse/route.ts`、`src/app/tasks/[id]/page.tsx`、IP list/status/request-status | 旧快照、详情/复制/复用、跨账号隐私投影及正常Codex Bearer原号读取。 |
+| `scripts/character-assets-engineering.mjs`、`character-assets-ip-auth-engineering.mjs`、`create-pricing-compatible-guard.mjs`、`pricing-compatible-guard-engineering.mjs` | 18/23组模拟、七开关guard源生成/相容检查；不收费、不调真实供应商。 |
+| `src/app/api/codex/config/route.ts`、`src/lib/release.ts`、`package.json`/lock | 描述新输入合同、真实v0.144.0版本与用户更新摘要。 |
+
+发布专用脚本及完整日志在第10节固定私有stage与本地资料`release/`下；不把生产配置、数据库备份、token或原片整包提交到Git。
