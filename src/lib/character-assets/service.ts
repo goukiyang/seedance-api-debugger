@@ -1,8 +1,9 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { prisma, retrySqliteBusy } from '@/lib/prisma';
 import { AuthError, type SessionUser } from '@/lib/auth/session';
 import { assertCanViewReferenceImage } from '@/lib/reference-albums/permissions';
+import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
 import { CharacterAssetError } from './errors';
 import { normalizeArkAssetId } from './inputs';
 import { CHARACTER_ASSET_WRITES_ENABLED } from './build-mode';
@@ -127,6 +128,51 @@ export async function listCharacterAssets(user: SessionUser, options: { includeD
 
 export async function getCharacterAsset(user: SessionUser, id: string) {
   return present(await findOwned(user.id, id, prisma), user);
+}
+
+/** Register an existing personal upload as a cover without adding generation inputs. */
+export async function registerCharacterThumbnail(user: SessionUser, assetIdValue: unknown) {
+  assertWritesEnabled();
+  const assetId = text(assetIdValue, '图片素材 ID', 256, true)!;
+  return retrySqliteBusy(() => prisma.$transaction(async db => {
+    const currentUser = await db.user.findUnique({ where: { id: user.id } });
+    if (!currentUser || currentUser.status !== 'active') throw new AuthError('账号不可使用，未登记缩略图', 403);
+    const asset = await db.asset.findUnique({ where: { id: assetId } });
+    if (!asset || asset.owner_id !== user.id) throw new CharacterAssetError('图片不存在或不属于本人', 404, 'CHARACTER_THUMBNAIL_FORBIDDEN');
+    if (asset.status !== 'active' || asset.type !== 'image'
+      || !['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp'].includes(asset.mime_type)
+      || asset.file_size <= 0 || asset.file_size > 30 * 1024 * 1024) {
+      throw new CharacterAssetError('请选择本人可用的 JPEG、PNG、GIF、WebP 或 BMP 图片，大小不超过 30MB', 400, 'CHARACTER_THUMBNAIL_INVALID');
+    }
+    if (!await canReadStudioAsset(currentUser, asset, db)) throw new AuthError('无权读取此图片，未登记缩略图', 403);
+
+    const albumId = `character_thumbnail_album_${createHash('sha256').update(user.id).digest('hex')}`;
+    const album = await db.referenceAlbum.upsert({
+      where: { id: albumId }, update: {},
+      create: { id: albumId, owner_user_id: user.id, name: '角色缩略图', album_type: 'personal', visibility: 'private',
+        project_id: null, workspace_id: null, public_folder_id: null, status: 'active' },
+      include: { _count: { select: { shares: { where: { status: 'active', OR: [{ expires_at: null }, { expires_at: { gt: new Date() } }] } } } } },
+    });
+    if (album.owner_user_id !== user.id || album.status !== 'active' || album.album_type !== 'personal'
+      || album.visibility !== 'private' || album.project_id !== null || album.workspace_id !== null
+      || album.public_folder_id !== null || album._count.shares !== 0) {
+      throw new CharacterAssetError('原缩略图图集已变化或共享，未登记新图片；原文件保留在本人历史', 409, 'CHARACTER_THUMBNAIL_ALBUM_CONFLICT');
+    }
+    const referenceImageId = `character_thumbnail_ref_${createHash('sha256').update(JSON.stringify([user.id, asset.id])).digest('hex')}`;
+    const image = await db.referenceImage.upsert({
+      where: { id: referenceImageId }, update: {},
+      create: { id: referenceImageId, album_id: albumId, owner_user_id: user.id, asset_id: asset.id,
+        project_id: null, workspace_id: null, url: asset.original_url, thumbnail_url: asset.thumbnail_url,
+        source_type: 'upload', status: 'active' },
+    });
+    if (image.owner_user_id !== user.id || image.asset_id !== asset.id || image.album_id !== albumId
+      || image.status !== 'active' || image.project_id !== null || image.workspace_id !== null
+      || image.url !== asset.original_url || image.thumbnail_url !== asset.thumbnail_url) {
+      throw new CharacterAssetError('原缩略图关联已变化，未恢复或覆盖；原文件保留在本人历史', 409, 'CHARACTER_THUMBNAIL_REFERENCE_CONFLICT');
+    }
+    return { assetId: asset.id, referenceImageId: image.id,
+      thumbnailUrl: `/api/reference-images/${encodeURIComponent(image.id)}/content?variant=thumbnail` };
+  }));
 }
 
 /** Raw queries keep this additive table usable with the previous generated Prisma reader. */

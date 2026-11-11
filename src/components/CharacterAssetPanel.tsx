@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, Check, ChevronDown, Copy, Image as ImageIcon, Plus, RefreshCw, UsersRound, X } from 'lucide-react';
+import { ArrowLeft, Check, ChevronDown, Copy, Image as ImageIcon, Plus, RefreshCw, Upload, UsersRound, X } from 'lucide-react';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
-import { uploadSession } from '@/lib/http/upload-session';
+import { uploadFileToHistory, type UploadProgressSnapshot } from '@/lib/http/file-upload';
+import { subscribeUploadSession, uploadSession } from '@/lib/http/upload-session';
 import type { CharacterAssetDTO } from '@/lib/character-assets/types';
 import { normalizeArkAssetId } from '@/lib/character-assets/inputs';
 import './character-assets.css';
@@ -12,6 +13,13 @@ import './character-assets.css';
 type CharacterForm = {
   name: string; assetId: string; groupId: string; projectName: string; notes: string;
   thumbnailReferenceImageId: string; revision?: number;
+};
+type ThumbnailOption = { id: string; name: string; thumbnailUrl: string | null };
+type ThumbnailUpload = {
+  owner: string; epoch: number; operation: number; file: File; assetId?: string;
+  referenceImageId?: string; thumbnailUrl?: string;
+  phase: 'uploading' | 'registering' | 'preparing' | 'ready' | 'failed';
+  progress?: UploadProgressSnapshot; error?: string; options: ThumbnailOption[];
 };
 function CharacterThumbnail({ src, emptyLabel = '未设置缩略图' }: { src: string | null | undefined; emptyLabel?: string }) {
   const [failedSource, setFailedSource] = useState<string | null>(null);
@@ -30,10 +38,10 @@ export function useCharacterAssetDirectory(ownerId: string | null, enabled: bool
     { owner: null, assets: [], ready: false, error: null, loading: false });
   const ownerRef = useRef(ownerId); ownerRef.current = ownerId;
   const readRevision = useRef(0);
-  const request = useCallback(async (path = '', method = 'GET', body?: object) => {
+  const request = useCallback(async (path = '', method = 'GET', body?: object, signal?: AbortSignal) => {
     const session = uploadSession();
     if (!ownerId || session.ownerId !== ownerId) throw new Error('账号尚未确认，请稍候重试。');
-    const response = await fetch(`/api/character-assets${path}`, { method, cache: 'no-store',
+    const response = await fetch(`/api/character-assets${path}`, { method, cache: 'no-store', signal,
       headers: { 'Content-Type': 'application/json', 'x-app-session-user': ownerId }, ...(body ? { body: JSON.stringify(body) } : {}) });
     const data = await response.json();
     if (ownerRef.current !== ownerId || uploadSession().epoch !== session.epoch || uploadSession().ownerId !== ownerId) throw new Error('账号已变化，未应用角色目录结果。');
@@ -73,7 +81,7 @@ type Props = {
   capacity: number;
   isIp: boolean;
   switchChoices: Array<{ id: string; label: string; disabled?: boolean; disabledReason?: string }>;
-  thumbnails: Array<{ id: string; name: string; thumbnailUrl: string | null }>;
+  thumbnails: ThumbnailOption[];
   onJoin: (asset: CharacterAssetDTO, targetChoice?: string) => void;
 };
 
@@ -87,13 +95,30 @@ export function CharacterAssetPanel({ ownerId, directory, selectedIds, disabled,
   const [notice, setNotice] = useState<string | null>(null);
   const [targetChoice, setTargetChoice] = useState('');
   const [position, setPosition] = useState({ left: 12, top: 60, maxHeight: 600 });
+  const [thumbnailUploads, setThumbnailUploads] = useState<Record<string, ThumbnailUpload>>({});
+  const thumbnailUploadsRef = useRef<Record<string, ThumbnailUpload>>({});
+  const uploadOperation = useRef(0);
+  const editorRevision = useRef(0);
+  const editingRef = useRef(editing); editingRef.current = editing;
+  const openRef = useRef(open); openRef.current = open;
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+  const uploadPickRef = useRef<{ owner: string; epoch: number; target: string; revision: number } | null>(null);
   const draftKey = ownerId && editing ? `sd2:character-form:v1:${JSON.stringify([ownerId, editing])}` : null;
   const ownerRef = useRef(ownerId); ownerRef.current = ownerId;
-  useEffect(() => { setOpen(false); setEditing(null); setForm(emptyForm()); setError(null); setNotice(null); }, [ownerId]);
-  const close = useCallback(() => setOpen(false), []);
+  useEffect(() => {
+    editorRevision.current++; thumbnailUploadsRef.current = {}; setThumbnailUploads({});
+    setOpen(false); setEditing(null); setForm(emptyForm()); setError(null); setNotice(null);
+  }, [ownerId]);
+  useEffect(() => {
+    const unsubscribe = subscribeUploadSession(() => {
+      editorRevision.current++; thumbnailUploadsRef.current = {}; setThumbnailUploads({});
+    });
+    return () => { unsubscribe(); editorRevision.current++; thumbnailUploadsRef.current = {}; };
+  }, []);
+  const close = useCallback(() => { editorRevision.current++; openRef.current = false; setOpen(false); }, []);
   useDialogDismiss({ open, dialogRef: panelRef, branchRefs: [triggerRef], layerSurfaceRef: panelRef,
     initialFocusRef: searchRef, modal: false, onDismiss: close });
   useLayoutEffect(() => {
@@ -126,7 +151,72 @@ export function CharacterAssetPanel({ ownerId, directory, selectedIds, disabled,
       const saved = key && JSON.parse(localStorage.getItem(key) || 'null');
       if (saved && ['name', 'assetId', 'groupId', 'projectName', 'notes', 'thumbnailReferenceImageId'].every(field => typeof saved[field] === 'string')) next = saved;
     } catch { /* The current server record remains editable if local optional data is unavailable. */ }
+    editorRevision.current++; editingRef.current = id;
     setForm(next); setEditing(id); setError(null); setNotice(null);
+  };
+  const thumbnailUpload = editing ? thumbnailUploads[editing] : undefined;
+  const uploadingThumbnail = Boolean(thumbnailUpload && !['ready', 'failed'].includes(thumbnailUpload.phase));
+  const returnToList = () => { if (busy || uploadingThumbnail) return; editorRevision.current++; editingRef.current = null; setEditing(null); };
+  const prepareThumbnail = async (file?: File) => {
+    const target = editingRef.current, owner = ownerId, session = uploadSession();
+    if (!target || !owner || session.ownerId !== owner || busy) return;
+    const previous = thumbnailUploadsRef.current[target];
+    if (previous && !['ready', 'failed'].includes(previous.phase)) return;
+    const source = file || previous?.file;
+    if (!source) return;
+    if (!['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp'].includes(source.type) || source.size <= 0 || source.size > 30 * 1024 * 1024) {
+      setError('请选择非空且不超过 30MB 的 JPEG、PNG、GIF、WebP 或 BMP 图片。'); return;
+    }
+    const operation = ++uploadOperation.current, revision = editorRevision.current;
+    let pending: ThumbnailUpload = file
+      ? { owner, epoch: session.epoch, operation, file: source, phase: 'uploading', options: previous?.options || [] }
+      : { ...previous!, operation, phase: previous?.assetId ? 'registering' : 'uploading', progress: undefined, error: undefined };
+    const current = () => ownerRef.current === owner && uploadSession().ownerId === owner && uploadSession().epoch === session.epoch
+      && thumbnailUploadsRef.current[target]?.operation === operation;
+    const update = () => { thumbnailUploadsRef.current = { ...thumbnailUploadsRef.current, [target]: pending }; setThumbnailUploads(thumbnailUploadsRef.current); };
+    update(); setError(null);
+    try {
+      if (!pending.assetId) {
+        const uploaded = await uploadFileToHistory(source, { ownerId: owner, onProgress: progress => {
+          if (!current()) return; pending = { ...pending, progress }; update();
+        } });
+        if (!current()) return;
+        if (!uploaded.id) throw new Error('上传编号尚未确认，请继续核对原上传。');
+        pending = { ...pending, assetId: uploaded.id, phase: 'registering', progress: undefined }; update();
+      }
+      if (!pending.referenceImageId || !pending.thumbnailUrl) {
+        const registered = await directory.request('/thumbnail', 'POST', { assetId: pending.assetId }, AbortSignal.timeout(60_000));
+        if (!current()) return;
+        if (registered.assetId !== pending.assetId || typeof registered.referenceImageId !== 'string'
+          || registered.thumbnailUrl !== `/api/reference-images/${encodeURIComponent(registered.referenceImageId)}/content?variant=thumbnail`) {
+          throw new Error('缩略图登记结果无法确认，请重试准备缩略图。');
+        }
+        pending = { ...pending, referenceImageId: registered.referenceImageId, thumbnailUrl: registered.thumbnailUrl };
+      }
+      pending = { ...pending, phase: 'preparing' }; update();
+      const image = new Image(); image.src = pending.thumbnailUrl!;
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const timer = window.setTimeout(() => { image.src = ''; reject(new Error('缩略图读取超时')); }, 30_000);
+          image.decode().then(() => { window.clearTimeout(timer); resolve(); }, cause => { window.clearTimeout(timer); reject(cause); });
+        });
+      }
+      catch { throw new Error('缩略图暂时无法读取，原封面和上传素材已保留，请重试。'); }
+      if (!current()) return;
+      const referenceImageId = pending.referenceImageId!, thumbnailUrl = pending.thumbnailUrl!;
+      pending = { ...pending, phase: 'ready', options: [{ id: referenceImageId, name: source.name, thumbnailUrl },
+        ...pending.options.filter(item => item.id !== referenceImageId)] }; update();
+      if (openRef.current && editingRef.current === target && editorRevision.current === revision) {
+        setForm(value => ({ ...value, thumbnailReferenceImageId: referenceImageId }));
+      }
+    } catch (cause) {
+      if (current()) {
+        const message = cause instanceof Error && ['TimeoutError', 'AbortError'].includes(cause.name)
+          ? '缩略图登记暂未确认，上传素材和输入已保留，请重试准备缩略图。'
+          : cause instanceof Error ? cause.message : '缩略图暂未准备成功，输入已保留。';
+        pending = { ...pending, phase: 'failed', error: message }; update();
+      }
+    }
   };
   const mutate = async (path: string, method: string, body: object, message: string) => {
     const owner = ownerId;
@@ -139,6 +229,7 @@ export function CharacterAssetPanel({ ownerId, directory, selectedIds, disabled,
     finally { if (ownerRef.current === owner) setBusy(false); }
   };
   const save = async () => {
+    if (busy || uploadingThumbnail) return;
     let assetId: string;
     try { assetId = normalizeArkAssetId(form.assetId); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Asset ID 无效'); return; }
     if (!form.name.trim()) { setError('请填写角色名称。'); return; }
@@ -147,27 +238,63 @@ export function CharacterAssetPanel({ ownerId, directory, selectedIds, disabled,
       projectName: form.projectName.trim() || null, notes: form.notes.trim() || null,
       thumbnailReferenceImageId: form.thumbnailReferenceImageId || null,
     }, '角色登记已保存');
-    if (saved) { if (draftKey) { try { localStorage.removeItem(draftKey); } catch { /* Saved record is authoritative. */ } } setEditing(null); }
+    if (saved) {
+      if (draftKey) { try { localStorage.removeItem(draftKey); } catch { /* Saved record is authoritative. */ } }
+      if (editing) {
+        const pending = thumbnailUploadsRef.current[editing], remaining = { ...thumbnailUploadsRef.current };
+        delete remaining[editing];
+        if (pending?.phase === 'failed') remaining[saved.id] = pending;
+        thumbnailUploadsRef.current = remaining; setThumbnailUploads(remaining);
+      }
+      editorRevision.current++; editingRef.current = null; setEditing(null);
+    }
   };
   const items = directory.assets.filter(asset => `${asset.name} ${asset.assetId}`.toLowerCase().includes(query.trim().toLowerCase()));
   const activeChoice = switchChoices.find(choice => choice.id === targetChoice);
   const currentRecord = directory.assets.find(asset => asset.id === editing);
-  const thumbnailOptions = form.thumbnailReferenceImageId && !thumbnails.some(item => item.id === form.thumbnailReferenceImageId)
-    ? [{ id: form.thumbnailReferenceImageId, name: '当前缩略图', thumbnailUrl: currentRecord?.thumbnailReferenceImageId === form.thumbnailReferenceImageId ? currentRecord.thumbnailUrl : null }, ...thumbnails]
-    : thumbnails;
+  const availableThumbnails = [...(thumbnailUpload?.options || []), ...thumbnails.filter(item => !thumbnailUpload?.options.some(option => option.id === item.id))];
+  const thumbnailOptions = form.thumbnailReferenceImageId && !availableThumbnails.some(item => item.id === form.thumbnailReferenceImageId)
+    ? [{ id: form.thumbnailReferenceImageId, name: '当前缩略图', thumbnailUrl: currentRecord?.thumbnailReferenceImageId === form.thumbnailReferenceImageId
+      ? currentRecord.thumbnailUrl : `/api/reference-images/${encodeURIComponent(form.thumbnailReferenceImageId)}/content?variant=thumbnail` }, ...availableThumbnails]
+    : availableThumbnails;
   return <>
     <button type="button" ref={triggerRef} className="character-assets-trigger" aria-haspopup="dialog" aria-expanded={open}
-      disabled={!ownerId} onClick={() => { setOpen(current => !current); if (!open) void directory.refresh(); }}><UsersRound size={15} />角色资产<ChevronDown size={12} aria-hidden="true" /></button>
+      disabled={!ownerId} onClick={() => { if (open) close(); else { openRef.current = true; setOpen(true); void directory.refresh(); } }}><UsersRound size={15} />角色资产<ChevronDown size={12} aria-hidden="true" /></button>
     {open && createPortal(<div ref={panelRef} className="character-assets-panel" role="dialog" aria-label="角色资产" tabIndex={-1}
       style={{ left: position.left, top: position.top, maxHeight: position.maxHeight }}>
-      <header><div>{editing && <button type="button" className="btn-icon" aria-label="返回角色列表" disabled={busy} onClick={() => setEditing(null)}><ArrowLeft size={16} /></button>}
+      <header><div>{editing && <button type="button" className="btn-icon" aria-label="返回角色列表" disabled={busy || uploadingThumbnail} onClick={returnToList}><ArrowLeft size={16} /></button>}
         <strong>{editing ? editing === 'new' ? '新增角色' : '编辑角色' : '角色资产'}</strong></div>
         <button type="button" className="btn-icon" aria-label="关闭角色资产" onClick={close}><X size={17} /></button></header>
       {editing ? <form onSubmit={event => { event.preventDefault(); void save(); }} className="character-assets-form">
         <label>角色名称<input value={form.name} maxLength={120} onChange={event => setForm(current => ({ ...current, name: event.target.value }))} required /></label>
         <label>Asset ID<input value={form.assetId} maxLength={264} onChange={event => setForm(current => ({ ...current, assetId: event.target.value }))} placeholder="asset-… 或 asset://asset-…" required /></label>
-        <fieldset className="character-assets-thumbnail-picker" disabled={busy}>
+        <fieldset className="character-assets-thumbnail-picker" disabled={busy || uploadingThumbnail}>
           <legend>缩略图</legend>
+          <div className="character-assets-thumbnail-upload">
+            <input ref={uploadInputRef} type="file" hidden accept="image/jpeg,image/png,image/gif,image/webp,image/bmp"
+              onChange={event => {
+                const file = event.target.files?.[0], picked = uploadPickRef.current, session = uploadSession();
+                event.target.value = ''; uploadPickRef.current = null;
+                if (file && picked && ownerRef.current === picked.owner && session.ownerId === picked.owner && session.epoch === picked.epoch
+                  && editingRef.current === picked.target && editorRevision.current === picked.revision && openRef.current) void prepareThumbnail(file);
+              }} />
+            <button type="button" className="btn-secondary" disabled={thumbnailUpload?.phase === 'failed' && !thumbnailUpload.assetId} onClick={() => {
+              const session = uploadSession();
+              if (!ownerId || session.ownerId !== ownerId || !editing) return;
+              uploadPickRef.current = { owner: ownerId, epoch: session.epoch, target: editing, revision: editorRevision.current };
+              uploadInputRef.current?.click();
+            }}><Upload size={14} />{form.thumbnailReferenceImageId ? '上传 / 更换图片' : '上传图片'}</button>
+            <small>JPEG / PNG / GIF / WebP / BMP，30MB 以内</small>
+          </div>
+          {thumbnailUpload && <div className="character-assets-thumbnail-upload-status" role={thumbnailUpload.phase === 'failed' ? 'alert' : 'status'}>
+            <span className="character-assets-upload-name">{thumbnailUpload.file.name}</span>
+            <span>{thumbnailUpload.phase === 'failed' ? thumbnailUpload.error : thumbnailUpload.phase === 'registering' ? '正在登记缩略图…'
+              : thumbnailUpload.phase === 'preparing' ? '正在准备缩略图…' : thumbnailUpload.phase === 'ready'
+                ? form.thumbnailReferenceImageId === thumbnailUpload.referenceImageId ? '缩略图已就绪，保存登记后生效。' : '缩略图已就绪，请按图选择。'
+              : `${thumbnailUpload.progress?.label || '正在准备上传…'}${thumbnailUpload.progress?.percent != null ? ` ${thumbnailUpload.progress.percent}%` : ''}`}</span>
+            {thumbnailUpload.phase === 'uploading' && <progress aria-label="图片上传进度" max={100} value={thumbnailUpload.progress?.percent} />}
+            {thumbnailUpload.phase === 'failed' && <button type="button" className="btn-secondary" onClick={() => void prepareThumbnail()}>{thumbnailUpload.assetId ? '重试准备缩略图' : '继续核对原上传'}</button>}
+          </div>}
           <div className="character-assets-thumbnail-options">
             <button type="button" className="character-assets-thumbnail-option" aria-pressed={!form.thumbnailReferenceImageId}
               onClick={() => setForm(current => ({ ...current, thumbnailReferenceImageId: '' }))}>
@@ -180,15 +307,15 @@ export function CharacterAssetPanel({ ownerId, directory, selectedIds, disabled,
               <span>{item.name}</span>{form.thumbnailReferenceImageId === item.id && <Check className="character-assets-selected-check" size={15} aria-hidden="true" />}
             </button>)}
           </div>
-          <small>{thumbnails.length ? '选择本次素材中的站内图片，仅作识别封面。' : '可先将有权使用的站内图片加入本次素材，再按图选择封面。'}</small>
+          <small>也可从本次站内图片按图选择。上传图片留在本人素材历史，保存登记后仅作识别封面。</small>
         </fieldset>
         <details><summary>分组、项目与备注</summary><label>Group ID<input value={form.groupId} maxLength={264} onChange={event => setForm(current => ({ ...current, groupId: event.target.value }))} /></label>
           <label>Ark ProjectName<input value={form.projectName} maxLength={120} onChange={event => setForm(current => ({ ...current, projectName: event.target.value }))} placeholder="未知可留空" /></label>
           <label>备注<textarea value={form.notes} maxLength={2000} onChange={event => setForm(current => ({ ...current, notes: event.target.value }))} rows={3} /></label></details>
-        {currentRecord && form.revision !== currentRecord.revision && <p className="character-assets-error">记录已有新版本，本次输入已保留。<button type="button" onClick={() => setForm(formFor(currentRecord))}>重读记录</button></p>}
+        {currentRecord && form.revision !== currentRecord.revision && <p className="character-assets-error">记录已有新版本，本次输入已保留。<button type="button" disabled={busy || uploadingThumbnail} onClick={() => setForm(formFor(currentRecord))}>重读记录</button></p>}
         {(error || directory.error) && <p className="character-assets-error" role="alert">{error || directory.error}
           {currentRecord && <button type="button" onClick={() => { void directory.refresh(); }}>刷新记录</button>}</p>}
-        <footer><button type="button" className="btn-secondary" disabled={busy} onClick={() => setEditing(null)}>返回</button><button type="submit" className="btn-primary" disabled={busy || Boolean(currentRecord && form.revision !== currentRecord.revision)}>{busy ? '正在保存…' : '保存登记'}</button></footer>
+        <footer><button type="button" className="btn-secondary" disabled={busy || uploadingThumbnail} onClick={returnToList}>返回</button><button type="submit" className="btn-primary" disabled={busy || uploadingThumbnail || Boolean(currentRecord && form.revision !== currentRecord.revision)}>{busy ? '正在保存…' : '保存登记'}</button></footer>
       </form> : <>
         <div className="character-assets-search"><input ref={searchRef} aria-label="搜索角色名称或 Asset ID" placeholder="搜索名称或 Asset ID" value={query} onChange={event => setQuery(event.target.value)} />
           <button type="button" className="btn-secondary" disabled={busy} onClick={() => beginEdit()}><Plus size={14} />新增</button>
