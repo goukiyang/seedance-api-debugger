@@ -1,3 +1,9 @@
+<!-- ARK-CHARACTER-ASSET01-MATERIALS-20261111 -->
+## 私域角色资产入口原图（2026-11-11）
+
+[原工单](../../tasks/todo/2026-11-11-seedance-private-character-assets.md)；[用户红框截图原件](2026-11-11-seedance-private-character-assets/codex-clipboard-d499faa9-4bef-40c4-b7ec-dea9668b6960.png)已从本次附件复制并核字节一致，用于定位素材区右上「角色资产」管理入口。本次只归档与补方案，非真实新功能截图；未公开上传、未发送MJ、未生成或收费。实际应用与手验尚未进行。
+<!-- /ARK-CHARACTER-ASSET01-MATERIALS-20261111 -->
+
 <!-- FUSION-UX12-MATERIALS-20261110 -->
 ## 角色融合UX12保留卡片与分组（2026-11-10）
 
