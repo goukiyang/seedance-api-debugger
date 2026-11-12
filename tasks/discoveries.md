@@ -1,5 +1,13 @@
 # 项目任务外发现报告
 
+<!-- D-20261112-MEDIA-ERROR-COPY -->
+## D-20261112-MEDIA-ERROR-COPY 媒体读取失败沿用喜欢功能文案（已确认，非阻断）
+
+本轮旧缩略图/参考传输修复的风险核对中，定向源码确认`src/app/api/content-reactions/media/route.ts`在非鉴权读取异常时调用共用`reactionError`；`src/lib/content-reactions/http.ts`对未知异常固定503与“喜欢暂时不可用，请稍后重试”。因此该媒体API实际错误场景的JSON提示与图片读取无关。普通img失败仍走既有不可用占位，不等同原件丢失/权限绕过/生成失败，未做浏览器现场复现。
+
+后续在该读取route窄改为明确媒体错误提示，保401/403/404、Cache-Control及真实503，不扩改其它喜欢/删除接口。本轮main8f73已冻结构建，未将这项旧错误文案夹入或重建全站；完整缩略图与普通视频引用两项目标继续。原任务和证据入口：[LEGACY-THUMB-REPAIR16](todo/2026-11-11-seedance-private-character-assets.md#16-旧缩略图完整显示修复与提交未知排查2026-11-12)。
+<!-- /D-20261112-MEDIA-ERROR-COPY -->
+
 项目全名：video-api-debugger（sd2 视频生成API调试平台）
 正式根：`/Volumes/Data/Projects/video-api-debugger`
 建立日期：2026-11-01

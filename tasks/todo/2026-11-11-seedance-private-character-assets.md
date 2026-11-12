@@ -419,4 +419,46 @@
 
 CodeGraph同树两次准备分别遇already-running及合并时源码变化而退出，未返回成功结构查询；本批已沿真实源码与上述实际模块工程核关系，不把工具连接/准备冒成功。最终稳定源再按需同步，不阻断已授权的必要工程和发布。
 
+### 16.5 精确组源与候选构建启动
+
+最终主源8f73f25a7a6a83c461178f9097258ca7f507c1b5/v0.148.1，分支codex/legacy-thumbnail-complete-20261112已推且ls-remote核同；合入实际健康355be/v1480，融合21文件及外部模板开放修复保留。Git-only精确导出2534文件、13运行净差量、继承113原排除/新排除0、无docs/tasks运行差量、工作树读0/无凭据入包。29文件冻结包SHA256 `6bd56b71f42e0bf7873da82803407fb117b23131769c1bee8a85e947f74bb6ae`（312128字节）已上传并在服务器核同，16份继承原证逐字节复制，assemble逐Git blob核过。
+
+新stage `/data/video-api-debugger/release-staging/legacy-thumbnail-complete-20261112/attempt01`，控制器sd2-legacy-thumbnail-complete-build-20261112-01已启动main-only构建。启动前核正式站仍355be active、其它build/release/cutover/recovery控制器0、工程父目录755与候选私有generated client约束；未切换版本。完整types/改动lint/两真实工程原件/native按输入复用或刷新/fresh计价/完整Next与实际子进程回执仍待收，不预填BUILD或冒已部署。
+
+稳定源CodeGraph prepare/sync已exit0，绑定8f73、2099文件、pending/mismatch/missing/parse均0，源指纹fa0753c3f3836b765d1711d3a2ec3f0b3ba9c63dd3f9819080210b08304dee32；实际MCP context约90秒未返回，保留“查询未完成”缺口，不把索引成功冒结构查询通过。源码caller替代核readStudioThumbnail→readStudioDisplayImage(url,thumbnail)，后续preview预热原样。
+
+### 16.6 首候选完整成功，但切版前捕获同版并行候选
+
+本轮attempt01主源8f73/v1481完整构建已exit0，实际BUILD rux_lj-5WkdLdQBnvZK3B。服务器完整types/改动lint/两工程20组通过；原生17记录12复用5刷新，关联17记录13复用4刷新，fresh计价通过；Next实际子进程exit0/no signal/error、source-pair/十门guard原成品、prepared-pair及持久链接就绪。未切版。
+
+切版前新鲜进程检查捕获另一个controller：multiview-action-controls-20261112/attempt04，candidate1fe7e725be9d0e74f907d638f2c99ee47f8a46cd也为v1481、base355be。root受影响发布命令在启动release前停止，未停服、无配置/数据切换；不是本轮编译失败。Reason live inventory仅本会话，未向其它聊天派工/广播，原单及实际controller是协调事实源。不能让同版候选先后覆盖同期修复；本轮保01全部成功原证，等待该后继实际健康后合入为1482，再构建/顺序发布。只读13差量对方17文件，交集仅package/lock/release公告；工程22依赖字节仍待整合鲜核。不会以未上线candidate冒健康基线或重放其发布。
+
+两条旧任务进一步各按真实耐久clientRequestId精准只读查询一次（SDK既有POST /getResult，仅clientRequestId，非create/收费/结算）。08:27:33.919Z最新匹配返回HTTP200/0字节/119ms，08:27:34.045Z前一条HTTP200/0字节/85ms，无原key回显、上游ID或状态；仍不能证明受理/未受理/免费。SDK空响应回填clientRequestId只属占位，绝不当上游号。停止继续查询，原DB/135冻结各自保留，需供应商按两原key给明确受理与费用回执。
+
+额外确认旧媒体错误503文案借用“喜欢暂时不可用”，已记tasks/discoveries.md的D-20261112-MEDIA-ERROR-COPY，未夹入本次代码或借此扩大重建。相容guard为原1480程序，不含本轮显示/传输修正；若实际用于恢复，只回程序/配置、保业务数据，修复行为需再接续，未演练生产回退。
+
+### 16.7 发布占用判断纠正：原ready修复先发，后继须鲜核继承
+
+16.6曾因同站候选build与同版号暂停。本轮随后核实际项目入口：对方仅build，无cutover-started/正式release或recovery控制器，当前健康主源仍355be；对方实际pre-cutover.py强制7服务cwd等于其baseline355be，禁止另一个fixed cutover同时运行。release-window-coordination也明确本地编辑/build/Git不自动占生产窗口。root临时人工预检把所有build-controller也列为正式切版占用，判断过宽；这不是既有发布器/工具安全拒绝。
+
+按这些实证纠正计划：保本轮已完成8f73/v1481/BUILD rux_lj-5WkdLdQBnvZK3B首候选不变，确认无实际live切换且旧基线仍健康后先沿原guard发布；本轮实际发布开始/健康源在原单及固定todo登记，后继1fe等必须鲜核新主源、合入本轮修复并重新定版本，不能切回旧355基线或同号覆盖。未提前部署对方未验内容，不停止其build，不向其它chat派工，不绕过既有发布器。
+
+02接续包仅本地inactive准备，已STOP-WRITING，不作为本轮待发布目标、不删除01成功原证或改冻结脚本。22绑定源与对方candidate零变，两业务修法无重叠，但该事实不把未上线candidate冒健康源。接下来仅执行原01固定来源release controller；真实前置/恢复边界全部继续有效。
+
+### 16.8 实际上线与风险闭环（已部署，待用户手动验收）
+
+**v0.148.1已于2026-11-12 08:37:42Z（纽约03:37:42）部署，08:38:40Z健康收口。** 主源8f73f25a7a6a83c461178f9097258ca7f507c1b5／BUILD rux_lj-5WkdLdQBnvZK3B，分支codex/legacy-thumbnail-complete-20261112已推并核远端；继承实际355be/v1480。主构建0、实际types/Next子进程0、cutover0；7服务均加载8f73，54公网资源核同实际成品、12匿名401（含两个图片读取GET及tasks/create和封面登记POST）、4timer、6真实启动检查和内外health通过。无真实上传/生成收费/浏览器或截图功能验收。
+
+产品改8源码及2工程脚本、3版本文件，共13运行差量：合法active旧图的两授权读取入口和library/workspace投影按同一原件重派生完整缩略图，viewOnly仍640、BMP有界私有兼容；普通Seedance合法图片复用既有直传，保序/原件/三模式/两模型及大小限制，未知状态中文不误报生成中。上传器、原件/旧缩略图/DB及角色Asset ID未改写，无批量重建/重传。20项工程和22绑定SHA、完整types/lint/Next、34原生关联记录（25复用/9刷新）及fresh计价均有原证。
+
+发布保护已实核：旧writer自然退出、无旧source进程/强杀；配置及一致SQLite备份保server私有，Works/CharacterAsset/5 Fusion表仅只读核既有迁移，未执行DDL或回业务数据。原两行价费全字段SHA d03c539d74a31b5e2a6a0305724b1b9f193e0ade878370898c7632d1bdc96539、私密36目标policy及持久数据链接保持；video delivery仍TimeoutStartUSec=2h/RuntimeMax=infinity。实际十门guard67305263189ecfddc79dcd11202764595bf2be1a／tX6SyfBNWAgTKvuak-X8k沿07:56:52Z原成功成品复用，不新造时间。
+
+恢复入口：`bash /data/video-api-debugger/release-staging/legacy-thumbnail-complete-20261112/attempt01/program-recovery.sh /data/video-api-debugger/release-staging/legacy-thumbnail-complete-20261112/attempt01/release-input.json`。仅回相容程序/config、保新数据，不依赖坏main物理完整；未演练生产回退。guard不含本轮修正，若恢复使用须后续接续，不能冒新功能仍存在。其它build不等于live切版占用；本轮实际源/BUILD/时间登记固定todo和部署入口，后继必须鲜核并继承，不用同号或旧355覆盖。
+
+**仍未闭环：** 两旧任务08:40:09Z只读鲜核仍submission_unknown/provider_task_id=null、各冻135、actual_cost/refund_amount均null；本轮未重发、退款/解冻或清预算。原key各精准只读查询一次仍HTTP200空体，无可验证受理/费用回执，需供应商按原key核对。前一generic错误不套用后一缺图根因，不能把新传输修复冒两旧单已恢复。首次完整缩略图仍需读取原件，受源站速度/可用性与原限额影响，缓存后复用，不承诺秒开。
+
+用户手验：刷新核1481；原问题旧图在素材列表/大图完整呈现、不用重传；角色下拉旧图及新增/编辑换图保持；普通2.5多图新生成和原首尾/多帧照常，旧单仅看明确待确认状态。工程/健康不代替实际功能手验，不追加收费调用。非阻断旧媒体错误文案单记D-20261112-MEDIA-ERROR-COPY，未扩本批修改。
+
+[本轮发布摘要](../../docs/materials/2026-11-11-seedance-private-character-assets/legacy-thumbnail-complete-release-summary.json)保存脱敏身份、检查和剩余风险。私有release/legacy-thumbnail-complete01/completed仅取回8份无凭据元证，未下载env/配置备份/DB或真实媒体；01冻结包和未用02材料原样保留。代码索引对应8f73已同步，MCP context超时缺口沿16.5，未冒结构查询成功。
+
 <!-- /LEGACY-THUMB-REPAIR16-20261112 -->

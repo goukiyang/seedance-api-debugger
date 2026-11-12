@@ -1,11 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '3D多视图模型与弹窗修复',
+  title: '火山参考图与错误记录修复',
   outline: [
-    '动作整理记住所选模型，可更新当前目录',
-    '失效模型说明原因并保留原动作',
-    '多视图弹窗居中，操作区更清楚'
+    '火山生成可按原有权限读取站内参考图',
+    '生成失败保留安全诊断，方便核对原因',
+    '原图、历史任务与点数记录保持'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
