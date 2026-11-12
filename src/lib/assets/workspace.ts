@@ -115,9 +115,11 @@ export async function getWorkspaceWithAssets(workspaceId: string) {
     ...workspace,
     assets: workspaceAssets.map((wa) => {
       const originalUrl = publicAssetUrl(wa.asset.original_url) || wa.asset.original_url;
-      const thumbnailUrl = localUploadExists(wa.asset.thumbnail_url)
-        ? publicAssetUrl(wa.asset.thumbnail_url)
-        : null;
+      const thumbnailUrl = wa.asset.type === 'image' && wa.asset.status === 'active'
+        ? wa.reference_image?.status === 'active' && wa.reference_image.album.status !== 'deleted'
+          ? `/api/reference-images/${encodeURIComponent(wa.reference_image.id)}/content?variant=thumbnail`
+          : `/api/content-reactions/media?key=${encodeURIComponent(`asset:${wa.asset.id}`)}&variant=thumbnail`
+        : localUploadExists(wa.asset.thumbnail_url) ? publicAssetUrl(wa.asset.thumbnail_url) : null;
       return {
         id: wa.id,
         assetId: wa.asset.id,

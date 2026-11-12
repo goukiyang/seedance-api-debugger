@@ -26,7 +26,7 @@ export async function GET(request: Request) {
       return NextResponse.redirect(target, { status: 302, headers });
     }
     if (resolved.summary.category === 'image') {
-      return await authorizedImageResponse(request, variant === 'thumbnail' ? resolved.source.thumbnail || resolved.source.url : resolved.source.url, variant as ImageVariant, resolved.source.mimeType || 'application/octet-stream', resolved.source.fileName || resolved.summary.title, started,
+      return await authorizedImageResponse(request, resolved.source.url, variant as ImageVariant, resolved.source.mimeType || 'application/octet-stream', resolved.source.fileName || resolved.summary.title, started,
         { requesterId: user.id, owner: resolved.source.hdOwner });
     }
     if (variant === 'thumbnail' && resolved.source.thumbnail) {

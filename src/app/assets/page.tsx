@@ -416,6 +416,7 @@ function getOrCreateWorkspaceTabId() {
 
 function statusLabel(status: string) {
   if (status === 'succeeded') return '已完成';
+  if (status === 'submission_unknown') return '提交结果待确认';
   if (status === 'running') return '生成中';
   if (status === 'submitted') return '排队中';
   if (status === 'failed') return '失败';

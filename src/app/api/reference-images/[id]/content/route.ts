@@ -49,11 +49,11 @@ async function content(
 
     // Image-only viewers keep thumbnail access; originals still require download permission.
     const useThumbnail = variant === 'thumbnail' || (['preview', 'detail'].includes(variant) && assetType === 'image' && !downloadable);
-    const sourceUrl = useThumbnail
+    const sourceUrl = assetType === 'image' ? image.url : useThumbnail
       ? (image.thumbnail_url || image.url)
       : image.url;
     const contentType = useThumbnail && image.thumbnail_url ? 'image/jpeg' : image.asset?.mime_type || 'image/jpeg';
-    if (assetType === 'image') return await authorizedImageResponse(request, sourceUrl, variant as ImageVariant, contentType, image.asset?.file_name || 'reference-image', started,
+    if (assetType === 'image') return await authorizedImageResponse(request, sourceUrl, useThumbnail && variant !== 'thumbnail' ? 'thumbnail' : variant as ImageVariant, image.asset?.mime_type || 'image/jpeg', image.asset?.file_name || 'reference-image', started,
       { requesterId: user.id, owner: image.asset ? { kind: 'asset', id: image.asset.id, ownerId: image.asset.owner_id }
         : { kind: 'reference', id: image.id, ownerId: image.owner_user_id } });
     return await mediaPreviewResponse(request, sourceUrl, contentType);

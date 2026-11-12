@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import https from 'node:https';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { lookup } from 'node:dns/promises';
 import sharp from 'sharp';
 import { createHash, randomUUID } from 'node:crypto';
@@ -83,8 +85,36 @@ async function readStudioDisplayImage(url: string, variant: StudioDisplayVariant
     if (thumbnailActive >= 2) await new Promise<void>(resolve => thumbnailWaiters.push(resolve));
     else thumbnailActive += 1;
     try {
-      const original = await readStudioImage(url);
-      const bytes = await sharp(original, { limitInputPixels: 40_000_000, animated: false })
+      let original = await readStudioImage(url);
+      // Sharp cannot decode BMP. Keep its original intact and decode a bounded,
+      // private single-frame display inside the same two-slot derivative queue.
+      if (original.toString('latin1', 0, 2) === 'BM') {
+        if (original.length < 26 || original.readUInt32LE(2) !== original.length) throw new Error('BMP 图片无效');
+        const dib = original.readUInt32LE(14);
+        if (![12, 40, 52, 56, 64, 108, 124].includes(dib) || original.length < 14 + dib) throw new Error('BMP 图片无效');
+        const width = dib === 12 ? original.readUInt16LE(18) : original.readInt32LE(18);
+        const height = dib === 12 ? original.readUInt16LE(20) : Math.abs(original.readInt32LE(22));
+        const offset = original.readUInt32LE(10);
+        if (width <= 0 || height <= 0 || width * height > 40_000_000
+          || original.readUInt16LE(dib === 12 ? 22 : 26) !== 1
+          || ![1, 4, 8, 16, 24, 32].includes(original.readUInt16LE(dib === 12 ? 24 : 28))
+          || offset < 14 + dib || offset >= original.length) throw new Error('BMP 图片尺寸或格式无效');
+        await fs.mkdir(directory, { recursive: true });
+        const temporary = await fs.mkdtemp(path.join(directory, 'bmp-display-'));
+        try {
+          const input = path.join(temporary, 'source.bmp'), output = path.join(temporary, 'display.png');
+          await fs.writeFile(input, original, { mode: 0o600 });
+          const maximum = size * size * 4 + 1024 * 1024;
+          await promisify(execFile)(process.env.FFMPEG_PATH || 'ffmpeg', ['-nostdin', '-v', 'error', '-xerror', '-err_detect', 'explode',
+            '-threads', '2', '-f', 'bmp_pipe', '-i', input, '-map', '0:v:0', '-frames:v', '1',
+            '-vf', `scale=w='min(${size},iw)':h='min(${size},ih)':force_original_aspect_ratio=decrease`,
+            '-threads', '2', '-c:v', 'png', '-fs', String(maximum), '-f', 'image2', output], { timeout: 45000, maxBuffer: 65536 });
+          const info = await fs.stat(output);
+          if (!info.isFile() || !info.size || info.size > maximum) throw new Error('BMP 缩略图无法准备');
+          original = await fs.readFile(output);
+        } finally { await fs.rm(temporary, { recursive: true, force: true }); }
+      }
+      const bytes = await sharp(original, { limitInputPixels: 40_000_000, animated: false }).timeout({ seconds: 45 })
         .rotate().resize(size, size, { fit: 'inside', withoutEnlargement: true }).webp({ quality }).toBuffer();
       await fs.mkdir(directory, { recursive: true });
       const temporary = `${file}.${randomUUID()}.tmp`;
