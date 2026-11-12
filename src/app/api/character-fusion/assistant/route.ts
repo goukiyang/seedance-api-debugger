@@ -7,7 +7,7 @@ import { createMuskChatCompletion, getMuskApiSettings, isMuskApiReady, resolveMu
 import { assertCharacterFusionWritesEnabled } from '@/lib/character-fusion/build-mode';
 import { FusionError, isRecord, parseOperationId, type FusionCommand } from '@/lib/character-fusion/actions';
 import { readFusionCatalogue } from '@/lib/character-fusion/catalogue-repository';
-import { executeWorkspaceOperation, getWorkspace, reserveAssistantOperation, finishAssistantOperation, cancelAssistantOperation, readAssistantOperationStatus, readWorkspaceHistory, listUndoableWorkspaceOperations } from '@/lib/character-fusion/workspace.server';
+import { executeWorkspaceOperation, getWorkspace, queryWorkspaceOperation, reserveAssistantOperation, finishAssistantOperation, cancelAssistantOperation, readAssistantOperationStatus, readWorkspaceHistory, listUndoableWorkspaceOperations } from '@/lib/character-fusion/workspace.server';
 import { bindFusionAgentCommands, fusionAgentCataloguePage, readFusionAgentControls, validateFusionAgentExecution, FusionAgentError, proposeFusionAgent, type FusionAgentProposal, type FusionAgentTarget } from '@/lib/character-fusion/agent-adapter.server';
 import { confirmFusionAgentContinuation, pageFusionAgentCatalogue, prepareFusionAgentContinuation, previewFusionAgentContinuation, queryFusionAgentContinuation } from '@/lib/character-fusion/agent-continuation.server';
 import type { FusionCatalogue } from '@/lib/character-fusion/catalogue-model';
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
     if (body.action === 'confirmCatalogue') return json(await confirmFusionAgentContinuation(user, workspaceId, opId, { entries: body.entries, previewVersion: body.previewVersion }));
     if (body.action === 'saveInline') {
       if (typeof body.cardId !== 'string' || !Number.isSafeInteger(body.baseVersion) || Number(body.baseVersion) < 1) throw new FusionAgentError('请先保存当前卡片，再存入个人词库。');
-      const prior = await queryFusionAgentContinuation(user, workspaceId, opId); if (prior.status !== 'unknown') return json(prior);
+      const prior = await queryWorkspaceOperation(user, workspaceId, opId); if (prior.status !== 'unknown') return json(prior);
       const page = await getWorkspace(user, workspaceId, { limit: 20 }), current = page.workspace;
       if (current.version !== Number(body.baseVersion)) throw new FusionAgentError('当前卡片已更新，请保留输入并重新预览。', 409, 'fusion_agent_scene_changed');
       const catalogue = (await readFusionCatalogue(user)).catalogue;
