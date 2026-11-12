@@ -1,11 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '生图模板外部开放',
+  title: '角色融合先聊清楚再生成',
   outline: [
-    '管理员可指定对外开放的账号和模板',
-    '外部账号沿原价格生成并管理本人结果',
-    '关闭开放后，本人历史和原图下载仍保留'
+    '聊天自动整理卡片，检查后点击生成方案',
+    '原卡片与常驻对话同屏，支持单条调整和撤销',
+    '新词先用于本次创作，再按需存入个人词库'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
