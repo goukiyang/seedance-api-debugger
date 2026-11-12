@@ -23,7 +23,7 @@ export default function CreationChat({ ownerId, workspaceId, documentName, prepa
   const [pending, setPending] = useState<PendingTurn | null>(null), [reply, setReply] = useState('');
   const [proposal, setProposal] = useState<UnappliedProposal | null>(null), [expanded, setExpanded] = useState(false), [longInput, setLongInput] = useState(false);
   const [lastOperation, setLastOperation] = useState<WorkspaceOperation | null>(null);
-  const [scopeChoices, setScopeChoices] = useState<AssistantResponse['scopeChoices']>();
+
   const [history, setHistory] = useState<HistoryOperation[] | null>(null), [historyCursor, setHistoryCursor] = useState<string | null>(null), [loadingHistory, setLoadingHistory] = useState(false);
   const [undoable, setUndoable] = useState<HistoryOperation[]>([]);
   const [undoBoundary, setUndoBoundary] = useState<{ opId: string; reason: string; label: string } | null>(null);
@@ -61,7 +61,7 @@ export default function CreationChat({ ownerId, workspaceId, documentName, prepa
     element.style.height = 'auto'; element.style.height = `${Math.min(element.scrollHeight, longInput ? 340 : 128)}px`;
   }, [input, longInput]);
   useEffect(() => {
-    setInput(''); setPending(null); setReply(''); setError(''); setProposal(null); setHistory(null); setHistoryCursor(null); setLastOperation(null); setUndoable([]); setScopeChoices(undefined); setPhase('idle');
+    setInput(''); setPending(null); setReply(''); setError(''); setProposal(null); setHistory(null); setHistoryCursor(null); setLastOperation(null); setUndoable([]); setPhase('idle');
     try {
       const saved = JSON.parse(sessionStorage.getItem(draftKey) || 'null');
       if (saved) { if (saved.proposal) { setProposal(saved.proposal); if (saved.proposal.drafts?.length) onDrafts(saved.proposal.drafts, saved.proposal.continuation); } setInput(typeof saved.input === 'string' ? saved.input : ''); if (typeof saved.pending?.opId === 'string' && saved.pending.dispatched !== false) { setPending(saved.pending); setPhase('unknown'); } }
@@ -124,23 +124,22 @@ export default function CreationChat({ ownerId, workspaceId, documentName, prepa
     catch (e) { if (accepts(workspaceId)) { setPhase('unknown'); setError(e instanceof Error ? e.message : '停止状态仍待核对，原操作编号保留。'); } }
     finally { stopping.current = false; }
   };
-  const send = async (scopeChoice?: 'row' | 'document') => {
+  const send = async () => {
     if (busy || pendingRef.current || proposal?.continuation || disabled || preparing || !workspaceId || !modelReady || !input.trim() || !active) return;
     const operation: PendingTurn = { opId: crypto.randomUUID(), message: input.trim(), dispatched: false, ...(target ? { target } : {}) }, request = new AbortController();
-    stopping.current = false; controller.current = request; pendingRef.current = operation; setPending(operation); setPhase('saving'); setError(''); setReply(''); setLastOperation(null); setScopeChoices(undefined); polls.current = 0; persist(input, operation);
+    stopping.current = false; controller.current = request; pendingRef.current = operation; setPending(operation); setPhase('saving'); setError(''); setReply(''); setLastOperation(null); polls.current = 0; persist(input, operation);
     try {
       const ready = await onPrepare();
       if (!accepts(workspaceId) || request.signal.aborted) return;
       if (!ready || ready.workspaceId !== workspaceId) { setPending(null); pendingRef.current = null; setPhase('idle'); persist(inputRef.current, null); setError('当前调整尚未保存，未发送给助手。输入已保留，请先核对工作文档。'); return; }
       operation.dispatched = true; setPending({ ...operation }); persist(inputRef.current, operation); setPhase('processing');
-      const result = await postFusion<AssistantResponse>('/api/character-fusion/assistant', { workspaceId, opId: operation.opId, baseVersion: ready.version, message: operation.message, model, ...(operation.target ? { target: { rowId: operation.target.rowId, version: operation.target.version } } : {}), ...(scopeChoice ? { scopeChoice } : {}) }, request.signal);
+      const result = await postFusion<AssistantResponse>('/api/character-fusion/assistant', { workspaceId, opId: operation.opId, baseVersion: ready.version, message: operation.message, model, ...(operation.target ? { target: { rowId: operation.target.rowId, version: operation.target.version } } : {}) }, request.signal);
       if (!accepts(workspaceId)) return;
       if (result.workspace) onWorkspace({ workspace: result.workspace, rowChanges: result.rowChanges, rowsPage: result.rowsPage });
       receiveOperation(result.operation);
       if (pauseForPlan(result)) return;
       if (result.drafts?.length) keepProposal({ drafts: result.drafts, continuation: result.continuation, reply: result.reply });
       setReply(result.reply || '本轮已结束。');
-      if (result.scopeChoices?.length) { setScopeChoices(result.scopeChoices); setPending(null); pendingRef.current = null; setPhase('idle'); persist(inputRef.current, null); return; }
       if (result.status === 'rejected' || result.status === 'cancelled') { acceptLookup(result as OperationLookup, operation); return; }
       if (result.pending || result.status === 'planning' || result.status === 'unknown') { setPhase(result.status === 'planning' ? 'processing' : 'unknown'); return; }
       finish(operation);
@@ -161,8 +160,8 @@ export default function CreationChat({ ownerId, workspaceId, documentName, prepa
   }, [completedPlanId]);
   const effects = lastOperation?.effects;
   const addedIds = effects?.addedIds || [];
-  const effectStatus = effects ? [effects.batches.length ? `已新增第${effects.batches.map(batch => batch.number).join('、')}批${effects.addedIds.length}条` : effects.addedIds.length ? `已新增${effects.addedIds.length}条` : '', effects.modifiedIds.length ? `已修改${effects.modifiedIds.length}条` : '', effects.removedIds.length ? `已移除${effects.removedIds.length}条` : '', effects.settingsChanged || effects.intentChanged ? '后续创作要求已更新' : '', effects.undoneOperationId ? '已撤销该步调整' : ''].filter(Boolean).join('；') : '';
-  const status = phase === 'saving' ? '正在保存当前调整…' : phase === 'processing' ? '正在处理…' : phase === 'stopping' ? '正在停止并核对结果…' : phase === 'checking' ? '正在核对结果…' : phase === 'unknown' ? '尚未确认这次是否完成' : effectStatus || reply || messages[messages.length - 1]?.reply || (messages[messages.length - 1]?.role === 'assistant' ? messages[messages.length - 1]?.content : '描述方向，继续探索或调整方案');
+  const effectStatus = effects ? [effects.batches.length ? `已新增第${effects.batches.map(batch => batch.number).join('、')}批${effects.addedIds.length}条` : effects.addedIds.length ? `已新增${effects.addedIds.length}条` : '', effects.modifiedIds.length ? `已修改${effects.modifiedIds.length}条` : '', effects.removedIds.length ? `已移除${effects.removedIds.length}条` : '', effects.settingsChanged || effects.intentChanged || effects.preparationChanged ? '卡片已同步，可检查后点击生成或更新'  : '', effects.undoneOperationId ? '已撤销该步调整' : ''].filter(Boolean).join('；') : '';
+  const status = phase === 'saving' ? '正在保存当前调整…' : phase === 'processing' ? '正在处理…' : phase === 'stopping' ? '正在停止并核对结果…' : phase === 'checking' ? '正在核对结果…' : phase === 'unknown' ? '尚未确认这次是否完成' : effectStatus || reply || messages[messages.length - 1]?.reply || (messages[messages.length - 1]?.role === 'assistant' ? messages[messages.length - 1]?.content : '描述想法，我来配置卡片' );
   const orderedHistory = history ? [...history].sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || ''))) : null;
   const undoLabel = (operation: HistoryOperation) => operation.turn?.user || operation.batch?.label || operation.reply || `${operation.effects?.addedIds.length ? `新增${operation.effects.addedIds.length}条方案` : operation.effects?.modifiedIds.length ? `修改${operation.effects.modifiedIds.length}条方案` : operation.effects?.removedIds.length ? `移除${operation.effects.removedIds.length}条方案` : '更新创作要求'} · ${new Date(operation.createdAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
   return <section data-fusion-creation-chat className={`${styles.chat} ${styles.creationChat} ${expanded ? styles.chatExpanded : ''}`} aria-labelledby="fusion-creation-chat-title">
@@ -170,23 +169,24 @@ export default function CreationChat({ ownerId, workspaceId, documentName, prepa
     <div id="fusion-creation-history" className={styles.chatHistory}>
       <div className={styles.chatHistoryTools}><small>{documentName}</small><button disabled={loadingHistory} onClick={() => void loadHistory(history ? historyCursor || undefined : undefined)}>{loadingHistory ? '读取中…' : history ? historyCursor ? '读取更早对话' : '刷新对话记录' : '查看已保存的早期对话'}</button><details onToggle={event => { if (event.currentTarget.open) void loadUndoable(); }}><summary>近期可撤销操作</summary><div>{undoBoundary && <p>最近的{undoBoundary.label}不能直接撤销；可明确选择更早的操作。</p>}{undoable.length ? undoable.map(operation => <button key={operation.opId} disabled={disabled || busy || Boolean(pending)} onClick={() => { void onUndo(operation.opId).then(ok => { if (ok) { setUndoable(current => current.filter(item => item.opId !== operation.opId)); setReply('已撤销该步，原对话保留。'); } }); }}><Undo2 size={13} />{undoLabel(operation)}</button>) : <p>暂无可安全撤销的操作。</p>}</div></details></div>
       <div ref={log} className={styles.chatMessages} role="log" aria-label="创作对话" onScroll={event => { const element = event.currentTarget; following.current = element.scrollHeight - element.scrollTop - element.clientHeight < 48; }}>
-        {!messages.length && !orderedHistory?.length && <p>说说你想要的角色，也可以在方案上点“聊这张”。</p>}
+        {!messages.length && !orderedHistory?.length && <div className={styles.chatExamples}><p>说说想要什么角色，我会先把条件配好。</p>{['3D动画风的家庭主角，大头短腿，4套双语', '水彩非战斗伙伴，每套都有巨掌和巨脚', '硬科幻双体研究搭档，职业这批分别用'].map(example => <button type="button" key={example} onClick={() => { setInput(example); persist(example, pending); composer.current?.focus(); }}>{example}</button>)}</div>}
         {orderedHistory?.some(operation => operation.turn) ? orderedHistory.filter(operation => operation.turn).map(operation => <div key={operation.opId}><div className={styles.userMessage}><small>你</small><p>{operation.turn!.user}</p></div><div className={styles.assistantMessage}><small>创作助手{operation.undoneBy ? ' · 该步已撤销' : ''}</small><p>{operation.turn!.assistant}</p></div></div>) : messages.slice(-20).map((message, index) => <div key={index} className={message.role === 'user' ? styles.userMessage : styles.assistantMessage}><small>{message.role === 'user' ? '你' : '创作助手'}</small><p>{message.reply || message.content}</p></div>)}
         {reply && messages[messages.length - 1]?.content !== reply && <p role="status">{reply}</p>}
       </div>
     </div>
     <div className={styles.chatComposer}>
-      <div className={styles.chatTarget}>{target ? <><span>仅修改：{target.label}</span><button type="button" aria-label="取消单方案聊天目标，作用于本次创作" onClick={onClearTarget}><X size={14} /></button></> : <span>作用于：本次创作</span>}<small>{count}条 · {language}</small></div>
+      {!messages.length && !reply && !busy && <div className={styles.chatQuickIdeas}>{['3D动画主角，大头短腿，4套双语', '水彩非战斗伙伴，巨掌和巨脚都要'].map(example => <button type="button" key={example} onClick={() => { setInput(example); persist(example, pending); composer.current?.focus(); }}>{example}</button>)}</div>}
+      <div className={styles.chatTarget}>{target ? <><span>仅修改：{target.label}</span><button type="button" aria-label="取消单方案聊天目标，作用于本次创作" onClick={onClearTarget}><X size={14} /></button></> : <span>配置下一批</span>}</div>
       <div className={styles.chatStatus} role="status"><span>{status}</span>{addedIds.length > 0 && !busy && <button type="button" onClick={() => onViewResults(addedIds)}>查看新增{addedIds.length}条</button>}{lastOperation?.reversible && !busy && <button type="button" disabled={disabled || Boolean(pending)} onClick={() => { void onUndo(lastOperation.opId).then(ok => { if (ok) { setLastOperation(null); setReply('已撤销这步调整，原对话保留。'); } }); }}><Undo2 size={13} />撤销</button>}{busy && <button type="button" disabled={phase === 'stopping'} onClick={() => void stop()}><Square size={13} />停止</button>}</div>
       {proposal?.continuation || proposal?.drafts?.length ? <div className={styles.chatDraftNotice}><span>{proposal.continuation?.mode === 'generate' ? '新词草稿待预览，确认后继续原批次' : '新词草稿待预览入库'}</span><button type="button" onClick={onOpenDrafts}>编辑与预览</button></div> : null}
       {error && <p className={styles.chatError} role="alert">{error}</p>}
       {pending && phase === 'unknown' && <div className={styles.actions}><button type="button" onClick={() => void check()}>核对结果</button><button type="button" onClick={() => void stop()}>停止并核对</button><details><summary>操作详情</summary><small>{pending.opId}</small></details></div>}
-      {scopeChoices?.length ? <div className={styles.scopeChoices}><span>这次想调整哪里？</span>{scopeChoices.map(choice => <button type="button" key={choice.id} disabled={disabled} onClick={() => { if (choice.id === 'document') onClearTarget(); void send(choice.id); }}>{choice.label}</button>)}</div> : null}
+
       {!modelReady && <div className={styles.chatModelNotice}><button type="button" onClick={onChooseModel}>选择 API 模型</button><small>当前输入已保留</small></div>}
       {preparing || !workspaceId ? <small role="status">{preparing ? '正在准备当前文档…' : '新建或继续一份文档后即可发送'}</small> : disabled && !busy && !pending ? <small>当前文档暂不能提交，输入已保留</small> : null}
       <form className={`${styles.chatInput} ${longInput ? styles.longChatInput : ''}`} onSubmit={event => { event.preventDefault(); void send(); }}>
-        <textarea ref={composer} disabled={!workspaceId} rows={1} maxLength={4000} aria-label="本次创作想法或调整要求" value={input} onChange={event => { setInput(event.target.value); persist(event.target.value, pending); }} onKeyDown={event => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send(); } }} placeholder={target ? '描述要怎样调整这张方案…' : '继续描述想法…'} />
-        <div className={styles.chatSendActions}><button type="button" className={styles.iconButton} aria-label={longInput ? '收起长输入' : '展开长输入'} aria-expanded={longInput} onClick={() => setLongInput(value => !value)}>{longInput ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button><button className={styles.primary} aria-label="发送" disabled={busy || Boolean(pending) || Boolean(proposal?.continuation) || disabled || preparing || !workspaceId || !modelReady || !input.trim()}><Send size={16} /><span>发送</span></button></div>
+        <textarea ref={composer} rows={1} maxLength={4000} aria-label="本次创作想法或调整要求" value={input} onChange={event => { setInput(event.target.value); persist(event.target.value, pending); }} onKeyDown={event => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void send(); } }} placeholder={target ? '想怎样调整这张？发送后检查卡片，再点更新…' : '描述方向、选项或不要的内容…'} />
+        <div className={styles.chatSendActions}><button type="button" className={styles.iconButton} aria-label={longInput ? '收起长输入' : '展开长输入'} aria-expanded={longInput} onClick={() => setLongInput(value => !value)}>{longInput ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button><button className={styles.secondarySend} aria-label="发送" disabled={busy || Boolean(pending) || Boolean(proposal?.continuation) || disabled || preparing || !workspaceId || !modelReady || !input.trim()}><Send size={16} /><span>发送</span></button></div>
       </form><small className={styles.chatKeyboard}>Enter 换行，Ctrl / ⌘ Enter 发送</small>
     </div>
   </section>;

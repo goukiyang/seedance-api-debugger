@@ -1,8 +1,9 @@
-import type { FusionRow, FusionSettings } from '@/lib/character-fusion/engine';
+import type { FusionRow } from '@/lib/character-fusion/engine';
+import { fusionSettingsChanges } from '@/lib/character-fusion/configuration';
 import type { FusionCatalogue } from '@/lib/character-fusion/catalogue-model';
 
 export type { FusionWorkspace, FusionWorkspaceState as WorkspaceState, FusionCommand, FusionOperation } from '@/lib/character-fusion/actions';
-import type { FusionWorkspace, FusionWorkspaceState, FusionCommand, FusionOperation, FusionWorkspaceRow, FusionFieldChange } from '@/lib/character-fusion/actions';
+import type { FusionWorkspace, FusionWorkspaceState, FusionCommand, FusionOperation, FusionWorkspaceRow } from '@/lib/character-fusion/actions';
 export type WorkspaceOperation = FusionOperation;
 export type RowsPage = { nextCursor: string | null; total: number };
 export type WorkspaceReceipt = { workspace: FusionWorkspace; operation: FusionOperation; rowsPage?: RowsPage; rowChanges?: { upsert: FusionWorkspaceRow[]; removedIds: string[]; order?: string[] } };
@@ -28,21 +29,11 @@ export function lookupOperation(workspaceId: string, opId: string, signal?: Abor
   return fusionRequest<OperationLookup>(`${WORKSPACE_API}/${encodeURIComponent(workspaceId)}/actions?opId=${encodeURIComponent(opId)}`, { signal });
 }
 
-export function settingsChanges(before: FusionSettings, after: FusionSettings): FusionFieldChange[] {
-  const walk = (a: unknown, b: unknown, path: string[]): FusionFieldChange[] => {
-    if (['catalogue.dynamic.snapshot', 'catalogue.dynamic.formatVersion'].includes(path.join('.'))) return [];
-    if (JSON.stringify(a) === JSON.stringify(b)) return [];
-    if (b && typeof b === 'object' && !Array.isArray(b) && (a === undefined || a === null || typeof a === 'object' && !Array.isArray(a))) {
-      const previous = (a || {}) as Record<string, unknown>, next = b as Record<string, unknown>;
-      return Array.from(new Set([...Object.keys(previous), ...Object.keys(next)])).flatMap(key => walk(previous[key], next[key], [...path, key]));
-    }
-    return [{ path, value: b ?? null, expected: a ?? null }];
-  };
-  return walk(before, after, []);
-}
+export const settingsChanges = fusionSettingsChanges;
 export function stateCommands(before: FusionWorkspaceState, after: FusionWorkspaceState): FusionCommand[] {
   const commands: FusionCommand[] = [], changes = settingsChanges(before.settings, after.settings);
   if (changes.length) commands.push({ type: 'patchSettings', changes });
+  if (JSON.stringify(before.preparation || null) !== JSON.stringify(after.preparation || null)) commands.push({ type: 'prepare', value: after.preparation || null, expected: before.preparation || null });
   if (before.idea !== after.idea || before.summary !== after.summary) commands.push({ type: 'context', ...(before.idea !== after.idea ? { idea: after.idea } : {}), ...(before.summary !== after.summary ? { summary: after.summary } : {}), expected: { idea: before.idea, summary: before.summary } });
   if (JSON.stringify(before.intent?.requirements || []) !== JSON.stringify(after.intent?.requirements || [])) commands.push({ type: 'intent', requirements: after.intent?.requirements || [], expected: before.intent || { requirements: [] } });
   if (JSON.stringify(before.selectedIds) !== JSON.stringify(after.selectedIds) || JSON.stringify(before.retainedIds) !== JSON.stringify(after.retainedIds)) commands.push({ type: 'selection', ...(JSON.stringify(before.selectedIds) !== JSON.stringify(after.selectedIds) ? { selectedIds: after.selectedIds, expected: { selectedIds: before.selectedIds } } : {}), ...(JSON.stringify(before.retainedIds) !== JSON.stringify(after.retainedIds) ? { retainedIds: after.retainedIds, expected: { ...(JSON.stringify(before.selectedIds) !== JSON.stringify(after.selectedIds) ? { selectedIds: before.selectedIds } : {}), retainedIds: before.retainedIds } } : {}) });

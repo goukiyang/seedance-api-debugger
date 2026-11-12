@@ -7,6 +7,9 @@ export type FusionGenerationPlan = {
   formatVersion: 1; scope: 'document' | 'batch'; count?: number; overlay?: FusionFieldChange[];
   onceMust?: Record<string, string[]>; diversity?: 'prefer' | 'strict'; targetRowIds?: string[];
 };
+/** Pending execution metadata in the same workspace; effective settings always reuse the engine overlay. */
+export type FusionPreparation = { formatVersion: 1; batch?: FusionGenerationPlan;
+  row?: { rowId: string; version: number; changes: FusionFieldChange[] } };
 export type FusionAllocation = {
   formatVersion: 1; rows: Array<{ selections: Record<string, string[]> }>;
   diversity?: { availableSourceCount: number; repeatedSourceCount: number; relaxed: boolean };
@@ -17,5 +20,5 @@ export type FusionBatchReceipt = {
 };
 export type FusionEffects = {
   formatVersion: 1; addedIds: string[]; modifiedIds: string[]; removedIds: string[]; retainedIds: string[];
-  settingsChanged: boolean; intentChanged: boolean; batches: FusionBatchReceipt[]; undoneOperationId?: string;
+  settingsChanged: boolean; intentChanged: boolean; batches: FusionBatchReceipt[]; undoneOperationId?: string; preparationChanged?: boolean;
 };

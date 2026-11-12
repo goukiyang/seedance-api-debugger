@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import { CORE, allocateFusionBatch, defaults, textFor } from '../src/lib/character-fusion/engine';
-import { builtinCatalogue, hydrateCatalogueSettings } from '../src/lib/character-fusion/catalogue';
+import { TRAITS, builtinCatalogue, hydrateCatalogueSettings, parseCatalogue } from '../src/lib/character-fusion/catalogue';
 import { applyFusionCommands, emptyWorkspaceState, newCreationState, type FusionCommand } from '../src/lib/character-fusion/actions';
 import { BODY_CARDS } from '../src/lib/character-fusion/body-cards';
 import { FusionAgentError, bindFusionAgentCommands, fusionAgentCataloguePage, fusionAgentScene, fusionCatalogueGenerationRequested, needsFusionAgentScopeChoice, proposeFusionAgent, readFusionAgentControls, validateFusionAgentExecution } from '../src/lib/character-fusion/agent-adapter.server';
@@ -77,7 +77,7 @@ export async function checkFusionUx21(input: { actor: { id: string }; repository
   assert.equal(fusionCatalogueGenerationRequested('先给我预览，确认后使用这个词生成4套。'), true);
   const categoryId = randomUUID(), termId = randomUUID();
   const drafts = [{ kind: 'category', data: { id: categoryId, nameZh: '生体发光特征', nameEn: 'Bioluminescent features', descriptionZh: '生物身体的发光外观', descriptionEn: 'Bioluminescent body features', group: 'extra', multi: true, randomMax: 1, generationKind: 'trait' } },
-    { kind: 'term', data: { id: termId, categoryId, nameZh: '星潮光囊', nameEn: 'Star-tide light sac', descriptionZh: '肩背半透明囊体，内部蓝绿光点像潮汐缓慢流动', descriptionEn: 'Translucent shoulder and back sacs with blue-green points of light flowing slowly like tides' } }];
+    { kind: 'term', data: { id: termId, categoryId, nameZh: '星潮光囊', nameEn: 'Star-tide light sac', descriptionZh: '肩背半透明囊体，内部蓝绿光点像潮汐缓慢流动。', descriptionEn: 'Translucent shoulder and back sacs with blue-green points of light flowing slowly like tides. ' } }];
   const pending = [{ type: 'generate', mode: 'append', plan: { formatVersion: 1, scope: 'batch', count: 4, overlay: [{ path: ['catalogue', 'dynamic', 'selections', categoryId], value: fixed([termId]) }] } }];
   let draftRounds = 0;
   const pendingResult = await proposeFusionAgent({ workspace: applied.workspace, message: s08, complete: async () => { draftRounds++; return JSON.stringify({ reply: '先预览，确认后追加', drafts, commands: draftRounds === 1 ? [] : draftRounds === 2 ? [{ type: 'generate', mode: 'append' }] : pending }); }, read: async () => ({}) });
@@ -92,6 +92,7 @@ export async function checkFusionUx21(input: { actor: { id: string }; repository
   assert.equal(confirmed.generationStatus, 'committed'); assert('workspace' in confirmed); assert.equal(confirmed.rowsPage?.total, 8);
   assert('rowChanges' in confirmed); assert.equal(confirmed.rowChanges?.upsert.length, 4);
   assert(confirmed.rowChanges!.upsert.every(row => row.catalogueSnapshot?.selections[categoryId]?.includes(termId) && row.catalogueSnapshot.body.zh.includes('肩背半透明囊体')));
+  for (const row of confirmed.rowChanges!.upsert) { assert(row.catalogueSnapshot!.body.zh.includes('缓慢流动。')); assert(!row.catalogueSnapshot!.body.zh.includes('缓慢流动。。')); assert(row.catalogueSnapshot!.body.en.includes('like tides.')); assert(!/like tides\.\s*\./.test(row.catalogueSnapshot!.body.en)); }
   const repeated = await confirmFusionAgentContinuation(actor, document.workspace.id, sourceId, {}); assert('rowsPage' in repeated); assert.equal(repeated.rowsPage?.total, 8);
   const saveOnly = await proposeFusionAgent({ workspace: confirmed.workspace, message: '只保存新词到词库，不要生成。', complete: async () => JSON.stringify({ reply: '仅待入库', drafts }), read: async () => ({}) });
   assert.deepEqual(saveOnly.proposal.commands, []); assert.equal(saveOnly.iterations, 1);
@@ -104,7 +105,7 @@ export async function checkFusionUx21(input: { actor: { id: string }; repository
   const cancelled = await repository.cancelAssistantOperation(actor, document.workspace.id, cancelledSource);
   assert.equal(cancelled.status, 'cancelled'); assert('error' in cancelled); assert.match(cancelled.error || '', /未入库或生成/);
   assert.equal((await input.library.queryCatalogueOperation(actor, parseFusionAgentContinuation(cancelPreview.continuation).catalogueOpId)).status, 'unknown');
-  checks.push('UX21确认后生成原意：空计划和未引用新词均有界纠错、确认前零库写、确认后stable ID进每条、重复确认不双生、仅保存不抽卡');
+  checks.push('UX21确认后生成原意：空计划和未引用新词均有界纠错、确认前零库写、确认后stable ID进每条且中英句末不重补标点、重复确认不双生、仅保存不抽卡');
 
   const research = '做4套双语硬科幻工业研究搭档，每套是两位独立站立的角色，不要粘成一个身体。方体轮廓、肩胯等宽、适中肌肉，研究探索用途，母体和研究岗位不同。';
   const researchDocument = await repository.createFusionWorkspace(actor, { opId: 'ux21-research-create', state: { ...emptyWorkspaceState(), settings: { ...defaults(), count: 4, lang: 'both' } } });
@@ -243,6 +244,47 @@ export async function checkFusionUx21(input: { actor: { id: string }; repository
   const indexedFinal = await repository.getWorkspace(actor, indexedDocument.workspace.id);
   assert.equal(indexedFinal.workspace.version, otherCard.workspace.version); assert.deepEqual(indexedFinal.workspace.state.settings, otherCard.workspace.state.settings); assert.equal(indexedFinal.rowsPage.total, 0);
   checks.push('UX21数组局部写真实SQLite：公开卡片/旧规则路径保存刷新撤销，保其它项顺序锁与中英；旧全数组可写，过期索引/错误CAS/撤销冲突/非法索引/越权均零写入');
+
+  const traitDocument = await repository.createFusionWorkspace(actor, { opId: 'ux21-trait-feedback-create', state: structuredClone(unjoinedState) });
+  const traitBefore = structuredClone(traitDocument.workspace.state.settings);
+  const invalidOverlay = [
+    { path: ['catalogue', 'traits', 'silhouette', 'values'], value: ['方形'] },
+    { path: ['catalogue', 'traits', 'build'], value: { enabled: 'yes', locked: true, values: ['适中'], excluded: [], must: [] } },
+    { path: ['catalogue', 'traits', 'shapeHint'], value: fixed(['方体']) },
+    { path: ['catalogue', 'traits', 'shoulderHips'], value: fixed(['equal-width']) },
+  ];
+  const validOverlay = [['silhouette', '方形'], ['build', '适中'], ['shoulderHips', '肩胯等宽']].map(([id, value]) => ({ path: ['catalogue', 'traits', id], value: fixed([value]) }));
+  let traitRounds = 0, traitDiagnostic = '';
+  const traitMessage = '仅本批生成4套角色，主体轮廓和肌肉量按已选内容，保留旧组合。';
+  const traitResult = await proposeFusionAgent({ workspace: traitDocument.workspace, message: traitMessage, seed: 2123,
+    complete: async messages => {
+      traitRounds++;
+      if (traitRounds === 1) return JSON.stringify({ reply: '查合法选项', reads: [{ kind: 'catalogue', categoryId: 'occupation', limit: 2 }] });
+      if (traitRounds === 3) {
+        traitDiagnostic = JSON.parse(String(messages[messages.length - 1].content)).proposalError;
+        const detail = JSON.parse(traitDiagnostic.slice(traitDiagnostic.indexOf('{'), traitDiagnostic.lastIndexOf('}') + 1));
+        assert.deepEqual(detail.invalidTraits.map((item: { path: string[] }) => item.path[2]), ['silhouette', 'build', 'shapeHint', 'shoulderHips']);
+        assert(detail.invalidTraits[0].fields.some((field: string) => field.includes('enabled'))); assert(detail.invalidTraits[0].fields.some((field: string) => field.includes('locked')));
+        assert.deepEqual(detail.invalidTraits[1].options, TRAITS.find(trait => trait.id === 'build')!.options.map(option => option.zh));
+        assert(detail.validTraitIds.some((id: string) => id.startsWith('shoulderHips('))); assert.deepEqual(detail.shape, { enabled: true, locked: false, values: [], excluded: [], must: [] });
+      }
+      return JSON.stringify({ reply: '按具体诊断修复本批属性', commands: [{ type: 'generate', mode: 'append', plan: { formatVersion: 1, scope: 'batch', overlay: traitRounds === 2 ? invalidOverlay : validOverlay } }] });
+    },
+    read: async () => fusionAgentCataloguePage({ catalogue: { ...catalogue, terms: jobTerms.slice(0, 2).map(term => ({ ...term, descriptionZh: '中'.repeat(2000), descriptionEn: 'e'.repeat(2000) })) }, total: 2, nextCursor: null }, { categoryId: 'occupation' }),
+    validateCommands: commands => validateFusionAgentExecution(commands, traitDocument.workspace, catalogue, traitMessage),
+  });
+  assert.equal(traitResult.iterations, 3); assert(traitDiagnostic.includes('未配置的属性')); assert.equal((await repository.getWorkspace(actor, traitDocument.workspace.id)).workspace.version, 1);
+  const traitApplied = await repository.executeWorkspaceOperation(actor, traitDocument.workspace.id, { opId: 'ux21-trait-feedback-apply', baseVersion: 1, commands: bindFusionAgentCommands(traitResult.proposal.commands, traitDocument.workspace, 2123) });
+  assert.equal(traitApplied.rowsPage.total, 4); assert.deepEqual(traitApplied.workspace.state.settings.catalogue?.traits, traitBefore.catalogue?.traits); assert.deepEqual(traitApplied.workspace.state.settings.catalogue?.dynamic?.selections, traitBefore.catalogue?.dynamic?.selections);
+  for (const row of traitApplied.workspace.rows) for (const change of validOverlay) assert(row.design?.traits[change.path[2]].some(value => value.zh === change.value.values[0]));
+  let humanTraitError: unknown;
+  try { validateFusionAgentExecution(bindFusionAgentCommands([{ type: 'generate', mode: 'append', plan: { formatVersion: 1, scope: 'batch', overlay: invalidOverlay } }], traitDocument.workspace, 2123), traitDocument.workspace, catalogue); } catch (error) { humanTraitError = error; }
+  assert(humanTraitError instanceof FusionAgentError); assert.match(humanTraitError.userMessage || '', /属性设置/); assert(!/catalogue|shapeHint|enabled|locked|\{/.test(humanTraitError.userMessage || ''));
+  assert.deepEqual(traitDocument.workspace.state.settings, traitBefore);
+  try { parseCatalogue({ details: {}, traits: Object.fromEntries(TRAITS.map(trait => [trait.id, { values: [] }])) }); assert.fail('不完整属性须拒绝'); } catch (error) {
+    assert(error instanceof Error && 'proposalError' in error && typeof error.proposalError === 'string'); assert(error.proposalError.length <= 6000); assert(JSON.parse(error.proposalError).remaining > 0);
+  }
+  checks.push('UX21属性反馈闭环：一次列全缺布尔/缺数组/未知ID/非法中文值与真实选项，长目录后同轮纠正实际四条，本批不回写且人话分离/诊断有界');
 
   const assistantFile = ts.createSourceFile('route.ts', await readFile('src/app/api/character-fusion/assistant/route.ts', 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   let plannerComplete: ts.ArrowFunction | undefined;

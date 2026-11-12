@@ -76,12 +76,29 @@ export function parseCatalogue(input: unknown): CatalogueSettings {
     if (!CONFIG.some(d => d.id === id) || !detail || typeof detail.value !== 'string' || typeof detail.locked !== 'boolean' || !CONFIG.some(d => d.id === id && d.tags.some(label => concreteOptions(id, label).some(o => o.zh === detail.value)))) throw new Error('具体选项已失效，请重新选择。');
     next.details[id] = { value: detail.value, locked: detail.locked };
   }
+  const invalidTraits: Array<{ path: string[]; title: string; fields: string[]; options?: string[]; multi?: boolean }> = [];
   for (const [id, state] of Object.entries(c.traits)) {
     const definition = TRAITS.find(t => t.id === id);
-    if (!definition || !state || typeof state.enabled !== 'boolean' || typeof state.locked !== 'boolean') throw new Error('属性选择无效。');
-    for (const values of [state.values, state.excluded, state.must]) if (!Array.isArray(values) || values.length > definition.options.length || new Set(values).size !== values.length || values.some(v => !definition.options.some(o => o.zh === v))) throw new Error(`${definition.title}选项无效。`);
-    if (state.values.some((value, i) => state.values.slice(i + 1).some(other => choicesConflict({ ...definition, incompatible: undefined }, value, other)))) throw new Error(`${definition.title}包含互斥选项。`);
+    const path = ['catalogue', 'traits', id.slice(0, 120)], fields: string[] = [];
+    if (!definition) { invalidTraits.push({ path, title: '未识别属性', fields: ['该key不是原生trait ID；按controls的真实selectionPath写入，不用中文名或自造ID'] }); continue; }
+    if (!state || typeof state.enabled !== 'boolean') fields.push('enabled须为boolean，不能缺失');
+    if (!state || typeof state.locked !== 'boolean') fields.push('locked须为boolean，不能缺失');
+    for (const [field, values] of Object.entries({ values: state?.values, excluded: state?.excluded, must: state?.must })) {
+      if (!Array.isArray(values)) fields.push(`${field}须为数组，不能缺失`);
+      else if (values.length > definition.options.length || new Set(values).size !== values.length || values.some(v => !definition.options.some(o => o.zh === v))) fields.push(`${field}只能使用不重复的合法中文选项，不能用termId、英文或自造值`);
+    }
+    if (!fields.length && state.values.some((value, i) => state.values.slice(i + 1).some(other => choicesConflict({ ...definition, incompatible: undefined }, value, other)))) fields.push('values包含互斥选项；按multi选择合法组合');
+    if (fields.length) { invalidTraits.push({ path, title: definition.title, fields, options: definition.options.map(option => option.zh), multi: definition.multi }); continue; }
     next.traits[id] = { enabled: state.enabled, locked: state.locked, values: [...state.values], excluded: [...state.excluded], must: [...state.must] };
+  }
+  if (invalidTraits.length) {
+    const shown = invalidTraits.slice(0, 12), describe = () => JSON.stringify({ invalidTraits: shown, remaining: invalidTraits.length - shown.length,
+      shape: { enabled: true, locked: false, values: [], excluded: [], must: [] },
+      ...(invalidTraits.some(item => item.title === '未识别属性') ? { validTraitIds: TRAITS.map(trait => `${trait.id}(${trait.title})`) } : {}),
+      instruction: '未配置的属性须在selectionPath提交完整shape；已有属性才局部改字段。shape仅示例，按原意设置values/locked，保其它设置、锁/池/排除，不自动补默认值。原生选项用中文；动态类别用真实selectionPath和termId。' });
+    while (describe().length > 6000 && shown.length > 1) shown.pop();
+    const names = Array.from(new Set(invalidTraits.slice(0, 3).map(item => item.title))).join('、');
+    throw Object.assign(new Error(`${names}${invalidTraits.length > 1 ? `等${invalidTraits.length}项` : ''}属性设置不完整或与目录不匹配，请重新选择相关属性；原输入与结果保留。`), { proposalError: describe() });
   }
   if (c.sourceFusion !== undefined) {
     const state = c.sourceFusion, options = sourceFusionOptions();
