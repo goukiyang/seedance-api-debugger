@@ -62,24 +62,24 @@ const actionSource = fs.readFileSync(path.join(root, 'src/app/multiview/Multivie
 const ast = ts.createSourceFile('action.tsx', actionSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const handlers = [];
 function collect(node) {
-  if (ts.isFunctionDeclaration(node) && ['keepAiJournal', 'consumeAi', 'organize', 'queryAi'].includes(node.name?.text)) handlers.push(node.getText(ast));
+  if (ts.isFunctionDeclaration(node) && ['rememberModel', 'keepAiJournal', 'consumeAi', 'organize', 'queryAi'].includes(node.name?.text)) handlers.push(node.getText(ast));
   ts.forEachChild(node, collect);
 }
-collect(ast); assert.equal(handlers.length, 4);
-const handlerCode = ts.transpileModule(handlers.join('\n') + '\nglobalThis.handlers={organize,consumeAi,queryAi};', {
+collect(ast); assert.equal(handlers.length, 5);
+const handlerCode = ts.transpileModule(handlers.join('\n') + '\nglobalThis.handlers={organize,consumeAi,queryAi,rememberModel};', {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
 }).outputText;
 const original = { requestId: 'original-request', runId: 'original-run', model: 'gpt-5.5', status: 'uncertain', edit: -1 };
 function actionHarness(journal, result, error) {
   const calls = [], storage = new Map(), writes = [], suggestions = [];
   const env = { aiLock: { current: false }, aiPending: journal.current, aiJournalRef: { current: journal },
-    state: { capabilities: { llmEnabled: true } }, llmReady: true, text: '保留人工动作', llmModel: 'gpt-6.1-sol', aiKey: 'owner:work',
+    state: { capabilities: { llmEnabled: true } }, llmReady: true, text: '保留人工动作', llmModel: 'gpt-6.1-sol', aiKey: 'owner:work', modelKey: 'owner:model',
     input: { current: { text: '保留人工动作' } }, editRevision: { current: 4 }, aiPoll: { current: { key: '', count: 0 } },
     finished: new Set(['succeeded', 'failed', 'cancelled']), crypto: { randomUUID: () => 'new-request' },
     confirm: async () => true, saveDraft: async () => ({ id: 'draft', revision: 1 }), active: () => true,
-    rememberModel() {}, setAiBusy() {}, setMessage() {}, setAiJournal() {}, setState(update) { update({ runs: [] }); },
+    setLlmModel() {}, setModelMessage() {}, setAiBusy() {}, setMessage() {}, setAiJournal() {}, setState(update) { update({ runs: [] }); },
     setBeforeAi() {}, setAppliedRunId() {}, setText(value) { writes.push(value); }, setSuggestion(value) { suggestions.push(value); },
-    localStorage: { setItem(key, value) { storage.set(key, JSON.parse(value)); } },
+    localStorage: { setItem(key, value) { storage.set(key, key === 'owner:model' ? value : JSON.parse(value)); } },
     api: async (url, body) => { calls.push({ url, body }); if (error) throw error; return { run: result }; },
   };
   vm.runInNewContext(handlerCode, env);
@@ -117,4 +117,14 @@ action = actionHarness({ current: { ...newPending, edit: 3 }, retained: [] });
 action.env.handlers.consumeAi({ id: newPending.runId, status: 'succeeded', text: 'older result', tasks: [] }, { ...newPending, edit: 3 });
 assert.equal(action.writes.length, 0); assert.equal(action.suggestions.length, 1);
 checks.push('manual edits made during organization are not overwritten by the completed result');
+action = actionHarness({ current: null, retained: [] }, queued);
+let releaseDraft;
+action.env.saveDraft = () => new Promise(resolve => { releaseDraft = resolve; });
+const organizing = action.env.handlers.organize();
+action.env.handlers.rememberModel('gpt-6-luna');
+releaseDraft({ id: 'draft', revision: 1 });
+await organizing;
+assert.equal(action.calls[0].body.llmModel, 'gpt-6.1-sol');
+assert.equal(action.storage.get('owner:model'), 'gpt-6-luna');
+checks.push('a model chosen during draft saving remains the next preference while the submitted model stays frozen');
 console.log(JSON.stringify({ passed: true, checks, isolation: { realFetches: 0, realGeneration: 0, browserRuns: 0, productionWrites: 0, productionDatabaseOpened: false } }));

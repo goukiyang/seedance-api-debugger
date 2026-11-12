@@ -157,8 +157,9 @@ export function MultiviewActionPanel(props: Props) {
   async function organize(){
     if(aiLock.current||aiPending&&aiPending.status!=='uncertain'||!state?.capabilities.llmEnabled||!llmReady||!text.trim())return;
     if(aiPending&&!await confirm('原文案结果仍未确认，原记录会保留，不会重发。继续将用当前所选模型新建一次整理，上游文字费用由平台承担。', {title:'新建一次动作整理',confirmLabel:'新建整理'}))return;
+    rememberModel(llmModel);
     const sourceEdit=editRevision.current,savedDraft=await saveDraft();if(!savedDraft)return;
-    const pending:AiRequest={requestId:crypto.randomUUID(),edit:sourceEdit,model:llmModel};aiLock.current=true;setAiBusy(true);setMessage('');rememberModel(llmModel);
+    const pending:AiRequest={requestId:crypto.randomUUID(),edit:sourceEdit,model:llmModel};aiLock.current=true;setAiBusy(true);setMessage('');
     let retained=false;
     try{
       const previous=aiJournalRef.current;
