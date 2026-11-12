@@ -640,11 +640,11 @@ stage `/data/video-api-debugger/release-staging/fusion-live-fixes-ux21-20261111/
 <a id="fusion-ux22-release"></a>
 ### 2026-11-12 角色融合UX22聊天配卡与生成闭环
 
-当前状态（15:54Z）：实际v0.148.8已部署，主de4e72eec8a4d4c02b985054ef6b606f5c05241f / b96Yv0cZcZvIz2CaLIAw-、guard22797c4c82e7e47bc2ae8284ace702c916146b3f / 4l54MGIW1lrw_eEp0gaNU；15:34:45Z独立7服务健康，双构建/48项及原门禁通过。18项包f2cb0af38c7c02310958ed453b2f08141b20498840794ea45541556194b29fc8位于release09/evidence。S07母体冲突已真实消除，但无职业回退仍未通过；主7bd03a42fd15eab25b7a53fe45090b3daca00837/v1489、guard46907c87590164df46d7766ea090aa90ebca5b1e已推核，49项本地通过，attempt09完整构建和有界等待发布中。下文1487/1488候选叙述保留发布过程，不作为当前未部署结论。
+最终交付状态（2026-11-12）：v0.148.9已实际部署，主7bd03a42fd15eab25b7a53fe45090b3daca00837 / eth0KAAHdq58l9gJprrbo，guard46907c87590164df46d7766ea090aa90ebca5b1e / btNBixIj9G01HnvzQ4LbQ。双完整types/Next、49融合检查、原生/reader/计价与恢复verify-only均通过；attempt09 build0/cutover0，16:18:02Z开始切版，控制器inactive。16:19:06Z独立7服务/内外健康正常，相关三页25/35/5公开资源逐字节核对。18项证据包006910c0002bd69dd737b8ad082ab4187fef5c81d0c9b07a1b5d13df616e4707已核并保存release10/evidence；价格/私有策略/持久链接保持。S07原生新空白文档同原句已真实聊天0→点击4，无职业/道具与母体冲突，水彩和中文持续、reload完整相等；8类及指定操作链均已通过。下文保留历史发布过程。
 
 已部署v0.148.7，主源252058b561c58867499d2c588b4d947235dd0817 / BUILD 4Xf2_mg7u4P9fd8g06OvE；同源十门guard b5f4a60c574057a7b9ddf05ca4bdbb912d40be0f / zfdF8xMKLYEGVkTs5vy1s。双完整types/Next、47项融合、原生/reader/价格、数据备份及独立程序恢复通过；14:33Z切版0，14:34Z独立7服务/内外health通过，价格/私有策略及持久数据链接保持。18项批准证据在implementation/ux22/release08/evidence，包SHA256 152002b4753055e16c573c9119e6ccd49265a855e44645a9b900337ebafdf954，不含DB/env/配置备份。
 
 实测又发现水彩场景的新母体描述卡与原生母体冲突，v0.148.8仅修配卡边界与回归。主de4e72eec8a4d4c02b985054ef6b606f5c05241f、guard22797c4c82e7e47bc2ae8284ace702c916146b3f已推核；基于上述实际1487，应用差量5文件、无schema/dependency变化。attempt08/build09/release06已启动，48项、主完整构建及guard原生检查通过，guard最终构建/切版与fresh S07实测待完成。
 
-功能证据及剩余项统一见[原角色融合单UX22](../tasks/todo/2026-11-08-character-fusion.md#fusion-ux22-implementation)。已实测聊天0新增→点击生成、两种追加/历史继续刷新、单条更新与聊天撤销、临时词→私人编辑入库→正式ID新创作生成，原卡片操作沿仍匹配证据复用；不以工程或发布冒八组全部已过。实体触控及CSV浏览器落盘仍待手验。
+功能证据及剩余项统一见[原角色融合单UX22](../tasks/todo/2026-11-08-character-fusion.md#fusion-ux22-implementation)。已实测聊天0新增→点击生成、两种追加/历史继续刷新、单条更新与聊天撤销、临时词→私人编辑入库→正式ID新创作生成，原卡片操作沿仍匹配证据复用；8类实测证据与工程/发布证据分开记录。旧10文档/44行及旧私人词最终完整相等，原6.1模型已恢复。已部署，待用户手动验收；实体触控、真实手机键盘及CSV浏览器落盘仍待手验。
 <!-- /FUSION-UX22-RELEASE-20261112 -->

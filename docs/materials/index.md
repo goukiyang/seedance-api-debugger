@@ -650,6 +650,6 @@ v0.146.0已部署，待用户手动验收；原卡片与三批共用链、26组�
 <!-- /FUSION-UX21-MATERIAL-20261111 -->
 
 <!-- FUSION-UX22-MATERIAL-20261112 -->
-- **最新接续**：release09/evidence已保存实际1488的18项批准证据（SHA256 f2cb0af38c7c02310958ed453b2f08141b20498840794ea45541556194b29fc8），legacy-final1488/compare确认旧10文档/44行及旧词完整对象一致。S07-generated1488保留无职业回退的失败原证；release10是49项修复的1489精确候选及构建配置，最终实测仍待，以下早期资料说明不替代最新原单状态。
-- **角色融合UX22聊天配卡与生成闭环**：[正式原单](../../tasks/todo/2026-11-08-character-fusion.md#fusion-ux22-implementation)，发布见[UX22部署记录](../ubuntu24-deployment.md#fusion-ux22-release)。私有原件位于`2026-11-08-character-fusion-prototype/implementation/ux22/`，包含8类原句实测、单条准备/更新/撤销、两种追加/原生历史继续/刷新、临时新词及私人入库编辑/正式ID复用、原卡片及手机视口证据；失败和未通过原件保留，不冒全部通过。旧10文档/44行及原私人词条的完整对象比较沿legacy-before1470和后续只读快照；未导出数据库或凭据。release08/evidence为实际1487的18项批准发布JSON（包SHA256 152002b4753055e16c573c9119e6ccd49265a855e44645a9b900337ebafdf954）；release09保存1488精确Git候选与构建配置，尚待该版本最终发布及fresh S07验收。CSV内容核对与浏览器落盘分开、视口检查与实体触屏分开。
+- **最新交付**：v0.148.9已部署；release10/evidence保存18项批准JSON，SHA256 006910c0002bd69dd737b8ad082ab4187fef5c81d0c9b07a1b5d13df616e4707。S07-fresh/configured/generated/refreshed1489记录最后原句真实聊天0→点击4与刷新不变，8类与额外操作全链已通过。final-new1489只读捕获13个本轮文档及2个私人词，legacy-final1489/compare确认开局旧10文档/44行和旧私人词完整相等；未导出数据库或凭据。
+- **角色融合UX22聊天配卡与生成闭环**：[正式原单§28–29](../../tasks/todo/2026-11-08-character-fusion.md#fusion-ux22-implementation)，发布见[UX22部署记录](../ubuntu24-deployment.md#fusion-ux22-release)。私有原件位于`2026-11-08-character-fusion-prototype/implementation/ux22/`，含8类原句、单条准备/更新/聊天撤销、两种追加/历史继续/刷新、临时新词与私人编辑入库/正式ID复用、原卡片及手机视口证据；旧失败文档与1487/1488发布原证保留，不改写。复制/CSV内容与浏览器落盘、视口与实体触屏分别记证。已部署，待用户手动验收；实际手机与浏览器落盘的证据边界见原单。
 <!-- /FUSION-UX22-MATERIAL-20261112 -->
