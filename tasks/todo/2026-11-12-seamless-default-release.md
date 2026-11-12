@@ -17,7 +17,7 @@
 1. [x] 项目AGENTS、CLI、profile默认seamless；共享旧冷切分支拒绝，旧安装引擎仅允许只读查历史。旧分支先聚焦合入本实现，再准备下次正式发布。
 2. [x] 实际新Web/图片worker的启动保护、同权限私密策略、Nginx切流/旧worker退场/旧资源保留、固定主入口交接已接入新默认执行器。
 3. [x] 原后台、SQLite一致只读备份、原屏障/源/BUILD、收费/共享心跳、同步原号和固定guard恢复已接线；拒绝不相容变更。真实Linux/systemd交接尚未执行，不冒部署/功能达标。
-4. [ ] 最终类型/lint与离线工程证据、差异核对、CodeGraph更新及聚焦提交推送；结果见下节，服务器仍未启用。
+4. [x] 最终类型/lint与离线工程证据、差异核对、CodeGraph更新及聚焦提交推送；结果见下节，服务器仍未启用。
 
 ## 3. 工程验证与边界
 
@@ -32,4 +32,6 @@
 
 基线7bd；主工作区 `/Users/gouki-youdoo/.codex/worktrees/seamless-release/video-api-debugger`，分支 `codex/seamless-default-20261112`，正确origin为 `https://github.com/goukiyang/seedance-api-debugger.git`。保护正式根全部用户脏改，项目规则/todo按独立标记更新；备用独立检出未写实现。本轮只推隔离分支，未合并部署分支、未启用服务器引擎；后续发布须先核源码包含本实现。
 
-已在实际工作区查询CodeGraph并回源码检查影响面，索引更新与最终Git身份待追加。参考：[Nginx HUP](https://nginx.org/en/docs/control.html#reconfiguration)、[Next14自托管版本差异](https://nextjs.org/docs/14/app/building-your-application/deploying#version-skew)。本轮新发现均属发布改动必要因果范围；依赖安装的既有Next告警已在正式 `tasks/discoveries.md` 登记，不重复新增或夹带升级。
+已在实际工作区查询CodeGraph并回源码检查影响面，索引已在实现提交 `3f37b48827ad1f679c09ce5d8f1b8a616f1363c6` 核对：2109文件，pending=0、hash mismatch=0、parse error=0。实现已提交并推送，远端同头；随后仅收口文档，不为文档再重建源码索引。参考：[Nginx HUP](https://nginx.org/en/docs/control.html#reconfiguration)、[Next14自托管版本差异](https://nextjs.org/docs/14/app/building-your-application/deploying#version-skew)。本轮新发现均属发布改动必要因果范围；依赖安装的既有Next告警已在正式 `tasks/discoveries.md` 登记，不重复新增或夹带升级。
+
+最终工程原证在正式根 `docs/materials/2026-11-12-seamless-release/offline-engineering.json` 和 `verification.json`；全类型、六文件lint、24组离线检查与差异检查通过。实现提交 `3f37b48827ad1f679c09ce5d8f1b8a616f1363c6` 已推送且远端核同头。规则与源码交付完成，服务器引擎未安装/未启用；无新线上配置、服务重启、切流、DDL或功能验收。用户手验与真实Linux发布检查保持待办。本轮未新增任务外问题。
