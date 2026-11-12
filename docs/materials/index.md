@@ -1,3 +1,9 @@
+<!-- FB-PULL-20261112-MATERIALS -->
+## 2026-11-12 后台视频提交等待反馈诊断
+
+近24小时1条/2原截图已采集并核同大小/SHA，已有请求时序与线上源码确认同步等待供应商创建回执和本地状态展示滞后；后续任务已成功。详[私有原工单](../../tasks/todo/2026-11-12-feedback-submit-rootcause.md)，完整资料仅正式根本地`docs/materials/2026-11-12-feedback-rootcause/collection01/`，权限700/600且Git exclude，不公开原文/编号/用户/截图或完整JSON。只读，未改状态/代码/费用，未收费/生成/部署，修复未实施。
+<!-- /FB-PULL-20261112-MATERIALS -->
+
 <!-- ARK-CHARACTER-ASSET01-MATERIALS-20261111 -->
 ## 私域角色资产入口与交付证据（2026-11-11）
 
