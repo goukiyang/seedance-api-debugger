@@ -69,7 +69,8 @@ export function MultiviewActionPanel(props: Props) {
   const saveLock=useRef(false),submitLock=useRef(false),aiLock=useRef(false);
   const requestKey=`sd2:multiview-action-request:v1:${props.ownerId}:${props.work?.id||'pending'}`;
   const attemptKey=requestKey+':attempt';
-  const aiKey=`sd2:multiview-action-text-request:v1:${props.ownerId}:${props.work?.id||'pending'}`;
+  const legacyAiKey=`sd2:multiview-action-text-request:v1:${props.ownerId}:${props.work?.id||'pending'}`;
+  const aiKey=`sd2:multiview-action-text-request:v2:${props.ownerId}:${props.work?.id||'pending'}`;
   const modelKey=`sd2:multiview-action-llm:v1:${props.ownerId}`;
   const projectCatalogRevision = useProjectCatalogRevision();
   const active=useCallback((value=scope)=>liveScope.current===value&&!isClientSessionBlocked(),[scope]);
@@ -118,7 +119,7 @@ export function MultiviewActionPanel(props: Props) {
     const captured=scope;let cancelled=false;
     if(!props.work)return;
     setParameters(value=>({...value,ratio:props.ratio,project_id:props.videoDefaults?.projectId||props.work?.projectId||'',video_card_id:props.videoDefaults?.videoCardId||props.work?.videoCardId||null}));
-    void (async()=>{try{await refresh(true);if(cancelled||!active(captured))return;const local=localStorage.getItem(requestKey+':input');if(local){const value=JSON.parse(local);if(typeof value.text==='string'&&value.parameters&&typeof value.parameters==='object'){setText(value.text);setParameters({...value.parameters,ratio:props.ratio});}}const attempt=localStorage.getItem(attemptKey);if(attempt){const value=JSON.parse(attempt);if(value.id==='initial'||/^[a-f0-9-]{36}$/i.test(value.id)){setAttemptId(value.id);setNewAttemptRequired(value.needsNew===true);}}const old=localStorage.getItem(requestKey);if(old){const value=JSON.parse(old);if(typeof value.key!=='string'||typeof value.runId!=='string')throw new Error('原视频请求记录无法确认，请保留页面。');setOriginal(value);setSelectedRunId(value.runId);}const ai=localStorage.getItem(aiKey);if(ai){const value=JSON.parse(ai);const journal:AiJournal=typeof value.requestId==='string'?{current:value,retained:[]}:value;
+    void (async()=>{try{await refresh(true);if(cancelled||!active(captured))return;const local=localStorage.getItem(requestKey+':input');if(local){const value=JSON.parse(local);if(typeof value.text==='string'&&value.parameters&&typeof value.parameters==='object'){setText(value.text);setParameters({...value.parameters,ratio:props.ratio});}}const attempt=localStorage.getItem(attemptKey);if(attempt){const value=JSON.parse(attempt);if(value.id==='initial'||/^[a-f0-9-]{36}$/i.test(value.id)){setAttemptId(value.id);setNewAttemptRequired(value.needsNew===true);}}const old=localStorage.getItem(requestKey);if(old){const value=JSON.parse(old);if(typeof value.key!=='string'||typeof value.runId!=='string')throw new Error('原视频请求记录无法确认，请保留页面。');setOriginal(value);setSelectedRunId(value.runId);}const ai=localStorage.getItem(aiKey)||localStorage.getItem(legacyAiKey);if(ai){const value=JSON.parse(ai);const journal:AiJournal=typeof value.requestId==='string'?{current:value,retained:[]}:value;
       if(!journal||!Array.isArray(journal.retained)||[journal.current,...journal.retained].some(item=>item!==null&&(!item||typeof item.requestId!=='string'||item.runId!==undefined&&typeof item.runId!=='string')))throw new Error('原文案请求记录无法确认。');
       const restored={current:journal.current?{...journal.current,edit:-1}:null,retained:journal.retained.map(item=>({...item,edit:-1}))};aiJournalRef.current=restored;setAiJournal(restored);}}catch(cause){if(active(captured)){setDraftBlocked(true);setMessage(cause instanceof Error?cause.message:'草稿暂不可恢复。');}}})();
     return()=>{cancelled=true;};
