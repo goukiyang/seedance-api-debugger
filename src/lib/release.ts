@@ -1,11 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '角色融合先聊清楚再生成',
+  title: '完整缩略图与视频参考修复',
   outline: [
-    '聊天自动整理卡片，检查后点击生成方案',
-    '原卡片与常驻对话同屏，支持单条调整和撤销',
-    '新词先用于本次创作，再按需存入个人词库'
+    '旧图片缩略图完整显示，无需重新上传',
+    '普通视频参考图沿原权限安全传输',
+    '提交结果未知时明确显示等待确认'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

@@ -406,4 +406,17 @@
 
 缩略图实际读链还包含library/workspace DTO的旧thumbnail_url，须仅将active合法图片投影到同一保护端点；hidden/deleted沿旧合同，不借旧图修复扩大已删除素材权限。BMP兼容限同一两并发/32队列内私有临时单帧，40MP/96MiB和45秒编码边界；不写公开新原图、不替换DB或源文件。
 
+### 16.4 实现与必要工程完成（未发布本轮）
+
+产品净改8文件：两图片读取route、library/workspace DTO、image-studio/media BMP兼容，以及普通tasks/create、assets状态与delivery helper。另新增legacy-thumbnail-complete工程、扩既有multiview-reference-transport工程；未改上传器、schema、权限中间件、transport实现、上游错误/SAFE_RETRY与计费链。两执行者已STOP-WRITING，root自核净差异、读取权限与调用顺序。
+
+- 缩略图9组隔离工程通过，绑定12源SHA；真实图片派生/响应函数运行，auth/DB为夹具边界，合成PNG/JPEG/GIF/WebP/BMP边缘和比例、旧缓存、HEAD/304、低权限640、失权/缺原件、40MP与2active/32pending均有证。窄ESLint和当前schema独立client TypeScript均exit0，无共享依赖变更。
+- 传输/状态11组隔离工程通过，绑定11源SHA；真实transport/payload/delivery函数运行，两模型×三模式、外链保序、原字节和64MB/失权/路径限制有证；编排、原请求及冻结前顺序为实际AST断言，不冒全POST/真实费用验收。窄delivery类型和四文件lint exit0，仅assets旧区域一条Hook提醒。原producer为completed=true/count11，未伪造passed字段。
+- 两工程network/database/真实上传/生成/账务/浏览器均0。脚本通过既有server-runtime.cjs进入，未新增stub/私密consumer。草稿夹具预热同步和VM Error上下文问题已定向修正，原失败保留；并非产品失败。
+- 风险取舍：首次完整缩略图需按原件派生，远程读取仍受原180秒/96MiB/40MP边界；缺源或超限返回真实错误，不回旧裁片。只支持原视频transport的PNG/JPEG/WebP与每图30MB/总64MB，BMP配套仅改善显示，不隐式改生成格式。工程运行使用发布器已有env -i/NODE_ENV=test，不继承生产URL环境。
+
+同站UX22已实际部署355be2dbb61eb78e632df4cf885eb23b7703ab0c/v1480/e_hsRKcVhd5V_SQ-q0I_X，public原证08:00:01Z、cutover0；root08:01:07Z核7服务同源active/内外health200ok/运行发布控制器0。新guard67305263189ecfddc79dcd11202764595bf2be1a/tX6SyfBNWAgTKvuak-X8k十门完整成功07:56:52Z。本轮将继承这一实际健康源，计划1481，仅构建main、复用该guard原成品与原时刻；未把本地工程冒本轮已部署。
+
+CodeGraph同树两次准备分别遇already-running及合并时源码变化而退出，未返回成功结构查询；本批已沿真实源码与上述实际模块工程核关系，不把工具连接/准备冒成功。最终稳定源再按需同步，不阻断已授权的必要工程和发布。
+
 <!-- /LEGACY-THUMB-REPAIR16-20261112 -->
