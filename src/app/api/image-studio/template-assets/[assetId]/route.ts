@@ -2,7 +2,7 @@ import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
 import { authorizedImageResponse, discardHdViewingInterest, privateImageHeaders } from '@/lib/media/authorized-image-response';
 import { performance } from 'node:perf_hooks';
-import { canViewStudioPreset, canUseCompanyTemplates, type ImageStudioIdentity } from '@/lib/image-studio/access';
+import { canViewStudioPreset, canUseCompanyTemplates, isExternalImageStudioActor, type ImageStudioIdentity } from '@/lib/image-studio/access';
 import { getStudioPresetsFixedReferences } from '@/lib/image-studio/fixed-references';
 import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
 import { homeTemplateCover } from '@/lib/content-reactions/home-templates';
@@ -33,6 +33,7 @@ export async function GET(_request: Request, { params }: { params: { assetId: st
   }
   const asset = await prisma.asset.findFirst({ where: { id: params.assetId, status: 'active', type: 'image' }, select: { id: true, owner_id: true, original_url: true, mime_type: true, file_name: true } });
   if (!asset) return unavailable();
+  if (isExternalImageStudioActor(user) && asset.owner_id !== user.id) return unavailable();
   if (!await canReadStudioAsset(user, asset)) return unavailable();
   if (asset.owner_id !== user.id) {
     let actor: ImageStudioIdentity;

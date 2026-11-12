@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { deleteStudioResult, listStudioTasks, cancelQueuedChannelTask, StudioError, submitStudioBatch, studioBusinessErrorStatus } from '@/lib/image-studio/tasks';
-import { canUseCompanyTemplates } from '@/lib/image-studio/access';
+import { canAccessImageTemplates, isExternalImageStudioActor } from '@/lib/image-studio/access';
+import { externalStudioErrorMessage } from '@/lib/image-studio/external-task-projection';
 import { ContextVersionError } from '@/lib/image-studio/context-version';
 import { studioTemplateEntrySnapshot } from '@/lib/image-studio/viewer-receipts';
 import { QueueCapacityError, QueueMaintenanceError } from '@/lib/image-studio/queue-capacity';
@@ -33,7 +34,7 @@ export const dynamic = 'force-dynamic';
 export async function PATCH(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
-  if (user.status !== 'active' || !canUseCompanyTemplates(user)) return NextResponse.json({ error: '无权操作图片任务' }, { status: 403 });
+  if (user.status !== 'active' || !canAccessImageTemplates(user)) return NextResponse.json({ error: '无权操作图片任务' }, { status: 403 });
   let recheck = false;
   try {
     const body = await request.json();
@@ -59,7 +60,7 @@ export async function PATCH(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
-  if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '图片不存在或无权访问' }, { status: 404 });
+  if (!canAccessImageTemplates(user)) return NextResponse.json({ error: '图片不存在或无权访问' }, { status: 404 });
   try { await deleteStudioResult(user.id, (await request.json()).id); return NextResponse.json({ deleted: true }); }
   catch (error) {
     if (error instanceof StudioError) return NextResponse.json({ error: error.message }, { status: error.status });
@@ -69,7 +70,7 @@ export async function DELETE(request: NextRequest) {
 export async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
-  if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限公司飞书账号使用图片生成' }, { status: 403 });
+  if (!canAccessImageTemplates(user)) return NextResponse.json({ error: '当前账号没有图片使用权限' }, { status: 403 });
   try {
     const params = request.nextUrl.searchParams;
     const moduleId = params.get('moduleId') || undefined;
@@ -128,7 +129,7 @@ export async function POST(request: NextRequest) {
   const startedAt = Date.now();
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
-  if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限公司飞书账号使用图片生成' }, { status: 403 });
+  if (!canAccessImageTemplates(user)) return NextResponse.json({ error: '当前账号没有图片使用权限' }, { status: 403 });
   let body: Record<string, unknown> | undefined;
   try {
     const input: unknown = await request.json();
@@ -159,7 +160,7 @@ export async function POST(request: NextRequest) {
       : expected || insufficientCredits ? (error as Error).message
         : error instanceof SyntaxError ? '提交内容无效'
           : '提交结果待确认，请查询这次提交，不要重复新建任务';
-    return NextResponse.json({ error: message, code: receipt?.code || detail.code,
+    return NextResponse.json({ error: isExternalImageStudioActor(user) ? externalStudioErrorMessage(status, insufficientCredits) : message, code: receipt?.code || detail.code,
       ...(requestId ? { requestId } : {}), ...(receipt ? { receipt, submitted: false } : {}) },
     { status, headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   }

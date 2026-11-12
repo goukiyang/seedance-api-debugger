@@ -7,7 +7,7 @@ import type { Prisma } from '@prisma/client';
 import { readSharedStudioSnapshot } from './read-snapshot';
 import { createGalleryReadContext, type GalleryPageSelection } from './gallery-context';
 import { assertStudioActor, getStudioRemovedDefaultGroups, sharedStudioAvailability, studioSharedBinding, studioPublisherModule, StudioSharingError } from './shared-contract';
-import { canManageStudioPreset, canViewStudioPreset, type ImageStudioIdentity } from './access';
+import { canManageStudioPreset, canViewStudioPreset, isExternalImageStudioActor, type ImageStudioIdentity } from './access';
 import { resolveStudioTemplateAuthor } from './template-author';
 import { studioFixedCoverDTO } from './module-cover';
 import { studioVisibleAssetWhere } from './protected-assets';
@@ -53,7 +53,8 @@ export function parseGalleryQuery(value: unknown): GalleryQuery {
 
 export async function readGalleryCatalog(user: ImageStudioIdentity, tx: Prisma.TransactionClient, selection?: GalleryPageSelection) {
   const actor = await assertStudioActor(user.id, tx);
-  const context = await createGalleryReadContext(tx, actor.id, selection), client = context.client;
+  const external = isExternalImageStudioActor(actor);
+  const context = await createGalleryReadContext(tx, actor.id, selection, actor), client = context.client;
   const deletedRows = selection ? (await Promise.all(context.sources.map(row => readStudioDeletedSource(actor.id, row.id, client)))).filter(row => row !== null)
     : await listStudioDeletedSources(actor.id, client);
   const deleted = new Set(deletedRows.filter(row => !row.reopenedModuleId).map(row => row.presetId));
@@ -82,11 +83,12 @@ export async function readGalleryCatalog(user: ImageStudioIdentity, tx: Prisma.T
     }
     const source = row.source_preset_id ? sourceById.get(row.source_preset_id) : null;
     const sourceVisible = Boolean(source && canViewStudioPreset(actor, source) && !await studioPresetArchived(source.id, client));
-    const usable = !bindingInvalid && (!row.source_preset_id || sourceVisible && available.get(row.source_preset_id) === true);
+    const usable = !bindingInvalid && (!external || binding?.mode === 'live') && (!row.source_preset_id || sourceVisible && available.get(row.source_preset_id) === true);
     const merged = Boolean(binding && source && binding.presetId === source.id);
     const key = merged ? `image_template:${binding!.presetId}` : `image_module:${row.id}`;
-    const item: GalleryNavigationItem = { key, id: row.id, title: merged && sourceVisible ? source!.name : row.name, name: merged && sourceVisible ? source!.name : row.name,
-      groupName: (merged && sourceVisible ? source!.group_name : row.group_name) || '未分组', mine: merged ? source!.owner_id === actor.id : true,
+    const safeName = merged && sourceVisible ? source!.name : external ? '本人历史' : row.name;
+    const item: GalleryNavigationItem = { key, id: row.id, title: safeName, name: safeName,
+      groupName: (merged && sourceVisible ? source!.group_name : external ? '本人历史' : row.group_name) || '未分组', mine: merged ? source!.owner_id === actor.id : true,
       shared: merged && sourceVisible && source!.is_shared, navigationTarget: { moduleId: row.id }, ...(merged ? { presetId: binding!.presetId } : {}),
       sourcePresetId: row.source_preset_id, sourcePresetShared: sourceVisible ? source!.is_shared : row.source_preset_id ? null : false,
       objectKind: binding ? binding.mode : row.source_preset_id ? 'legacy-copy' : 'local',
@@ -94,7 +96,7 @@ export async function readGalleryCatalog(user: ImageStudioIdentity, tx: Prisma.T
         : await author(merged ? { presetId: binding!.presetId } : { moduleId: row.id }),
       createdAt: merged ? sourceVisible ? source!.created_at?.toISOString() || null : null : row.created_at?.toISOString() || null,
       updatedAt: merged ? sourceVisible ? source!.updated_at.toISOString() : null : row.updated_at?.toISOString() || null, available: usable,
-      reaction: null, coverEditable: !bindingInvalid && (!row.source_preset_id || sourceVisible)
+      reaction: null, coverEditable: !external && !bindingInvalid && (!row.source_preset_id || sourceVisible)
         && (!merged || binding!.mode === 'publisher' && canManageStudioPreset(actor, source!)),
       deletion: studioWorkspaceDeletionCapability(actor.id, row.id, row.revision) };
     entries.set(key, item); targets.set(key, { kind: 'module', id: row.id });
@@ -118,7 +120,7 @@ export async function readGalleryCatalog(user: ImageStudioIdentity, tx: Prisma.T
       version: row?.version || 0, available: entry.available, likeCount: entry.available ? countByKey.get(entry.key) || 0 : null };
   }
   const defaultId = `default-${actor.id}`;
-  if ((!selection || selection.moduleIds.includes(defaultId)) && !context.modules.some(row => row.id === defaultId) && !await readStudioWorkspaceDeletion(actor.id, defaultId, client)) {
+  if (!external && (!selection || selection.moduleIds.includes(defaultId)) && !context.modules.some(row => row.id === defaultId) && !await readStudioWorkspaceDeletion(actor.id, defaultId, client)) {
     entries.set(`image_module:${defaultId}`, { key: `image_module:${defaultId}`, id: defaultId, name: '默认模块', title: '默认模块',
       groupName: '常用', mine: true, shared: false, navigationTarget: { moduleId: defaultId },
       author: { known: false, key: null, displayName: '作者未知', avatarUrl: null }, createdAt: null, updatedAt: null,
@@ -142,7 +144,7 @@ export async function queryStudioGallery(user: ImageStudioIdentity, raw: unknown
     const directoryCompare = (a: GalleryNavigationItem, b: GalleryNavigationItem) => groupIndex(a) - groupIndex(b) || orderIndex(a) - orderIndex(b) || natural.get(a.key)! - natural.get(b.key)!;
     const recentTime = (entry: GalleryNavigationItem) => Math.max(recent[entry.key] || 0,
       recent[entry.presetId ? `preset:${entry.presetId}` : `module:${entry.id}`] || 0);
-    const revision = digest([catalog.actor.id, catalog.actor.role, catalog.actor.account_type, catalog.actor.feature_profile_id,
+    const revision = digest([catalog.actor.id, catalog.actor.role, catalog.actor.account_type, catalog.actor.feature_profile_id, catalog.actor.externalStudioAccess,
       entries, catalog.dependency, catalog.settings.filter(row => /archived|binding|publisher|deleted/.test(row.key)),
       input.query || '', input.scope || 'all', input.authorKey || null, input.sort || 'created', recent, directory]);
     if (input.catalogRevision && input.catalogRevision !== revision) throw new StudioSharingError('封面目录已变化，请重新读取', 409, 'state-conflict');
@@ -168,7 +170,7 @@ export async function queryStudioGallery(user: ImageStudioIdentity, raw: unknown
       if (entry.available && target) {
         fixedCover = await studioFixedCoverDTO(catalog.actor, target, catalog.client);
         const row = target.kind === 'module' ? catalog.modules.find(row => row.id === target.id) : catalog.sourceById.get(target.id);
-        if (!fixedCover && row?.banner_asset_id) {
+        if (!fixedCover && !isExternalImageStudioActor(catalog.actor) && row?.banner_asset_id) {
           const asset = await tx.asset.findFirst({ where: { id: row.banner_asset_id, owner_id: row.owner_id, status: 'active', type: 'image',
             AND: [await studioVisibleAssetWhere(catalog.actor, catalog.client, [row.banner_asset_id])] }, select: { id: true, width: true, height: true } });
           if (asset) banner = { id: asset.id, thumbnailUrl: studioTemplateAssetUrl(asset.id, true), originalUrl: studioTemplateAssetUrl(asset.id), width: asset.width, height: asset.height };
@@ -190,7 +192,7 @@ export async function queryStudioGallery(user: ImageStudioIdentity, raw: unknown
         const source = catalog.sourceById.get(target.kind === 'preset' ? target.id : workspace?.source_preset_id || '');
         if (source && !isParameterCopyId(source.id) && canManageStudioPreset(catalog.actor, source) && !await studioPresetArchived(source.id, catalog.client)) {
           sharing = { kind: 'preset', id: source.id, shared: source.is_shared, revision: source.updated_at.toISOString() };
-        } else if (workspace && !workspace.source_preset_id && entry.objectKind === 'local') {
+        } else if (!isExternalImageStudioActor(catalog.actor) && workspace && !workspace.source_preset_id && entry.objectKind === 'local') {
           const preference = await readStudioModuleSharingPreference(catalog.actor.id, workspace.id, catalog.client);
           sharing = { kind: 'module', id: workspace.id, selected: preference?.enabled === true, revision: workspace.revision };
         }

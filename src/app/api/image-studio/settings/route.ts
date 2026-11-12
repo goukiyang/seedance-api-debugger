@@ -14,6 +14,7 @@ import { PrivatePromptAccessError } from '@/lib/security/private-prompt-identity
 import { PrivatePromptError } from '@/lib/security/private-prompts.server';
 import { readPrivateGlobalEditor, savePrivateGlobalDraft, savePrivateGlobalEditor, privateGlobalEditorStatus } from '@/lib/image-studio/private-settings-editor.server';
 import { PrivateDraftConflict } from '@/lib/security/private-prompt-drafts.server';
+import { isExternalImageStudioActor } from '@/lib/image-studio/access';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,8 +32,12 @@ export async function GET(request: NextRequest) {
   return traceHttpRequest('studio.settings', request.headers, async () => {
   const user = await tracePhase('auth', () => getSession());
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
+  const external = isExternalImageStudioActor(user);
   try {
     const mode = request.nextUrl.searchParams.get('mode');
+    if (external && (mode || request.nextUrl.searchParams.get('private') === '1')) {
+      return NextResponse.json({ error: '无权读取模板内部设置' }, { status: 403, headers: { 'Cache-Control': 'private, no-store' } });
+    }
     if (mode === 'private-editor' || mode === 'private-save-status' || mode === 'private-draft-status') {
       const result = mode === 'private-editor' ? await tracePhase('resolve', () => readPrivateGlobalEditor(user.id))
         : await tracePhase('resolve', () => privateGlobalEditorStatus(user.id, request.nextUrl.searchParams.get('requestId') || '', mode === 'private-draft-status'));
@@ -49,7 +54,11 @@ export async function GET(request: NextRequest) {
     const providerReady = Object.values(modelReady).some(Boolean);
     const modelFourToOne = Object.fromEntries(IMAGE_STUDIO_MODELS.map(model => [model, byModel.get(model)
       ? imageGenerationSupportsStudioFourToOne(byModel.get(model)!, model) : false]));
-    return NextResponse.json({ ...await tracePhase('data', () => imageStudioSettingsPayload(settings, user.id, request.nextUrl.searchParams.get('private') === '1')), providerReady, modelReady, modelFourToOne, imageChannels: await tracePhase('pricing-readiness', () => getPricingImageChannelOptions()),
+    const payload = await tracePhase('data', () => imageStudioSettingsPayload(settings, user.id, !external && request.nextUrl.searchParams.get('private') === '1'));
+    const visibleSettings = external ? { model: payload.model, prices: payload.prices, revision: payload.revision,
+      templateDefaults: payload.templateDefaults, billing: payload.billing, contextConfigured: false,
+      privateContext: false, canReadPrivatePrompt: false, canEditPrivatePrompt: false, requiresIdentityVerification: false } : payload;
+    return NextResponse.json({ ...visibleSettings, providerReady, modelReady, modelFourToOne, imageChannels: await tracePhase('pricing-readiness', () => getPricingImageChannelOptions()),
       taskSettingsProtocol: studioTaskSettingsWriterEnabled() ? STUDIO_TASK_SETTINGS_PROTOCOL : null,
       billingReadiness: await tracePhase('billing-readiness', () => imageBillingReadinessPayload()) }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
   } catch (error) {
@@ -66,6 +75,7 @@ export async function PUT(request: NextRequest) {
   let requestId: string | undefined;
   try {
     const user = await getAdminUser(request);
+    if (isExternalImageStudioActor(user)) return NextResponse.json({ error: '无权修改图片通用设置' }, { status: 403 });
     phase = 'parse';
     const body = await request.json();
     if (body?.action === 'save-private-definition' || body?.action === 'save-private-draft') {

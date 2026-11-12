@@ -11,7 +11,8 @@ const dependencyKey = (scope: string) => CATALOG_DEPENDENCY_PREFIX + createHash(
 const dependencyModels = new Set(['PlatformSetting', 'Asset', 'ImageStudioPreset', 'ImageStudioModule', 'ImageStudioTask', 'User']);
 const dependencySettingPrefixes = ['studio_shared_', 'studio_fixed_references_', 'studio_reference_policy_', 'studio_style_',
   'studio_skill_', 'studio_preset_archived_', 'studio_deleted_workspace', 'studio_removed_default_groups_', 'studio_module_cover_v1:',
-  'studio_parameter_copy_', 'studio_works_method_pin_', 'multiview_rotation_preset_', 'multiview_private_media_access_', 'feature_profile'];
+  'studio_parameter_copy_', 'studio_works_method_pin_', 'multiview_rotation_preset_', 'multiview_private_media_access_', 'feature_profile',
+  'image_studio_external_access_v1'];
 const relevantSetting = (key: string) => dependencySettingPrefixes.some(prefix => key.startsWith(prefix))
   && key !== 'studio_shared_worker_v1' && !key.startsWith('studio_shared_request_v1:');
 const mutationFields: Record<string, string[]> = {

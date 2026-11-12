@@ -9,6 +9,7 @@ import { multiviewOutputFileAccess } from '@/lib/video/multiview-output-access.s
 import { getStudioTemplate } from '@/lib/template-studio/templates';
 import { archivedPresetKey } from '@/lib/image-studio/preset-lifecycle';
 import { tryContentKeyParts } from './key';
+import { assertStudioActor } from '@/lib/image-studio/shared-contract';
 import type { ContentKey } from './types';
 
 async function readBatches<T>(ids: string[], read: (batch: string[]) => Promise<T[]>): Promise<T[]> {
@@ -28,6 +29,8 @@ const referenceInclude = () => ({ asset: true, album: { include: {
 /** Only this request may reuse the current authorization projection; nothing is persisted in a reaction. */
 export async function createReactionProjection(user: SessionUser, keys: ContentKey[]) {
   const parts = keys.flatMap(key => { const parsed = tryContentKeyParts(key); return parsed ? [parsed] : []; });
+  const studioActor = user.account_type === 'external' && parts.some(part => part.type === 'image_template' || part.type === 'image_module')
+    ? await assertStudioActor(user.id) : user;
   const ids = (type: string) => Array.from(new Set(parts.filter(part => part.type === type).map(part => part.id)));
   const assetIds = ids('asset');
   const referenceIds = ids('reference_image');
@@ -91,7 +94,7 @@ export async function createReactionProjection(user: SessionUser, keys: ContentK
     for (const url of await studioHiddenAssetUrls(user, prisma, allAssetIds.slice(offset, offset + 200))) hiddenUrls.add(url);
   }
   return {
-    details: false, assets, references: byId(references), modules: byId(modules), presets: byId(presets),
+    details: false, studioActor, assets, references: byId(references), modules: byId(modules), presets: byId(presets),
     assetPresets: presets.filter(row => assetPresets.some(item => item.id === row.id)),
     archived: new Set(archived.map(row => row.key)), owners: byId([...owners, ...presetOwners]),
     videoTemplates: byId(videoTemplates), drafts: byId(drafts), legacy: byId(legacy), runs: byId(runs), tasks: byId(tasks), seedance: byId(seedance),

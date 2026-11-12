@@ -23,6 +23,7 @@ type RememberedStudioLocation = {
 type Props = {
   userId: string;
   isAdmin: boolean;
+  externalActor?: boolean;
   allowedTypes: StudioType[];
   initialType: StudioType;
 };
@@ -119,6 +120,7 @@ function locationHref(location: RememberedStudioLocation) {
 export default function TemplateStudioShell({
   userId,
   isAdmin,
+  externalActor = false,
   allowedTypes,
   initialType,
 }: Props) {
@@ -304,7 +306,7 @@ export default function TemplateStudioShell({
 
       {activeType === 'image' ? (
         <div className={styles.imageSurface} role="tabpanel">
-          <ImageStudio key={userId} isAdmin={isAdmin} userId={userId} templateWorkbench />
+          <ImageStudio key={userId} isAdmin={isAdmin && !externalActor} userId={userId} externalActor={externalActor} templateWorkbench />
         </div>
       ) : (
         <div role="tabpanel">

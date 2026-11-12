@@ -15,7 +15,7 @@ const modelDomains: Record<string, CatalogDomain[]> = {
 };
 const templatePrefixes = ['studio_shared_', 'studio_fixed_references_', 'studio_reference_policy_', 'studio_style_',
   'studio_skill_selection_', 'studio_preset_archived_', 'studio_deleted_workspace', 'studio_removed_default_groups_', 'studio_module_cover_v1:',
-  'multiview_rotation_preset_v1:', 'multiview_private_media_access_v1:', 'feature_profile'];
+  'multiview_rotation_preset_v1:', 'multiview_private_media_access_v1:', 'feature_profile', 'image_studio_external_access_v1'];
 const assetPrefixes = ['asset-library-removal:', 'resource-library-removal:', 'multiview_'];
 const installed = new WeakMap<object, PrismaClient>();
 const marker = Symbol.for('sd2.catalog-directory-writes.v1');

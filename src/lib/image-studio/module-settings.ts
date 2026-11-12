@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { canUseCompanyTemplates, type ImageStudioIdentity } from './access';
-import { assertStudioActor, parseSharedStudioPersonalOverrides, resolveSharedStudioDefinition, StudioSharingError } from './shared-contract';
+import { canAccessImageTemplates, isExternalImageStudioActor, type ImageStudioIdentity } from './access';
+import { assertStudioActor, parseSharedStudioPersonalOverrides, resolveSharedStudioDefinition, studioSharedBinding, StudioSharingError } from './shared-contract';
 import { validStudioModuleId } from './modules';
 import { studioVisibleAssetWhere } from './protected-assets';
 import { parseStudioStyleIds, resolveStudioStyleReferences, StudioStyleError } from './style-groups';
@@ -51,21 +51,27 @@ function readStored(value: string, ownerId: string, moduleId: string, id?: strin
   }
   return row;
 }
-function dto({ fingerprint: _fingerprint, ...row }: Stored): StudioModuleSettings { return row; }
+function dto({ fingerprint: _fingerprint, ...row }: Stored, external = false): StudioModuleSettings {
+  return external ? { ...row, values: { ...row.values, styleGroupIds: [] } } : row;
+}
 async function actor(user: ImageStudioIdentity, client: Client) {
   const fresh = await assertStudioActor(user.id, client);
-  if (!canUseCompanyTemplates(fresh)) throw new StudioModuleSettingsError('无权使用模板设置', 403);
+  if (!canAccessImageTemplates(fresh)) throw new StudioModuleSettingsError('无权使用模板设置', 403);
   return fresh;
 }
 async function workspace(user: ImageStudioIdentity, moduleId: string, client: Client) {
   if (!validStudioModuleId(moduleId, user.id)) throw new StudioModuleSettingsError('模板不存在或无权使用', 404);
   const row = await client.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: user.id } });
   if (!row) throw new StudioModuleSettingsError('模板不存在或已删除，设置不会新建模板', 404);
+  if (isExternalImageStudioActor(user) && (await studioSharedBinding(user.id, row.id, client))?.mode !== 'live') {
+    throw new StudioModuleSettingsError('只能在获准模板工作区使用本人设置', 403);
+  }
   const source = row.source_preset_id ? await resolveSharedStudioDefinition(user, row.source_preset_id, client) : null;
   return { row, source };
 }
 async function materialize(user: ImageStudioIdentity, row: Stored, client: Client,
   source: Awaited<ReturnType<typeof resolveSharedStudioDefinition>> | null) {
+  if (isExternalImageStudioActor(user) && row.values.styleGroupIds.length) throw new StudioModuleSettingsError('外部设置不包含模板内部风格或提示词组', 403);
   // Resolve the current template before reusing its style projection. Additional
   // choices still require this actor's own access.
   const template = new Map((source?.definition.styleGroups || []).map(group => [group.id, group]));
@@ -77,7 +83,7 @@ async function materialize(user: ImageStudioIdentity, row: Stored, client: Clien
     select: { id: true, width: true, height: true } });
   if (assets.length !== row.values.referenceIds.length) throw new StudioModuleSettingsError('设置中的临时参考已不可用，当前输入保留', 409);
   const byId = new Map(assets.map(asset => [asset.id, asset]));
-  return { ...dto(row), styleGroups: groups.map(group => ({ id: group.id, name: group.name, revision: group.revision,
+  return { ...dto(row, isExternalImageStudioActor(user)), styleGroups: groups.map(group => ({ id: group.id, name: group.name, revision: group.revision,
     referenceCount: group.references.length, canManage: user.role === 'admin' || group.ownerId === user.id,
     coverUrl: `/api/image-studio/style-groups/${group.id}/cover?revision=${group.revision}` })),
     images: row.values.referenceIds.map(id => ({ ...byId.get(id)!, originalUrl: studioTemplateAssetUrl(id), thumbnailUrl: studioTemplateAssetUrl(id, true) })) };
@@ -93,7 +99,7 @@ export async function listStudioModuleSettings(user: ImageStudioIdentity, module
     }
     const rows = await tx.platformSetting.findMany({ where: { key: { startsWith: prefix(fresh.id, moduleId) } }, orderBy: { created_at: 'desc' } });
     // The picker reads names and values only. Resolve references once on explicit apply.
-    return { settings: rows.map(row => dto(readStored(row.value_json, fresh.id, moduleId))) };
+    return { settings: rows.map(row => dto(readStored(row.value_json, fresh.id, moduleId), isExternalImageStudioActor(fresh))) };
   });
 }
 export async function studioModuleSettingsStatus(user: ImageStudioIdentity, moduleId: string, requestId: string) {
@@ -101,7 +107,7 @@ export async function studioModuleSettingsStatus(user: ImageStudioIdentity, modu
     const fresh = await actor(user, tx);
     if (!validStudioModuleId(moduleId, fresh.id) || !validRequestId(requestId)) throw new StudioModuleSettingsError('原保存查询无效');
     const row = await tx.platformSetting.findUnique({ where: { key: prefix(fresh.id, moduleId) + requestId } });
-    return row ? { status: 'completed' as const, setting: dto(readStored(row.value_json, fresh.id, moduleId, requestId)) }
+    return row ? { status: 'completed' as const, setting: dto(readStored(row.value_json, fresh.id, moduleId, requestId), isExternalImageStudioActor(fresh)) }
       : { status: 'not-found' as const };
   });
 }
@@ -116,7 +122,7 @@ export async function saveStudioModuleSettings(user: ImageStudioIdentity, raw: u
       if (previous) {
         const row = readStored(previous.value_json, fresh.id, command.moduleId, command.requestId);
         if (row.fingerprint !== fingerprint) throw new StudioModuleSettingsError('原保存编号已用于其他设置，请核对原操作', 409);
-        return { saved: true, setting: dto(row), replayed: true };
+        return { saved: true, setting: dto(row, isExternalImageStudioActor(fresh)), replayed: true };
       }
       const current = await workspace(fresh, command.moduleId, tx);
       if (current.row.revision !== command.moduleRevision || current.source
@@ -127,7 +133,7 @@ export async function saveStudioModuleSettings(user: ImageStudioIdentity, raw: u
         name: command.name, values: command.values, createdAt: new Date().toISOString(), fingerprint };
       await materialize(fresh, row, tx, current.source);
       await tx.platformSetting.create({ data: { key, value_json: JSON.stringify(row), updated_by: fresh.id } });
-      return { saved: true, setting: dto(row), replayed: false };
+      return { saved: true, setting: dto(row, isExternalImageStudioActor(fresh)), replayed: false };
     });
   } catch (error) {
     // Only a rolled-back business rejection plus a fresh absence of this exact

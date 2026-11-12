@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import type { UploadedAssetPayload } from '@/lib/http/file-upload';
-import { canUseCompanyTemplates, type ImageStudioIdentity } from './access';
+import { canAccessImageTemplates, type ImageStudioIdentity } from './access';
 import { MAX_REFERENCE_IMAGES } from './limits';
 import { studioTemplateAssetUrl } from './media';
 import { readableStudioCoverIds } from './protected-assets';
@@ -80,7 +80,7 @@ export function studioInputMainPreview(source: StudioInputMainSource, snapshotJs
 type FrozenInputMain = { ownerId: string; snapshotJson: string | null; referenceIdsJson: string };
 export async function readFrozenStudioInputMain(user: ImageStudioIdentity, source: StudioInputMainSource,
   frozen: FrozenInputMain): Promise<StudioInputMainResponse> {
-  if (!canUseCompanyTemplates(user) || frozen.ownerId !== user.id) throw new StudioInputMainError('无权读取本次输入主图', 403);
+  if (!canAccessImageTemplates(user) || frozen.ownerId !== user.id) throw new StudioInputMainError('无权读取本次输入主图', 403);
   const snapshotToken = createHash('sha256').update(JSON.stringify([
     'studio-direct-input-main-v2', source, frozen.ownerId, frozen.snapshotJson, frozen.referenceIdsJson,
   ])).digest('hex');
@@ -111,7 +111,7 @@ export async function readFrozenStudioInputMain(user: ImageStudioIdentity, sourc
 }
 
 export async function getStudioTaskInputMain(user: ImageStudioIdentity, taskId: string): Promise<StudioInputMainResponse> {
-  if (!canUseCompanyTemplates(user)) throw new StudioInputMainError('无权读取本次输入主图', 403);
+  if (!canAccessImageTemplates(user)) throw new StudioInputMainError('无权读取本次输入主图', 403);
   if (!/^[a-zA-Z0-9-]{1,120}$/.test(taskId)) throw new StudioInputMainError('任务编号无效', 400);
   const task = await prisma.imageStudioTask.findFirst({
     where: { ...studioTemplateTaskWhere(user.id, undefined, true), id: taskId },

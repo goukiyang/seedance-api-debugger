@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
-import { canUseCompanyTemplates } from '@/lib/image-studio/access';
+import { canAccessImageTemplates, isExternalImageStudioActor } from '@/lib/image-studio/access';
 import { defaultStudioModuleId, validStudioModuleId } from '@/lib/image-studio/modules';
 import { ContextVersionError, resolveModuleContextVersion, snapshotModuleContextVersion } from '@/lib/image-studio/context-version';
 import { studioTemplateTaskWhere } from '@/lib/image-studio/task-visibility';
@@ -12,12 +12,13 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
-  if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '无权使用图片模板' }, { status: 403 });
+  if (!canAccessImageTemplates(user)) return NextResponse.json({ error: '无权使用图片模板' }, { status: 403 });
   try {
     const body = await request.json();
     if (!validStudioModuleId(body.moduleId, user.id)) return NextResponse.json({ error: '模块不存在' }, { status: 404 });
     const workspace = await prisma.imageStudioModule.findFirst({ where: { id: body.moduleId, owner_id: user.id } });
     if (!workspace && body.moduleId !== defaultStudioModuleId(user.id)) return NextResponse.json({ error: '模块不存在' }, { status: 404 });
+    if (isExternalImageStudioActor(user)) return NextResponse.json({ code: null, state: 'ready' }, { headers: { 'Cache-Control': 'private, no-store' } });
     if (body.taskId !== undefined) {
       if (typeof body.taskId !== 'string' || body.taskId.length > 120) return NextResponse.json({ error: '历史记录无效' }, { status: 400 });
       const [excludedToolBatches, historyModuleId] = await Promise.all([

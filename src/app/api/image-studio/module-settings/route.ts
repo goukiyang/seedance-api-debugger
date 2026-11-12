@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { canUseCompanyTemplates } from '@/lib/image-studio/access';
+import { canAccessImageTemplates } from '@/lib/image-studio/access';
 import { listStudioModuleSettings, saveStudioModuleSettings, studioModuleSettingsStatus, StudioModuleSettingsError } from '@/lib/image-studio/module-settings';
 import { StudioSharingError } from '@/lib/image-studio/shared-contract';
 import { StudioStyleError } from '@/lib/image-studio/style-groups';
@@ -16,7 +16,7 @@ function failure(error: unknown) {
 export async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401, headers });
-  if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '无权使用模板设置' }, { status: 403, headers });
+  if (!canAccessImageTemplates(user)) return NextResponse.json({ error: '无权使用模板设置' }, { status: 403, headers });
   try {
     const moduleId = request.nextUrl.searchParams.get('moduleId') || '';
     const requestId = request.nextUrl.searchParams.get('requestId');
@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401, headers });
-  if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '无权使用模板设置' }, { status: 403, headers });
+  if (!canAccessImageTemplates(user)) return NextResponse.json({ error: '无权使用模板设置' }, { status: 403, headers });
   try { return NextResponse.json(await saveStudioModuleSettings(user, await request.json()), { headers }); }
   catch (error) { return failure(error); }
 }

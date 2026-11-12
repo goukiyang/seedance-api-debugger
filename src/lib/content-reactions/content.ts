@@ -17,7 +17,7 @@ import { resolveCutoutResult, type CutoutContentContext } from './cutout-content
 import { tryContentKeyParts } from './key';
 import { studioPresetArchived } from '@/lib/image-studio/preset-lifecycle';
 import { studioFixedCoverDTO } from '@/lib/image-studio/module-cover';
-import { studioSharedBinding } from '@/lib/image-studio/shared-contract';
+import { assertStudioActor, studioSharedBinding } from '@/lib/image-studio/shared-contract';
 import { resolveStudioPinnedAsset } from '@/lib/image-studio/result-pins';
 import { multiviewOutputFileAccess } from '@/lib/video/multiview-output-access.server';
 import { archivedPresetKey } from '@/lib/image-studio/preset-lifecycle';
@@ -165,8 +165,9 @@ export async function resolveContent(user: SessionUser, input: ContentKey, conte
       item.downloadUrl = deliveryStage.stableDownloadReady ? `/api/video/download/${id}` : null;
       return { summary: item };
     }
-    if (user.account_type !== 'internal') return null;
+    if (user.account_type !== 'internal' && type !== 'image_template' && type !== 'image_module') return null;
     if (type === 'image_template') {
+      const studioActor = projection?.studioActor || (user.account_type === 'external' ? await assertStudioActor(user.id) : user);
       let row = projection ? projection.presets.get(id) : await prisma.imageStudioPreset.findUnique({ where: { id } });
       if (!row && id.startsWith('module-source:')) {
         const workspace = projection ? projection.modules.get(id.slice('module-source:'.length))
@@ -174,28 +175,29 @@ export async function resolveContent(user: SessionUser, input: ContentKey, conte
         if (workspace?.source_preset_id) row = projection ? projection.presets.get(workspace.source_preset_id)
           : await prisma.imageStudioPreset.findUnique({ where: { id: workspace.source_preset_id } });
       }
-      if (!row || await archived(row.id) || !canViewStudioPreset(user, row)) return null;
+      if (!row || await archived(row.id) || !canViewStudioPreset(studioActor, row)) return null;
       const item = summary(input, 'template', row.name, `/template-studio?type=image&presetId=${encodeURIComponent(row.id)}`);
       item.templateKind = 'definition'; item.templateMedium = 'image';
       item.actionLabel = '使用模板'; item.versionLabel = row.updated_at.toISOString(); item.owner = await projectedOwner(row.owner_id);
       if (projection?.details === false) return { summary: item };
-      const fixedCover = await studioFixedCoverDTO(user, { kind: 'preset', id: row.id });
+      const fixedCover = await studioFixedCoverDTO(studioActor, { kind: 'preset', id: row.id });
       if (fixedCover) { item.thumbnailUrl = fixedCover.thumbnailUrl; item.previewUrl = fixedCover.imageUrl; }
       return { summary: item };
     }
     if (type === 'image_module') {
+      const studioActor = projection?.studioActor || (user.account_type === 'external' ? await assertStudioActor(user.id) : user);
       const row = projection ? projection.modules.get(id) : await prisma.imageStudioModule.findUnique({ where: { id } });
       if (!row) return null;
       const source = row.source_preset_id ? projection ? projection.presets.get(row.source_preset_id) || null
         : await prisma.imageStudioPreset.findUnique({ where: { id: row.source_preset_id } }) : null;
       if (source && await archived(source.id)) return null;
-      if (!canViewStudioModule(user, row, source)) return null;
-      const item = summary(input, 'template', row.name, `/template-studio?type=image&moduleId=${id}`);
+      if (!canViewStudioModule(studioActor, row, source)) return null;
+      const item = summary(input, 'template', user.account_type === 'external' ? source!.name : row.name, `/template-studio?type=image&moduleId=${id}`);
       item.templateKind = 'workpage'; item.templateMedium = 'image';
       item.actionLabel = '继续编辑'; item.versionLabel = String(row.revision); item.owner = await projectedOwner(row.owner_id);
       if (projection?.details === false) return { summary: item };
       const binding = await studioSharedBinding(user.id, row.id);
-      const fixedCover = await studioFixedCoverDTO(user, source ? { kind: 'preset', id: source.id }
+      const fixedCover = await studioFixedCoverDTO(studioActor, source ? { kind: 'preset', id: source.id }
         : binding ? { kind: 'preset', id: binding.presetId } : { kind: 'module', id: row.id });
       if (fixedCover) { item.thumbnailUrl = fixedCover.thumbnailUrl; item.previewUrl = fixedCover.imageUrl; }
       return { summary: item };

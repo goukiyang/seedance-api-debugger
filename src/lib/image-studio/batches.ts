@@ -4,11 +4,14 @@ import { prisma } from '@/lib/prisma';
 import { freezeWorkSourcePolicy } from '@/lib/works/source-policy';
 import { assertUsageProject, parseUsageProjectId, recordUsageAttribution } from '@/lib/admin/usage-attribution';
 import { allocateTaskCredits } from '@/lib/credits/policy';
-import { canUseCompanyTemplates, canViewStudioPreset } from './access';
+import { canAccessImageTemplates, canViewStudioPreset, isExternalImageStudioActor } from './access';
+import { hydrateExternalStudioActor } from './external-access.server';
+import { externalStudioTaskError, externalStudioErrorMessage } from './external-task-projection';
 import { getImageStudioSettings, IMAGE_STUDIO_SETTING_KEY, DEFAULT_STUDIO_PRICES } from './settings';
 import { resolveStudioModuleGenerationConfig } from './modules';
 import { submitStudioBatch, parseStudioRequest, parseSharedStudioIntent, sameSharedStudioIntent, resolveOwnedStudioTaskSharedUse,
-  assertSharedStudioWorkerReady, studioSharedGenerationSource, publicImageTaskStatus, cancelQueuedChannelTask, SharedStudioDefinitionError, StudioError } from './tasks';
+  assertSharedStudioWorkerReady, studioSharedGenerationSource, publicImageTaskStatus, cancelQueuedChannelTask, SharedStudioDefinitionError, StudioError,
+  studioSubmissionProjectId, assertExternalStudioProject } from './tasks';
 import { STUDIO_BATCH_LIMITS, studioBatchBudgetPrecision, type StudioBatchView } from './batch-contract';
 import { studioOutputMismatch as studioDimensionMismatch, studioDimensionMismatchNotice, studioOutputIssue, studioTaskHasViewableOutput } from './dimension-mismatch';
 import { frozenStudioInputMainIds, getStudioTaskInputMain, readFrozenStudioInputMain, studioInputMainPreview,
@@ -41,6 +44,7 @@ import { CURRENT_STUDIO_SIZE_POLICY_VERSION, type StudioSizePolicyVersion } from
 import { normalizeImageFeishuChoice, type FrozenImageFeishuChoice } from './feishu-contract';
 import { freezeImageFeishuChoice, enqueueFrozenImageFeishuNotification, imageFeishuTaskStatuses } from './feishu-notification';
 import { assertStudioRequestWritable, markStudioSubmitFailure } from './submit-receipts.server';
+import { transformPrivateImageTask, readPrivateImageTaskSnapshot, privateImageTaskOrigins } from './private-storage.server';
 
 const PREFIX = 'studio_batch_v1:';
 const ITEM_PREFIX = 'studio_batch_item_v1:';
@@ -272,6 +276,8 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
   }
   submissionStage = 'batch-input';
   const input = parseStudioRequest({ ...body, count: 1 });
+  const submissionProjectId = await studioSubmissionProjectId(ownerId, input.projectId);
+  if (submissionProjectId !== undefined) input.projectId = submissionProjectId;
   if (typeof body.moduleId !== 'string' || !boundedBudget(body.budget)) throw new StudioError('请选择模板并填写最高预算');
   const sources = body.sources;
   if (!Array.isArray(sources) || sources.length < 1 || sources.length > STUDIO_BATCH_LIMITS.images) throw new StudioError(`本批最多 ${STUDIO_BATCH_LIMITS.images} 张图片`);
@@ -304,9 +310,10 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
       { key: { startsWith: `${PRICING_BATCH_PREFIX}${ownerId}:` } },
     ], AND: [{ OR: ['preparing', 'ready', 'paused', 'blocked', 'needs-confirmation'].map(state => ({ value_json: { contains: `"state":"${state}"` } })) }] } });
     if (active >= STUDIO_BATCH_LIMITS.activeBatches) throw new StudioError('最多保留 5 个未结束批次，请先处理原批次', 429);
-    const usageUser = await tx.user.findUnique({ where: { id: ownerId }, select: { id: true, role: true, status: true } });
+    const usageUser = await tx.user.findUnique({ where: { id: ownerId }, select: { id: true, role: true, account_type: true, status: true } });
     if (!usageUser || usageUser.status !== 'active') throw new StudioError('当前账号不可用', 403);
     await assertUsageProject(tx, usageUser, input.projectId ?? null);
+    await assertExternalStudioProject(tx, usageUser, input.projectId ?? null);
     const imageFeishu = await freezeImageFeishuChoice(tx, ownerId, normalizeImageFeishuChoice(body.image_feishu));
     const workspace = await tx.imageStudioModule.findFirst({ where: { id: body.moduleId as string, owner_id: ownerId },
       select: { name: true, model: true, quality: true, resolution: true, prices_json: true } });
@@ -387,6 +394,8 @@ export async function createStudioBatch(ownerId: string, body: Record<string, un
 
 async function prepareBatch(owner: string, id: string) {
   const initial = (await readOwned(owner, id)).batch;
+  const preparationOwner = await prisma.user.findUniqueOrThrow({ where: { id: owner }, select: { account_type: true } });
+  const external = preparationOwner.account_type === 'external';
   try {
     for (const item of initial.items) {
       if (item.prepared || item.taskId || item.cancelled) continue;
@@ -420,7 +429,8 @@ async function prepareBatch(owner: string, id: string) {
         const firstPending = batch.items.find(item => item.prepared && !item.taskId && !item.cancelled);
         const first = firstPending ? await tx.platformSetting.findUnique({ where: { key: itemKey(batch, firstPending.ordinal) } }) : null;
         if (first) {
-          const before = JSON.parse((JSON.parse(first.value_json) as Prisma.ImageStudioTaskUncheckedCreateInput).snapshot_json as string);
+          const firstTask = JSON.parse(first.value_json);
+          const before = external ? readPrivateImageTaskSnapshot(firstTask) : JSON.parse(firstTask.snapshot_json as string);
           const now = JSON.parse(task.snapshot_json as string);
           const skillInput = (snapshot: Record<string, unknown>) => Array.isArray(snapshot.skills) ? snapshot.skills.map(skill => ({ id: skill.id, prompt: skill.prompt, promptVersion: skill.promptVersion, ownerId: skill.ownerId })) : [];
           const definitionFields = ['globalContext', 'moduleContext', 'settingsRevision', 'taskSettings', 'sharedLive', 'styleGroups', 'fixedReferenceImages',
@@ -433,7 +443,10 @@ async function prepareBatch(owner: string, id: string) {
         task.context += `\n\n本批条目 ${item.ordinal}/${batch.total}。严格保留原正文中的明确条件；仅对正文未指定且允许随机的细节作不同选择，不照抄本批其他条目、不改变演化档数或组合图排版。`;
         task.snapshot_json = JSON.stringify({ ...JSON.parse(task.snapshot_json as string), effectiveContext: task.context, batchId: id, requestId: batch.requestId, persistentBatchId: id, batchOrdinal: item.ordinal });
         await assertStudioRequestWritable(tx, owner, batch.requestId);
-        await tx.platformSetting.create({ data: { key: itemKey(batch, item.ordinal), value_json: JSON.stringify(task), updated_by: owner } });
+        const frozenTask = external ? transformPrivateImageTask({ ...task, id: String(task.id), owner_id: owner,
+          prompt: String(task.prompt), context: String(task.context), snapshot_json: String(task.snapshot_json) }, true,
+        privateImageTaskOrigins(task as Parameters<typeof privateImageTaskOrigins>[0])) : task;
+        await tx.platformSetting.create({ data: { key: itemKey(batch, item.ordinal), value_json: JSON.stringify(frozenTask), updated_by: owner } });
         current.prepared = true; batch.prepared += 1;
         await writeBatch(tx, row, batch);
       } });
@@ -467,6 +480,7 @@ export async function studioBatchView(owner: string, id: string, includeItems = 
   const { batch } = await readOwned(owner, id);
   if (batch.billingMode === 'actual') batch.committedCredits = await batchBillingCommitted(prisma, batch);
   const identity = await prisma.user.findUniqueOrThrow({ where: { id: owner }, select: { id: true, role: true, account_type: true, feature_profile_id: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true } });
+  const external = isExternalImageStudioActor(identity);
   const taskIds = batch.items.flatMap(item => item.taskId ? [item.taskId] : []);
   const tasks = await prisma.imageStudioTask.findMany({ where: { id: { in: taskIds }, owner_id: owner }, select: { id: true, status: true, error: true, usage_json: true, asset_id: true, deleted_at: true,
     owner_id: true, snapshot_json: includeItems, reference_ids: true, billing_status: true, actual_amount_micros: true, actual_credits: true, billing_contract_json: true, unit_credits: true, billing_settled_at: true } });
@@ -505,9 +519,9 @@ export async function studioBatchView(owner: string, id: string, includeItems = 
   const pricing = batch.billingContracts?.find(contract => contract?.pricing)?.pricing
     || tasks.map(task => parseImageBillingContract(task.billing_contract_json)?.pricing).find(Boolean);
   const creditPrecision = pricing && !['legacy_fixed', 'legacy_actual'].includes(pricing.mode) ? 0.1 as const : 0.01 as const;
-  return { id: batch.id, requestId: batch.requestId, moduleId: batch.moduleId, moduleName: batch.moduleName, state: !active && !pending && uncertain ? 'uncertain' : batch.state === 'ready' && !active && !pending ? 'complete' : batch.state, note: batch.note, total: batch.total, generated: statuses.filter(state => state === 'succeeded').length, failed: statuses.filter(state => state === 'failed').length, uncertain, active, pending, prepared: batch.prepared, budget: batch.budget, committedCredits: batch.committedCredits, unitCredits: batch.unitCredits, createdAt: batch.createdAt,
+  return { id: batch.id, requestId: batch.requestId, moduleId: batch.moduleId, moduleName: batch.moduleName, state: !active && !pending && uncertain ? 'uncertain' : batch.state === 'ready' && !active && !pending ? 'complete' : batch.state, note: external && batch.note ? externalStudioErrorMessage(batch.state === 'needs-confirmation' ? 409 : 403) : batch.note, total: batch.total, generated: statuses.filter(state => state === 'succeeded').length, failed: statuses.filter(state => state === 'failed').length, uncertain, active, pending, prepared: batch.prepared, budget: batch.budget, committedCredits: batch.committedCredits, unitCredits: batch.unitCredits, createdAt: batch.createdAt,
     pricingRevision: pricing?.revision ?? null, creditPrecision,
-    ...(batch.input.sharedLive ? { sharedLive: parseSharedStudioIntent(batch.input.sharedLive) } : {}),
+    ...(!external && batch.input.sharedLive ? { sharedLive: parseSharedStudioIntent(batch.input.sharedLive) } : {}),
     ...(batch.definitionConfirmationRequired ? { definitionConfirmationRequired: true } : {}),
     ...(typeof batch.input.model === 'string' ? { model: batch.input.model } : {}),
     ...(includeItems ? { items: batch.items.map((item, index) => {
@@ -523,7 +537,8 @@ export async function studioBatchView(owner: string, id: string, includeItems = 
           state: item.prepared ? 'unknown' as const : 'unavailable' as const };
       return { ordinal: item.ordinal, sourceName: item.sourceName, taskId: item.taskId, status: statuses[index],
         ...(task ? { feishu: feishu.get(task.id) } : {}),
-        error: mismatch && asset ? studioDimensionMismatchNotice(mismatch.validation) : task?.error,
+        error: mismatch && asset ? studioDimensionMismatchNotice(mismatch.validation)
+          : external ? externalStudioTaskError(task?.error, statuses[index]) : task?.error,
         resultDisposition: mismatch ? mismatch.code === 'generated_format_mismatch' ? 'format_mismatch' as const : 'dimensions_mismatch' as const : null,
         outputIssue: task ? studioOutputIssue(task) : null, inputMainPreview,
         ...(task && deliveryByTask.has(task.id) ? { delivery: deliveryByTask.get(task.id) } : {}),
@@ -664,13 +679,15 @@ export async function dispatchStudioBatches() {
         const prepared = await tx.platformSetting.findUnique({ where: { key: itemKey(batch, item.ordinal) } });
         if (!prepared) throw new StudioError('素材快照不可用，未派发新任务');
         const data = JSON.parse(prepared.value_json) as Prisma.ImageStudioTaskUncheckedCreateInput;
-        const user = await tx.user.findUnique({ where: { id: batch.ownerId }, select: { id: true, role: true, account_type: true, feature_profile_id: true, status: true, user_profile: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true } });
-        if (!user || user.status !== 'active' || !canUseCompanyTemplates(user)) throw new StudioError('当前账号不能继续生成');
+        const storedUser = await tx.user.findUnique({ where: { id: batch.ownerId }, select: { id: true, role: true, account_type: true, feature_profile_id: true, status: true, user_profile: true, feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true } });
+        if (!storedUser || storedUser.status !== 'active' || !canAccessImageTemplates(storedUser)) throw new StudioError('当前账号不能继续生成');
+        const user = await hydrateExternalStudioActor(storedUser, tx);
         if (data.source_preset_id) {
-          const source = await tx.imageStudioPreset.findUnique({ where: { id: data.source_preset_id }, select: { owner_id: true, scope: true, is_shared: true } });
+          const source = await tx.imageStudioPreset.findUnique({ where: { id: data.source_preset_id }, select: { id: true, owner_id: true, scope: true, is_shared: true } });
           if (!source || !canViewStudioPreset(user, source)) throw new StudioError('模板已停止共享，未派发新任务');
         }
-        const snapshot = JSON.parse(String(data.snapshot_json));
+        const snapshot = isExternalImageStudioActor(user) ? readPrivateImageTaskSnapshot({ ...data, id: String(data.id), owner_id: batch.ownerId,
+          prompt: String(data.prompt), context: String(data.context), snapshot_json: String(data.snapshot_json) }) : JSON.parse(String(data.snapshot_json));
         if (!sameSharedStudioIntent(parseSharedStudioIntent(snapshot.sharedLive), sharedUse?.definition.intent)) throw new SharedStudioDefinitionError();
         if (sharedUse && !isChannelBatch(batch)) {
           const frozenOriginal = snapshot.imageChannel as ImageGenerationChannelSnapshot | undefined;
@@ -680,7 +697,7 @@ export async function dispatchStudioBatches() {
         const transientIds = (snapshot.transientReferenceImages || []).map((reference: { id: string }) => reference.id);
         const visibleReferences = await tx.asset.count({ where: { id: { in: transientIds }, owner_id: batch.ownerId, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(user, tx)] } });
         if (visibleReferences !== new Set(transientIds).size) throw new StudioError('本批参考图已不可用，未派发新任务');
-        if ((snapshot.restoredSettings || snapshot.currentInputs) && snapshot.templateReferenceImages?.length) {
+        if ((snapshot.restoredSettings || snapshot.currentInputs) && snapshot.templateReferenceImages?.length && !isExternalImageStudioActor(user)) {
           const templateIds = snapshot.templateReferenceImages.map((reference: { id: string }) => reference.id);
           const readable = await tx.asset.count({ where: { id: { in: templateIds }, status: 'active', type: 'image',
             AND: [await studioVisibleAssetWhere(user, tx)] } });
@@ -704,7 +721,12 @@ export async function dispatchStudioBatches() {
             }
           }
         }
-        await historicalSkills(user, snapshot.skills, tx);
+        if (isExternalImageStudioActor(user) && sharedUse) {
+          const frozenSkills = (snapshot.skills || []) as Array<{ id: string; promptVersion: string }>;
+          const currentSkills = sharedUse.definition.skills || [];
+          if (frozenSkills.length !== currentSkills.length || frozenSkills.some((skill, index) => skill.id !== currentSkills[index].id
+            || skill.promptVersion !== currentSkills[index].promptVersion)) throw new SharedStudioDefinitionError();
+        } else await historicalSkills(user, snapshot.skills, tx);
         if (snapshot.restoredSettings) {
           const draft = batch.input.draft as { skillIds?: string[]; skillVersions?: Record<string, string> } | undefined;
           if (draft?.skillIds) {
@@ -744,6 +766,7 @@ export async function dispatchStudioBatches() {
         const channelStatus = studioTaskState({ billing_contract_json: String(data.billing_contract_json) }, isChannelBatch(batch) ? 'channel_queued' : 'queued');
         const freeze = Number(data.unit_credits) > 0 ? await allocateTaskCredits(tx, user, Number(data.unit_credits), taskId) : null;
         await assertUsageProject(tx, user, batch.usageContext?.projectId ?? null);
+        await assertExternalStudioProject(tx, user, batch.usageContext?.projectId ?? null);
         const created = await tx.imageStudioTask.create({ data: { ...data, id: taskId, status: channelStatus, freeze_snapshot: freeze?.snapshot } });
         await freezeImageWorkMethodUse(tx, created, batch.id);
         await enqueueFrozenImageFeishuNotification(tx, created, batch.imageFeishu);

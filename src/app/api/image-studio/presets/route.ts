@@ -1,7 +1,8 @@
+import { canAccessImageTemplates, isExternalImageStudioActor } from '@/lib/image-studio/access';
 import { traceHttpRequest } from '@/lib/performance/request-trace';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { applyStudioPreset, canUseCompanyTemplates, linkStudioQuickPreset, listStudioPresets, manageStudioPreset, saveStudioPreset, setStudioPresetSharing, studioSharingCommandStatus, studioPresetDeletionStatus, studioPresetLifecycleHistory } from '@/lib/image-studio/presets';
+import { applyStudioPreset, linkStudioQuickPreset, listStudioPresets, manageStudioPreset, saveStudioPreset, setStudioPresetSharing, studioSharingCommandStatus, studioPresetDeletionStatus, studioPresetLifecycleHistory } from '@/lib/image-studio/presets';
 import { StudioModuleError } from '@/lib/image-studio/modules';
 import { StudioTaskSettingsError } from '@/lib/image-studio/task-settings';
 import { StudioStyleError } from '@/lib/image-studio/style-groups';
@@ -20,12 +21,13 @@ export async function GET(request: NextRequest) {
   return traceHttpRequest('studio.presets', request.headers, async () => {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录', reasonCode: 'login-required' }, { status: 401, headers: privateHeaders });
-  if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限公司飞书账号使用共享模板', reasonCode: 'access-revoked' }, { status: 403, headers: privateHeaders });
+  if (!canAccessImageTemplates(user)) return NextResponse.json({ error: '无权使用图片模板', reasonCode: 'access-revoked' }, { status: 403, headers: privateHeaders });
   try {
     const moduleId = request.nextUrl.searchParams.get('moduleId') ?? undefined;
     const presetId = request.nextUrl.searchParams.get('presetId') ?? undefined;
     if (presetId && presetId.length > 160 || moduleId && moduleId.length > 160) return NextResponse.json({ error: '模板读取参数无效' }, { status: 400, headers: privateHeaders });
     const mode = request.nextUrl.searchParams.get('mode');
+    if (isExternalImageStudioActor(user) && mode) return NextResponse.json({ error: '无权读取模板原件管理资料', reasonCode: 'access-revoked' }, { status: 403, headers: privateHeaders });
     if (mode === 'parameter-copy-status') return NextResponse.json(await studioParameterCopyStatus(user, request.nextUrl.searchParams.get('requestId')), { headers: privateHeaders });
     if (mode === 'definition') {
       if (Boolean(presetId) === Boolean(moduleId)) return NextResponse.json({ error: '模板定义读取参数无效' }, { status: 400, headers: privateHeaders });
@@ -65,7 +67,8 @@ export async function POST(request: NextRequest) {
   return traceHttpRequest('studio.presets', request.headers, async () => {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录', reasonCode: 'login-required' }, { status: 401, headers: privateHeaders });
-  if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限公司飞书账号使用共享模板', reasonCode: 'access-revoked' }, { status: 403, headers: privateHeaders });
+  if (!canAccessImageTemplates(user)) return NextResponse.json({ error: '无权使用图片模板', reasonCode: 'access-revoked' }, { status: 403, headers: privateHeaders });
+  if (isExternalImageStudioActor(user)) return NextResponse.json({ error: '外部账号不能创建或修改模板定义', reasonCode: 'access-revoked' }, { status: 403, headers: privateHeaders });
   try {
     const body = await request.json();
     if (!body || typeof body !== 'object' || Array.isArray(body)) return NextResponse.json({ error: '模板内容无效' }, { status: 400, headers: privateHeaders });

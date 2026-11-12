@@ -18,13 +18,30 @@ export type ImageStudioIdentity = {
   feishu_open_id?: string | null;
   feishu_union_id?: string | null;
   feishu_tenant_key?: string | null;
+  /** Server-resolved, revision-bound image-only grants. Never a company identity. */
+  externalStudioAccess?: { enabled: boolean; revision: number; presetIds: string[] };
 };
 
 export type StudioPresetAccessRow = {
+  id?: string;
   owner_id: string;
   scope: string;
   is_shared: boolean;
 };
+
+export function isExternalImageStudioActor(user: ImageStudioIdentity | SessionUser) {
+  return user.account_type === 'external';
+}
+
+/** Reader/entry capability. New submissions additionally require a current source grant. */
+export function canAccessImageTemplates(user: ImageStudioIdentity | SessionUser) {
+  return canUseCompanyTemplates(user) || isExternalImageStudioActor(user);
+}
+
+export function externalStudioPresetIds(user: ImageStudioIdentity | SessionUser): string[] {
+  return 'externalStudioAccess' in user && user.externalStudioAccess?.enabled
+    ? user.externalStudioAccess.presetIds : [];
+}
 
 function identityFeishu(user: ImageStudioIdentity) {
   return {
@@ -62,6 +79,7 @@ export function canViewStudioPreset(
   user: ImageStudioIdentity | SessionUser,
   preset: StudioPresetAccessRow,
 ) {
+  if (isExternalImageStudioActor(user)) return Boolean(preset.id && externalStudioPresetIds(user).includes(preset.id));
   if (!canUseCompanyTemplates(user)) return false;
   if (preset.owner_id === user.id) return true;
   return (preset.scope === 'admin' || preset.scope === 'creator') && preset.is_shared;
@@ -78,6 +96,7 @@ export function canManageStudioPreset(
 
 export function canViewStudioModule(user: ImageStudioIdentity | SessionUser,
   module: { owner_id: string; source_preset_id: string | null }, source: StudioPresetAccessRow | null) {
+  if (isExternalImageStudioActor(user)) return module.owner_id === user.id && Boolean(module.source_preset_id && source && canViewStudioPreset(user, source));
   return module.owner_id === user.id && canUseCompanyTemplates(user)
     && (!module.source_preset_id || Boolean(source && canViewStudioPreset(user, source)));
 }

@@ -10,6 +10,7 @@ export interface NavItem {
   externalHidden?: boolean;
   externalOnlyHidden?: boolean;
   imageStudioOnly?: boolean;
+  imageTemplatesOnly?: boolean;
 }
 
 export interface NavGroup {
@@ -91,7 +92,7 @@ const shellRoutePrefixes = [
 export const topbarQuickItems: NavItem[] = [
   { label: '创作首页', href: '/', match: ['/', '/works'] },
   { label: '生成', href: '/generate', match: ['/generate', '/generate/canvas'], externalHidden: true },
-  { label: '模板工作台', href: '/template-studio?type=image&view=covers', match: ['/template-studio', '/templates', '/template-generate'], prefixMatch: true, externalHidden: true },
+  { label: '模板工作台', href: '/template-studio?type=image&view=covers', match: ['/template-studio', '/templates', '/template-generate'], prefixMatch: true, imageTemplatesOnly: true },
   { label: '资产', href: '/assets', match: ['/assets'], prefixMatch: true },
   { label: 'IP生成', href: '/generate/ip', match: ['/generate/ip'], prefixMatch: true },
   { label: '无限画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'], prefixMatch: true, externalHidden: true },
@@ -105,7 +106,7 @@ export const userNavGroups: NavGroup[] = [
     items: [
       { label: '创作首页', href: '/', match: ['/', '/works'] },
       { label: '生成视频', href: '/generate', match: ['/generate', '/generate/canvas'], externalHidden: true },
-      { label: '模板工作台', href: '/template-studio?type=image&view=covers', match: ['/template-studio'], prefixMatch: true, externalHidden: true },
+      { label: '模板工作台', href: '/template-studio?type=image&view=covers', match: ['/template-studio'], prefixMatch: true, imageTemplatesOnly: true },
       { label: '视频超分', href: '/generate/enhance', match: ['/generate/enhance'], prefixMatch: true, adminOnly: true },
       { label: '模板生成', href: '/template-generate', prefixMatch: true, externalHidden: true },
       { label: '动画模板', href: '/templates', prefixMatch: true, externalHidden: true },
@@ -226,7 +227,10 @@ export function isNavItemVisible(
   if (item.adminOnly && !isAdmin) return false;
   if(item.href==='/cutout'&&typeof viewer!=='boolean'&&!canUseCutout(viewer))return false;
   if (item.href === '/works' && (typeof viewer === 'boolean' || viewer?.works_preview !== true)) return false;
-  if (item.imageStudioOnly && (typeof viewer === 'boolean' ? !viewer : viewer?.account_type !== 'internal' || !isAdmin && !hasInternalEmailAuthorization(viewer) && (!viewer?.feishu?.tenant_key || !Boolean(viewer?.feishu?.user_id || viewer?.feishu?.open_id || viewer?.feishu?.union_id)))) return false;
+  const companyImagesAllowed = typeof viewer === 'boolean' ? viewer : viewer?.account_type === 'internal'
+    && Boolean(isAdmin || hasInternalEmailAuthorization(viewer) || viewer?.feishu?.tenant_key && (viewer.feishu.user_id || viewer.feishu.open_id || viewer.feishu.union_id));
+  if (item.imageStudioOnly && !companyImagesAllowed) return false;
+  if (item.imageTemplatesOnly && isExternal && (typeof viewer === 'boolean' || viewer?.account_type !== 'external')) return false;
   if ((item.externalHidden || item.externalOnlyHidden) && isExternal) return false;
   return true;
 }

@@ -60,6 +60,7 @@ export async function getSkill(user: ImageStudioIdentity, id: string, tx: Client
   return skill;
 }
 export async function skillDTO(skill: StudioSkill, user?: ImageStudioIdentity, includePrivate = false) {
+  if (user) identity(user);
   const origins = privateFieldOrigins(skill, 'prompt');
   const capabilities = user ? await privatePromptRequestCapabilities(user.id, origins)
     : { canReadPrivatePrompt: false, canEditPrivatePrompt: false, requiresIdentityVerification: false };

@@ -10,7 +10,7 @@ import { resolveStudioTemplateAuthor } from './template-author';
 import { readPrivateStudioDefinition } from './private-storage.server';
 import { privateFieldOrigins } from '@/lib/security/private-prompt-fields.server';
 import { requirePrivatePromptRequest } from '@/lib/security/private-prompt-request.server';
-import type { ImageStudioIdentity } from './access';
+import { canUseCompanyTemplates, type ImageStudioIdentity } from './access';
 import type { SharedStudioReasonCode, StudioTemplateDefinitionRead, StudioTemplateRead } from './shared-types';
 
 export class StudioDefinitionReadError extends Error {
@@ -19,6 +19,7 @@ export class StudioDefinitionReadError extends Error {
 
 export async function readStudioTemplateDefinition(user: ImageStudioIdentity,
   target: { presetId?: string; moduleId?: string }): Promise<StudioTemplateDefinitionRead> {
+  if (!canUseCompanyTemplates(user)) throw new StudioDefinitionReadError('模板不存在或无权读取', 404);
   const resolved = await resolveStudioTemplateAuthor(user, target);
   if (!resolved.templateRead.canViewTemplateContext || resolved.templateRead.author.state !== 'known') {
     throw new StudioDefinitionReadError('模板不存在或无权读取', 404);
@@ -116,6 +117,7 @@ export async function listAdminStudioDefinitionDirectory(user: ImageStudioIdenti
 
 export async function readStudioTemplateAuthorContact(user: ImageStudioIdentity,
   target: { presetId?: string; moduleId?: string }) {
+  if (!canUseCompanyTemplates(user)) throw new StudioDefinitionReadError('模板不存在或无权读取', 404);
   const resolved = await resolveStudioTemplateAuthor(user, target);
   const adminRead = resolved.actor.account_type === 'internal' && resolved.actor.role === 'admin' && resolved.bindingConfirmed;
   if ((!resolved.ordinarilyVisible && !adminRead) || resolved.templateRead.author.state !== 'known' || !resolved.owner) {

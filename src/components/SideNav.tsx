@@ -49,7 +49,7 @@ function SideNavGroup({
               aria-current={active ? 'page' : undefined}
               onClick={onNavigate}
             >
-              {item.label}
+              {item.imageTemplatesOnly && user?.account_type === 'external' ? '生图模板' : item.label}
             </Link>
           );
         })}

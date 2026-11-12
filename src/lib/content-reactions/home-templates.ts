@@ -1,11 +1,11 @@
 import 'server-only';
 import { prisma } from '@/lib/prisma';
 import type { SessionUser } from '@/lib/auth/session';
-import { canUseCompanyTemplates, canViewStudioPreset, canViewStudioModule } from '@/lib/image-studio/access';
+import { canAccessImageTemplates, canViewStudioPreset, canViewStudioModule, type ImageStudioIdentity } from '@/lib/image-studio/access';
 import { archivedPresetKey } from '@/lib/image-studio/preset-lifecycle';
 import { readableStudioCoverIds } from '@/lib/image-studio/protected-assets';
 import { studioFixedCoverDTO } from '@/lib/image-studio/module-cover';
-import { studioSharedBinding } from '@/lib/image-studio/shared-contract';
+import { assertStudioActor, studioSharedBinding } from '@/lib/image-studio/shared-contract';
 import type { ModuleCoverTarget } from '@/lib/image-studio/module-cover-types';
 import type { HomeTemplate, HomeTemplates } from '@/lib/home/types';
 import type { ContentKey } from './types';
@@ -15,8 +15,9 @@ import { tryContentKeyParts } from './key';
 const presetSelect = { id: true, owner_id: true, scope: true, is_shared: true, name: true, banner_asset_id: true } as const;
 type Projection = { key: ContentKey; title: string; href: string; kind: 'definition' | 'workpage'; ownerId: string; bannerId: string | null; fixedTarget: ModuleCoverTarget };
 
-async function projectTemplates(user: SessionUser, keys: ContentKey[]): Promise<Projection[]> {
-  if (!canUseCompanyTemplates(user)) return [];
+async function projectTemplates(user: SessionUser, keys: ContentKey[], actor?: ImageStudioIdentity): Promise<Projection[]> {
+  if (!canAccessImageTemplates(user)) return [];
+  const studioActor = actor ?? await assertStudioActor(user.id);
   const parts = keys.flatMap(key => { const parsed = tryContentKeyParts(key); return parsed ? [parsed] : []; });
   const definitions = parts.filter(item => item.type === 'image_template').map(item => item.id);
   const legacyModules = definitions.filter(id => id.startsWith('module-source:')).map(id => id.slice('module-source:'.length));
@@ -32,12 +33,12 @@ async function projectTemplates(user: SessionUser, keys: ContentKey[]): Promise<
     if (type === 'image_template') {
       const legacy = id.startsWith('module-source:') ? byModule.get(id.slice('module-source:'.length)) : null;
       const row = byId.get(id) || (legacy?.source_preset_id ? byId.get(legacy.source_preset_id) : null);
-      return row && canViewStudioPreset(user, row) ? [{ key, title: row.name, href: `/template-studio?type=image&presetId=${encodeURIComponent(row.id)}`,
-        kind: 'definition' as const, ownerId: row.owner_id, bannerId: row.banner_asset_id, fixedTarget: { kind: 'preset', id: row.id } }] : [];
+      return row && canViewStudioPreset(studioActor, row) ? [{ key, title: row.name, href: `/template-studio?type=image&presetId=${encodeURIComponent(row.id)}`,
+        kind: 'definition' as const, ownerId: row.owner_id, bannerId: user.account_type === 'external' ? null : row.banner_asset_id, fixedTarget: { kind: 'preset', id: row.id } }] : [];
     }
     const row = byModule.get(id), source = row?.source_preset_id ? byId.get(row.source_preset_id) || null : null;
-    return row && canViewStudioModule(user, row, source) ? [{ key, title: row.name, href: `/template-studio?type=image&moduleId=${encodeURIComponent(id)}`,
-      kind: 'workpage' as const, ownerId: row.owner_id, bannerId: source ? null : row.banner_asset_id,
+    return row && canViewStudioModule(studioActor, row, source) ? [{ key, title: user.account_type === 'external' ? source!.name : row.name, href: `/template-studio?type=image&moduleId=${encodeURIComponent(id)}`,
+      kind: 'workpage' as const, ownerId: row.owner_id, bannerId: user.account_type === 'external' || source ? null : row.banner_asset_id,
       fixedTarget: source ? { kind: 'preset', id: source.id } : { kind: 'module', id: row.id } }] : [];
   });
 }
@@ -55,6 +56,7 @@ async function covers(user: SessionUser, rows: Projection[]) {
 }
 
 export async function homeTemplateCover(user: SessionUser, input: string, assetId: string) {
+  if (user.account_type === 'external') return null;
   const key = parseContentKey(input);
   if (!key.startsWith('image_template:') && !key.startsWith('image_module:')) return null;
   const rows = await projectTemplates(user, [key]);
@@ -63,7 +65,8 @@ export async function homeTemplateCover(user: SessionUser, input: string, assetI
 }
 
 export async function homeTemplates(user: SessionUser, params: URLSearchParams): Promise<HomeTemplates> {
-  if (!canUseCompanyTemplates(user)) return { items: [], nextCursor: null };
+  if (!canAccessImageTemplates(user)) return { items: [], nextCursor: null };
+  const studioActor = await assertStudioActor(user.id);
   const requestedLimit = params.get('limit');
   if (requestedLimit !== null && !/^[1-5]$/.test(requestedLimit)) throw new ReactionError('收藏数量无效');
   const limit = requestedLimit === null ? 5 : Number(requestedLimit);
@@ -84,7 +87,7 @@ export async function homeTemplates(user: SessionUser, params: URLSearchParams):
   ] }, orderBy: [{ updated_at: 'desc' }, { id: 'desc' }], take: 41,
   select: { id: true, content_key: true, liked: true, favorited: true, version: true, updated_at: true } });
   const batch = candidates.slice(0, 40);
-  const projected = await projectTemplates(user, batch.flatMap(row => { const parsed = tryContentKeyParts(row.content_key); return parsed ? [parsed.key] : []; }));
+  const projected = await projectTemplates(user, batch.flatMap(row => { const parsed = tryContentKeyParts(row.content_key); return parsed ? [parsed.key] : []; }), studioActor);
   const byKey = new Map(projected.map(row => [row.key, row]));
   const selected: Array<{ row: typeof batch[number]; projection: Projection }> = [];
   let consumed = 0;
@@ -101,7 +104,7 @@ export async function homeTemplates(user: SessionUser, params: URLSearchParams):
       const binding = await studioSharedBinding(user.id, target.id);
       if (binding) target = { kind: 'preset', id: binding.presetId };
     }
-    return [projection.key, await studioFixedCoverDTO(user, target)] as const;
+    return [projection.key, await studioFixedCoverDTO(studioActor, target)] as const;
   })));
   const items: HomeTemplate[] = selected.map(({ row, projection }) => {
     const asset = coverByKey.get(projection.key);

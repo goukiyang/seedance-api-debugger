@@ -6,7 +6,7 @@ import { assertStudioActor, StudioSharingError } from './shared-contract';
 import { parseGalleryQuery, queryStudioGallery } from './gallery';
 import { galleryDirectorySql, type GalleryDirectoryRow } from './gallery-directory-sql';
 import { catalogReaderReady, readCatalogRevision } from './catalog-revision';
-import type { ImageStudioIdentity } from './access';
+import { isExternalImageStudioActor, type ImageStudioIdentity } from './access';
 import type { GalleryQuery, GalleryQueryResult } from './gallery-types';
 import { observeOperation } from '@/lib/performance/server-operations';
 import { tracePhase } from '@/lib/performance/request-trace';
@@ -31,7 +31,7 @@ export async function readGalleryPage(db: Prisma.TransactionClient, user: ImageS
   const observed = observeOperation('studio.gallery');
   const actor = await assertStudioActor(user.id, db), before = await readCatalogRevision(db, 'templates');
   if (!before) throw new CatalogSqlCompatibilityError('目录writer尚未就绪');
-  const revision = createHash('sha256').update(JSON.stringify([before, actor.id, actor.role, actor.account_type, actor.feature_profile_id,
+  const revision = createHash('sha256').update(JSON.stringify([before, actor.id, actor.role, actor.account_type, actor.feature_profile_id, actor.externalStudioAccess,
     input.query || '', input.scope || 'all', input.authorKey || null, input.sort || 'created', input.directoryOrder || {}, input.recentHints || {}])).digest('hex');
   if (input.catalogRevision && input.catalogRevision !== revision) throw new StudioSharingError('封面目录已变化，请重新读取', 409, 'state-conflict');
   const directory = await galleryDirectorySql(db, actor, input);
@@ -72,7 +72,10 @@ export async function readGalleryPage(db: Prisma.TransactionClient, user: ImageS
     nav = await tracePhase('gallery-navigation', () => project(navigationRows, true));
   const groups = capturedGroups ?? (await db.$queryRaw<Array<{ groupName: string }>>(Prisma.sql`WITH ${navigation!.ctes} SELECT DISTINCT groupName FROM filtered ORDER BY groupName`)).map(row => row.groupName);
   if (before !== await readCatalogRevision(db, 'templates')) throw new StudioSharingError('封面目录已变化，请重新读取', 409, 'state-conflict');
-  await assertStudioActor(user.id, db);
+  const freshActor = await assertStudioActor(user.id, db);
+  if (isExternalImageStudioActor(actor) && JSON.stringify(freshActor.externalStudioAccess) !== JSON.stringify(actor.externalStudioAccess)) {
+    throw new StudioSharingError('模板开放范围已变化，请重新读取', 409, 'state-conflict');
+  }
   const result: GalleryQueryResult = { protocol: 'catalog-paged-v2', items: cover.items, navigation: nav.navigation, matches: pageRows.length ? cover.navigation : [],
     total, page, pageSize, catalogRevision: revision, directoryRevision: before, navigationTotal, navigationPage, navigationPageSize, directoryGroups: groups,
     capabilities: { independentReactions: true }, removedDefaultGroups: nav.removedDefaultGroups, deletedSourcePresetIds: [] };
