@@ -1,10 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '角色融合对话等待修复',
+  title: '3D多视图模型与弹窗修复',
   outline: [
-    '多步查询与纠错有足够时间接续完成',
-    '保留原卡片、取消操作及已有结果'
+    '动作整理记住所选模型，可更新当前目录',
+    '失效模型说明原因并保留原动作',
+    '多视图弹窗居中，操作区更清楚'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

@@ -12,11 +12,12 @@ import { StudioError } from '@/lib/template-studio/errors';
 import { assertUsageProject, recordUsageAttribution } from '@/lib/admin/usage-attribution';
 import { getStudioCapabilities } from '@/lib/template-studio/capabilities';
 import { isSeedanceVideoModelId, isSeedanceVideoDuration, seedanceVideoDurationError, DEFAULT_SEEDANCE_VIDEO_MODEL_ID } from '@/lib/provider/seedance-models';
-import { isStudioTextModel } from '@/lib/template-studio/text-models';
 import { TEMPLATE_STUDIO_LIMITS, stableJson } from '@/lib/template-studio/validation';
 import { containsPrivateContext, visibleRunPrompt } from '@/lib/template-studio/projection';
 import { transformPrivateVideoRun, privateVideoRunOrigins } from '@/lib/template-studio/private-storage.server';
-import { assertPrivateMuskSend, getMuskApiSettings } from '@/lib/integrations/musk';
+import { assertPrivateMuskSend, getMuskApiSettings, resolveMuskChatModels } from '@/lib/integrations/musk';
+import { readModelAccessSettings } from '@/lib/pricing/model-access.server';
+import { supplementaryModelEnabled } from '@/lib/pricing/model-availability-contract';
 import { privatePromptState, type PrivateOrigin } from '@/lib/security/private-prompts.server';
 import type { StudioJsonValue, StudioRunSnapshot } from '@/lib/template-studio/types';
 import { getMultiviewWork, multiviewWorkRecipeHash, assertMultiviewWorkReference, MultiviewWorkError } from './multiview-works';
@@ -88,6 +89,11 @@ async function runDto(row: RunRow, db: Db = prisma): Promise<MultiviewActionRun>
 export async function getMultiviewActionCapabilities(user: SessionUser): Promise<MultiviewActionCapabilities> {
   requireStudioUser(user);
   const capabilities = await getStudioCapabilities(user);
+  const settings = await getMuskApiSettings();
+  const access = await readModelAccessSettings();
+  const models = (await resolveMuskChatModels(settings)).filter(model => supplementaryModelEnabled(access, 'text', model));
+  capabilities.llmModels = models.map(id => ({ id, label: id }));
+  capabilities.defaultLlmModel = models.includes(settings.default_model) ? settings.default_model : '';
   try {
     const [format, sync] = await Promise.all([multiviewActionContextMetadata(user, 'format'), multiviewActionContextMetadata(user, 'sync')]);
     const ready = format.configured && sync.configured && MULTIVIEW_ACTION_ENABLED && process.env.MULTIVIEW_ACTION_ACCEPTING !== '0';
@@ -158,7 +164,7 @@ function baseSnapshot(user: SessionUser, draft: DraftRow, prompt: string, parame
 export async function createMultiviewActionRun(user: SessionUser, input: unknown) {
   requireStudioUser(user);
   if (!object(input) || !identifier(input.draftId) || !Number.isSafeInteger(input.revision) || typeof input.requestId !== 'string'
-    || !/^[A-Za-z0-9:_-]{1,96}$/.test(input.requestId) || input.llmModel !== undefined && !isStudioTextModel(String(input.llmModel))) throw invalid('文案请求无效');
+    || !/^[A-Za-z0-9:_-]{1,96}$/.test(input.requestId) || input.llmModel !== undefined && (typeof input.llmModel !== 'string' || !input.llmModel || input.llmModel.length > 100)) throw invalid('文案请求无效');
   const requestId = `mv-action:${input.requestId}`;
   const prior = await prisma.videoStudioRun.findUnique({ where: { owner_user_id_request_id: { owner_user_id: user.id, request_id: requestId } } });
   if (prior) {
@@ -171,11 +177,13 @@ export async function createMultiviewActionRun(user: SessionUser, input: unknown
   const text = actionText(draft.prompt, true);
   const capabilities = await getMultiviewActionCapabilities(user);
   if (!capabilities.actionReady || !capabilities.llmEnabled) throw new StudioError(capabilities.actionReason || capabilities.llmReason || '文案服务当前不可用', 503, 'UNAVAILABLE');
+  const model = input.llmModel as string || capabilities.defaultLlmModel;
+  if (!capabilities.llmModels.some(item => item.id === model)) throw new StudioError('所选文案模型当前不可用，请更新模型后重新选择；原动作保留。', 400, 'INVALID', { notAccepted: true });
   const format = await readMultiviewActionContext('format');
   if (!format.context.trim()) throw conflict('动作格式尚未配置');
   const value = baseSnapshot(user, draft, text, parsed.parameters);
   value.privateContext = { global: format.context, module: '', globalRevision: format.revision, moduleRevision: 0 };
-  value.llmModel = input.llmModel as string || capabilities.defaultLlmModel;
+  value.llmModel = model;
   value.multiviewAction = { stage: 'format', workId: work.id, revision: work.draftRevision, recipeHash: multiviewWorkRecipeHash(work.recipe!), outputHash: '',
     sourceTaskId: work.sourceTaskId, sourceVersion: work.recipe!.sourceVersion, geometry: workGeometry(work.recipe! as Parameters<typeof workGeometry>[0]), assetId: '', formatRevision: format.revision, syncRevision: 0 };
   if (text.length + format.context.length > TEMPLATE_STUDIO_LIMITS.llmInput) throw invalid('动作和固定规则合计过长');

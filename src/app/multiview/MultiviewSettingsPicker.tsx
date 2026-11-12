@@ -71,7 +71,7 @@ export function MultiviewSettingsPicker(props: Props) {
 }
 
 function MultiviewSettingsPickerContent(props: Props) {
-  const { prompt, confirm, productDialog } = useProductDialog();
+  const { prompt, confirm, productDialog } = useProductDialog({ placement: 'center' });
   const label = props.kind === 'generation' ? '生成设置' : '选帧方案';
   const inputId = useId();
   const [items, setItems] = useState<Summary[]>([]);
