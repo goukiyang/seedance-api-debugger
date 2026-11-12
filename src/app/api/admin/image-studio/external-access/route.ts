@@ -14,8 +14,7 @@ async function route(request: NextRequest, mutate: boolean) {
     if (!mutate) {
       const requestId = request.nextUrl.searchParams.get('requestId');
       return NextResponse.json(requestId ? await getExternalStudioAccessOperation(actor, requestId)
-        : await getExternalStudioAccessAdmin(actor, { q: request.nextUrl.searchParams.get('q') || undefined,
-          after: request.nextUrl.searchParams.get('after') || undefined }), { headers });
+        : await getExternalStudioAccessAdmin(actor), { headers });
     }
     let origin: URL;
     try { origin = new URL(request.headers.get('origin') || ''); } catch { throw new AuthError('请在本站操作', 403); }

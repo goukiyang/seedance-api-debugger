@@ -5,7 +5,7 @@ import { canAccessImageTemplates, canViewStudioPreset, canViewStudioModule, type
 import { archivedPresetKey } from '@/lib/image-studio/preset-lifecycle';
 import { readableStudioCoverIds } from '@/lib/image-studio/protected-assets';
 import { studioFixedCoverDTO } from '@/lib/image-studio/module-cover';
-import { assertStudioActor, studioSharedBinding } from '@/lib/image-studio/shared-contract';
+import { assertStudioActor, sharedStudioAvailability, studioSharedBinding } from '@/lib/image-studio/shared-contract';
 import type { ModuleCoverTarget } from '@/lib/image-studio/module-cover-types';
 import type { HomeTemplate, HomeTemplates } from '@/lib/home/types';
 import type { ContentKey } from './types';
@@ -28,6 +28,11 @@ async function projectTemplates(user: SessionUser, keys: ContentKey[], actor?: I
   const presets = await prisma.imageStudioPreset.findMany({ where: { id: { in: presetIds } }, take: 80, select: presetSelect });
   const archived = new Set((await prisma.platformSetting.findMany({ where: { key: { in: presetIds.map(archivedPresetKey) } }, take: 80, select: { key: true } })).map(row => row.key));
   const byId = new Map(presets.filter(row => !archived.has(archivedPresetKey(row.id))).map(row => [row.id, row]));
+  if (user.account_type === 'external') for (const row of presets) {
+    if (!byId.has(row.id) || !canViewStudioPreset(studioActor, row)) continue;
+    const source = await prisma.imageStudioPreset.findUnique({ where: { id: row.id } });
+    if (!source || !await sharedStudioAvailability(studioActor, source, prisma)) byId.delete(row.id);
+  }
   const byModule = new Map(modules.map(row => [row.id, row]));
   return parts.flatMap<Projection>(({ key, type, id }) => {
     if (type === 'image_template') {

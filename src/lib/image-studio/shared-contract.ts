@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { parseStudioCurrentInputs } from './current-inputs';
 import type { ImageStudioPreset, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { canAccessImageTemplates, canManageStudioPreset, canUseCompanyTemplates, canViewStudioPreset, isExternalImageStudioActor, externalStudioPresetIds, type ImageStudioIdentity } from './access';
+import { canAccessImageTemplates, canManageStudioPreset, canUseCompanyTemplates, canViewStudioPreset, isExternalImageStudioActor, externalStudioPresetIds, externalStudioAllShared, type ImageStudioIdentity } from './access';
 import { hydrateExternalStudioActor } from './external-access.server';
 import { archivedPresetKey, studioPresetArchived } from './preset-lifecycle';
 import { getStudioModuleFixedReferences, getStudioPresetFixedReferences, parseStudioFixedReferences, repairStudioFixedReferences, studioFixedReferenceStatus, setStudioPresetFixedReferences, StudioFixedReferenceError, type StudioFixedReference } from './fixed-references';
@@ -269,7 +269,7 @@ async function readSharedStudioDependencies(actor: ImageStudioIdentity, source: 
   forceExternalExecution = false) {
   const external = isExternalImageStudioActor(actor) || forceExternalExecution;
   // Execution does not grant the consumer the source owner's reading rights.
-  // The external actor has already been hydrated against this exact source.
+  // The hydrated actor grants execution eligibility, never source reading rights.
   if (external && !canViewStudioPreset(actor, source)) throw new StudioSharingError('模板不存在或无权使用', 404, 'access-revoked');
   const executionActor = external && actor.id !== source.owner_id ? await assertStudioActor(source.owner_id, client) : actor;
   if (external && !canUseCompanyTemplates(executionActor)) throw new StudioSharingError('模板来源当前不可用', 409, 'dependency-invalid');
@@ -300,6 +300,12 @@ async function readSharedStudioDependencies(actor: ImageStudioIdentity, source: 
   if (templateReferenceIds.some(id => !readableIds.has(id))) throw new StudioSharingError('模板参考图已变为受保护内容，请由创建者核对', 409);
   const model = source.model as SharedStudioDefaults['model'];
   if (!IMAGE_STUDIO_MODELS.includes(model)) throw new StudioSharingError('模板模型已不可用，请由创建者重新保存', 409);
+  if (external) {
+    try {
+      normalizeImageStudioQuality(model, source.quality);
+      normalizeImageResolution(model, source.resolution);
+    } catch (error) { throw new StudioSharingError((error as Error).message, 409, 'dependency-invalid'); }
+  }
   return { templateReferenceIds, referencePolicy, reproduction, fixedReferences, styleGroupIds, styles, skills, byId, readableIds, model };
 }
 
@@ -308,11 +314,7 @@ export async function assertExternalStudioTemplateDependencies(source: ImageStud
   try {
     const owner = await assertStudioActor(source.owner_id, client);
     if (!canUseCompanyTemplates(owner)) throw new StudioSharingError('模板来源当前不可用', 409, 'dependency-invalid');
-    const { model } = await readSharedStudioDependencies(owner, readPrivateStudioDefinition('image-preset', source), client, true);
-    try {
-      normalizeImageStudioQuality(model, source.quality);
-      normalizeImageResolution(model, source.resolution);
-    } catch (error) { throw new StudioSharingError((error as Error).message, 409, 'dependency-invalid'); }
+    await readSharedStudioDependencies(owner, readPrivateStudioDefinition('image-preset', source), client, true);
   } catch (error) { throw normalizeSharedError(error); }
 }
 
@@ -320,7 +322,7 @@ export async function assertExternalStudioTemplateDependencies(source: ImageStud
 export async function sharedStudioAvailability(actor: ImageStudioIdentity, source: ImageStudioPreset, client: SharedStudioClient) {
   if (!canViewStudioPreset(actor, source) || await studioPresetArchived(source.id, client)) return false;
   try { if (isParameterCopyId(source.id)) await resolveSharedStudioDefinition(actor, source.id, client);
-    else await readSharedStudioDependencies(actor, source, client); return true; }
+    else await readSharedStudioDependencies(actor, isExternalImageStudioActor(actor) ? readPrivateStudioDefinition('image-preset', source) : source, client); return true; }
   catch (error) {
     const problem = normalizeSharedError(error);
     if (problem instanceof StudioSharingError && [400, 403, 404, 409].includes(problem.status)) return false;
@@ -1595,7 +1597,8 @@ async function sharedDefinitionToken(source: ImageStudioPreset, client: SharedSt
 async function sharedCatalogState(user: ImageStudioIdentity, client: SharedStudioClient) {
   const actor = await assertStudioActor(user.id, client);
   const rows = await client.imageStudioPreset.findMany({ where: isExternalImageStudioActor(actor)
-    ? { id: { in: externalStudioPresetIds(actor) } } : { OR: [{ owner_id: actor.id }, { is_shared: true }] }, orderBy: { id: 'asc' },
+    ? externalStudioAllShared(actor) ? { is_shared: true, scope: { in: ['admin', 'creator'] } }
+      : { id: { in: externalStudioPresetIds(actor) } } : { OR: [{ owner_id: actor.id }, { is_shared: true }] }, orderBy: { id: 'asc' },
     select: { id: true, owner_id: true, scope: true, is_shared: true, name: true, group_name: true, banner_asset_id: true, reference_ids: true, updated_at: true } });
   const archived = await client.platformSetting.findMany({ where: { key: { in: rows.map(row => archivedPresetKey(row.id)) } }, select: { key: true } });
   const archivedKeys = new Set(archived.map(row => row.key));
