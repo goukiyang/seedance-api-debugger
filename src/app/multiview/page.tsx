@@ -171,7 +171,7 @@ function MultiviewPageContent() {
   const [previewState, setPreviewState] = useState<PreviewState>({ manifest: null, urls: {}, loading: false, error: '' });
   const [localPresent, setLocalPresent] = useState(false);
   const [allowWorkCreate, setAllowWorkCreate] = useState(false);
-  const { confirm, prompt, productDialog } = useProductDialog();
+  const { confirm, prompt, productDialog } = useProductDialog({ placement: 'center' });
   const sortSensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 350, tolerance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates,

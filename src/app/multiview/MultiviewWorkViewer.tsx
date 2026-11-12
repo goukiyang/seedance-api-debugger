@@ -49,7 +49,7 @@ export function MultiviewWorkViewer(props: WorkViewerProps) {
   const current = useRef(identity); current.current = identity;
   const titleContext = useRef({ id: `${owner}:${work.id}`, value: work.title });
   const titleAttempted = useRef('');
-  const { confirm, productDialog } = useProductDialog();
+  const { confirm, productDialog } = useProductDialog({ placement: 'center' });
   const uniqueTitle = Boolean(title.trim() && title.trim() !== work.title && !titleRetained);
   useUnsavedNavigation(uniqueTitle, confirm, { unsaved: uniqueTitle ? ['本次作品名称'] : [], busy: [], revision: `${owner}:${work.id}:${title}` });
   const preferenceKey = `sd2:multiview:work-view:v1:${owner}:${work.id}:${work.sourceVersion || ''}`;

@@ -567,16 +567,29 @@
   .generationMore { order: 4; }
 }
 @media (max-width: 760px) {
-  .page { padding: 14px 12px 8px; }
+  .page { container-type: normal; padding: 14px 12px 8px; }
   .toolbar { gap: 6px; }
+  .toolbarActions > button { display: none; }
   .toolbarActions { gap: 8px; }
   .documentBar { gap: 7px; }
   .documentBar > .actions { gap: 4px; }
-  .documentBar button, .documentBar summary { min-height: 36px; }
-  .workbench { min-height: 0; height: clamp(280px, calc(var(--fusion-viewport-height, 100dvh) - var(--fusion-workbench-top, 220px) - 10px), calc(var(--fusion-viewport-height, 100dvh) - 12px)); }
-  .conditionsScroll, .resultsColumn { padding-right: 2px; }
+  .documentBar button, .documentBar summary { min-height: 40px; padding-inline: 4px; font-size: 12px; }
+  .workbench { display: block; min-height: 0; height: auto; padding-bottom: calc(var(--fusion-dock-height, 280px) + 16px); }
+  .workbench.managementView { padding-bottom: 0; }
+  .conditionsScroll, .resultsColumn { overflow: visible; padding-right: 2px; }
+  .workbench .ruleGrid { grid-template-columns: minmax(0, 1fr); }
+  .creationDock { position: fixed; z-index: 20; left: var(--fusion-dock-left, 12px); right: var(--fusion-dock-right, 12px); bottom: var(--fusion-keyboard-inset, 0px); max-height: calc(var(--fusion-viewport-height, 100dvh) - 8px); overflow-y: auto; overscroll-behavior-y: contain; }
+  .creationDock .generateDock { position: sticky; bottom: 0; background: var(--bg-primary); }
+  .generationControls { flex-wrap: wrap; }
+  .generationControls > label { flex: 1; }
+  .generationControls select { width: 100%; }
+  .page .generationControls > .primary { order: 3; flex-basis: calc(100% - 42px); }
+  .generationMore { order: 4; }
+  .generationMore > div { position: fixed; right: var(--fusion-dock-right, 12px); bottom: calc(var(--fusion-keyboard-inset, 0px) + 56px); z-index: 21; }
   .creationChat .chatInput textarea { font-size: 16px; }
-  .page .chatSendActions > .iconButton { min-height: 44px; width: 34px; }
+  .creationChat .chatInput:not(.longChatInput) textarea { max-height: 80px; }
+  .page .chatSendActions button { min-height: 44px; min-width: 44px; }
+  .page .chatSendActions > .iconButton { min-height: 44px; width: 44px; }
   .chatKeyboard { display: none; }
   .chatExpanded .chatHistory { max-height: 24dvh; }
   .chatSendActions > button > span { display: none; }

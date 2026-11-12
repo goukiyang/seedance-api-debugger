@@ -3,6 +3,8 @@ export type FusionFieldChange = { path: string[]; value: unknown; expected?: unk
 export type FusionIntent = { requirements: Array<{ text: string; en?: string; sourceOpId?: string }> };
 export type FusionSummaryMeta = { formatVersion: 1; stateVersion: number; throughOpId?: string; legacy?: boolean };
 export type FusionIdentity = { nextDisplayNo: number; nextBatchNo: number };
+/** Private terminal diagnostics, omitted from public workspace/operation DTOs. */
+export type FusionProposalDiagnostic = { formatVersion: 1; step: number; code: string; reason: string; commands?: unknown[]; commandsOmitted?: true };
 export type FusionGenerationPlan = {
   formatVersion: 1; scope: 'document' | 'batch'; count?: number; overlay?: FusionFieldChange[];
   onceMust?: Record<string, string[]>; diversity?: 'prefer' | 'strict'; targetRowIds?: string[];
