@@ -1,10 +1,10 @@
 import type { MuskChatMessage } from '@/lib/integrations/musk';
 import { randomUUID } from 'node:crypto';
-import { CONFIG, COUNTS } from './engine';
+import { CONFIG, CORE, COUNTS } from './engine';
 import { TRAITS } from './catalogue';
 import { builtinCategoryId, isExtensionId, type FusionCatalogue } from './catalogue-model';
 import type { FusionEffects } from './domain';
-import { FusionError, isRecord, parseFusionCommands, sameFusionValue, settingsFingerprint, type FusionCommand, type FusionWorkspace } from './actions';
+import { FusionError, applyFusionCommands, isRecord, parseFusionCommands, sameFusionValue, settingsFingerprint, type FusionCommand, type FusionWorkspace } from './actions';
 
 export const FUSION_AGENT_MAX_STEPS = 6;
 const MAX_CONTEXT_CHARS = 23500;
@@ -19,6 +19,40 @@ export type FusionAgentRead = { kind: 'catalogue'; categoryId?: string; q?: stri
   | { kind: 'constraints'; categoryId: string; field: 'values' | 'excluded' | 'must' | 'candidates'; cursor?: string; limit?: number };
 export type FusionAgentBinding = { target?: FusionAgentTarget; message?: string; sourceOpId?: string; undoableOperationIds?: string[]; undoableOperations?: Array<{ opId: string; effects?: FusionEffects }>; scopeChoice?: 'row' | 'document' };
 export type FusionAgentScopeChoice = { id: 'row' | 'document'; label: string };
+const requestClauses = (message: string) => message.split(/[，,。；;！!？?\n]+|(?:但是|但|同时|\bbut\b|\bhowever\b)/i).map(value => value.trim()).filter(Boolean);
+const negatedRequest = (clause: string) => /^(?:(?:也|并且?|请|仍|都|还)\s*)*(?:不要|别|不必|无需|不用|不是|不|禁止|勿|do not\b|don't\b|never\b)/i.test(clause);
+/** A protected future batch is not a request to create one. The target itself stays server-bound. */
+export function needsFusionAgentScopeChoice(message: string): boolean {
+  return requestClauses(message).some(clause => {
+    if (negatedRequest(clause) || /(?:保持|维持|保留).*(?:不变|原样)|(?:下[一]?批|其它方案|其他方案).*(?:不变|不受影响)/.test(clause)) return false;
+    const single = /(?:只|仅).*(?:这张|这条|这个方案|当前方案)|only.*(?:this|selected).*(?:row|card|proposal)/i.test(clause);
+    const batch = /(?:再来|再抽|重抽|追加|新增|生成|替换|出).{0,20}(?:[一二三四五六七八九十\d]+(?:批|条|套)|这批|本批|整批|全部方案|所有方案)|(?:下[一]?批|这批|本批|整批).{0,8}(?:改|换|生成|用)|another\s+batch|(?:generate|append|reroll|replace).{0,20}(?:batch|all\s+(?:rows|proposals)|\d+\s+(?:rows|proposals))/i.test(clause);
+    return batch || !single && /再来|再抽|追加|更多|不同方向|\bmore\b/i.test(clause);
+  });
+}
+/** Confirmation defers execution, not the user's explicitly requested generation plan. */
+export function fusionCatalogueGenerationRequested(message: string): boolean {
+  return requestClauses(message).some(clause => !negatedRequest(clause)
+    && !/^(?:先)?(?:讨论|问问|了解|研究一下)|能否|是否|能不能|可不可以|等我(?:另行|再次|说)|我(?:自己|手动|稍后|以后)再|(?:以后|稍后)我|\b(?:could|would)\b.*\?/i.test(clause)
+    && /(?:生成|抽卡|抽取|出|追加|再来).{0,20}(?:[一二三四五六七八九十\d]+\s*(?:条|套|批)|一批|这批|本批|方案|提示词)|(?:确认后|并|然后|接着|继续|用它|用这个词条).{0,12}(?:抽卡|生成)|(?:用|用于|带入).{0,16}(?:这批|本批|下一批).{0,8}(?:生成|抽卡)?|(?:generate|append).{0,16}(?:\d+|batch|proposals)/i.test(clause));
+}
+/** Pure engine preflight only: no operation is reserved, written, charged, or sent upstream. */
+export function validateFusionAgentExecution(commands: FusionCommand[], workspace: FusionWorkspace, catalogue: FusionCatalogue, message = '') {
+  if (!commands.some(command => ['patchSettings', 'generate', 'intent'].includes(command.type))) return;
+  try {
+    const next = applyFusionCommands(workspace, { opId: 'fusion-proposal-preflight', baseVersion: workspace.version, commands }, catalogue);
+    const differentJobs = requestClauses(message).some(clause => !negatedRequest(clause) && /(?:职业|岗位|职责|分工).{0,8}(?:不同|各异|互异)|不同.{0,8}(?:职业|岗位|职责|分工)|different\s+(?:jobs|occupations|research roles)/i.test(clause));
+    const oldIds = new Set(workspace.rows.map(row => row.id)), generated = next.rows.filter(row => !oldIds.has(row.id));
+    if (differentJobs && generated.length > 1) {
+      const jobs = generated.map(row => (row.design?.traits.occupation || []).map(value => value.zh).sort().join('、'));
+      if (jobs.some(job => !job || job === '无职业设定') || new Set(jobs).size < generated.length) throw new FusionAgentError('用户要求各套职业/研究岗位不同，但实际岗位重复或未绑定；请查职业与身份目录，用合法occupation的plan.onceMust安排不同岗位，保科研/探索用途，不把所有方案锁成研究员。仅在共同要求写“岗位不同”不算分配，词条不足须如实说明。');
+    }
+  }
+  catch (error) {
+    if (error instanceof FusionError || error instanceof Error && error.constructor === Error) throw new FusionAgentError(`提案尚未执行：${error.message} 请保留用户要求并修正合法设置。`, 400, 'fusion_agent_proposal_invalid');
+    throw error;
+  }
+}
 /** Keep query metadata relevant; repeated full category lists can exhaust the model context. */
 export function fusionAgentCataloguePage(page: { catalogue: FusionCatalogue; nextCursor: string | null; total: number }, query: { categoryId?: string; q?: string }) {
   const returnedCategories = new Set(page.catalogue.terms.map(term => term.categoryId));
@@ -103,11 +137,11 @@ availableRuleDefinitions是未加入的旧中英定义，不是用户排除；co
 身型口语/角色参照须拆成独立的高矮胖瘦、肌肉量、头身比、轮廓、四肢长度要求；矮胖和壮硕可共存，大体块不等于高。只取参照身体比例，不加其服装/职业/配色/身份，不自造未指定比例或Boss定位。用既有属性锁定共同身型，让未指定母体/主题变化；无需先把参照角色名入库。保无关设置与固定要求开关，不能只改摘要。
 dimensionOptions.id用于changeRow.dimension，categoryId用于检索，values是大类；如concept的“梦境”是合法大类。具体词条的group仅指所属大类，不能把词名写成大类。rules.label仅允许这些大类或文档已读旧定义，不能新造；具体母体须用合法termId。
 五种范围分开：持续settings；不能由设置表达的明确intent；本批plan.overlay/onceMust；服务器allocation；单条修改。固定组合多值全部进入每条中英正文；candidates是允许池，[]就是空池；excluded是排除；must/onceMust是所属批次至少一次。一次检索不授予永久候选/必出，差异默认由allocation和diversity:prefer完成，不将分配写入settings或冻结池。长期池只按明确要求修改，软偏好不变永久排除。
-画风/材质/定位、无职业/无道具等必须进真实设置或要求。持续视觉用requirements/requirementsEn（语义等价）和requirementsEnabled；仅本批用overlay同名字段。原固定要求关闭时不得顺带启用旧默认3D要求。共同要求只写每条都应满足的内容，不写人物名单、数量或操作指令；差异用allocation/onceMust。仅改单条画风先读目标requirements，再patchRow中英完整要求，保其它维度及未改要求；不必扩词库、不借换母体/主题冒改画风。
+画风/材质/定位、无职业/无道具等必须进真实设置或要求。持续视觉用requirements/requirementsEn（语义等价）和requirementsEnabled；仅本批用overlay同名字段。原固定要求关闭时不得顺带启用旧默认3D要求。共同要求只写每条都应满足的内容，不写人物名单、数量或操作指令；差异用allocation/onceMust。仅改单条画风先读目标requirements，再patchRow中英完整要求，保其它维度及未改要求；不必扩词库、不借换母体/主题冒改画风。core source/concept/mechanism/personality不可因非战斗/无道具移出，用要求表达不强调战斗机制。职业/研究岗位不同须查occupation合法词条用onceMust分配，保科研用途，不全锁研究员，不用同一句“岗位不同”冒实际差异。
 再来一批/不同方向默认append；明确替换才replace，重抽本批绑定该批ID；保留项不被批量替换。retainedIds保留、selectedIds复制导出选择、锁定、聊天target互相独立。scopeChoice是用户已选范围，不重复问；target只能改该rowId/version和原快照，不动下一批设置。单目标下含糊“再来一批”返回空commands及scopeChoices（id:row/document，具体label）。同名/跨批“第2条”不能猜，按批次或displayNo查，不足则列具体候选。
 讨论/建议/可能性不执行，明确抽卡/调整/保留才发命令；未有真实回执不声称已应用。intent只保明确采纳且设置无法表达的要求及中英，不复制身体/职业/固定要求。summary只是有版本/回合锚的非执行备忘，legacy无执行权；未采纳备选不入intent，后手改卡优先。最近20条只是窗口，早期原话用history读，不编造遗失历史。
 撤销先读operations，用真实undo而非反向编辑；requiresExplicitChoice:true或blockedBy表示最新业务不可撤，解释该步，本轮不能过滤后误撤更早生成。
-drafts仅待本人预览确认的类别/词条：{kind:"category"|"term",data:{id:UUID,categoryId?:已有或同批新类别UUID,nameZh,nameEn,descriptionZh,descriptionEn,group?:"extra",multi?:boolean}}。新类别只用既有generationKind:trait，说明单/多选与互斥语义，默认private，不自动入库/共享。保用户原想法和中英。需入库后续原批时每项给稳定UUID，并同时给引用该UUID的原commands；服务器保存同计划、明确确认后接续，不需二次模型。只保存不附generate。`;
+drafts仅待本人预览确认的类别/词条：{kind:"category"|"term",data:{id:UUID,categoryId?:已有或同批新类别UUID,nameZh,nameEn,descriptionZh,descriptionEn,group?:"extra",multi?:boolean}}。新类别只用既有generationKind:trait，说明单/多选与互斥语义，默认private，不自动入库/共享。保用户原想法和中英。需入库后续原批时每项给稳定UUID，并同时给引用该UUID的原commands；服务器保存同计划、明确确认后接续，不需二次模型。用户明确“先预览，确认后入库并生成”仍须带引用新UUID的pending generate和selection/overlay；每条都带用locked:true/values:[新termId]，onceMust仅保证一次。commands只存计划，确认前不执行，不能丢成仅入库。只保存/讨论不附generate。`;
 
 export const FUSION_AGENT_COMMANDS = `注册命令，opId/owner/expected/版本/seed由服务器绑定；仅写明确字段，不提交整份设置或自造snapshot：
 {type:"patchSettings",changes:[{path:[字段],value:值}]}。长列表增删用同结构加edit:"add"|"remove"，value仅本次明确增删的ID，服务器合并完整原表；整体替换需该类别/词条的明确授权，不能用预览子集。
@@ -173,6 +207,7 @@ export function bindFusionAgentCommands(input: unknown[], workspace: FusionWorks
           if (!Array.isArray(change.path) || !change.path.length || change.path.some(key => typeof key !== 'string' || ['__proto__', 'constructor', 'prototype'].includes(key))
             || change.path[0] === 'catalogue' && (change.path[1] === 'dynamic' && change.path[2] !== 'selections' || change.path.length < 3)) throw new FusionAgentError('模型不能替换目录快照或整个设置。');
           const path = change.path as string[];
+          if (path[0] === 'bossDimensions' && (path.length !== 1 || !Array.isArray(change.value) || CORE.some(dimension => !(change.value as unknown[]).includes(dimension.id)))) throw new FusionAgentError('母体、跨界概念、机制与性格是必要core，不能因无职业/道具或非战斗而移出；请在requirements表达不强调战斗机制，保留core。');
           if (path[0] === 'rules') {
             const validLabel = (id: string, label: unknown) => { const dimension = CONFIG.find(card => card.id === id); return dimension && (dimension.tags.includes(label as never) || workspace.state.settings.rules[dimension.id].some(existing => existing.label === label)); };
             const validTags = (id: string, tags: unknown) => Array.isArray(tags) && tags.every(tag => isRecord(tag) && validLabel(id, tag.label));
@@ -325,9 +360,10 @@ export function fusionAgentScene(workspace: FusionWorkspace, context: { total?: 
 }
 
 export async function proposeFusionAgent(options: {
-  workspace: FusionWorkspace; message: string; signal?: AbortSignal; binding?: FusionAgentBinding; rowsPage?: { total: number; nextCursor: string | null };
+  workspace: FusionWorkspace; message: string; signal?: AbortSignal; binding?: FusionAgentBinding; rowsPage?: { total: number; nextCursor: string | null }; seed?: number;
   complete: (messages: MuskChatMessage[]) => Promise<string>;
   read: (read: FusionAgentRead) => Promise<unknown>;
+  validateCommands?: (commands: FusionCommand[]) => void | Promise<void>;
 }) {
   const scene = fusionAgentScene(options.workspace, { ...options.rowsPage, target: options.binding?.target });
   // A column header preserves every control field without repeating its keys per card.
@@ -362,12 +398,25 @@ export async function proposeFusionAgent(options: {
     let proposal: FusionAgentProposal;
     try {
       proposal = parseFusionAgentProposal(content);
+      if (!proposal.reads.length && proposal.drafts.length && !fusionCatalogueGenerationRequested(options.message) && /(?:只|仅)(?:要|需)?(?:保存|入库)|(?:不要|不必|不用|别)(?:自动)?(?:生成|抽卡)|先讨论/.test(options.message) && proposal.commands.some(command => isRecord(command) && command.type === 'generate')) throw new FusionAgentError('用户本次仅保存或讨论新词，不能附加generate；请保留可编辑草稿，不自动生成。');
+      if (!proposal.reads.length && proposal.drafts.length && fusionCatalogueGenerationRequested(options.message) && !proposal.commands.some(command => isRecord(command) && command.type === 'generate')) throw new FusionAgentError('用户明确要求确认入库后继续生成；草稿必须同时携带引用新词稳定UUID的pending generate计划，不能仅保存。确认前不会执行。');
       if (!proposal.reads.length && proposal.commands.length) {
         for (const draft of proposal.drafts) {
           if (!isRecord(draft) || !isRecord(draft.data) || typeof draft.data.id !== 'string' || !isExtensionId(draft.data.id)) throw new FusionAgentError('带接续命令的新词/类别须有稳定UUID，尚未执行；请在同一提案补齐并原样引用。');
         }
         for (const draft of proposal.drafts) if (isRecord(draft) && draft.kind === 'term' && isRecord(draft.data) && typeof draft.data.id === 'string' && typeof draft.data.categoryId === 'string') knownTerms.set(draft.data.id, draft.data.categoryId);
-        const commands = bindFusionAgentCommands(proposal.commands, options.workspace, 0, { message: options.message, ...options.binding, undoableOperationIds, undoableOperations });
+        const commands = bindFusionAgentCommands(proposal.commands, options.workspace, options.seed ?? 0, { message: options.message, ...options.binding, undoableOperationIds, undoableOperations });
+        if (proposal.drafts.length && fusionCatalogueGenerationRequested(options.message)) {
+          const draftTerms = proposal.drafts.filter(draft => isRecord(draft) && draft.kind === 'term' && isRecord(draft.data)).map(draft => (draft as { data: { id: string; categoryId: string } }).data);
+          const everyRow = /每(?:条|套|个方案).{0,12}(?:都|带|包含|使用)|every\s+(?:row|proposal|set)/i.test(options.message);
+          const changes = commands.flatMap(command => command.type === 'patchSettings' ? command.changes || [] : command.type === 'generate' ? command.plan?.overlay || [] : []);
+          const referenced = (term: { id: string; categoryId: string }) => changes.some(change => {
+            if (change.path.slice(0, 4).join('.') !== `catalogue.dynamic.selections.${term.categoryId}`) return false;
+            if (change.path.length === 4 && isRecord(change.value)) return change.value.enabled === true && Array.isArray(change.value.values) && change.value.values.includes(term.id) && (!everyRow || change.value.locked === true);
+            return !everyRow && change.path[4] === 'values' && Array.isArray(change.value) && change.value.includes(term.id);
+          }) || !everyRow && commands.some(command => command.type === 'generate' && command.plan?.onceMust?.[term.categoryId]?.includes(term.id));
+          if (!draftTerms.length || draftTerms.some(term => !referenced(term))) throw new FusionAgentError('确认后生成须真正引用新词UUID；在generate.plan.overlay启用新类别并绑定values。用户要求每条都带时用locked:true，不用onceMust冒共同特征。');
+        }
         for (const command of commands) if (command.type === 'generate') for (const [categoryId, ids] of Object.entries(command.plan?.onceMust || {})) {
           if (ids.some(id => knownTerms.get(id) !== categoryId)) throw new FusionAgentError('本批必出须原样引用已读目录的合法词条编号。');
         }
@@ -378,6 +427,7 @@ export async function proposeFusionAgent(options: {
             : path.length === 5 && ['values', 'excluded', 'must', 'candidates'].includes(path[4]) ? [change.value] : [];
           if (lists.some(list => Array.isArray(list) && list.some(id => typeof id !== 'string' || knownTerms.get(id) !== path[3]))) throw new FusionAgentError('模型词条引用未核实或被改写，请从已读目录原样复用词条编号；需要其它词条须先检索。本次未写入。');
         }
+        if (!proposal.drafts.length) await options.validateCommands?.(commands);
       }
     }
     catch (error) {

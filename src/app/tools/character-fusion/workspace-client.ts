@@ -13,12 +13,12 @@ export type OperationLookup = { proposal?: UnappliedProposal; error?: string; re
 export const WORKSPACE_API = '/api/character-fusion/workspaces';
 
 export class FusionRequestError extends Error {
-  constructor(message: string, public status: number, public code?: string, public details?: unknown) { super(message); }
+  constructor(message: string, public status: number, public code?: string, public details?: unknown, public submitted?: boolean) { super(message); }
 }
 export async function fusionRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { cache: 'no-store', ...init });
   const data = await response.json();
-  if (!response.ok) throw new FusionRequestError(data.error || '操作未确认，当前草稿已保留。', response.status, data.code, data.details);
+  if (!response.ok) throw new FusionRequestError(data.error || '操作未确认，当前草稿已保留。', response.status, data.code, data.details, data.submitted);
   return data as T;
 }
 export function postFusion<T>(url: string, body: unknown, signal?: AbortSignal) {

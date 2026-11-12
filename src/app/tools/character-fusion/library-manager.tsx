@@ -13,7 +13,7 @@ type Entry = { kind: 'category' | 'term'; data: Partial<FusionCategory> | Partia
 type Preview = { version: string; entries: Array<{ index: number; status: 'new' | 'update' | 'duplicate' | 'error'; message?: string; entry?: Entry }>; errors: number; duplicates: number; canImport: boolean };
 type MaintenanceOperation = { opId: string; body: Record<string, unknown> };
 type ImportOperation = { opId: string; scope: 'private' | 'shared'; entries: Entry[]; previewVersion: string };
-type Props = { ownerId: string; admin: boolean; active: boolean; catalogue: FusionCatalogue; cards: FusionCard[]; drafts: unknown[]; continuation?: CreationContinuation; onContinuation: (continuation: CreationContinuation | undefined) => void; onWorkspace: (receipt: Pick<WorkspaceReceipt, 'workspace' | 'rowChanges' | 'rowsPage'>) => void; onPreparePlan: () => Promise<boolean>; onCatalogue: (catalogue: FusionCatalogue) => void; onJoin: (categoryId: string, termId?: string) => void; onOpenCardChat: () => void };
+type Props = { ownerId: string; admin: boolean; active: boolean; catalogue: FusionCatalogue; cards: FusionCard[]; drafts: unknown[]; continuation?: CreationContinuation; onContinuation: (continuation: CreationContinuation | undefined, reply?: string) => void; onWorkspace: (receipt: Pick<WorkspaceReceipt, 'workspace' | 'rowChanges' | 'rowsPage'>) => void; onPreparePlan: () => Promise<boolean>; onCatalogue: (catalogue: FusionCatalogue) => void; onJoin: (categoryId: string, termId?: string) => void; onOpenCardChat: () => void };
 const API = '/api/character-fusion/catalogue';
 const blankForm = () => ({ kind: 'term' as 'category' | 'term', id: '', version: '', categoryId: '', nameZh: '', nameEn: '', descriptionZh: '', descriptionEn: '', aliases: '', tags: '', group: 'extra' as FusionCategory['group'], multi: true, semanticGroup: '', shape: '', shapeEn: '', anchor: '', anchorEn: '', root: '', prop: '', propEn: '', mood: '', moodEn: '', suffix: '', bodyTrait: '', bodyZh: '', bodyEn: '', semanticJson: '' });
 function csvRows(source: string): string[][] {
@@ -132,7 +132,7 @@ export default function LibraryManager({ ownerId, admin, active, catalogue, card
       const result = await postFusion<{ status: string; workspace?: WorkspaceReceipt['workspace']; rowsPage?: WorkspaceReceipt['rowsPage']; rowChanges?: WorkspaceReceipt['rowChanges']; error?: string }>('/api/character-fusion/assistant', { action: 'cancel', workspaceId: continuation.workspaceId, opId: continuation.sourceOpId });
       if (!alive.current) return;
       if (result.workspace) onWorkspace({ workspace: result.workspace, rowChanges: result.rowChanges, rowsPage: result.rowsPage });
-      if (result.status === 'cancelled') { onContinuation(undefined); setNotice(assistantCatalogueSaved ? '后续计划已取消，已入库词条保留。' : '本次计划已取消，未入库或生成。'); }
+      if (result.status === 'cancelled') { const reply = result.error || (assistantCatalogueSaved ? '后续计划已取消，已入库词条保留。' : '本次计划已取消，未入库或生成。'); onContinuation(undefined, reply); setNotice(reply); }
       else setNotice(result.error || '取消状态仍需核对，原计划保留。');
     } catch (e) { if (alive.current) setError(e instanceof Error ? e.message : '取消状态待核对，原计划保留。'); }
     finally { if (alive.current) setBusy(false); }

@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronDown, Maximize2, MessageCircle, Minimize2, Send, Square, Undo2, X } from 'lucide-react';
 import type { FusionMessage } from '@/lib/character-fusion/assistant';
-import { lookupOperation, postFusion, type CreationContinuation, type CreationTarget, type FusionWorkspace, type WorkspaceOperation, type WorkspaceReceipt, type OperationLookup, type UnappliedProposal } from './workspace-client';
+import { FusionRequestError, lookupOperation, postFusion, type CreationContinuation, type CreationTarget, type FusionWorkspace, type WorkspaceOperation, type WorkspaceReceipt, type OperationLookup, type UnappliedProposal } from './workspace-client';
 import styles from './studio.module.css';
 
 type AssistantResponse = Partial<OperationLookup> & { reply?: string; pending?: boolean; scopeChoices?: Array<{ id: 'row' | 'document'; label: string }> };
@@ -11,13 +11,13 @@ type PendingTurn = { opId: string; message: string; dispatched?: boolean; target
 type Phase = 'idle' | 'saving' | 'processing' | 'checking' | 'stopping' | 'unknown';
 type Props = {
   ownerId: string; workspaceId: string; documentName: string; preparing: boolean; messages: FusionMessage[]; model: string; modelReady: boolean;
-  disabled: boolean; active: boolean; completedPlanId?: string; count: number; language: string; target: CreationTarget | null; onClearTarget: () => void;
+  disabled: boolean; active: boolean; completedPlanId?: string; completedPlanReply?: string; count: number; language: string; target: CreationTarget | null; onClearTarget: () => void;
   onWorkspace: (receipt: Pick<WorkspaceReceipt, 'workspace' | 'rowChanges' | 'rowsPage'>) => void; onChooseModel: () => void;
   onDrafts: (drafts: unknown[], continuation?: CreationContinuation) => void; onOpenDrafts: () => void;
   onPrepare: () => Promise<{ workspaceId: string; version: number } | null>; onActivityChange: (active: boolean) => void;
   onViewResults: (rowIds: string[]) => void; onUndo: (operationId: string) => Promise<boolean>;
 };
-export default function CreationChat({ ownerId, workspaceId, documentName, preparing, messages, model, modelReady, disabled, active, completedPlanId, count, language, target, onClearTarget, onWorkspace, onChooseModel, onDrafts, onOpenDrafts, onPrepare, onActivityChange, onViewResults, onUndo }: Props) {
+export default function CreationChat({ ownerId, workspaceId, documentName, preparing, messages, model, modelReady, disabled, active, completedPlanId, completedPlanReply, count, language, target, onClearTarget, onWorkspace, onChooseModel, onDrafts, onOpenDrafts, onPrepare, onActivityChange, onViewResults, onUndo }: Props) {
   const draftKey = `sd2-fusion-assistant:${ownerId}:${workspaceId}`;
   const [input, setInput] = useState(''), [phase, setPhase] = useState<Phase>('idle'), [error, setError] = useState('');
   const [pending, setPending] = useState<PendingTurn | null>(null), [reply, setReply] = useState('');
@@ -146,12 +146,16 @@ export default function CreationChat({ ownerId, workspaceId, documentName, prepa
       finish(operation);
     } catch (e) {
       if (!accepts(workspaceId) || request.signal.aborted && !operation.dispatched || stopping.current) return;
+      if (e instanceof FusionRequestError && e.submitted === false) {
+        setPending(null); pendingRef.current = null; setPhase('idle'); persist(inputRef.current, null);
+        setError(`本次未执行，原输入与结果已保留。${e.message}`); return;
+      }
       setPhase('unknown'); setError(e instanceof Error ? `回复未确认：${e.message}` : '回复未确认，原输入与操作编号已保留。请核对结果。');
     }
   };
   useEffect(() => {
     if (!completedPlanId || proposal?.continuation?.sourceOpId !== completedPlanId) return;
-    proposalRef.current = null; setProposal(null); setReply(''); setLastOperation(null); setError(''); persist(inputRef.current, pendingRef.current, null);
+    proposalRef.current = null; setProposal(null); setReply(completedPlanReply || ''); setLastOperation(null); setError(''); persist(inputRef.current, pendingRef.current, null);
     // Completion is acknowledged by the existing catalogue plan receipt.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [completedPlanId]);
@@ -161,7 +165,7 @@ export default function CreationChat({ ownerId, workspaceId, documentName, prepa
   const status = phase === 'saving' ? '正在保存当前调整…' : phase === 'processing' ? '正在处理…' : phase === 'stopping' ? '正在停止并核对结果…' : phase === 'checking' ? '正在核对结果…' : phase === 'unknown' ? '尚未确认这次是否完成' : effectStatus || reply || messages[messages.length - 1]?.reply || (messages[messages.length - 1]?.role === 'assistant' ? messages[messages.length - 1]?.content : '描述方向，继续探索或调整方案');
   const orderedHistory = history ? [...history].sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || ''))) : null;
   const undoLabel = (operation: HistoryOperation) => operation.turn?.user || operation.batch?.label || operation.reply || `${operation.effects?.addedIds.length ? `新增${operation.effects.addedIds.length}条方案` : operation.effects?.modifiedIds.length ? `修改${operation.effects.modifiedIds.length}条方案` : operation.effects?.removedIds.length ? `移除${operation.effects.removedIds.length}条方案` : '更新创作要求'} · ${new Date(operation.createdAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
-  return <section className={`${styles.chat} ${styles.creationChat} ${expanded ? styles.chatExpanded : ''}`} aria-labelledby="fusion-creation-chat-title">
+  return <section data-fusion-creation-chat className={`${styles.chat} ${styles.creationChat} ${expanded ? styles.chatExpanded : ''}`} aria-labelledby="fusion-creation-chat-title">
     <div className={styles.chatHeading}><h3 id="fusion-creation-chat-title"><MessageCircle size={17} />创作对话</h3><button type="button" className={styles.chatExpand} aria-expanded={expanded} aria-controls="fusion-creation-history" onClick={() => setExpanded(value => !value)}>{expanded ? '收起对话' : '展开对话'}<ChevronDown size={14} /></button></div>
     <div id="fusion-creation-history" className={styles.chatHistory}>
       <div className={styles.chatHistoryTools}><small>{documentName}</small><button disabled={loadingHistory} onClick={() => void loadHistory(history ? historyCursor || undefined : undefined)}>{loadingHistory ? '读取中…' : history ? historyCursor ? '读取更早对话' : '刷新对话记录' : '查看已保存的早期对话'}</button><details onToggle={event => { if (event.currentTarget.open) void loadUndoable(); }}><summary>近期可撤销操作</summary><div>{undoBoundary && <p>最近的{undoBoundary.label}不能直接撤销；可明确选择更早的操作。</p>}{undoable.length ? undoable.map(operation => <button key={operation.opId} disabled={disabled || busy || Boolean(pending)} onClick={() => { void onUndo(operation.opId).then(ok => { if (ok) { setUndoable(current => current.filter(item => item.opId !== operation.opId)); setReply('已撤销该步，原对话保留。'); } }); }}><Undo2 size={13} />{undoLabel(operation)}</button>) : <p>暂无可安全撤销的操作。</p>}</div></details></div>

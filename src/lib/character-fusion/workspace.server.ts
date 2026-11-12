@@ -460,7 +460,7 @@ export async function cancelAssistantOperation(actor: FusionActor, id: string, o
         const result = JSON.parse(operation.result_json) as StoredWorkspaceResult, plan = result.continuation;
         const catalogue = isRecord(plan) && typeof plan.catalogueOpId === 'string' ? await tx.characterFusionOperation.findUnique({ where: { owner_id_op_id: { owner_id: actor.id, op_id: plan.catalogueOpId } } }) : null;
         const saved = catalogue?.target_kind === 'catalogue' && catalogue.status === 'committed';
-        const message = saved ? '词条已入库并保留；后续计划已停止，本次未生成。' : '该回合已取消，未应用提案。';
+        const message = saved ? '词条已入库并保留；后续计划已停止，本次未生成。' : isRecord(plan) ? '本次计划已取消，未入库或生成。' : '该回合已取消，未应用提案。';
         await tx.characterFusionOperation.updateMany({ where: { id: operation.id, status: 'planning' }, data: { status: 'cancelled', result_json: JSON.stringify({ ...result, ...(saved && isRecord(plan) ? { catalogueOpId: plan.catalogueOpId, phase: 'catalogue_saved_cancelled' } : {}), ...(result.turn ? { turn: { user: result.turn.user, assistant: message } } : {}), error: message }) } });
       }
     }

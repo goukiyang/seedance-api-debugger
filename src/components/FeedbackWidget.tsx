@@ -355,7 +355,7 @@ export default function FeedbackWidget() {
   };
 
   return (
-    <div style={{ position: 'fixed', right: 24, bottom: 24, zIndex: 60 }}>
+    <div style={{ position: 'fixed', right: 24, bottom: pathname === '/tools/character-fusion' ? 'var(--character-fusion-feedback-bottom, 24px)' : 24, zIndex: 60 }}>
       {open && (
         <section ref={panelRef} onPaste={onPaste} style={{
           width: 360,

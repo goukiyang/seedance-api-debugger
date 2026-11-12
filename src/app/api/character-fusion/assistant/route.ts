@@ -8,7 +8,7 @@ import { assertCharacterFusionWritesEnabled } from '@/lib/character-fusion/build
 import { FusionError, isRecord, parseOperationId, type FusionCommand } from '@/lib/character-fusion/actions';
 import { readFusionCatalogue } from '@/lib/character-fusion/catalogue-repository';
 import { executeWorkspaceOperation, getWorkspace, reserveAssistantOperation, finishAssistantOperation, cancelAssistantOperation, readAssistantOperationStatus, readWorkspaceHistory, listUndoableWorkspaceOperations } from '@/lib/character-fusion/workspace.server';
-import { bindFusionAgentCommands, fusionAgentCataloguePage, readFusionAgentControls, FusionAgentError, proposeFusionAgent, type FusionAgentProposal, type FusionAgentTarget, type FusionAgentScopeChoice } from '@/lib/character-fusion/agent-adapter.server';
+import { bindFusionAgentCommands, fusionAgentCataloguePage, readFusionAgentControls, needsFusionAgentScopeChoice, validateFusionAgentExecution, FusionAgentError, proposeFusionAgent, type FusionAgentProposal, type FusionAgentTarget, type FusionAgentScopeChoice } from '@/lib/character-fusion/agent-adapter.server';
 import { confirmFusionAgentContinuation, pageFusionAgentCatalogue, prepareFusionAgentContinuation, previewFusionAgentContinuation, queryFusionAgentContinuation } from '@/lib/character-fusion/agent-continuation.server';
 import type { FusionCatalogue } from '@/lib/character-fusion/catalogue-model';
 
@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
       if (page.workspace.version !== workspace.version || !row || row.version !== target.version) throw new FusionAgentError('目标方案版本已变，原输入已保留，请重新选择目标。', 409, 'fusion_agent_target_changed');
       workspace.rows = [...workspace.rows.filter(item => item.id !== row.id), row];
     }
-    const scopeChoices: FusionAgentScopeChoice[] | undefined = target && !body.scopeChoice && /再来|再抽|追加|更多|一批|不同方向|another batch|more/i.test(body.message)
+    const scopeChoices: FusionAgentScopeChoice[] | undefined = target && !body.scopeChoice && needsFusionAgentScopeChoice(body.message)
       ? [{ id: 'row', label: '仅调整当前方案' }, { id: 'document', label: '为整份创作追加一批' }] : undefined;
     if (scopeChoices) {
       const reply = '当前仍绑定单条方案，请明确本次作用范围；尚未新增或修改方案。';
@@ -83,7 +83,13 @@ export async function POST(request: NextRequest) {
       if (current.status !== 'planning') throw new FusionAgentError('原回合已结束，未继续请求模型或应用新提案。', 409, 'fusion_agent_cancelled');
     };
     const binding = { target, message: body.message.trim(), sourceOpId: opId, scopeChoice: body.scopeChoice as 'row' | 'document' | undefined };
-    const result = await proposeFusionAgent({ workspace, rowsPage: initial.rowsPage, binding, message: body.message.trim(), signal: request.signal,
+    const executionSeed = randomInt(0, 2147480000);
+    const result = await proposeFusionAgent({ workspace, rowsPage: initial.rowsPage, binding, message: body.message.trim(), signal: request.signal, seed: executionSeed,
+      validateCommands: async commands => {
+        if (!commands.some(command => ['patchSettings', 'generate', 'intent'].includes(command.type))) return;
+        catalogueSnapshot ||= (await readFusionCatalogue(user)).catalogue;
+        validateFusionAgentExecution(commands, workspace, catalogueSnapshot, body.message as string);
+      },
       complete: async messages => {
         await assertPlanning();
         const remaining = 90000 - (Date.now() - started);
@@ -131,7 +137,7 @@ export async function POST(request: NextRequest) {
     });
     proposed = result.proposal;
     await assertPlanning();
-    const commands = result.limitReached ? [] : bindFusionAgentCommands(result.proposal.commands, workspace, randomInt(0, 2147480000), { ...binding, undoableOperationIds: result.undoableOperationIds, undoableOperations: result.undoableOperations });
+    const commands = result.limitReached ? [] : bindFusionAgentCommands(result.proposal.commands, workspace, executionSeed, { ...binding, undoableOperationIds: result.undoableOperationIds, undoableOperations: result.undoableOperations });
     const reply = result.limitReached ? '本轮已达到 6 次工具往返上限，未执行新创作操作；已有现场与查询结果已保留，可明确目标后继续。'
       : commands.length ? result.proposal.reply : `本轮仅提供建议或草稿，未执行抽卡或设置变更。${result.proposal.reply}`;
     const title: FusionCommand[] = !commands.some(command => command.type === 'undo') && !workspace.rows.length && !workspace.state.messages.some(message => message.role === 'user') && ['新的角色融合创作', '继续角色融合创作', '未命名创作'].includes(workspace.name)
@@ -147,7 +153,10 @@ export async function POST(request: NextRequest) {
     return json({ ...receipt, reply: receipt.reply || reply, drafts: [], scopeChoices: result.proposal.scopeChoices, reads: result.reads, iterations: result.iterations, limitReached: result.limitReached, model: selectedModel });
   } catch (error) {
     if (intent && !deferred && !request.signal.aborted) {
-      try { await finishAssistantOperation(intent.user, intent.workspaceId, intent.opId, { intentFingerprint: intent.fingerprint, status: 'rejected', message: error instanceof Error ? error.message : '本轮提案未完成。', proposal: proposed }); }
+      try {
+        const terminal = await finishAssistantOperation(intent.user, intent.workspaceId, intent.opId, { intentFingerprint: intent.fingerprint, status: 'rejected', message: error instanceof Error ? error.message : '本轮提案未完成。', proposal: proposed });
+        if (terminal.status !== 'planning' && terminal.status !== 'unknown') return json({ ...terminal, pending: false, submitted: terminal.status === 'committed' });
+      }
       catch { /* The original receipt remains the only recovery route. */ }
     }
     if (error instanceof AuthError || error instanceof FusionError || error instanceof FusionAgentError || error instanceof MuskApiError) return json({ error: error.message, code: 'code' in error ? error.code : undefined, details: { conflict: 'details' in error ? error.details : undefined, ...(proposed ? { proposal: proposed } : {}) }, submitted: false }, error.status);
