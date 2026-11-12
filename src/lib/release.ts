@@ -1,9 +1,9 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '角色融合聊天与抽卡修复',
+  title: '角色融合母体筛选修复',
   outline: [
-    '聊天先勾选条件，确认后点击生成',
+    '母体筛选接到原卡片，避免两种母体冲突',
     '追加保留旧方案，单条调整可撤销',
     '保留卡片操作和手机输入'
   ]

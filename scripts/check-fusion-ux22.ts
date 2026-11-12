@@ -45,6 +45,33 @@ export async function checkFusionUx22(input: { actor: { id: string }; repository
   assert.deepEqual(second.workspace.state.settings.catalogue!.traits.occupation.must, configured.workspace.state.settings.catalogue!.traits.occupation.must);
   checks.push('UX22聊天配置与点击生成：服务端拒直接生成、同轮纠正后0新增，两次点击各4条/四岗位分配持续生效；尽量不同保小硬池，明确各异不足拒绝，旧结果及人工锁排除保留');
 
+  const sourceDoc = await repository.createFusionWorkspace(actor, { opId: 'ux22-source-shadow-create', state: emptyWorkspaceState() });
+  const animals = catalogue.terms.filter(term => term.categoryId === 'dimension:source' && term.data?.group === '动物').slice(0, 4);
+  assert.equal(animals.length, 4);
+  const animalConfiguration = { count: 4, lang: 'both', cards: [{ id: 'dimension:source', use: 'distribute', values: animals.map(term => term.id) }] };
+  let sourceCalls = 0;
+  const animalProposal = await proposeFusionAgent({ workspace: sourceDoc.workspace, message: '小动物母体各不相同', binding: { contract: 'configure' }, seed: 2220,
+    complete: async messages => {
+      sourceCalls++;
+      if (sourceCalls === 2) assert.match(String(messages[messages.length - 1].content), /不能另建母体选择卡/);
+      return JSON.stringify({ reply: '同步母体', commands: [{ type: 'configure', configuration: sourceCalls === 1
+        ? { ...animalConfiguration, inlineCards: [{ title: '小动物母体', titleEn: 'Small Animal Base', use: 'distribute', terms: [{ nameZh: '睡鼠', nameEn: 'Dormouse', descriptionZh: '以睡鼠为母体', descriptionEn: 'Use a dormouse as the base' }] }] }
+        : animalConfiguration }] });
+    }, read: async () => ({}), validateCommands: commands => validateFusionAgentExecution(commands, sourceDoc.workspace, catalogue),
+  });
+  assert.equal(sourceCalls, 2); assert.equal((await repository.getWorkspace(actor, sourceDoc.workspace.id)).rowsPage.total, 0);
+  assert.doesNotThrow(() => bindFusionAgentCommands([{ type: 'configure', configuration: { inlineCards: [{ title: '母体表面纹理', titleEn: 'Source surface texture', terms: [{ nameZh: '柔软绒毛', nameEn: 'Soft fur', descriptionZh: '柔软绒毛表面', descriptionEn: 'A surface of soft fur' }] }] } }], sourceDoc.workspace, 2220, { contract: 'configure' }));
+  const animalSettings = await repository.executeWorkspaceOperation(actor, sourceDoc.workspace.id, { opId: 'ux22-source-shadow-configure', baseVersion: 1,
+    commands: bindFusionAgentCommands(animalProposal.proposal.commands, sourceDoc.workspace, 2220, { contract: 'configure' }) });
+  assert.equal(animalSettings.rowsPage.total, 0);
+  const animalRows = await repository.executeWorkspaceOperation(actor, sourceDoc.workspace.id, { opId: 'ux22-source-shadow-click', baseVersion: animalSettings.workspace.version, commands: [{ type: 'generate', mode: 'append', seed: 2220 }] });
+  assert.equal(animalRows.rowsPage.total, 4); assert.deepEqual(new Set(animalRows.workspace.rows.map(row => row.source.name)), new Set(animals.map(term => term.nameZh)));
+  for (const row of animalRows.workspace.rows) {
+    assert.match(row.catalogueSnapshot!.body.zh, new RegExp(row.source.name));
+    assert(!row.catalogueSnapshot!.body.zh.includes('睡鼠')); assert(!row.catalogueSnapshot!.body.en.includes('dormouse'));
+  }
+  checks.push('UX22母体单一来源：小动物附加母体卡同轮拒绝并纠正到原生目录，聊天0新增→点击4个实际母体，不出现另一睡鼠描述；正常表面纹理卡仍允许');
+
   const nativeState = emptyWorkspaceState(); nativeState.settings.count = 4;
   nativeState.settings.cards = structuredClone(state.settings.cards);
   const controlsDoc = await repository.createFusionWorkspace(actor, { opId: 'ux22-all-controls-create', state: nativeState });

@@ -188,6 +188,7 @@ count只允许 ${COUNTS.join("、")} 数字；lang仅"zh"|"en"|"both"；role仅"
 export const FUSION_CONFIGURATION_SYSTEM = `你是角色融合工作台的配卡助手。聊天只同步可见卡片，绝不生成方案、直接改结果或调用媒体/费用。用户说“出4套”也只配置数量、语言、方向与差异，随后由本人点击生成。回复只能描述实际配置，不能声称已新增方案。
 只返回JSON {"reply":"简短中文","reads":[],"commands":[],"drafts":[]}。一次只查询或提交；最多6轮，每轮最多6项reads，limit 1..30，可选字段省略不传null。reads为catalogue/controls/constraints/results/history/operations/batches，cursor原样分页。初始卡片页未列出不等于不存在；目录检索不是启用授权。
 configure只表达真实卡片id、中文选项或termId和使用方式，程序补齐原卡片结构。不要拼settings路径/布尔state，不自造原生属性ID。each=每套都带，random=从中随机，distribute=每批分别用、至少各一次；普通要求默认scope:document并持续生效。“做4套”“本次创作”“出一批”不等于临时要求，只有明确“仅用于这一批/这一次”或继续调整已有临时条件才scope:batch。互斥单选不能each多值；巨掌+巨脚等可共存项用each多选。保留未提到的人工锁、候选池、排除和内容，不批量重置。
+母体始终由原生source卡决定。小动物等范围先查现有母体目录，用cards的source或dimension:source选择已有动物分组/具体词；不得另建“小动物母体”等inline卡再指定另一种动物，否则会与实际抽出的母体冲突。用户未指定新增物种时直接用现有母体，不自造兔子等新母体来填附加描述卡。
 生成方式generationMode与页面“生成方式”共用：明确追加用append，明确替换现有/未保留方案用replace；未提到时保原值。仅本批的方式也随scope:batch在点击后消费，不改长期值。绑定单条时不能配置生成方式。
 当前必要core仅为${CORE.map(card => `${card.title}(${card.id})`).join('、')}，不得删除。${CONFIG.filter(card => !CORE.some(core => core.id === card.id)).map(card => `${card.title}(${card.id})`).join('、')}按实际可选，仅需时加入；独立主性格沿primaryPersonality，不因旧personality未加入而强制补入。无职业/无道具用真实对应选项或视觉要求，不默认Boss。共同视觉要求须完整、等价中英，保尚有效要求；不把人物名单或“岗位不同”当分配。明确不同岗位须查occupation并用distribute安排足够真实岗位；母体可变化，软避重交原引擎。仅启用与本次相关的卡片，不随机加入与方向冲突的世界/科技条件。
 绑定单条目标时configure只准备这条，先读目标requirements和卡片，保其它内容；更换画风须同步改已有卡片中的旧画风文字，按definitionsRead读取完整中英含义，沿真实cardId编辑并保其其它含义，不能只新增新画风卡却保留相反旧画风；程序绑定rowId/version，等待本人点“更新这条”。不改其它行或下一批条件，不配置数量。没有目标才配置本次创作。
@@ -247,6 +248,7 @@ export function bindFusionAgentCommands(input: unknown[], workspace: FusionWorks
       case 'configure': {
         let configuration;
         try { configuration = parseFusionConfiguration(value.configuration); } catch (error) { throw new FusionAgentError(error instanceof Error ? error.message : '卡片配置无效。'); }
+        if (configuration.inlineCards?.some(card => !card.cardId && (/母体$/.test(card.title.trim()) || /(?:animal\s+base|source\s+prototype|base\s+source)$/i.test(card.titleEn.trim())))) throw new FusionAgentError('inlineCards是附加描述，不能另建母体选择卡，否则会与原生抽出的母体矛盾。请移除这张新卡，检索现有母体目录，用configuration.cards的id=source或dimension:source配置动物分组或真实词条；用户未指定新增物种时不要自造新母体。');
         if (!binding.target && configuration.scope === 'batch' && binding.message && !workspace.state.preparation?.batch
           && !requestClauses(binding.message).some(clause => !negatedRequest(clause) && /仅本批|仅这(?:一)?批|只这(?:一)?批|这一次|(?:仅|只)(?:用|用于|在|对)?(?:本批|这(?:一)?批|这次)(?!创作)|(?:only|just)\s+(?:for\s+)?(?:this|one)\s+batch|this\s+batch\s+only/i.test(clause))) throw new FusionAgentError('本轮没有明确“仅用于这一批/这一次”，也没有正在调整的临时条件。请将configuration.scope改为document或省略，让普通创作要求在生成后继续保留；做4套/本次创作不表示临时。');
         if (configuration.cards?.some(card => card.replacePool) && binding.message && !/替换|改用|改成|改为|只用|仅用|只允许|不再限定|清空|所有|全部|replace|only/i.test(binding.message)) throw new FusionAgentError('用户未明确替换候选范围，请保留原硬池并省略replacePool。');
