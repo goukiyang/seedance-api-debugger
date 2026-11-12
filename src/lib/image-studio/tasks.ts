@@ -692,7 +692,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     }
     const sharedDefinition = sharedUse?.definition;
     const savedSettingsSource = moduleId ? await readStudioWorkspaceSource(tx, ownerId, String(moduleId)) : null;
-    assertStudioTaskSettingsWrite(savedSettingsSource?.taskSettings ?? sharedDefinition?.reproduction?.taskSettings, input.taskSettings);
+    assertStudioTaskSettingsWrite(savedSettingsSource?.taskSettings ?? sharedDefinition?.reproduction?.taskSettings,
+      input.taskSettings ?? (isExternalImageStudioActor(identity) ? sharedDefinition?.reproduction?.taskSettings : undefined));
     const restored = await resolveStudioTaskRestoredSettings(identity, typeof moduleId === 'string' ? moduleId : undefined, input, sharedUse, tx);
     if (sharedUse && input.personalOverrides !== undefined && !preparation?.batchItem
       && input.count !== (input.personalOverrides.count ?? sharedUse.definition.generationDefaults.count)) {

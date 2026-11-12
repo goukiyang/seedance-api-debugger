@@ -4573,7 +4573,7 @@ function ImageStudioBlock({ isAdmin, externalActor, userId, module, hidden, onSh
     {bannerCrop && <BannerCropDialog source={bannerCrop} onCancel={closeBannerCrop} onCropped={file => { closeBannerCrop(); void uploadBanner(file); }} />}
     <div className={styles.workspace}>
       <section className={styles.inputs} aria-label="生成参数">
-        {globalContextMode === 'historical' && <p role="status" className={styles.appliedSource}>使用历史设置
+        {!externalActor && globalContextMode === 'historical' && <p role="status" className={styles.appliedSource}>使用历史设置
           <button type="button" disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending) || moduleSaving || draftRestoring}
             onClick={useCurrentGlobalSettings}>改用当前通用设置</button>
         </p>}

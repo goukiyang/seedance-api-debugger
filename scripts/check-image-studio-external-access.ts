@@ -144,6 +144,17 @@ async function main() {
     assert.ok(!catalog.entries.some(item => item.id === `default-${externalId}`));
     check('real_definition_executes_server_source_and_external_dto_is_private');
 
+    const { listStudioPresets } = require(path.join(root, 'src/lib/image-studio/presets.ts')) as typeof import('@/lib/image-studio/presets');
+    const directoryIds = Array.from({ length: 40 }, (_, index) => `fixture-directory-capacity-${index}`);
+    for (const id of directoryIds) await db.imageStudioPreset.create({ data: { ...source, id, name: id } });
+    const largeDirectory = await listStudioPresets(external);
+    assert.equal(largeDirectory.length, 42, 'All valid shared templates must load beyond the 32-slot read queue');
+    assert.ok(directoryIds.every(id => largeDirectory.some(row => row.id === id)));
+    assert.ok(!JSON.stringify(largeDirectory).includes(secretPrompt) && !JSON.stringify(largeDirectory).includes(secretContext));
+    assert.ok(!largeDirectory.some(row => row.id === hidden.id || row.id === invalidSource.id));
+    await db.imageStudioPreset.deleteMany({ where: { id: { in: directoryIds } } });
+    check('full_shared_directory_exceeds_read_queue_without_rejection_or_private_rows');
+
     await db.asset.create({ data: { id: 'fixture-source-image', owner_id: sourceOwner, type: 'image', status: 'active',
       original_url: 'https://fixture.invalid/uploads/assets/internal-source.png', thumbnail_url: '/uploads/thumbs/internal-source.png',
       file_name: 'Internal source', mime_type: 'image/png', file_size: 100, width: 32, height: 32 } });

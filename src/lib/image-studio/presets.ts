@@ -154,7 +154,10 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
   const bannerIds = privateRows.map(row => row.banner_asset_id).filter((id): id is string => Boolean(id));
   const assets = await prisma.asset.findMany({ where: { id: { in: Array.from(new Set([...assetIds, ...bannerIds])) }, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(user)] }, select: { id: true, owner_id: true, original_url: true, thumbnail_url: true, width: true, height: true } });
   const byId = new Map(assets.map(asset => [asset.id, asset]));
-  const results = await Promise.all(visibleRows.map(async row => {
+  const results = [];
+  // Shared definitions use a bounded serial snapshot queue; a full directory must not fill it at once.
+  for (let offset = 0; offset < visibleRows.length; offset += 8) {
+    results.push(...await Promise.all(visibleRows.slice(offset, offset + 8).map(async row => {
     const deletion = studioSourceDeletionCapability(user, row);
     if (row.is_shared || isParameterCopyId(row.id)) {
       const templateRead = (await resolveStudioTemplateAuthor(user, { presetId: row.id })).templateRead;
@@ -232,7 +235,8 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
       fixedCover: await studioFixedCoverDTO(user, { kind: 'preset', id: row.id }), coverEditable: canManageStudioPreset(user, row),
       createdAt: row.created_at, updatedAt: row.updated_at,
     };
-  }));
+    })));
+  }
   return results.filter((item): item is NonNullable<typeof item> => item !== null);
 }
 
