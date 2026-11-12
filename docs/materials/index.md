@@ -2,6 +2,7 @@
 ## 2026-11-12 后台提交反馈与Ark受控传图修复（v0.148.4已部署待手验）
 
 两案原证保本机私有collection01/02，完整原文/编号/用户/截图/JSON均Git exclude且权限700/600。[原工单](../../tasks/todo/2026-11-12-feedback-submit-rootcause.md)与[发布摘要](2026-11-12-feedback-rootcause/ark-reference-transport-release-summary.json)记录a4bcc443/v0.148.4/z1Zk5c2dmIDvI36EaZNq6，11:05:20Z公网、11:06:29Z七服务健康，build/cutover0；原图/权限/旧请求/账务和2h看护保持。9组隔离模拟、完整types/lint/Next及34原生/关联、计价/恢复/59资源/10匿名401有证，无真实生成或浏览器功能验收，待用户手验。提交等待的GET不能证明React状态，历史事件仍缺；未改未证状态机或重发旧任务。完整13份完成元证保本地私有release/ark-reference-transport01/completed。
+新增REGRESSION-ORIGIN01按实际提交/上线时序追溯共享权限变更与旧消费者冲突，8项旧新函数重放及只读元数据/HEAD证据保本机私有`2026-11-12-feedback-rootcause/regression-origin01/`。新同因残留明确标注未实施，旧遗留/已证新回归/尚未归因分开；本轮未改程序、业务或收费调用，详同一原单。
 <!-- /FB-PULL-20261112-MATERIALS -->
 
 <!-- ARK-CHARACTER-ASSET01-MATERIALS-20261111 -->

@@ -201,3 +201,6 @@ UX17收口：v0.145.5按本轮用户授权完成实际新建A/B/C、A/B及C/B互
 
 
 - **D-20261112-RELEASE-PROCESS-SCOPE｜待核线索，未改。** Ark受控传图发布准备复用既有pre-cutover时发现，含`/release-engine/`或`sd2-release-run.mjs`的命令行会统一按其他发布器阻止，未解析实际build/cutover动作。尚未证本轮被此条件阻止；最终须核实际健康基线与mutating controller，普通candidate build本身不占切版窗口，也不在未知CLI协议下放宽保护。源码及判断见[本轮原单](todo/2026-11-12-feedback-submit-rootcause.md)和本机私有ark-reference-transport01/deploy/pre-cutover.py。主任务按原发布入口继续，通用维护另核实际动作协议。
+
+
+- **D-20261112-PRIVATE-MEDIA-CONSUMERS｜已证源码合同残留，实际新事故待匹配。** 001524/v1470正确收紧普通原件匿名访问，旧`isPubliclyReachable`仍只按本地存在/URL形态判断。a4/v1484图片修复没有适配H3匿名首尾帧读取及视频/音频裸URL传输。只读聚合有79本站active视频，一份原件存在且匿名HEAD404；未逐个核参考规格/启用线路或匹配新失败任务，不能称79次失败。普通未知尺寸/缩放准备也残留匿名读，但1906本站图均无该条件。8项前后真实函数合成重放和限界见[原单REGRESSION-ORIGIN01](todo/2026-11-12-feedback-submit-rootcause.md)及本机私有regression-origin01；本轮没有源码/业务修改或收费。后续按现有授权与各供应商协议收口消费者，不全局放开原图、不盲套图片data URI、不重发旧任务；不扩为全站重构或新存储平台。
