@@ -38,6 +38,15 @@ export function videoPlayableAvailableForTask(task: VideoDeliveryStageTask) {
 }
 
 export function videoDeliveryStageForTask(task: VideoDeliveryStageTask): VideoDeliveryStage {
+  if (task.local_status === 'submission_unknown') {
+    return {
+      key: 'unavailable',
+      label: '等待提交确认，暂无可下载视频',
+      stableDownloadReady: false,
+      previewAvailable: hasPreview(task),
+    };
+  }
+
   if (task.local_status !== 'succeeded') {
     return {
       key: 'generating',

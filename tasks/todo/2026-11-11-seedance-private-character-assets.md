@@ -325,4 +325,98 @@
 - 新工作区CodeGraph已同步2085文件，实际结构查询找到新登记函数；实施检查完成不冒已上线。等待UX16实际健康后继与当前发布窗口释放，再在该有效新基线上完成主候选完整构建、版本/健康与保护发布。功能仍由用户手验。
 
 本地已合入对方已推送的UX16候选`90fb0a812790ab3bceb358f5c7cfee91b844e6c4`（1451），本轮准备1452；该合并没有修改本轮10个工程源哈希，原12项证据继续有效，不重跑。正式窗口及实际上线元证仍待对方交回，未启动本轮服务器候选或切版。
+
+### 14.4 实际发布闭环
+
+**v0.145.2 已于2026-11-11 09:36:37（纽约时间，UTC-5）部署，待用户手动验收。** 原证时间14:36:37Z，后验health于14:37:28Z通过。主源`adbc4587b002c7b32379f419729f2dbdfe56dd36`／BUILD`U1Vfw8JndDHcOREZCUOex`，分支`codex/character-thumbnail-upload-20261111`已推并核远端；继承UX16实际健康90fb／1451／l5xDbf3NvkT0mSk4Qt6uE。先获构建窗口，再等待原owner真实调用结束并释放切换窗口后才切版；后继融合任务已收到本轮健康源与恢复合同，并明确将继承本轮健康源。
+
+- 修改四个产品文件（Panel、CSS、character-assets service、新thumbnail API）和一个工程脚本，另三版本文件；精确导出2520文件，净8个运行差量。Composer、共享上传器/referenceImport、schema、生成输入/编号、模型通路均无差量。
+- 完整Linux类型、改动lint、12项本源隔离工程与Next内置全量types/lint通过。17原生记录按未变输入复用；17关联记录16复用、1项projects工程刷新；fresh计价通过。主构建及cutover均0，完整成品/原始子进程结果共同绑定，未只凭wrapper 0冒成功。
+- 6真实启动检查、7服务、4timer、54公网资源、8匿名401通过，含新接口匿名POST→401；最终内外网health=true、releaseControllers=0。私密36目标策略/价格全字段/持久链接及2h看护保持。Works/CharacterAsset/5个Fusion表只读核既有原迁移，无DDL、数据恢复或未知任务重发。
+- 恢复继续复用原`bbbcc1f9b6a311de9ea1fa83d5d8c50525615d68`／1451+points-pricing-guard.1／`wFBPdtkUEn_EQ74oygoGx`的实际九门和已编译成品；guardBase仍90fb，不把本轮新主源当成原九门变换基源。只回程序/配置，保所有新数据；不要求故障main目录可读，未演练生产回退。
+
+服务器原证阶段`/data/video-api-debugger/release-staging/character-thumbnail-upload-20261111/attempt01`，pair`684d8c5e-6b1c-4ac8-bff5-23ff98b95613`；正式根私有`release/thumbnail-upload01/completed/`保存选定原证，未下载环境、DB、凭据或真实媒体。详[上传发布摘要](../../docs/materials/2026-11-11-seedance-private-character-assets/thumbnail-upload-release-summary.json)。新树CodeGraph已对应adbc/2085文件同步，源指纹`09bd2131d6224fbba65d1512de39ce4983374c7c7bb8b6c58e2e84b14a1ac4ee`；记录收口不重复索引/构建。
+
+新增请求结构（隔离工程验证，非真实上传）：通用上传返回本人站内素材编号后，`POST /api/character-assets/thumbnail`发送`{"assetId":"<上传返回的素材编号>"}`，返回同一`assetId`、`referenceImageId`及`/api/reference-images/<id>/content?variant=thumbnail`。角色显式保存才将该ID传入`thumbnailReferenceImageId`。这里的上传素材编号不同于角色的火山Asset ID，不用文本冒素材引用，也不附加生成工作区图片。
+
+实际新增/编辑上传、更换预览、取消/重开草稿、失败/未知恢复、保存后下拉选图及手机操作待用户手验。本轮未真实上传用户文件、未收费生成、未浏览器或截图功能验收；工程/健康与功能效果分开。未新增范围外问题。
 <!-- /ARK-CHARACTER-ASSET01-THUMB-UPLOAD14-20261111 -->
+
+
+<!-- PREVIEW-CROP-ROOTCAUSE15-20261112 -->
+## 15. 上传素材看似被切割：历史缩略图根因核对（2026-11-12）
+
+本轮用户请求“上传被切割，你看看什么根因”，附素材选择弹窗大图截图。本节完成该单问题根因排查，不将诊断记录冒作修复/上线。运行鲜核为c47b1adab9c0919159a928e663bbe86e786e2f44／v0.146.4，旧1452工作区只作Git对象/既有归属记录读取，不冒运行源。截图来自普通视频参考素材弹窗，不是角色缩略图上传表单。
+
+### 15.1 已确认的原始证据
+
+通过截图中同一页的3个完整文件名和排序，定向只读确认该页资产及截图主体“正视图.png”，没有批量读取全部素材。已取回该素材原件并确认4000×4000、5,835,897字节；SHA-256与上传时Asset.hash完全一致（`b69ac3fc8bf26f89ae703af4834f4ca7d27213796fc4fb67e51c6041181c4894`），视觉为完整双视图及左右部件。原件未被裁切/覆盖。
+
+该素材保存的历史缩略图为300×450 PNG，直接查看其文件即可重现用户截图的同样左右截断；不是浏览器截图裁切或上传原件破坏。旧storage源码（7870a5977父提交）明确`resize(300,450,{fit:'cover',position:'center'})`，会把正方形图片强制填满2:3并裁掉左右。当前c47源码已改640×640/inside/withoutEnlargement，保持完整比例，但不会自动回填已经保存的历史thumbnail_url；同字节上传复用旧Asset也会继续取原thumbnail_url，并非重新上传就必定更新副本。
+
+### 15.2 为什么大图窗口也像被切了
+
+`ResourceLibraryPicker.tsx:741`把thumbnail与原图/preview地址分别传入共用大图组件。`content-reactions/media/route.ts:29`在thumbnail变体仍优先取`resolved.source.thumbnail`；`authorized-image-response.ts:143`对这个已经被裁的副本再做inside缩放，无法补回丢掉的像素。引用图路由同样在thumbnail分支优先`image.thumbnail_url`，是同类读取残留。
+
+截图状态为“当前：轻量预览／正在读取原图／压缩副本未登记／已读取0 B”。`ZoomableImagePreview.tsx:236–245`正是在原图尚未显示时继续展示已加载thumbnail；`.compareImage`使用contain，单图仅一个pane。已验证的旧thumbnail文件与截图主体一致，现有CSS放大的是旧裁片，不是把4000原图现场剪开。上下两块是原素材本来就有的两视图，真实缺失为两侧内容。
+
+因此根因闭环：**历史2:3居中cover缩略图裁掉两侧 → 新读取链继续信任/再压缩旧thumbnail → 原图尚未到达时把旧裁片放大展示**。原图下载首轮45秒未收完，随后按同URLRange接续并最终完整hash核同；这只说明本次读取较慢，不据此扩判全站网络根因。截图0B等待让裁片停留更显眼，但不是像素被裁的原因。
+
+### 15.3 边界与后续修复落点
+
+正确修复应在授权的图片thumbnail来源选择/按需派生层，针对历史裁切副本从同一合法原件生成保全幅的小图；不能只改CSS、把裁片拉伸、清全部缓存或让用户重传。沿既有owner/原件版本/preview-only读取边界，低权限仍只回缩略变体；不把可看缩略图变成可下载原件。优先按需补齐，不批量覆盖原片/旧缩略图/数据库，不重发生成。
+
+本轮只读业务数据库/生产文件与既有源码，未修改应用、线上配置、上传原件、缓存、角色记录、费用或未知请求，未部署、未新上传、未付费调用。Chrome只盘点到另一角色融合页，没有截图所指generate现场，未新开/刷新/借用该页；未冒称浏览器现场复现。原件和缩略图字节/视觉/历史生产代码及当前读取代码足以确认上述根因；修复实施及用户功能手验尚未执行。
+
+原截图按原名归档在正式根`docs/materials/2026-11-11-seedance-private-character-assets/diagnostics/2026-11-12-preview-crop/`，同目录有完整原片、旧缩略图与`rootcause.json`；原始图片均只保本地私有资料，不推到Git或公开外发。临时下载中间件与完整校验结果分开，未用部分文件冒原件完整。未新增任务外问题。
+<!-- /PREVIEW-CROP-ROOTCAUSE15-20261112 -->
+
+
+<!-- LEGACY-THUMB-REPAIR16-20261112 -->
+## 16. 旧缩略图完整显示修复与提交未知排查（2026-11-12）
+
+用户明确要求“直接修复上线，旧缩略图也要完整显示，不要裁切，保留原图，不用重新上传”，追加图1的submission_unknown根因诊断，并强调查风险。沿§15已确认原件/旧裁片证据实施，不重复取回/重传原图；任务未知项仅核原号，禁止新生成/重复扣费/自动退款。
+
+### 16.1 两项范围与已核基线
+
+1. 缩略图：共用图片素材与引用图thumbnail入口不再从300×450旧裁片派生；同一有权原件按需编码保全幅小图。复用既有readStudioThumbnail／inside640、受保护响应、缓存身份/HEAD只读和队列，不改上传、Asset/ReferenceImage、原件字节/URL或批量重建。视频/音频poster及模块自有封面保持。
+2. 图1：只读定位“小U漫剧”9秒/720P/9:16/SD2.5的具体原任务、请求回执与日志，分清未发送、已发送未知、已受理但回执不明；核状态英文及“稳定下载生成中”是否误导，不用文案变更冒真实受理修复。原请求/冻结和真实费用保持。
+
+实际起点已从c47/v1464推进为c8a5ae27ccd61f83fc1b17fbdd6a5e229b8423b8/v1470/WYB5qrC9wnawMnSgGmTO3；外部生图相容guard7362bcb093c1822f8c0927e1257c52fce3b44855/yxG4WDcTIgqLgBpRibUIT为10门，不能退回原9门。新隔离树legacy-thumbnail-complete-20261112从c8创建，正式根其它脏改不入包。UX22的355be2dbb61eb78e632df4cf885eb23b7703ab0c/v1480在独立stage构建中，不能重叠启动同机候选或覆盖其有效后继；本轮先本地实现，发布前继承其最终实际健康源。
+
+### 16.2 实施前风险判断与保护
+
+- 权限：viewOnly读取仍只返回640以内的编码小图，不302/回传原件，不放开original/download/HD或内部模板配方。原权限和账号/版本检查继续有效。
+- 缓存与原件：按真实原件源/版本形成新派生缓存；不清全量缓存、不覆旧thumb、不写原件/DB。源缺失/失权/读取错误保持可恢复错误，不偷偷回旧裁片或给浏览器大原图。
+- 负载与格式：现有两并发、32项队列、96MiB读取、40MP编码、远程SSRF/时限边界保持，按需读取而非批量预热。实际发现BMP上传合法而Sharp原图显示不支持BMP，须在既有队列内补有界私有BMP转小图，否则改源会造成格式回归；这是必要兼容配套，不扩上传平台。
+- 原请求/费用：截图9秒任务处于submission_unknown，不由前端等待时间推断未受理或免费；只查原回执/原上游号，未知不重发、不清重试预算、不改冻结、账本或历史。
+- 发布：必要窄工程/完整候选/原生按依赖复用/计价/版本资源与健康、十门完整guard和可执行仅程序恢复必须完成。UI/真实媒体功能仍手验，不自动收费或上传用户文件。
+
+图1原截图已按原名本地私有归档diagnostics/2026-11-12-submission-unknown，旧裁切原证沿§15。实施/验证/部署与未完成风险另追加实际结果，不把初始方案冒已修复。
+
+### 16.3 图1的已证因果与旧任务风险
+
+截图未含任务ID，只能按项目、9秒/720P/9:16、4图及可见提示词匹配最近候选，不把匹配当截图ID证明。最新匹配`bd7382b7-1f4d-416a-a34f-7d8c33d0d20b`于07:26:47Z创建，5.122秒后上游HTTP200正文却是InvalidParameter/BadRequest，明确第4张image_url资源不存在；此前`f16162ef-5627-4a6e-9736-89b6af7eb815`于07:04:10Z创建，160.620秒后HTTP200正文仅code=-1/call api error，具体原因仍未知，不能套用后一次缺图结论。
+
+两条均是普通seedance/dreamina-seedance-2-5-260628，并非Ark私域asset引用；4份上传原件物理存在，匿名HEAD/GET同址404。近期uploads权限收口正确地识别绝对站内Asset URL，匿名供应商不能借该地址读私图；普通tasks/create却只在多视图/画布等场景使用既有seedanceLocalReferenceTransport，遗漏普通视频页，造成权限合同与旧URL传输冲突。修法只去掉同一seedance调用的错误场景排除：先经原授权再将同一原件字节传入现有data URI字段，保图片顺序、首尾/多帧模式、每图30MB与请求64MB边界、原快照，不放开uploads，不改其它provider或上游错误/SAFE_RETRY规则。
+
+两条都只发送一次，无provider_task_id，各冻135点。虽然最新正文明确参数错误，现有证据仍不足以证明“未受理且零费用”；因此不自动退款、换号、重发或解冻，不清预算。现有普通status恢复只处理draft，unknown finalizer会跳过，两旧任务仍须后续沿原请求由供应商核对受理与费用，不能冒称本次修复已恢复。此为原任务诊断遗留，不借修复改账务规则。
+
+状态显示另有两处确定误导：assets未翻译submission_unknown，delivery helper把非成功一律称生成中。本批仅显示“提交结果待确认”及“等待提交确认，暂无可下载视频”，保已有预览能力、不转换持久状态。脱敏诊断JSON私有归档diagnostics/2026-11-12-submission-unknown/diagnosis.private.json，SHA256 `7f91e8a89d39f912e8a105853982f8c44b68b6a30a443511029e9f42bd1adf7a`；源码/日志行/只读命令有原证，未查询上游或创建任务。
+
+缩略图实际读链还包含library/workspace DTO的旧thumbnail_url，须仅将active合法图片投影到同一保护端点；hidden/deleted沿旧合同，不借旧图修复扩大已删除素材权限。BMP兼容限同一两并发/32队列内私有临时单帧，40MP/96MiB和45秒编码边界；不写公开新原图、不替换DB或源文件。
+
+### 16.4 实现与必要工程完成（未发布本轮）
+
+产品净改8文件：两图片读取route、library/workspace DTO、image-studio/media BMP兼容，以及普通tasks/create、assets状态与delivery helper。另新增legacy-thumbnail-complete工程、扩既有multiview-reference-transport工程；未改上传器、schema、权限中间件、transport实现、上游错误/SAFE_RETRY与计费链。两执行者已STOP-WRITING，root自核净差异、读取权限与调用顺序。
+
+- 缩略图9组隔离工程通过，绑定12源SHA；真实图片派生/响应函数运行，auth/DB为夹具边界，合成PNG/JPEG/GIF/WebP/BMP边缘和比例、旧缓存、HEAD/304、低权限640、失权/缺原件、40MP与2active/32pending均有证。窄ESLint和当前schema独立client TypeScript均exit0，无共享依赖变更。
+- 传输/状态11组隔离工程通过，绑定11源SHA；真实transport/payload/delivery函数运行，两模型×三模式、外链保序、原字节和64MB/失权/路径限制有证；编排、原请求及冻结前顺序为实际AST断言，不冒全POST/真实费用验收。窄delivery类型和四文件lint exit0，仅assets旧区域一条Hook提醒。原producer为completed=true/count11，未伪造passed字段。
+- 两工程network/database/真实上传/生成/账务/浏览器均0。脚本通过既有server-runtime.cjs进入，未新增stub/私密consumer。草稿夹具预热同步和VM Error上下文问题已定向修正，原失败保留；并非产品失败。
+- 风险取舍：首次完整缩略图需按原件派生，远程读取仍受原180秒/96MiB/40MP边界；缺源或超限返回真实错误，不回旧裁片。只支持原视频transport的PNG/JPEG/WebP与每图30MB/总64MB，BMP配套仅改善显示，不隐式改生成格式。工程运行使用发布器已有env -i/NODE_ENV=test，不继承生产URL环境。
+
+同站UX22已实际部署355be2dbb61eb78e632df4cf885eb23b7703ab0c/v1480/e_hsRKcVhd5V_SQ-q0I_X，public原证08:00:01Z、cutover0；root08:01:07Z核7服务同源active/内外health200ok/运行发布控制器0。新guard67305263189ecfddc79dcd11202764595bf2be1a/tX6SyfBNWAgTKvuak-X8k十门完整成功07:56:52Z。本轮将继承这一实际健康源，计划1481，仅构建main、复用该guard原成品与原时刻；未把本地工程冒本轮已部署。
+
+CodeGraph同树两次准备分别遇already-running及合并时源码变化而退出，未返回成功结构查询；本批已沿真实源码与上述实际模块工程核关系，不把工具连接/准备冒成功。最终稳定源再按需同步，不阻断已授权的必要工程和发布。
+
+<!-- /LEGACY-THUMB-REPAIR16-20261112 -->

@@ -1,7 +1,8 @@
 <!-- ARK-CHARACTER-ASSET01-MATERIALS-20261111 -->
 ## 私域角色资产入口与交付证据（2026-11-11）
 
-[原工单](../../tasks/todo/2026-11-11-seedance-private-character-assets.md)；[用户红框截图原件](2026-11-11-seedance-private-character-assets/codex-clipboard-d499faa9-4bef-40c4-b7ec-dea9668b6960.png)为用户附件本地归档，核字节一致，非新功能验收截图，未公开上传。v0.144.0实际发布与一次真实4秒任务结果见[部署摘要](2026-11-11-seedance-private-character-assets/release-summary.json)和[脱敏实际请求结构](2026-11-11-seedance-private-character-assets/provider-request.redacted.json)。完整私有日志/原片保存在本目录release下；无密钥入库，未发送MJ，界面与成片效果待用户手验。
+[原工单](../../tasks/todo/2026-11-11-seedance-private-character-assets.md)；[用户红框截图原件](2026-11-11-seedance-private-character-assets/codex-clipboard-d499faa9-4bef-40c4-b7ec-dea9668b6960.png)为用户附件本地归档，核字节一致，非新功能验收截图，未公开上传。v0.144.0实际发布与一次真实4秒任务结果见[部署摘要](2026-11-11-seedance-private-character-assets/release-summary.json)和[脱敏实际请求结构](2026-11-11-seedance-private-character-assets/provider-request.redacted.json)。后续v0.144.1提示词组急修见[提示词组发布摘要](2026-11-11-seedance-private-character-assets/prompt-groups-release-summary.json)，按用户顺序接续的v0.144.2缩略图下拉见[缩略图发布摘要](2026-11-11-seedance-private-character-assets/thumbnail-release-summary.json)。v0.145.2新增/编辑缩略图直接上传见[上传发布摘要](2026-11-11-seedance-private-character-assets/thumbnail-upload-release-summary.json)，完整工程/部署与手验边界沿原单§14。完整私有日志/原片保存在本目录release下；无密钥入库，未发送MJ，界面与成片效果待用户手验。
+截图裁切诊断（2026-11-12）：[原工单§15](../../tasks/todo/2026-11-11-seedance-private-character-assets.md#15-上传素材看似被切割历史缩略图根因核对2026-11-12)登记完整原图/旧裁切缩略图及根因；原截图和媒体仅保正式根本地私有diagnostics/2026-11-12-preview-crop，不公开Git。
 <!-- /ARK-CHARACTER-ASSET01-MATERIALS-20261111 -->
 
 <!-- FUSION-UX12-MATERIALS-20261110 -->
