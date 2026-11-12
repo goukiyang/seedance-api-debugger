@@ -58,7 +58,11 @@ import {
   assertPrivateVolcengineIpDestination,
   createVolcengineIpVideoTask,
   safeVolcengineIpUserMessage,
+  volcengineIpLocalReferenceTransport,
+  volcengineIpSafeErrorDiagnostic,
 } from '@/lib/provider/volcengine-ip';
+import { readAuthorizedLocalReferenceOriginal, type AuthorizedImage } from '@/lib/provider/reference-image-transport';
+import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import {
   PROVIDER_REFERENCE_IMAGE_MAX_PIXELS,
   ensureProviderSafeReferenceImageUrl,
@@ -1135,6 +1139,7 @@ export async function POST(request: NextRequest) {
       canvasInputs ? canvasInputs.orderedImageUrls : requestedReferenceImageUrls,
       user.id,
       Boolean(canvasInputs) || imageInputs !== undefined,
+      generationReferenceImages,
     ));
   } catch (error) {
     console.error('[IpTasksCreate] Reference image preparation failed:', error);
@@ -1353,6 +1358,21 @@ export async function POST(request: NextRequest) {
     ...providerInput,
     model: selectedModel,
   });
+  let ipReferenceTransport: Partial<CreateVideoInput> = {};
+  try {
+    const authorizedTransportImages: AuthorizedImage[] = [...generationReferenceImages];
+    for (const image of preparedImages) {
+      if (!image.providerAssetId || !image.sourceOriginalUrl
+        || !isAuthorizedReferenceOriginal(generationReferenceImages, image.sourceOriginalUrl)) continue;
+      const asset = await prisma.asset.findFirst({
+        where: { id: image.providerAssetId, owner_id: user.id, type: 'image', status: 'active', original_url: image.originalUrl },
+        select: { original_url: true, type: true, status: true, mime_type: true, file_size: true },
+      });
+      if (!asset) throw Error('本次参考图派生已变化，原图保留，尚未提交视频生成');
+      authorizedTransportImages.push({ url: image.originalUrl, asset });
+    }
+    ipReferenceTransport = await volcengineIpLocalReferenceTransport({ ...providerInput, model: selectedModel }, authorizedTransportImages);
+  } catch (error) { return errorJson(error instanceof Error ? error.message : '参考图传输准备失败，尚未提交视频生成', 400); }
   const content = providerPayload.content;
   const snapshot = await createTaskSnapshot({
     workspaceId,
@@ -1745,6 +1765,7 @@ export async function POST(request: NextRequest) {
     submissionStarted = true;
     const acceptedProviderResult = await createVolcengineIpVideoTask({
       ...providerInput,
+      ...ipReferenceTransport,
       model: selectedModel,
     }, { privateOrigins: videoGroups.origins });
     providerResult = acceptedProviderResult;
@@ -1842,6 +1863,13 @@ export async function POST(request: NextRequest) {
     const providerErrorMessage = groupRefs.length ? '视频服务暂未完成本次生成，请核对原任务状态和费用。' : volcengineProviderErrorMessage(err);
     const providerErrorCode = groupRefs.length ? 'PROVIDER_CREATE_FAILED' : volcengineProviderErrorCode(err);
     const providerHttpStatus = isPrivatePromptError(err) ? err.status : volcengineProviderHttpStatus(err);
+    const providerDiagnostic = volcengineIpSafeErrorDiagnostic(err);
+    const providerDiagnosticSuffix = providerDiagnostic ? [
+      providerDiagnostic.http_status ? `HTTP ${providerDiagnostic.http_status}` : '',
+      providerDiagnostic.provider_code || '',
+      providerDiagnostic.parameter || '',
+      providerDiagnostic.request_id ? `request=${providerDiagnostic.request_id}` : '',
+    ].filter(Boolean).join('; ') : '';
     const explicitProviderRejection = !providerTaskId && err instanceof VolcengineIpRequestError
       && typeof err.statusCode === 'number'
       && err.statusCode >= 400
@@ -1876,8 +1904,10 @@ export async function POST(request: NextRequest) {
           await markProviderApiRequestFailed({
             requestId: providerRequestId,
             errorCode: 'IP_SUBMISSION_UNCONFIRMED',
-            errorMessage: unconfirmedMessage,
+            errorMessage: `${unconfirmedMessage}${providerDiagnosticSuffix ? ` [${providerDiagnosticSuffix}]` : ''}`,
+            httpStatus: providerDiagnostic?.http_status,
             responseSummary: {
+              ...(providerDiagnostic ? { provider_diagnostic: providerDiagnostic } : {}),
               error: { code: 'IP_SUBMISSION_UNCONFIRMED', http_status: providerHttpStatus },
               reference_media: buildReferenceMediaFailureSummary({
                 preparedImages,
@@ -1923,8 +1953,10 @@ export async function POST(request: NextRequest) {
       await markProviderApiRequestFailed({
         requestId: providerRequestId,
         errorCode: providerErrorCode,
-        errorMessage: providerErrorMessage,
+        errorMessage: `${providerErrorMessage}${providerDiagnosticSuffix ? ` [${providerDiagnosticSuffix}]` : ''}`,
+        httpStatus: providerDiagnostic?.http_status,
         responseSummary: {
+          ...(providerDiagnostic ? { provider_diagnostic: providerDiagnostic } : {}),
           error: {
             code: providerErrorCode,
             user_message: userFacingProviderMessage,
@@ -2101,6 +2133,8 @@ async function handleProviderFailure(
 interface PreparedRefImage {
   name: string;
   originalUrl: string;
+  sourceOriginalUrl?: string;
+  providerAssetId?: string;
   sourceType: 'upload' | 'gallery' | 'external';
   order: number;
   width?: number | null;
@@ -2113,6 +2147,12 @@ interface PreparedRefImage {
     originalPixels?: number;
     maxPixels?: number;
   };
+}
+
+function isAuthorizedReferenceOriginal(images: AuthorizedImage[], url: string) {
+  const local = siteUploadPathFromUrl(url);
+  return images.some(image => image.asset?.type === 'image' && image.asset.status === 'active'
+    && (image.asset.original_url === url || Boolean(local && siteUploadPathFromUrl(image.asset.original_url) === local)));
 }
 
 function buildReferenceImageResizeSummary(preparedImages: PreparedRefImage[]) {
@@ -2153,6 +2193,7 @@ async function prepareReferenceImages(
   preferredReferenceImageUrls: string[] = [],
   ownerId: string,
   forceEmptyWorkspaceReferences = false,
+  authorizedImages: AuthorizedImage[] = [],
 ): Promise<{
   preparedImages: PreparedRefImage[];
   prepareErrors: string[];
@@ -2259,16 +2300,20 @@ async function prepareReferenceImages(
       let providerUrl = originalUrl;
       let sourceType: PreparedRefImage['sourceType'] = isR2 ? 'upload' : 'external';
       let providerSafeResize: PreparedRefImage['providerSafeResize'];
+      let providerAssetId: string | undefined;
       let safeWidth = item.asset?.width ?? null;
       let safeHeight = item.asset?.height ?? null;
       if (item.asset) {
         const shouldResize = Boolean(getProviderSafeImageResizeDimensions(item.asset.width, item.asset.height));
         try {
-          const safeReference = await ensureProviderSafeReferenceImageUrl({ originalUrl, asset: item.asset, ownerId });
+          const safeReference = await ensureProviderSafeReferenceImageUrl({ originalUrl, asset: item.asset, ownerId,
+            ...(siteUploadPathFromUrl(originalUrl) && isAuthorizedReferenceOriginal(authorizedImages, originalUrl)
+              ? { readOriginal: () => readAuthorizedLocalReferenceOriginal(originalUrl, authorizedImages) } : {}) });
           providerUrl = safeReference.providerUrl;
           safeWidth = safeReference.outputWidth ?? safeReference.width ?? safeWidth;
           safeHeight = safeReference.outputHeight ?? safeReference.height ?? safeHeight;
           if (safeReference.resized) {
+            providerAssetId = safeReference.providerAssetId;
             r2Uploaded += 1;
             sourceType = 'upload';
             providerSafeResize = {
@@ -2294,6 +2339,8 @@ async function prepareReferenceImages(
       preparedImages.push({
         name: item.asset?.file_name || `图${i + 1}`,
         originalUrl: providerUrl,
+        sourceOriginalUrl: originalUrl,
+        providerAssetId,
         sourceType,
         order: i,
         width: safeWidth,

@@ -14,6 +14,7 @@ import {
 } from '@/lib/integrations/volcengine-ip';
 import { seedanceReferenceMediaCapabilities } from '@/lib/provider/reference-media-policy';
 import { SEEDANCE_2_5_IP_MODEL_ID } from '@/lib/provider/seedance-models';
+import { authorizedLocalReferenceTransport, type AuthorizedImage } from './reference-image-transport';
 
 export const VOLCENGINE_IP_VIDEO_PROVIDER = 'volcengine_ark';
 
@@ -59,6 +60,16 @@ type NormalizedVolcengineIpError = {
   userMessage: string;
   providerMessage?: string;
   statusCode?: number;
+  diagnostic?: VolcengineIpSafeDiagnostic;
+};
+
+type VolcengineIpSafeDiagnostic = {
+  category: VolcengineIpErrorCategory;
+  provider_code?: string;
+  http_status?: number;
+  parameter?: string;
+  request_id?: string;
+  reason?: 'invalid_parameter' | 'reference_unavailable';
 };
 
 type PrivateConfig = {
@@ -285,6 +296,27 @@ export function buildVolcengineIpCreatePayload(
   return payload;
 }
 
+// Ark limits apply to its own serialized payload, reserving a 36-character
+// client ID budget before the task exists. Ordinary gateway policy stays separate.
+export async function volcengineIpLocalReferenceTransport(input: CreateVideoInput & { model: string },
+  authorized: AuthorizedImage[], read?: (url: string) => Promise<Buffer>) {
+  const mimeTypes: Record<string, string> = {
+    'image/jpeg': 'image/jpeg', 'image/jpg': 'image/jpeg', 'image/png': 'image/png',
+    'image/webp': 'image/webp', 'image/bmp': 'image/bmp', 'image/x-bmp': 'image/bmp',
+    'image/x-ms-bmp': 'image/bmp', 'image/tiff': 'image/tiff', 'image/tif': 'image/tiff', 'image/gif': 'image/gif',
+  };
+  if (input.model.includes('seedance-2-0')) Object.assign(mimeTypes, { 'image/heic': 'image/heic', 'image/heif': 'image/heif' });
+  return authorizedLocalReferenceTransport(input, authorized, {
+    buildPayload: value => buildVolcengineIpCreatePayload({ ...value, model: input.model,
+      client_request_id: value.client_request_id || value.clientRequestId || '00000000-0000-0000-0000-000000000000' }),
+    mimeTypes,
+    maxRequestBytes: 64_000_000,
+    encodedSizeDelta: (url, mimeType, fileSize) => 4 * Math.ceil(fileSize / 3)
+      + Buffer.byteLength(JSON.stringify(`data:${mimeType};base64,`)) - Buffer.byteLength(JSON.stringify(url)),
+    requestSizeMessage: '原图编码后的火山请求超过64MB，尚未提交视频生成',
+  }, read);
+}
+
 export function mapVolcengineTaskStatus(status?: string | null): LocalStatus {
   const normalized = (status || '').trim().toLowerCase();
   if (['succeeded', 'success', 'completed', 'complete'].includes(normalized)) return 'succeeded';
@@ -397,6 +429,7 @@ function normalizeVolcengineIpError(input: {
   statusCode?: number;
   raw?: unknown;
   fallbackMessage?: string;
+  requestId?: string | null;
 }): NormalizedVolcengineIpError {
   const code = pickNestedString(input.raw, [
     ['error', 'code'],
@@ -415,6 +448,22 @@ function normalizeVolcengineIpError(input: {
     ['Message'],
   ]) || input.fallbackMessage;
   const category = categorizeVolcengineError(code, input.statusCode);
+  const family = code.split('.')[0];
+  const knownCodes = ['InvalidParameter', 'InvalidArgument', 'BadRequest', 'AuthenticationError', 'InvalidAPIKey',
+    'AccessDenied', 'ModelNotOpen', 'QuotaExceeded', 'RateLimitExceeded', 'InternalError', 'ServiceUnavailable', 'NetworkError'];
+  const parameterPattern = '(?:content(?:\\[\\d{1,2}\\]|\\.\\d{1,2})(?:\\.(?:image_url|video_url|audio_url))?(?:\\.url)?|model|duration|ratio|resolution|seed|generate_audio|return_last_frame|watermark|callback_url|client_request_id|service_tier|execution_expires_after|output_format|omni_reference_task_type)';
+  const parameter = pickNestedString(input.raw, [['error', 'param'], ['error', 'parameter'], ['error', 'field'], ['param'], ['parameter'], ['field']])
+    || providerMessage?.match(new RegExp('[`\"\'](' + parameterPattern + ')[`\"\']'))?.[1];
+  const requestId = input.requestId || pickNestedString(input.raw, [['request_id'], ['requestId'], ['RequestId'], ['ResponseMetadata', 'RequestId']]);
+  const diagnostic: VolcengineIpSafeDiagnostic = {
+    category,
+    ...(knownCodes.includes(family) ? { provider_code: family } : {}),
+    ...(input.statusCode ? { http_status: input.statusCode } : {}),
+    ...(parameter && new RegExp('^' + parameterPattern + '$').test(parameter) ? { parameter } : {}),
+    ...(requestId && /^[A-Za-z0-9][A-Za-z0-9_-]{5,127}$/.test(requestId) ? { request_id: requestId } : {}),
+    ...(/resource not found|not accessible|(?:failed|unable|cannot|could not)\s+(?:to\s+)?(?:download|fetch|access)/i.test(providerMessage || '')
+      ? { reason: 'reference_unavailable' as const } : /^InvalidParameter(?:\.|$)/.test(code) ? { reason: 'invalid_parameter' as const } : {}),
+  };
 
   return {
     code,
@@ -423,7 +472,12 @@ function normalizeVolcengineIpError(input: {
     userMessage: userMessageForCategory(category),
     providerMessage,
     statusCode: input.statusCode,
+    diagnostic,
   };
+}
+
+export function volcengineIpSafeErrorDiagnostic(error: unknown) {
+  return error instanceof VolcengineIpRequestError ? error.normalized.diagnostic : undefined;
 }
 
 function redactUrl(raw: string) {
@@ -555,10 +609,11 @@ async function requestVolcengineIpJson(
   }
 
   const body = await readResponseBody(response);
+  const requestId = response.headers.get('x-request-id') || response.headers.get('x-tt-logid');
   if (!response.ok) {
     throw new VolcengineIpRequestError({
       statusCode: response.status,
-      normalized: normalizeVolcengineIpError({ statusCode: response.status, raw: body }),
+      normalized: normalizeVolcengineIpError({ statusCode: response.status, raw: body, requestId }),
       raw: redactVolcengineIpLog(body),
     });
   }
@@ -576,7 +631,7 @@ async function requestVolcengineIpJson(
   if (providerErrorBody || (topLevelErrorCode && !hasKnownSuccessShape)) {
     throw new VolcengineIpRequestError({
       statusCode: response.status,
-      normalized: normalizeVolcengineIpError({ statusCode: response.status, raw: body }),
+      normalized: normalizeVolcengineIpError({ statusCode: response.status, raw: body, requestId }),
       raw: redactVolcengineIpLog(body),
     });
   }

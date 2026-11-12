@@ -17,6 +17,7 @@ export interface ProviderReferenceImageAsset {
 export interface ProviderSafeReferenceImageResult {
   originalUrl: string;
   providerUrl: string;
+  providerAssetId?: string;
   resized: boolean;
   width?: number;
   height?: number;
@@ -105,6 +106,7 @@ export async function ensureProviderSafeReferenceImageUrl(params: {
   originalUrl: string;
   asset?: ProviderReferenceImageAsset | null;
   ownerId: string;
+  readOriginal?: () => Promise<Buffer>;
 }): Promise<ProviderSafeReferenceImageResult> {
   const { originalUrl, asset } = params;
   const knownResize = getProviderSafeImageResizeDimensions(asset?.width, asset?.height);
@@ -112,7 +114,7 @@ export async function ensureProviderSafeReferenceImageUrl(params: {
     return { originalUrl, providerUrl: originalUrl, resized: false, width: asset?.width ?? undefined, height: asset?.height ?? undefined };
   }
 
-  const buffer = await fetchImageBuffer(originalUrl);
+  const buffer = params.readOriginal ? await params.readOriginal() : await fetchImageBuffer(originalUrl);
   const image = sharp(buffer, { limitInputPixels: false }).rotate();
   const metadata = await image.metadata();
   const resize = getProviderSafeImageResizeDimensions(metadata.width, metadata.height);
@@ -152,6 +154,7 @@ export async function ensureProviderSafeReferenceImageUrl(params: {
   return {
     originalUrl,
     providerUrl: upload.originalUrl,
+    providerAssetId: upload.assetId,
     resized: true,
     width: metadata.width,
     height: metadata.height,
