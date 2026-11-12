@@ -7,14 +7,14 @@
 - 线上只读确认：`sd2.youdooart.com` HTTPS与既有`sd2-server.youdoodesign.com`入口反代`127.0.0.1:3302`，均无网关错误兜底页；现有发布切换会停止应用，因此重启间隙可能暴露Nginx默认502。
 - 页面独立存放于`/data/video-api-debugger/site-status/updating.html`，由Nginx直接提供；不依赖Next.js、数据库或图片资源。仅浏览器GET/HEAD且接受HTML时显示，原地址保持，10秒一次只读health，确认恢复后刷新当前页面；未承诺恢复时刻。
 - 网关不能从502判断是计划更新还是异常中断，因此标题为“正在更新或恢复服务”，避免把真实故障断言为正常发布；不使用虚假百分比或倒计时。
-- Nginx自身502/503/504统一返回503，带`no-store`与`Retry-After: 10`；API、`/_next`、非HTML及非GET/HEAD返回JSON。`proxy_intercept_errors off`保留应用真实401/403/404/500/503正文；原下载鉴权、请求方法、费用和受理未知恢复不变，不重新提交业务请求。
+- 最终仅替换Nginx自身502/503/504的响应内容，保留原HTTP状态，带`no-store`与`Retry-After: 10`；API、`/_next`、非HTML及非GET/HEAD返回JSON。`proxy_intercept_errors off`保留应用真实401/403/404/500/503正文；原下载鉴权、请求方法、费用和受理未知恢复不变，不重新提交业务请求。浏览器显示更新页，不再露出默认502错误文案；不将错误伪装成200成功。
 - 只增加本项目两个现有入口的include，不改其它站点、应用、发布器、systemd、数据库或素材；Nginx平滑reload，不停站。已观察其它候选构建，实际reload前核对不存在正在切版/恢复的所有者；不修改运行中的发布工具。
 
 ## 实施与工程检查
 
 - [x] 线上对象、实际配置与共享API边界已核对；当前应用基线771ca034ab426114463942f7ec81fa82936d5c65 / v0.148.2。
 - [x] 独立静态HTML与`ops/nginx/sd2-updating.conf`已实现，色彩沿现有深色工作台。
-- [x] 隔离Nginx验证15项：HTML/JSON、HEAD空正文、原地址保持、真实503/免缓存、应用401/403/404/500/502/503正文保留和正常200；生产请求0。内嵌JavaScript语法检查通过，未做浏览器验收。
+- [x] 最终隔离Nginx验证18项：HTML/JSON、HEAD空正文、原地址保持、502/504原状态、明确维护503/免缓存、应用401/403/404/500/502/503正文保留和正常200；生产请求0。内嵌JavaScript未改，复用原语法检查，未做浏览器验收。
 - [x] 配置备份、Nginx语法检查及平滑reload。
 - [x] 源码聚焦提交并推送既有正确origin分支`codex/maintenance-page-20261112`，不改原工作区分支或index。
 - [x] 正常公网健康与实际配置加载证据；页面视觉/真实更新过程待用户手验。
@@ -34,5 +34,15 @@ Git：原正式根有大量用户脏改，仅新增本任务文件；应用源�
 必要回退仅还原这两个站点配置，再`nginx -t`通过后`systemctl reload nginx`；不回应用或数据。操作前先核没有其它切版所有者，且当前两份配置SHA仍分别为`9105c11784c627e8d7e9f5be3c117ae396a6233e18a0ec1977e3a12123c27a7e`与`328e62f14d3754ed7c9e9ac193cd1198cd752df2e29073d3eee088753b551869`，避免用本次备份覆盖后续合法更新；备份分别为`sd2.youdooart.com.before.conf`和`sd2-server.youdoodesign.com.before.conf`。新静态页/snippet可保留为未引用文件，无须删除。
 
 本地首次公网读取命中已不可用的本机7898代理，改为本次curl直接访问后正常；这是本机连接问题，不是正式站故障，也未改全局代理。没有浏览器/截图验收，也没有为看提示页而停止生产应用；待用户后续手验。当前范围未新增其它产品线索或问题。
+
+## API状态兼容修正（最终生效，纽约05:07:59）
+
+最终兼容核对发现，实际771ca的`src/components/template-studio/VideoTemplateWorkbench.tsx:1322`把除503以外的5xx列为提交未知。首版把网关502/504转503会改变这一判断；首版15项代理检查未覆盖这个消费者，这是本轮遗漏，已纠正，没有声称已发生生产误判或重放历史请求。
+
+最终去掉`error_page`的`=503`状态覆盖，保留原HTTP状态，只换提示正文。隔离增加真实上游超时、API/页面502和504保留、明确维护503，共18项通过。中间隔离尝试仍显式覆盖503，GET API预期502实际503而失败，未部署该尝试；改正后完整18项通过，失败不冒通过。
+
+10:07:59Z仅替换本任务snippet并平滑reload，10:08:27Z公网健康。最终snippet SHA为`38899c8088fc392613e9598f1e64d8c23a083ccb08034f96d1cb609c9b714c3e`，HTML及两站点配置保持。最终原证在同主题`api-status02/engineering-result.json`、`nginx-test.log`、`deployment-result.json`；初版`attempt01`原证保留为历史。程序/数据/原请求未改、没有生产故障注入或浏览器验收。
+
+完整回退仍沿上一节两站点`*.before.conf`移除本次include，先核两份站点配置仍为本批SHA；不要仅恢复`api-status02/snippet.before.conf`，因为那是已经替代的首版503覆盖。后继须保留最终snippet与原状态保护。
 
 源码提交`b0e1adb71811dbcc78b866c454fe5ab709cd9a9e`仅3个`ops/nginx`文件，父提交为实际已运行771ca；已推送`origin/codex/maintenance-page-20261112`，原分支/index未修改。实际Git回执保本主题资料目录，本单随后独立提交。CodeGraph准备入口本轮因Git枚举`--cached --others`30秒超时失败，未声称索引同步成功；本轮为独立Nginx配置、HTML与隔离工程脚本，无应用调用关系变更，定向源文件/运行配置已核。

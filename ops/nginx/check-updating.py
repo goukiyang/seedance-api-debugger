@@ -14,6 +14,9 @@ import urllib.request
 
 class Application(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path.endswith('/timeout'):
+            time.sleep(.2)
+            return
         status = int(self.path.removeprefix('/app-')) if self.path.startswith('/app-') else 200
         body = json.dumps({'error': 'original application response', 'status': status}).encode()
         self.send_response(status)
@@ -61,6 +64,9 @@ http {{
     location = /api/down {{ proxy_pass http://127.0.0.1:{unavailable}; }}
     location = /_next/down.js {{ proxy_pass http://127.0.0.1:{unavailable}; }}
     location = /planned {{ return 503; }}
+    location = /api/planned {{ return 503; }}
+    location = /api/timeout {{ proxy_read_timeout 50ms; proxy_pass http://127.0.0.1:{app_port}; }}
+    location = /timeout {{ proxy_read_timeout 50ms; proxy_pass http://127.0.0.1:{app_port}; }}
   }}
 }}
 ''')
@@ -78,14 +84,17 @@ http {{
                     time.sleep(.05)
 
             cases = [
-                ('/down/page?original=1', 'GET', 'text/html', 503, 'text/html'),
-                ('/down/page', 'HEAD', 'text/html', 503, 'text/html'),
-                ('/api/down', 'GET', 'text/html', 503, 'application/json'),
-                ('/api/down', 'POST', 'text/html', 503, 'application/json'),
-                ('/down/page', 'POST', 'text/html', 503, 'application/json'),
-                ('/_next/down.js', 'GET', 'text/html', 503, 'application/json'),
-                ('/down/page', 'GET', '*/*', 503, 'application/json'),
+                ('/down/page?original=1', 'GET', 'text/html', 502, 'text/html'),
+                ('/down/page', 'HEAD', 'text/html', 502, 'text/html'),
+                ('/api/down', 'GET', 'text/html', 502, 'application/json'),
+                ('/api/down', 'POST', 'text/html', 502, 'application/json'),
+                ('/down/page', 'POST', 'text/html', 502, 'application/json'),
+                ('/_next/down.js', 'GET', 'text/html', 502, 'application/json'),
+                ('/down/page', 'GET', '*/*', 502, 'application/json'),
                 ('/planned', 'GET', 'text/html', 503, 'text/html'),
+                ('/api/planned', 'GET', 'text/html', 503, 'application/json'),
+                ('/api/timeout', 'GET', 'text/html', 504, 'application/json'),
+                ('/timeout', 'GET', 'text/html', 504, 'text/html'),
                 *[(f'/app-{status}', 'GET', 'text/html', status, 'application/json')
                   for status in (401, 403, 404, 500, 502, 503)],
                 ('/ok', 'GET', 'text/html', 200, 'application/json'),
@@ -108,6 +117,7 @@ http {{
                     else:
                         assert response.headers['Cache-Control'] == 'no-store'
                         assert response.headers['Retry-After'] == '10'
+                        assert response.headers['X-SD2-Origin'] == 'server-42-193'
                         if method == 'HEAD':
                             assert body == b''
                         elif expected_type == 'text/html':
