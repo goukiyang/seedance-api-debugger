@@ -1,11 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '完整缩略图与视频参考修复',
+  title: '角色融合配卡与手机操作修复',
   outline: [
-    '旧图片缩略图完整显示，无需重新上传',
-    '普通视频参考图沿原权限安全传输',
-    '提交结果未知时明确显示等待确认'
+    '分组选项与实际抽卡保持一致',
+    '手机输入、发送和生成更易操作',
+    '保留当前输入、卡片与已有方案'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
