@@ -49,6 +49,27 @@ export async function checkFusionUx21(input: { actor: { id: string }; repository
   assert.equal((await repository.queryWorkspaceOperation(actor, rejectedDocument.workspace.id, 'ux21-rejected-turn')).status, 'rejected');
   checks.push('UX21原句作用域与非法提案：单卡否定下批不误问、真实追加仍保护、core及纯引擎错误六步内纠错、耐久拒绝零写入');
 
+  for (const message of [s07, '生成4条中文伙伴方案。', '追加4套新的探索伙伴。', '制作八套角色方案。']) assert.equal(fusionCatalogueGenerationRequested(message), true, message);
+  for (const message of ['先讨论做4套小伙伴是否合适。', '仅改设置：做4套中文小伙伴的参数。', '把生成数量设置为4套。', '做4套小动物，但先不要生成。', '不要追加4套，只改水彩风。']) assert.equal(fusionCatalogueGenerationRequested(message), false, message);
+  const completeDocument = await repository.createFusionWorkspace(actor, { opId: 'ux21-required-generation-create', state: { ...emptyWorkspaceState(), settings: { ...defaults(), count: 4 } } });
+  let completeRounds = 0;
+  const completedGeneration = await proposeFusionAgent({ workspace: completeDocument.workspace, message: s07, seed: 2110,
+    complete: async messages => { completeRounds++; if (completeRounds > 1) assert.match(String(messages[messages.length - 1].content), /补generate/); return JSON.stringify({ reply: '调整创作条件', commands: completeRounds === 1 ? valid.filter(command => command.type !== 'generate') : completeRounds === 2 ? [] : valid }); },
+    read: async () => ({}), validateCommands: commands => validateFusionAgentExecution(commands, completeDocument.workspace, catalogue, s07),
+  });
+  assert.equal(completedGeneration.iterations, 3); assert.equal((await repository.getWorkspace(actor, completeDocument.workspace.id)).workspace.version, 1);
+  const completeApplied = await repository.executeWorkspaceOperation(actor, completeDocument.workspace.id, { opId: 'ux21-required-generation-apply', baseVersion: 1, commands: bindFusionAgentCommands(completedGeneration.proposal.commands, completeDocument.workspace, 2110, { message: s07 }) });
+  assert.equal(completeApplied.effects?.addedIds.length, 4); assert.equal(completeApplied.effects?.batches.length, 1); assert.equal(completeApplied.rowsPage.total, 4);
+  for (const message of ['仅改设置：做4套中文小伙伴的参数。', '先讨论做4套是否合适。', '做4套，但先不要生成。', '先预览要求，确认后生成4套。']) {
+    const settingsOnly = await proposeFusionAgent({ workspace: completeApplied.workspace, message, complete: async () => JSON.stringify({ reply: '仅保设置或讨论', commands: [{ type: 'context', summary: '尚未生成' }] }), read: async () => ({}) });
+    assert.equal(settingsOnly.iterations, 1); assert(!settingsOnly.proposal.commands.some(command => (command as { type: string }).type === 'generate'));
+  }
+  const singleTarget = completeApplied.workspace.rows[0];
+  const singleAdjustment = await proposeFusionAgent({ workspace: completeApplied.workspace, message: '只修改这张，沿用做4套那轮的水彩风设置。', binding: { target: { rowId: singleTarget.id, version: singleTarget.version } },
+    complete: async () => JSON.stringify({ reply: '仅改此条', commands: [{ type: 'patchRow', rowId: singleTarget.id, patch: { requirements: singleTarget.design!.requirements } }] }), read: async () => ({}) });
+  assert.equal(singleAdjustment.iterations, 1); assert.equal((singleAdjustment.proposal.commands[0] as { type: string }).type, 'patchRow');
+  checks.push('UX21明确生成完整性：做N套/追加仅改设置或空提案必须纠错并实际落四条；讨论、仅设置、否定、单条及待确认不提前生成');
+
   const s08 = '新增一个我自己的类别“生体发光特征”，加词条“星潮光囊”，英文 Star-tide light sac，含义是肩背上有半透明囊体，内部蓝绿光点像潮汐缓慢流动；这是外观特征，不是装备或职业。先给我可编辑预览，确认后入我的词库，并用这个词条追加4套研究搭档，每套都要真正带这个特征，保留现有方案。';
   assert.equal(fusionCatalogueGenerationRequested(s08), true);
   for (const message of ['新增词条，只保存到词库，不要生成。', '先讨论这个新词是否能生成4套。', '请给新词预览，先别抽卡。']) assert.equal(fusionCatalogueGenerationRequested(message), false, message);

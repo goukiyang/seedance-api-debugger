@@ -20,7 +20,7 @@ export type FusionAgentRead = { kind: 'catalogue'; categoryId?: string; q?: stri
 export type FusionAgentBinding = { target?: FusionAgentTarget; message?: string; sourceOpId?: string; undoableOperationIds?: string[]; undoableOperations?: Array<{ opId: string; effects?: FusionEffects }>; scopeChoice?: 'row' | 'document' };
 export type FusionAgentScopeChoice = { id: 'row' | 'document'; label: string };
 const requestClauses = (message: string) => message.split(/[，,。；;！!？?\n]+|(?:但是|但|同时|\bbut\b|\bhowever\b)/i).map(value => value.trim()).filter(Boolean);
-const negatedRequest = (clause: string) => /^(?:(?:也|并且?|请|仍|都|还)\s*)*(?:不要|别|不必|无需|不用|不是|不|禁止|勿|do not\b|don't\b|never\b)/i.test(clause);
+const negatedRequest = (clause: string) => /^(?:(?:也|并且?|请|仍|都|还|先|暂时|暂|目前)\s*)*(?:不要|别|不必|无需|不用|不是|不|禁止|勿|do not\b|don't\b|never\b)/i.test(clause);
 /** A protected future batch is not a request to create one. The target itself stays server-bound. */
 export function needsFusionAgentScopeChoice(message: string): boolean {
   return requestClauses(message).some(clause => {
@@ -32,9 +32,16 @@ export function needsFusionAgentScopeChoice(message: string): boolean {
 }
 /** Confirmation defers execution, not the user's explicitly requested generation plan. */
 export function fusionCatalogueGenerationRequested(message: string): boolean {
-  return requestClauses(message).some(clause => !negatedRequest(clause)
-    && !/^(?:先)?(?:讨论|问问|了解|研究一下)|能否|是否|能不能|可不可以|等我(?:另行|再次|说)|我(?:自己|手动|稍后|以后)再|(?:以后|稍后)我|\b(?:could|would)\b.*\?/i.test(clause)
-    && /(?:生成|抽卡|抽取|出|追加|再来).{0,20}(?:[一二三四五六七八九十\d]+\s*(?:条|套|批)|一批|这批|本批|方案|提示词)|(?:确认后|并|然后|接着|继续|用它|用这个词条).{0,12}(?:抽卡|生成)|(?:用|用于|带入).{0,16}(?:这批|本批|下一批).{0,8}(?:生成|抽卡)?|(?:generate|append).{0,16}(?:\d+|batch|proposals)/i.test(clause));
+  let requested = false;
+  for (const clause of requestClauses(message)) {
+    if (negatedRequest(clause)) { if (/生成|抽卡|抽取|追加|再来|做\s*[一二三四五六七八九十\d]+\s*(?:条|套|批)/.test(clause)) requested = false; continue; }
+    if (/^(?:(?:请|先)\s*)*(?:只|仅).{0,4}(?:改|调整|修改|保存|更新|设置).{0,8}(?:设置|参数|数量|要求)/.test(clause)) { requested = false; continue; }
+    if (/^(?:先)?(?:讨论|问问|了解|研究一下)|能否|是否|能不能|可不可以|等我(?:另行|再次|说)|我(?:自己|手动|稍后|以后)再|(?:以后|稍后)我|\b(?:could|would)\b.*\?/i.test(clause)) continue;
+    // "生成数量设置为4套" changes a setting; it is not the verb "生成4套".
+    const action = clause.replace(/(?:生成|抽卡)(?:数量|设置|参数)/g, '');
+    if (/(?:做|制作|生成|抽卡|抽取|出|追加|再来).{0,20}(?:[一二三四五六七八九十\d]+\s*(?:条|套|批)|一批|这批|本批|方案|提示词)|(?:确认后|并|然后|接着|继续|用它|用这个词条).{0,12}(?:抽卡|生成)|(?:用|用于|带入).{0,16}(?:这批|本批|下一批).{0,8}(?:生成|抽卡)?|(?:generate|append).{0,16}(?:\d+|batch|proposals)/i.test(action)) requested = true;
+  }
+  return requested;
 }
 /** Pure engine preflight only: no operation is reserved, written, charged, or sent upstream. */
 export function validateFusionAgentExecution(commands: FusionCommand[], workspace: FusionWorkspace, catalogue: FusionCatalogue, message = '') {
@@ -399,7 +406,11 @@ export async function proposeFusionAgent(options: {
     try {
       proposal = parseFusionAgentProposal(content);
       if (!proposal.reads.length && proposal.drafts.length && !fusionCatalogueGenerationRequested(options.message) && /(?:只|仅)(?:要|需)?(?:保存|入库)|(?:不要|不必|不用|别)(?:自动)?(?:生成|抽卡)|先讨论/.test(options.message) && proposal.commands.some(command => isRecord(command) && command.type === 'generate')) throw new FusionAgentError('用户本次仅保存或讨论新词，不能附加generate；请保留可编辑草稿，不自动生成。');
-      if (!proposal.reads.length && proposal.drafts.length && fusionCatalogueGenerationRequested(options.message) && !proposal.commands.some(command => isRecord(command) && command.type === 'generate')) throw new FusionAgentError('用户明确要求确认入库后继续生成；草稿必须同时携带引用新词稳定UUID的pending generate计划，不能仅保存。确认前不会执行。');
+      const generationRequired = fusionCatalogueGenerationRequested(options.message)
+        && (proposal.drafts.length > 0 || !options.binding?.target && !/确认后|等我确认|先.{0,6}预览/.test(options.message));
+      if (!proposal.reads.length && generationRequired && !proposal.commands.some(command => isRecord(command) && command.type === 'generate')) throw new FusionAgentError(proposal.drafts.length
+        ? '用户明确要求确认入库后继续生成；草稿必须同时携带引用新词稳定UUID的pending generate计划，不能仅保存。确认前不会执行。'
+        : '用户明确要求生成或追加一批方案；只改设置或回复说明没有完成要求，请保留原方向并在本提案补generate。尚未执行任何修改。');
       if (!proposal.reads.length && proposal.commands.length) {
         for (const draft of proposal.drafts) {
           if (!isRecord(draft) || !isRecord(draft.data) || typeof draft.data.id !== 'string' || !isExtensionId(draft.data.id)) throw new FusionAgentError('带接续命令的新词/类别须有稳定UUID，尚未执行；请在同一提案补齐并原样引用。');
