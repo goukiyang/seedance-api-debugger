@@ -141,8 +141,40 @@ export function configureFusionSettings(settings: FusionSettings, configuration:
     if (!category) throw new Error(`卡片${choice.id}不存在或不可用，请读controls/catalogue的真实id，不用自造属性；原维度使用dimension:前缀。`);
     if (choice.use === 'off' && dimension && CORE.some(core => core.id === dimension.id)) throw new Error(`${dimension.title}是必要基础维度，请保留；用视觉要求表达非战斗或不强调机制。`);
     const oldDynamic = next.catalogue.dynamic?.selections[choice.id];
+    if (choice.use === 'off' && dimension) { next.bossDimensions = next.bossDimensions.filter(id => id !== dimension.id); if (oldDynamic) oldDynamic.enabled = false; continue; }
     const terms = catalogue.terms.filter(term => term.categoryId === category.id && term.enabled);
     const selectedTerms = (values: string[]) => values.map(value => { const term = terms.find(term => term.id === value || term.nameZh === value || term.legacyValue === value); if (!term) throw new Error(`${category.nameZh}选项${value}未核实，请查该类别的真实termId或中文选项。`); return term; });
+    // dimensionOptions exposes original groups, independently of concrete catalogue terms.
+    if (dimension && choice.values?.length && choice.values.every(value => next.rules[dimension.id].some(tag => tag.label === value))) {
+      const id = dimension.id, groups = choice.values;
+      if (choice.use === 'each' && groups.length !== 1) throw new Error(`${dimension.title}每套只能使用一个原分组；多个分组请用random或distribute。`);
+      const groupAllows = (choice.allow || []).filter(value => next.rules[id].some(tag => tag.label === value));
+      const groupExcludes = (choice.exclude || []).filter(value => next.rules[id].some(tag => tag.label === value));
+      next.rules[id] = next.rules[id].map(tag => ({ ...tag, status: groupExcludes.includes(tag.label) || tag.status === 'exclude' && !groupAllows.includes(tag.label) ? 'exclude' : choice.use === 'distribute' && groups.includes(tag.label) ? 'must' : 'default' }));
+      if (groups.some(group => next.rules[id].some(tag => tag.label === group && tag.status === 'exclude'))) throw new Error(`${dimension.title}所选分组已被排除；仅在用户明确恢复时用allow恢复该分组。`);
+      const excluded = Array.from(new Set([...(oldDynamic?.excluded || []), ...selectedTerms((choice.exclude || []).filter(value => !groupExcludes.includes(value))).map(term => term.id)]))
+        .filter(termId => !selectedTerms((choice.allow || []).filter(value => !groupAllows.includes(value))).some(term => term.id === termId));
+      const detail = next.catalogue.details[id];
+      const originalPool = oldDynamic?.candidates && !choice.replacePool ? oldDynamic.candidates.flatMap(termId => terms.filter(term => term.id === termId)) : terms;
+      const candidates = originalPool.filter(term => groups.includes(term.data?.group || '')
+        && (choice.replacePool || (!oldDynamic?.candidates || oldDynamic.candidates.includes(term.id)) && (!oldDynamic?.locked || oldDynamic.values.includes(term.id))
+          && (!next.bossLocks[id] || term.data?.group === next.boss[id]) && (!detail?.locked || (term.legacyValue || term.nameZh) === detail.value)));
+      const pool = candidates.filter(term => !excluded.includes(term.id));
+      if (groups.some(group => !pool.some(term => term.data?.group === group))) throw new Error(`${dimension.title}所选分组在原候选池、锁定或排除后没有可用词条；请保留原限制，明确改范围后才用replacePool。`);
+      next.bossDimensions = Array.from(new Set([...next.bossDimensions, id])); next.bossLocks[id] = choice.use === 'each';
+      if (choice.use === 'each') next.boss[id] = groups[0];
+      if (choice.replacePool) delete next.catalogue.details[id];
+      if (choice.use !== 'each' || oldDynamic || excluded.length) {
+        // Keep groups as groups. The allocator chooses this batch's concrete representatives.
+        delete next.catalogue.details[id];
+        const dynamic = next.catalogue.dynamic;
+        const categories = new Map((dynamic?.snapshot.categories || []).map(category => [category.id, category])); categories.set(category.id, category);
+        const snapshotTerms = new Map((dynamic?.snapshot.terms || []).map(term => [term.id, term])); for (const term of terms) snapshotTerms.set(term.id, term);
+        next.catalogue.dynamic = { formatVersion: 1, selections: { ...dynamic?.selections, [category.id]: { ...(oldDynamic || emptyTrait()), enabled: true, locked: false,
+          excluded, candidates: candidates.map(term => term.id), must: [...(oldDynamic?.must || [])] } }, snapshot: { version: catalogue.version, categories: Array.from(categories.values()), terms: Array.from(snapshotTerms.values()) } };
+      }
+      continue;
+    }
     const selected = choice.values === undefined ? undefined : selectedTerms(choice.values);
     if (trait && !oldDynamic && !(choice.use === 'random' && choice.values !== undefined)) {
       const state = next.catalogue.traits[trait.id] || emptyTrait();

@@ -13,7 +13,7 @@ import { settingsChanges, mergeWorkspaceState } from '../src/app/tools/character
 import { emptyWorkspaceState } from '../src/lib/character-fusion/actions';
 import { checkFusionUx20 } from './check-fusion-ux20';
 import { checkFusionUx21 } from './check-fusion-ux21';
-import { checkFusionUx22 } from './check-fusion-ux22';
+import { checkFusionUx22, checkFusionUx22Fix01 } from './check-fusion-ux22';
 
 async function main() {
   if (process.env.FUSION_ENGINEERING_ONLY !== '1') throw new Error('请使用 character-fusion-engineering.mjs 隔离入口。');
@@ -472,6 +472,7 @@ async function main() {
     checks.push(...await checkFusionUx20({ actor, repository, library, prisma }));
     checks.push(...await checkFusionUx21({ actor, repository, library }));
     checks.push(...await checkFusionUx22({ actor, repository, library }));
+    checks.push(...await checkFusionUx22Fix01({ actor, repository, library }));
     console.log(JSON.stringify({ passed: true, checks, isolation: { temporarySqlite: true, realFetches: fetchAttempts, realGeneration: 0, browserRuns: 0, productionWrites: 0 } }));
   } finally { await close?.(); await rm(directory, { recursive: true, force: true }); }
 }

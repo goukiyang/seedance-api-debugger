@@ -157,8 +157,8 @@ export function validateGeneration(s: FusionSettings) {
     const propPolicy = s.catalogue.traits.equipmentPolicy, dynamicProps = s.catalogue.dynamic.selections.equipmentPolicy;
     const noProps = propPolicy?.enabled && propPolicy.locked && propPolicy.values.includes('无道具') || dynamicProps?.enabled && dynamicProps.locked && dynamicProps.values.some(id => s.catalogue!.dynamic!.snapshot.terms.some(term => term.id === id && (term.legacyValue || term.nameZh) === '无道具'));
     if (dimension.id === 'equipment' && noProps) return '词库道具选择与固定无道具规则冲突，请保留一种明确设置。';
-    const guaranteed = terms.filter(term => (state.locked ? state.values : state.must).includes(term.id)).map(term => term.data!.group);
-    if (required(s, dimension.id).some(group => !guaranteed.includes(group))) return `${category.nameZh}的原类别必出项须在词库选择中明确设为本批必出。`;
+    const reachable = (state.locked ? terms.filter(term => state.values.includes(term.id)) : dynamicPool(category, state, terms)).map(term => term.data!.group);
+    if (required(s, dimension.id).some(group => !reachable.includes(group))) return `${category.nameZh}的原类别必出项在有效候选池中没有可用词条。`;
     const overrides = dimension.id === 'personality' ? ['primaryPersonality'] : dimension.id === 'mechanism' ? ['mechanismPrinciple', 'mechanismMotion'] : dimension.id === 'entity' ? ['bodyCount', 'assembly', 'relationship', 'consciousness'] : dimension.id === 'physique' ? TRAITS.filter(trait => trait.group === 'body').map(trait => trait.id) : [];
     if (overrides.some(id => s.catalogue?.dynamic?.selections[id]?.enabled || !s.catalogue?.dynamic?.selections[id] && s.catalogue?.traits[id]?.enabled)) return `${category.nameZh}与已加入的专属属性重复，请保留一种明确设置。`;
   }
@@ -318,7 +318,7 @@ export function allocateFusionBatch(s: FusionSettings, seed: number, options: { 
     throw Object.assign(new Error(`${userMessage} onceMust[${JSON.stringify(id)}]未匹配当前组合类别。${category ? `${category.nameZh}的真实categoryId为${JSON.stringify(category.id)}；${category.enabled ? activation : '该目录类别已停用，不能用selection.enabled绕过，请重新查询可用类别。'}` : '该key不是当前已知目录categoryId，请查询catalogue/controls原样引用，不用名称或generationKind作key。'}保留已有锁定、候选池与排除；启用不会解除原限制。`), { userMessage });
   }
   let diversity: FusionAllocation['diversity'];
-  for (const axis of axes.filter(axis => axis.kind === 'source' || options.onceMust?.[axis.id]?.length)) {
+  for (const axis of axes.filter(axis => axis.kind === 'source' || axis.groups.length || options.onceMust?.[axis.id]?.length)) {
     const must = Array.from(new Set([...axis.must, ...allocationIds(axis, options.onceMust?.[axis.id] || [])]));
     if (axis.fixed) {
       if (must.some(id => !axis.fixed!.includes(id))) throw new Error(`${axis.title}的本批要求与固定组合冲突，请先调整锁定。`);
