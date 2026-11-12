@@ -24,6 +24,6 @@ export async function resumeImageResultVideoImport(receiptId: string): Promise<I
   if (!/^[a-f0-9]{64}$/.test(receiptId)) throw new Error('导入记录无效');
   const response = await fetch(`/api/image-result-next/${receiptId}`, { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'prepare-video' }) });
   const body = await response.json().catch(() => null);
-  if (!response.ok || body?.receiptId !== receiptId || body.ready !== true) throw new Error(body?.error || '原首帧准备结果尚未确认，请查询原记录');
+  if (!response.ok || body?.receiptId !== receiptId || body.ready !== true) throw new Error(body?.error || '原图片准备结果尚未确认，请查询原记录');
   return body as ImageResultNextReceipt;
 }

@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react';
-import { MoreHorizontal, RefreshCw, Search, UserRound, X } from 'lucide-react';
+import { MoreHorizontal, ImagePlus, RefreshCw, Search, Trash2, UserRound, X } from 'lucide-react';
 import type { GalleryAuthor, GalleryScope, GallerySort } from '@/lib/image-studio/gallery-types';
 import styles from './ModuleGallery.module.css';
+import { ProductActionMenu } from '@/components/ProductActionMenu';
 import TemplateUsageCount from '@/components/template-studio/TemplateUsageCount';
 
 export type ModuleGalleryItem = {
@@ -27,6 +28,9 @@ export type ModuleGalleryItem = {
   sharingControl?: ReactNode;
   onOpen: () => void;
   onEditCover?: () => void;
+  onDelete?: (anchor: HTMLElement) => void;
+  deleteDisabled?: boolean;
+  deletePending?: boolean;
 };
 
 export type ModuleGalleryProps = {
@@ -163,8 +167,11 @@ export function ModuleGallery({ items, total, filteredTotal, query, onQueryChang
             <div className={styles.cardActions}>
               {item.error && onRetry && <button type="button" className={styles.cardAction} disabled={loading}
                 aria-label={`重试读取封面：${item.name}`} title="重试读取封面" onClick={onRetry}><RefreshCw size={17} aria-hidden="true" /></button>}
-              {editable && <button type="button" className={styles.cardAction} disabled={opening}
-                aria-label={`设置封面：${item.name}`} title="设置封面" onClick={item.onEditCover}><MoreHorizontal size={20} aria-hidden="true" /></button>}
+              {(editable || item.onDelete) && <span className={styles.cardMenu}><ProductActionMenu label={`模板操作：${item.name}`} disabled={opening} actions={[
+                ...(editable ? [{ id: 'cover', label: '修改封面', icon: <ImagePlus size={16} />, onSelect: () => item.onEditCover?.() }] : []),
+                ...(item.onDelete ? [{ id: 'delete', label: item.deletePending ? '核对原删除' : '删除模板', icon: <Trash2 size={16} />, danger: true,
+                  disabled: item.deleteDisabled, onSelect: item.onDelete }] : []),
+              ]}><MoreHorizontal size={20} aria-hidden="true" /></ProductActionMenu></span>}
             </div>
           </div>
           {item.usageCount !== undefined && <div className={styles.usage}><TemplateUsageCount count={item.usageCount} /></div>}

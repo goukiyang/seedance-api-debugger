@@ -1,11 +1,10 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '角色融合无职业要求修复',
+  title: '模板参考图与封面操作更新',
   outline: [
-    '无职业要求真正进入生成结果',
-    '追加保留旧方案，单条调整可撤销',
-    '保留卡片操作和手机输入'
+    '发送视频参考图默认使用全能参考',
+    '模板封面菜单支持删除本人条目'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

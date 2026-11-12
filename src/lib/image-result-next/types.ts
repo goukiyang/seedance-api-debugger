@@ -1,7 +1,7 @@
 import type { ContentKey } from '@/lib/content-reactions/types';
 import type { CutoutAsset, CutoutJob, CutoutSettings } from '@/lib/cutout/types';
 
-export type ImageResultNextIntent = 'cutout' | 'video';
+export type ImageResultNextIntent = 'cutout' | 'video' | 'video-reference';
 export type ImageResultNextSource = {
   label: string;
   originalUrl: string;

@@ -60,9 +60,9 @@
 .gallery .time { position: relative; z-index: 2; display: inline-flex; align-items: center; min-height: 24px; color: #adb6bd; font-size: 12px; line-height: 16px; }
 .cardActions { position: absolute; left: 5px; top: 5px; z-index: 3; display: flex; align-items: center; opacity: 0; }
 .card:hover .cardActions, .card:focus-within .cardActions { opacity: 1; }
-.gallery .cardAction { display: inline-flex; align-items: center; justify-content: center; width: 38px; min-height: 40px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #adb6bd; cursor: pointer; }
-.gallery .cardAction:hover { color: #b9f7e8; background: #222b2e; }
-.gallery .cardAction:disabled, .gallery .retry:disabled { opacity: .55; cursor: wait; }
+.gallery .cardAction, .gallery .cardMenu > button { display: inline-flex; align-items: center; justify-content: center; width: 38px; min-height: 40px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #adb6bd; cursor: pointer; }
+.gallery .cardAction:hover, .gallery .cardMenu > button:hover { color: #b9f7e8; background: #222b2e; }
+.gallery .cardAction:disabled, .gallery .cardMenu > button:disabled, .gallery .retry:disabled { opacity: .55; cursor: wait; }
 .empty { display: grid; justify-items: center; align-content: center; gap: 12px; min-height: 280px; color: #adb6bd; font-size: 14px; }
 .empty p { margin: 0; }
 .pagination { min-width: 0; margin-top: 20px; }
@@ -79,7 +79,7 @@
 }
 @media (hover: none), (pointer: coarse) {
   .gallery .scope, .gallery .reset, .gallery .retry, .gallery .sort select { min-height: 44px; }
-  .gallery .cardAction { width: 44px; min-height: 44px; }
+  .gallery .cardAction, .gallery .cardMenu > button { width: 44px; min-height: 44px; }
   .cardActions { opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) { .card { transition: none; } }
