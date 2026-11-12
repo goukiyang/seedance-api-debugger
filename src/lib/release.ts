@@ -1,11 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '火山参考图与错误记录修复',
+  title: '角色融合聊天与抽卡修复',
   outline: [
-    '火山生成可按原有权限读取站内参考图',
-    '生成失败保留安全诊断，方便核对原因',
-    '原图、历史任务与点数记录保持'
+    '聊天先勾选条件，确认后点击生成',
+    '追加保留旧方案，单条调整可撤销',
+    '保留卡片操作和手机输入'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
