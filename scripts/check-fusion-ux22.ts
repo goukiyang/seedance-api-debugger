@@ -72,6 +72,32 @@ export async function checkFusionUx22(input: { actor: { id: string }; repository
   }
   checks.push('UX22母体单一来源：小动物附加母体卡同轮拒绝并纠正到原生目录，聊天0新增→点击4个实际母体，不出现另一睡鼠描述；正常表面纹理卡仍允许');
 
+  const noJobDoc = await repository.createFusionWorkspace(actor, { opId: 'ux22-no-occupation-create', state: emptyWorkspaceState() });
+  const noJobConfiguration = { ...animalConfiguration, cards: [...animalConfiguration.cards, { id: 'occupation', use: 'each', values: ['无职业设定'] },
+    { id: 'equipmentPolicy', use: 'each', values: ['无道具'] }], requirements: { zh: '安静治愈水彩风格', en: 'A quiet, soothing watercolor style' } };
+  const disabledJobConfiguration = { ...noJobConfiguration, cards: [...animalConfiguration.cards, { id: 'occupation', use: 'off' }, { id: 'equipmentPolicy', use: 'each', values: ['无道具'] }] };
+  let noJobCalls = 0;
+  const noJobProposal = await proposeFusionAgent({ workspace: noJobDoc.workspace, message: '不要职业、不要道具和武器', binding: { contract: 'configure' }, seed: 2221,
+    complete: async messages => {
+      noJobCalls++;
+      if (noJobCalls === 2) assert.match(String(messages[messages.length - 1].content), /关闭职业卡仍会沿用/);
+      return JSON.stringify({ reply: '同步无职业伙伴', commands: [{ type: 'configure', configuration: noJobCalls === 1 ? disabledJobConfiguration : noJobConfiguration }] });
+    }, read: async () => ({}), validateCommands: commands => validateFusionAgentExecution(commands, noJobDoc.workspace, catalogue, '不要职业、不要道具和武器'),
+  });
+  assert.equal(noJobCalls, 2);
+  assert.doesNotThrow(() => validateFusionAgentExecution(bindFusionAgentCommands([{ type: 'configure', configuration: disabledJobConfiguration }], noJobDoc.workspace, 2221, { contract: 'configure' }), noJobDoc.workspace, catalogue, '不要改变职业'));
+  const noJobConfigured = await repository.executeWorkspaceOperation(actor, noJobDoc.workspace.id, { opId: 'ux22-no-occupation-configure', baseVersion: 1,
+    commands: bindFusionAgentCommands(noJobProposal.proposal.commands, noJobDoc.workspace, 2221, { contract: 'configure' }) });
+  assert.equal(noJobConfigured.rowsPage.total, 0);
+  const noJobRows = await repository.executeWorkspaceOperation(actor, noJobDoc.workspace.id, { opId: 'ux22-no-occupation-click', baseVersion: noJobConfigured.workspace.version, commands: [{ type: 'generate', mode: 'append', seed: 2221 }] });
+  assert.equal(noJobRows.rowsPage.total, 4);
+  for (const row of noJobRows.workspace.rows) {
+    assert(!row.design!.sections.some(section => section.zh.startsWith('职业与身份：') || section.en.startsWith('Occupation:')));
+    assert(!row.catalogueSnapshot!.body.zh.includes('职业与身份：')); assert(!row.catalogueSnapshot!.body.en.includes('Occupation:'));
+    assert(row.name.endsWith('角色')); assert.match(row.catalogueSnapshot!.body.zh, /无道具/);
+  }
+  checks.push('UX22明确无职业：关闭卡片仍回退旧职业的实际预览须同轮纠正，0配置→4条中英无职业/无道具且名称无旧职业，不误读不要改变职业');
+
   const nativeState = emptyWorkspaceState(); nativeState.settings.count = 4;
   nativeState.settings.cards = structuredClone(state.settings.cards);
   const controlsDoc = await repository.createFusionWorkspace(actor, { opId: 'ux22-all-controls-create', state: nativeState });
