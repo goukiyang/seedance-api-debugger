@@ -23,7 +23,7 @@ const fixtureFile = 'scripts/template-author-cover-contract-engineering.ts';
 const sourceFiles = [fixtureFile, 'src/lib/performance/request-trace.ts', 'src/lib/performance/trace-contract.ts', 'src/lib/image-studio/template-author.ts', 'src/lib/image-studio/definition-read.ts',
   'src/lib/image-studio/private-storage.server.ts', 'src/lib/image-studio/module-cover.ts', 'src/lib/image-studio/module-cover-types.ts',
   'src/lib/media/hd-derivatives.ts', 'src/lib/media/image-comparison-version.ts',
-  'src/lib/image-studio/shared-contract.ts', 'src/lib/image-studio/shared-command-storage.ts',
+  'src/lib/image-studio/shared-contract.ts', 'src/lib/image-studio/shared-command-storage.ts', 'src/lib/image-studio/external-access.server.ts',
   'src/lib/image-studio/workspace-deletion.ts', 'src/lib/image-studio/preset-lifecycle.ts',
   'src/lib/image-studio/context-version.ts', 'src/lib/image-studio/access.ts',
   'src/lib/image-studio/parameter-copy.ts', 'src/lib/image-studio/model-catalog.ts', 'src/lib/image-studio/ratios.ts', 'src/lib/image-studio/preset-id.ts',
@@ -145,12 +145,6 @@ async function main() {
   const storage = evaluate('src/lib/image-studio/shared-command-storage.ts', { 'node:crypto': crypto });
   const deletion = evaluate('src/lib/image-studio/workspace-deletion.ts', { '@/lib/prisma': { prisma }, './access': access,
     './shared-command-storage': storage });
-  const sharedNames = ['SHARED_STUDIO_PROTOCOL', 'studioBindingKey', 'studioPublisherKey', 'assertStudioActor', 'parseRecord',
-    'studioSharedBinding', 'studioPublisherModule', 'readStudioTemplateSourceIdentity'];
-  const shared = evaluate('src/lib/image-studio/shared-contract.ts', {}, { prisma,
-    canUseCompanyTemplates: access.canUseCompanyTemplates, StudioSharingError: storage.StudioSharingError,
-    assertStudioWorkspaceNotDeleted: deletion.assertStudioWorkspaceNotDeleted,
-  }, declarations('src/lib/image-studio/shared-contract.ts', sharedNames));
   const lifecycle = evaluate('src/lib/image-studio/preset-lifecycle.ts', { '@/lib/prisma': { prisma } });
   const display = evaluate('src/lib/users/display.ts', {});
   const copyRatios = evaluate('src/lib/image-studio/ratios.ts', {});
@@ -158,6 +152,21 @@ async function main() {
   const copyCatalog = evaluate('src/lib/image-studio/model-catalog.ts', { '@/lib/image-generation/resolution': copyResolution });
   const copyIds = evaluate('src/lib/image-studio/preset-id.ts', {});
   const parameterCopy = evaluate('src/lib/image-studio/parameter-copy.ts', { './model-catalog': copyCatalog, './ratios': copyRatios, './preset-id': copyIds });
+  const sharedNames = ['SHARED_STUDIO_PROTOCOL', 'studioBindingKey', 'studioPublisherKey', 'assertStudioActor', 'parseRecord',
+    'studioSharedBinding', 'studioPublisherModule', 'readStudioTemplateSourceIdentity'];
+  // Preserve the real CommonJS module reference while wiring the policy/actor cycle.
+  // The closed policy never enters source binding or opens a new dependency graph.
+  const shared: Exports = {};
+  const externalAccess = evaluate('src/lib/image-studio/external-access.server.ts', { 'server-only': {}, 'node:crypto': crypto,
+    '@prisma/client': { Prisma: new Proxy({}, { get: () => forbidden('SQL') }) }, '@/lib/prisma': { prisma },
+    './access': access, './shared-command-storage': storage, './shared-contract': shared,
+    './preset-lifecycle': lifecycle, './parameter-copy': parameterCopy });
+  settings.set(externalAccess.EXTERNAL_STUDIO_ACCESS_KEY, { key: externalAccess.EXTERNAL_STUDIO_ACCESS_KEY,
+    value_json: JSON.stringify({ version: 1, revision: 0, mode: 'closed', userIds: [], templates: [] }) });
+  Object.assign(shared, evaluate('src/lib/image-studio/shared-contract.ts', {}, { prisma,
+    canAccessImageTemplates: access.canAccessImageTemplates, hydrateExternalStudioActor: externalAccess.hydrateExternalStudioActor,
+    StudioSharingError: storage.StudioSharingError, assertStudioWorkspaceNotDeleted: deletion.assertStudioWorkspaceNotDeleted,
+  }, declarations('src/lib/image-studio/shared-contract.ts', sharedNames)));
   const author = evaluate('src/lib/image-studio/template-author.ts', { 'server-only': {}, '@/lib/prisma': { prisma },
     '@/lib/users/display': display, './access': access, './shared-contract': shared, './parameter-copy': parameterCopy });
   const contextVersion = evaluate('src/lib/image-studio/context-version.ts', { 'node:crypto': { ...crypto, randomInt: () => forbidden('context-version-allocation') },
@@ -170,7 +179,7 @@ async function main() {
   let definitionResolution = 'dependency-invalid', definitionCalls = 0, noteReads = 0;
   const definition = evaluate('src/lib/image-studio/definition-read.ts', { 'server-only': {}, 'node:crypto': crypto,
     '@prisma/client': { Prisma: new Proxy({}, { get: () => forbidden('SQL') }) }, '@/lib/prisma': { prisma },
-    './context-version': contextVersion, './preset-lifecycle': lifecycle, './template-author': author,
+    './access': access, './context-version': contextVersion, './preset-lifecycle': lifecycle, './template-author': author,
     './private-storage.server': privateStorage, '@/lib/security/private-prompt-fields.server': privateFields,
     '@/lib/security/private-prompt-request.server': legacyPrivateRequest,
     './fixed-references': { getStudioPresetFixedReferences: async () => { noteReads++; return [{ assetId: 'fixed-source-do-not-project', note: '固定参考说明' }]; } },
@@ -210,7 +219,17 @@ async function main() {
   const forged = await author.resolveStudioTemplateAuthor({ ...peer, role: 'admin' }, { presetId: preset.id });
   assert.equal(forged.actor.role, 'user'); assert.equal(forged.templateRead.canViewTemplateContext, false);
   assert.equal(JSON.stringify(colleague.templateRead).includes('ou_author'), false);
-  await assert.rejects(author.resolveStudioTemplateAuthor(users.get('external'), { presetId: preset.id }));
+  const externalActor = await shared.assertStudioActor('external', prisma);
+  assert.equal(access.canAccessImageTemplates(externalActor), true);
+  assert.equal(access.canUseCompanyTemplates(externalActor), false);
+  assert.deepEqual(plain(externalActor.externalStudioAccess), { enabled: false, revision: 0, presetIds: [] });
+  assert.equal(access.canViewStudioPreset(externalActor, preset), false);
+  const externalAuthor = await author.resolveStudioTemplateAuthor(users.get('external'), { presetId: preset.id });
+  assert.equal(externalAuthor.preset, null); assert.equal(externalAuthor.owner, null);
+  assert.equal(externalAuthor.templateRead.author.state, 'unknown'); assert.equal(externalAuthor.templateRead.author.displayName, null);
+  assert.equal(externalAuthor.templateRead.canViewTemplateContext, false);
+  await assert.rejects(definition.readStudioTemplateDefinition(externalActor, { presetId: preset.id }), (error: any) => error.status === 404);
+  await assert.rejects(definition.readStudioTemplateAuthorContact(externalActor, { presetId: preset.id }), (error: any) => error.status === 404);
   checks.push('author_colleague_admin_and_fresh_identity_never_impersonate_each_other');
 
   const missing = await author.resolveStudioTemplateAuthor(admin, { presetId: 'missing-preset' });

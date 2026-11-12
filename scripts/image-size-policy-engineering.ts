@@ -21,7 +21,9 @@ const sourcePaths = ['prisma/schema.prisma', 'src/lib/sqlite-prisma-read-snapsho
   'src/lib/integrations/image-generation.ts', 'src/lib/image-studio/tasks.ts',
   'src/lib/image-studio/billing-quote-service.ts', 'src/lib/image-studio/billing-quote-store.ts',
   'src/lib/image-studio/batch-billing-quote.ts', 'src/lib/image-studio/batches.ts',
-  'src/lib/tools/toolflow-runtime.ts', 'src/app/api/assets/generate/route.ts', 'src/lib/image-studio/worker.ts'];
+  'src/lib/tools/toolflow-runtime.ts', 'src/app/api/assets/generate/route.ts', 'src/lib/image-studio/worker.ts',
+  'src/lib/image-studio/access.ts', 'src/lib/image-studio/external-access.server.ts',
+  'src/lib/image-studio/external-admission.ts', 'src/lib/image-studio/external-task-projection.ts', 'src/lib/projects/permissions.ts'];
 
 async function main() {
   const root = realpathSync(process.cwd()), runId = process.env.IMAGE_RECOVERY_GATE_RUN_ID;

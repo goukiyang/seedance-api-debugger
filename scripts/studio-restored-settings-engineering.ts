@@ -17,6 +17,8 @@ import { CURRENT_STUDIO_SIZE_POLICY_VERSION } from '../src/lib/image-studio/rati
 import { normalizeImageFeishuChoice } from '../src/lib/image-studio/feishu-contract';
 import { historicalStudioStyles } from '../src/lib/image-studio/style-history';
 import { freezeImageWorkMethodUse } from '../src/lib/works/method-reference';
+import { canAccessImageTemplates, isExternalImageStudioActor, externalStudioPresetIds } from '../src/lib/image-studio/access';
+import { EXTERNAL_IMAGE_ADMISSION_ENABLED } from '../src/lib/image-studio/external-admission';
 
 // This fixture evaluates selected production declarations with synthetic dependencies.
 // It never imports the application database, provider, worker, or HTTP modules.
@@ -35,6 +37,8 @@ async function main() {
   files.push('src/lib/image-studio/personal-prompt.ts', 'src/lib/image-studio/personal-prompt.server.ts');
   files.push('src/lib/image-studio/current-inputs.ts', 'src/lib/image-studio/shared-contract.ts');
   files.push('src/lib/works/method-reference.ts', 'src/lib/image-studio/pricing-state.ts');
+  files.push('src/lib/image-studio/access.ts', 'src/lib/image-studio/external-access.server.ts',
+    'src/lib/image-studio/external-admission.ts', 'src/lib/projects/permissions.ts');
   const sources = new Map(files.map(file => [file, readFileSync(path.join(root, file), 'utf8')]));
   const declarations = (file: string, names: string[]) => {
     const text = sources.get(file) ?? readFileSync(path.join(root, file), 'utf8');
@@ -177,7 +181,11 @@ async function main() {
     normalizeStudioRatio: (value: string) => value, parseImageQualityRouteSnapshot: () => null,
     defaultStudioModuleId: () => 'synthetic-default-module', validStudioModuleId: (id: string) => id === moduleId,
     getImageStudioSettings: async () => settings, withContextVersionRetry: (run: () => unknown) => run(),
-    assertNoSynchronousImageAdmission: async () => {}, assertUsageProject: async () => {}, canUseCompanyTemplates: () => true,
+    assertNoSynchronousImageAdmission: async () => {}, assertUsageProject: async () => {},
+    canAccessImageTemplates, isExternalImageStudioActor, externalStudioPresetIds, EXTERNAL_IMAGE_ADMISSION_ENABLED,
+    hydrateExternalStudioActor: async (actor: typeof user) => isExternalImageStudioActor(actor)
+      ? { ...actor, externalStudioAccess: { enabled: false, revision: 0, presetIds: [] } } : actor,
+    ensureDefaultProjectForUser: async () => { forbiddenCalls++; throw new Error('Internal restoration must not repair an external project'); },
     canViewStudioPreset: (_actor: unknown, preset: { owner_id: string; is_shared: boolean }) => preset.owner_id === owner || preset.is_shared,
     resolveStudioTaskSharedUse: async (_actor: unknown, _module: unknown, supplied: unknown) => { assert.deepEqual(plain(supplied), intent); return shared; },
     assertSharedStudioWorkerReady: async () => {}, assertStudioTaskSettingsWriter: async () => {},
@@ -221,6 +229,7 @@ async function main() {
     declarations('src/lib/image-studio/skills.ts', ['parseSkillIds', 'resolveSkills', 'historicalSkills', 'publicSkillVersion', 'publicSkillSnapshot']),
     declarations('src/lib/image-studio/tasks.ts', ['StudioError', 'SharedStudioDefinitionError', 'studioBusinessErrorStatus',
       'parseSharedStudioIntent', 'sameSharedStudioIntent', 'resolveOwnedStudioTaskSharedUse', 'resolveStudioTaskRestoredSettings',
+      'assertExternalStudioAdmission', 'studioSubmissionProjectId', 'assertExternalStudioProject',
       'studioSharedGenerationSource', 'normalizeSharedAuthorDraftForUse', 'safeImageChannelSnapshot', 'parseHistoricalStyleGroups',
       'parseStudioTaskDraft', 'parseStudioRequest', 'parseHistoricalFixedReferences', 'submitStudioBatch', 'publicStudioSnapshot']),
     declarations('src/lib/image-studio/billing-quote-service.ts', ['isManagedChannelId', 'isPinnedChannelId', 'imageChannelFromPreparedTask',

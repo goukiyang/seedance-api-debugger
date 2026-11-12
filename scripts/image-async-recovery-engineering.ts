@@ -22,7 +22,9 @@ const fixtureDeadline = setTimeout(() => { markPhase('fixture_180s_timeout'); pr
 fixtureDeadline.ref();
 const sourcePaths = ['src/lib/image-studio/worker.ts', 'src/lib/image-studio/provider.ts', 'src/lib/image-studio/tasks.ts',
   'src/lib/image-studio/async-recovery.ts', 'src/lib/image-studio/delivery.ts', 'src/lib/image-studio/queue-capacity.ts',
-  'src/lib/image-studio/synchronous-admission.ts', 'src/app/api/image-studio/tasks/route.ts'];
+  'src/lib/image-studio/synchronous-admission.ts', 'src/app/api/image-studio/tasks/route.ts',
+  'src/lib/image-studio/access.ts', 'src/lib/image-studio/external-access.server.ts',
+  'src/lib/image-studio/external-admission.ts', 'src/lib/image-studio/external-task-projection.ts', 'src/lib/projects/permissions.ts'];
 const sha = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
 const expectedChecks = ['explicit_provider_states_release_without_refund', 'owner_shared_capacity_includes_synchronous_running',
   'expiry_timeout_and_non_summary_404_do_not_release', 'two_independent_original_summary_404_observations',

@@ -306,7 +306,7 @@ async function main() {
     assert.equal(restoreFunctions.size, restoreNames.length);
     const compiled = ts.transpileModule(`${restoreNames.map(name => restoreFunctions.get(name)!.getText(file)).join('\n')}; exports.run = restoreResultSettings;`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
     let resolveDetail: (value: unknown) => void = () => {}, restored = 0;
-    const context = { taskReadScope: 'owner:module', currentView: { current: { token: 1, active: true } }, liveGenerationSignature: { current: 'initial' },
+    const context = { externalActor: false, taskReadScope: 'owner:module', currentView: { current: { token: 1, active: true } }, liveGenerationSignature: { current: 'initial' },
       currentInputRevision: { current: 1 }, privateEditorEditVersion: { current: 0 }, latestSettingsDraft: { current: 'initial' },
       detailReadSequence: { current: 0 }, taskReadScopeRef: { current: 'owner:module' },
       isClientSessionBlocked: () => false, readTaskDetail: () => new Promise(resolve => { resolveDetail = resolve; }),

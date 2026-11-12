@@ -14,7 +14,9 @@ type Kind = 'batch' | 'toolflow';
 type Call = { kind: Kind; candidateQueries: number; loaded: number[]; checked: string[] };
 type ObservedBatch = { id?: string; key?: string; updated_at?: Date };
 type ObservedRun = { id?: string; created_at?: Date };
-const sourcePaths = ['src/lib/image-studio/batches.ts', 'src/lib/tools/toolflow-runtime.ts', 'src/lib/image-studio/queue-capacity.ts'];
+const sourcePaths = ['src/lib/image-studio/batches.ts', 'src/lib/tools/toolflow-runtime.ts', 'src/lib/image-studio/queue-capacity.ts',
+  'src/lib/image-studio/access.ts', 'src/lib/image-studio/external-access.server.ts',
+  'src/lib/image-studio/external-admission.ts', 'src/lib/image-studio/external-task-projection.ts', 'src/lib/projects/permissions.ts'];
 const sha = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 
 /** Fresh SQLite and actual dispatch functions only. No generation worker is started. */
