@@ -1555,3 +1555,373 @@ Linux双候选在 `/data/video-api-debugger/release-staging/fusion-workbench-ux2
 
 15份批准JSON及恢复只读证明仅复制到正式根 `implementation/ux20/evidence/`，包SHA256 `db411ecdca1ae07d3361fc0677549e6343f1096da903ef0094b269a6b651cfb0` 已核；未复制DB、env或配置备份。源层原证沿 `source-engineering.private.json`、`source-types.private.json`。正式根其它脏改保持，最终记录仅同步本轮marker到原任务分支；纯记录不再构建或重启。
 <!-- /FUSION-UX20-IMPLEMENTATION-20261111 -->
+
+<!-- FUSION-UX21-LIVE-20261111 -->
+接续说明：本块保留UX21当时的原证与未通过事项；当前合同、实施及最终验收状态统一沿后续[UX22](#fusion-ux22-implementation)，不把下文历史“进行中”当最新版本。
+
+<a id="fusion-ux21-live"></a>
+## UX21 真实LLM八场景与新版全链验收（2026-11-11，进行中）
+
+用户明确要求真实LLM与实页验收至少8种不同场景，测通新建、沿用、继续、追加、单条修改、撤销、新词入库到生成，保原卡片操作，发现问题直接修。本轮由主控单一浏览器控制，复用本人Google Chrome/Default/xiaobo现有融合页，核无本任务其它浏览器执行者；刷新后页头和API均v0.146.0，实际模型gpt-6.1-sol。旧文档原件不动，原生新建独立测试文档，不手动预设目标字段冒LLM理解。
+
+八组覆盖：S01家庭3D动画/马里奥式大只佬冒险主角；S02沿用身形改黏土定格品牌吉祥物伙伴/巨掌巨脚；S03赛博朋克瘦长潜入反派；S04国风水墨绘本配角/无武器；S05暗黑哥特守关Boss/折叠旋转；S06复古像素普通敌人；S07治愈水彩非战斗伙伴/无职业道具；S08硬科幻工业双体搭档。每组目标4套，逐条核实际中英冻结正文；S01再追加、S03点卡修改/聊天撤销、S04追加临时画风与继续/刷新、S07或S08新词/类别确认入库并生成，结合原卡片折叠/展开/锁定/移出/再加入/拖动及双视图。
+
+每回合先经真实UI输入与操作，再读取本人同文档持久结果/版本/批次，与发送前做目标/非目标/settings差异；明确失败、未知和未验分开，不重发未知请求。先采本版各场景及关联事实，发现问题按因果范围修复部署后只补受影响证据；无图片/视频生成。本轮零功能调用不再成立，模型调用沿本次明确授权，不能把上轮工程通过当本轮真实验收。
+
+- [ ] 八场景真实初次生成与逐条正文。
+- [ ] 新建/沿用/继续/刷新及草稿、条件、结果隔离。
+- [ ] 追加/单条修改/撤销的实际目标范围与冻结保护。
+- [ ] 新词预览确认→正式ID→实际生成，重复/恢复不双生。
+- [ ] 原卡片与双视图操作保留、真实界面可用。
+- [ ] 修复、必要工程/上线及最终受影响复测、证据归档。
+
+私有原证与执行检查点沿implementation/ux21，浏览器session和原操作只在私有检查点保存，不含凭据。开局ClickOps selector-fill未触发React，已源码核为工具直接value写入，改用其原生label-fill，未改网站。一次通用复现工具因文本命中“发送”拒绝只读脚本，后续沿其文档paid gate＋select_control的已授权提交入口，不绕过安全限制。最终结果尚未完成。
+
+### v0.146.0初测与定向修复范围
+
+8个独立文档已用真实UI/gpt-6.1-sol进入测试，原证 `implementation/ux21/initial1460.private.json`（SHA256 32dbb79b42090ed0bae7538139ab7d7797cf23f7cf30fe3503d16bc27855f417）。S01–S06和S08各4条初始生成，S01再加4与S04剪纸再加4，初版当前共36条；S07整批拒绝0条。初测不冒八组通过。
+
+- S01新增4母体与首4不重复，保01、首4完整结果与全局settings相等；S02从原生“沿用当前组合新建”核完整settings相等/0结果0对话，再把黏土/伙伴/巨掌巨脚实际写入4套中英。S03点卡后仅02改蒸汽朋克，其他3条/settings相等，聊天撤销后原正文逐条恢复，目标行版本3、聊天保留。
+- S04追加剪纸后首4水墨完整结果及settings相等，新4只剪纸；真实“继续创作”列表显示2批/8条，回到原文档workspace完整相等，刷新8条/各批画风保持；S08自己的草稿返回后恢复。S05哥特Boss折叠+旋转双形式、S06像素普通单位而非精英/Boss均逐条进中英冻结正文。
+- 原卡片已实际展开、锁定/解锁、移出再加入、前后移动、卡片/分组切换；另用同Chrome官方native drag拖顶部，真实DOM顺序从主题/母体变母体/主题，持久结果逐项不变，原证 `native-card-mobile-proof.private.json`。390×844模拟无横溢出，输入可达，但反馈浮钮遮发送；不是物理触屏验收。
+
+已确认本轮缺陷及修法：①route“一批”任意命中误把“只改这张…别改下一批”当范围不明，按明确单条/否定保护与真实批量动词区分；②S07模型移除必需concept，纯预检引擎普通Error逃出原有有界纠错，且已耐久rejected却HTTP初报pending，恢复明确拒绝/纠错边界而不放宽引擎强校验；③S08“先预览确认后追加4”被drafts空commands当只保存，需携带正式ID引用的待执行generate，否则在原预算内纠正，不提前入库生成；④取消待入库计划后状态回落旧成功回复，接真实取消状态；⑤S08全4岗位研究员不是真实岗位差异，沿既有合法职业/科研用途组合分配，不仅写一句“不同”；⑥手机反馈浮钮与底部发送重叠，FeedbackWidget仅本页消费实际聊天高度偏移，其它路径仍24px默认，离页清理，保入口。
+
+上述均原任务因果内修复，实际代码同worktree由原lead定向处理，主控保持唯一浏览器控制；版本拟0.146.1，完整构建/保护发布后用原句复验受影响流程，不重跑未变媒体或无关全站功能。初测和修后证据分别保存，不抹失败或重发未知。
+
+### 修复候选与复验准备
+
+定向修复提交8d685e941、提示清理5962eaf5b，版本提交c7dceb0a20c634c85ac98506b59d299becbe52e5；同源九门关闭guard 67c22b5d14185708286ee86ac6480ea043aac0b6，两分支已推送并鲜核远端。30组原+新增工程及10目标ES5检查通过，Linux完整类型/主程序构建通过（BUILD M-u61Ge13XlpvbEwcMkXo），guard仍构建中，尚未切版。无DDL，数据/原请求保持。
+
+CodeGraph实际worktree源c7dceb0a2、fingerprint 5d327710e00425cdf6ae8d62ec98a93fe7dc0a3bd190fcd220998c615c1c7702；同步无缺失/过期，原句作用域/新词生成意图真实context返回两注册函数并回源码核实，不当功能证明。
+
+浏览器wrapper重接超时，无新业务调用；核实际Chrome42754/Default与原SD2唯一页签，并查到原生调试授权框仍挂起。核原生AXSheet“允许远程调试”、唯一允许/取消且非密码框后，按已授权正常连接执行一次允许，AX0；随后检测框已消失，新官方同引擎SDK连接实得原page1与原文档、杨波账号。非权限/安全拒绝，不重启用户Chrome、不读凭据、不改权限库。旧SDK传输已关闭，现主控唯一接线；S07草稿改回原句尚未发送，待新版本。
+
+
+### v0.146.1首次修后实测及新缺口
+
+0.146.1已保护部署：main c7dceb0a2 / M-u61Ge13XlpvbEwcMkXo，guard67c22b5d / WQ-UL7wVi8prppczl8vHI。build/cutover均0，02:06:23Z公网54资源/10匿名401，02:06:44Z7服务/4timer健康，恢复入口只读验证，原数据/价格/私有策略保持。15份批准JSON原证包SHA256 aca3b077516614382e013c714989e25c415d331d3b35a51c6d9cc7d7f4c2f5b5，本机核相同；不含数据库/env/配置备份。真实浏览器强刷新鲜核版本与账号，准备期短暂空草稿后ready恢复原S07输入，不误报草稿丢失。
+
+S07同原句新op89745f90-a88a-4dff-9704-258609af4965这次已committed，仅patchSettings而未generate，仍0条；真实回复“后续创作要求已更新”，不能算“做4套”成功。此为本轮新发现的同范围完整性缺陷，原句明确动作只改设置不能当完成，需进原6步纠错；已交同lead最小修补，原已committed回执不重发。原证s07-1461-history.private.json / s07-1461-completed.private.json。继续测试其余路径，0.146.1部署成功不冒八场景验收通过。
+
+S03同原句修后无需再点范围确认，真正仅02修改：workspace5→6、目标行3→4，其余3完整行/settings相同，中英正文均蒸汽朋克且保母体、瘦长长臂、反派及其它内容；旧历史中的范围提示仍原样保留，不误算本次问范围。真实聊天撤销复测继续。
+
+
+### S03闭环、手机真实命中与S08修后第二个缺口
+
+S03真实聊天撤销回执成功：workspace6→7、仅02行4→5，其它3行完整不变；4条冻结中英正文全部等于本次改动前，settings相等，12条聊天保留。原句修后单卡/撤销两条真实链已通过；原证s03-terminal1461.private.json、s03-undo-terminal1461.private.json。
+
+新S08r2通过原生新创作按钮建doc cmwcx0gtk002nipc8bsgj4352，真实初态1版/0结果/0消息、固定要求关闭、role空，无旧沿用提示。390×844 ready后实际发送命中通过：scrollWidth390，发送x320/y792/42×40，中心elementFromPoint确为提交按钮，反馈bottom261px已避开；实际截图mobile390-ready1461.png已目视。首次采样发生emulate引起重载准备期，未据短暂空草稿/禁用误报丢失；ready恢复原输入。原生MCP在手机读到无名按钮，源码CSS隐藏span且无aria-label，已仅加aria-label发送（67132b8b7），无卡片/视觉改动；实体触屏未测。原生点击该手机按钮确已发起S08r2原句，终止后已恢复桌面模拟。
+
+S08r2原句op fddd420a-d7db-485e-9200-11da969205ed六步后rejected，真实错误“本批必出项所属类别未加入或不可用”，version1/0rows保持；明确终止且输入保留，不再误结果未知，不能算岗位生成通过。result未保末次proposal，不能倒推具体哪个category。已交定向检查：allocation只含已启用类别，模型onceMust指令未把真实categoryId及先启用本批类别接清；还源码确认合法空数组被错误当非空约束检查的同类入口。按证据修模型反馈/空约束处理，不自动加入长期类别、不扩硬池、不增加六步。
+
+31组生成完整性检查已过、665e5a637补齐明确做N套必须带generate，67132b8b7手机名称，d62e89e82版本1462，仅是未上线候选；fix02源/guard c9c4421d及导出保留且未上传/未构建，发现S08后先补此缺口再发布。新fix03沿当前实际1461源c7d/BUILD与同一新attempt02空目录，不拿旧1460覆盖已部署修复。phase1461.private.json只读一致快照，SHA256 26f8a064ecd35786660513cb930645593fc0ce61b5d8ac25b6e2bad00e7ed881，9测试文档，S07/S08r2零结果，新类别/词均0；保失败不重发原号。
+
+
+### 新词取消真实闭环与最新基线接续
+
+原S08再用完整新词原句，真实op95d59222-183a-4f63-8a4c-3843c955a846返回正确“确认入库后继续生成”计划，原文档version3/4条未变，编辑预览可见且确认键为“确认入库并继续生成”；确认前未入库/未生成。实际在词库点取消后，原号cancelled，回执及返回工作台chat status均“本次计划已取消，未入库或生成。”，不再回落旧成功。原4条完整JSON及settings相等，私人新类别/词条数仍0。原证cancel-test-terminal-preview1461.private.json、cancel-correct-plan1462.private.json、cancel-chat-status1462.private.json。后续正式入库生成仍待最终版本实测；取消成功不冒正向完成。
+
+b7cc2c376/9f733983的1462候选32组及主Linux类型/工程已过，构建中主控Review发现新诊断对原维度/词卡加入方式的覆盖缺口：现有正确axis时只需改key，不能一律要求启用dynamic表示；完整合法dynamic覆盖本身受支持，并非所有该path非法。已正常停未部署attempt02构建，MainPID0/exit143、没有cutover-started，未误报构建成功。将按现有controls真实加入方式最小补齐，不改变抽卡或用户池。
+
+停止候选时鲜核发现同站多视图修复408a3c795fb891768bb70ffc99665fcf33c857c2已先上线v1462 / BUILD ALG6wEORwYIwiWaYUAbau（02:39:45Z公网、02:41:47Z健康）；原候选组源沿用旧c7d基线已落后，是本轮执行误判，未切版也会被旧基线保护拦住。已补取6份安全原证，main manifest hash与完成pair/pub/实际runtime一致，2524源文件/113既有排除均核；不下载DB/env/备份。
+
+同任务worktree干净b7上合并408形成5b6d59fcbf4e2e69be4a1df397a363e5f4140a6b：MultiviewGenerationPanel字节精确等于408，融合源码全保b7，唯一冲突release notice沿本次发布文案处理，包升1463；未动正式根脏改、他人浏览器页签或生产数据。接续候选拟fix04/远端attempt03，以408实发为baseline，保护同源guard和最新多视图恢复控件。最终组源前与切版前都重新鲜核实际source，不能拿记录/缓存冒当前。
+
+
+### 原卡片索引路径：必要配套修复
+
+按真实controls反例继续核，确认当前getPath把数组当不可读、setPath把数组换普通对象，导致已公开的cards[index]及rules[dimension][index].status局部写路径失败，expected/CAS也读成undefined。不是只修提示即可完成控制闭环。经此源码证据扩到actions.ts最小支持既有合法数组索引，保其它项/顺序/字段，越界/稀疏/length/索引删除拒绝；过期索引操作要求重读以免重排后改错卡，原整数组writer/undo整体数组合同保留。新增真实SQLite局部保存/撤销/并发拒绝反例；不建新框架或改预算/格式/权限。
+
+原生已加入source（含sourceFusion）错误key只纠key，optional原维度按bossDimensions、词卡按原cards加入，属性/动态按各自enabled；未知控制先查不猜dynamic，旧锁/池/排除保持。此为新增诊断自身的覆盖修正及既有注册控制路径修复，不据此推断原S08失败的具体key。正式源仍待统一检查和聚焦提交后绑定。
+
+S07最终新鲜复测文档已从真实“新创作”建cmwcyzdzk00kt35397xv5nsac：version1/0条/0消息、role空、固定要求关闭。原句仅填草稿，尚未发送，等待最终1463；不会用之前已被patch成水彩的旧文档冒从零生成成功。
+
+
+### 1463最终代码与构建
+
+802e826c99931a00c52aeb874cab0eb6e2e4c422已聚焦提交并推送远端同头；同源九门保护8928c4eea9bebcdcfff8f7cd84121f673a1ac10b亦已推核。版本1463，精确最新408基线，Multiview面板blob等于已部署408；9文件差量仅本次融合/版本，2524精确Git文件、113既有非运行排除核过，正式根脏改未打包。包SHA256 baab8b7aa538d880d9c5d35154eba977c2d82b8ca41cefa90a07b2ce26c3ef98已在服务器核相同；fix04/远端attempt03双构建中，尚未切版。
+
+统一33组隔离工程、4目标ES5及源码Review通过，新增数组组真实SQLite验证公开卡片/旧规则索引路径保存、刷新、撤销、错expected、排序后过期索引、后续别卡修改阻撤销、非法路径与越权均零额外写；新原生组已含source/sourceFusion/optional维度/body-card实际4条，不造dynamic覆盖、不改长期锁/池/排除。旧整数组writer和undo整体数组比较合同保持，无新JSON格式或DDL。实际CodeGraph指纹2cb01b3d7a22464610fd75b3af4f01d3c0355aa2af20810811edeea4fff18126，源码无缺失/过期/解析错；提交后真实context查询返回arrayIndex、allocateFusionBatch和rawFusionAgentControls，关键结论回源码核，不以索引冒验收。
+
+服务器同源完整类型/33组工程已通过，完整Next/guard及真实S07r2/S08r2、新词确认生成仍继续。只要实际结果未达要求，就不勾最终通过。
+
+
+### 1463已部署与S07全新文档真实通过
+
+双完整构建及保护发布均0、无回退，03:44:53Z公网54资源/10匿名401，03:45:36Z7服务4timer健康；主802e826c9/BUILD rYgAIUlQ7E0Vd51p7j_uN，保护8928c4ee/g96FzKtLvyQdIa5n2zu6W，原408多视图源码blob及另25条编译资源均核。独立恢复入口只读通过，无DDL/生产回填/数据恢复或价格/私有策略变更。16份批准JSON包SHA256 828bdc6079094729a0cb7da998919e811bfe993673d4cc5e4ef592b3b551af2e在本机复核，不含DB/env/配置备份。部署functionalAcceptance=false保原义。
+
+浏览器强刷新后鲜核1463、本人账号和原句草稿。准备期判ready时不能用页面第一个textarea（它可能是全局固定要求），已改为创作输入的准确aria-label、预期文本及提交按钮已启用；未将错误选择器的空值当网站丢草稿。
+
+S07r2原句真实op7471e86d-cd2b-43b9-ac17-0b9e6a96f458 committed，新鲜workspace1→2，实落第1批4条。四母体穿山甲/海獭/蜗牛/企鹅，动物范围真实生效；中英冻正文逐条含水彩/小巧/温柔好奇/无职业无道具无武器/非战斗探索伙伴。occupation均“无职业设定”，未渲染职业正文或任何正向道具项；equipment内部默认bool仍true而真实要求明确无道具，不据此假称该flag已关闭。原证s07r2-terminal1463.private.json已完整目读正文，未用旧已改设置文档冒从零生成。
+
+1463手机390×844实际截图已目视，scrollWidth390、发送中心命中true、aria-label发送、反馈bottom261px、按钮已启用；原生按钮点击确发起S08r2原句，当前等原号结果，不重发。原证mobile390-final1463.private.json/.png；实体触屏未测，尚未将研究岗位/新词入库生成勾通过。
+
+
+### S08实际时限缺口与1464最小修复
+
+S08r2原句op ec06243f-3d3e-47d4-bed6-6a1a59fb8ba9于1463已耐久rejected：本轮模型请求已达时限；文档仍1版/0条，不冒岗位差异通过。当前same-source route将至多6步共享90s整轮预算，鲜核SD2 HTTPS代理read/send为300s，SDK可接收每次timeout与内容无关的阶段/耗时/HTTP诊断。拟仅此route分整轮240s、每次min(90s, 最新配置与原号状态校验后的剩余)，余不足1s不发请求，六步/上下文/型号/白名单/取消/幂等不扩大。现有应用日志仅记原号、步数、阶段、耗时与HTTP等白名单，不记提示词/模型正文/词库内容/凭据，也不增表。
+
+重复失败后按路径复查并实际阅读官方AI SDK generateText文档与开源generate-text.ts关于totalMs/stepMs分离的实现思路（https://ai-sdk.dev/docs/reference/ai-sdk-core/generate-text ，https://raw.githubusercontent.com/vercel/ai/main/packages/ai/src/generate-text/generate-text.ts）；未引入依赖，240/90是结合本站代理与既有上限的本地取值，不冒官方推荐数值。34组隔离工程已报通过，实际route回调+真实六步loop以虚拟时钟220.8s完成、余999ms零调用、1000ms可调用、取消及SDK失败诊断有证；最终源码提交/完整构建/上线及同原句真实复测仍待，不拿工程代验收。
+
+
+### 1464上线及真实六步后仍失败的属性状态
+
+1464主c47b1adab9c0919159a928e663bbe86e786e2f44/Jherg0NTkyoX2tAHg51Lt，guard6db250dc8c220b4ed7e9af0cbec6175500a3b6bb/C_cbarjaX15Tao7ZdxPFp均推核、双完整类型/Next/34组及同源保护/恢复入口通过，build/cutover0，04:42:17Z7服务健康，另核多视图资源；最新卡片/聊天/索引writer/多视图源码blob全保。fix05/远端attempt04的16批准JSON包SHA256 8a5d6f1fcfb6702638a401a19476c771231d78946ab355d6f0cf43fd9a6cd9e8，无DB/env/配置备份外传；本机默认Python旧版不支持extractall(filter)，仅改用已安装3.15安全解包已校验包，未重复发布。实际源码索引c47指纹f838f4aa07bfc23d74eba53dff26d3618a499cd7d61427b3fbb7cbba5ae4e5a5无过期，真实context返回proposeFusionAgent并核源码。
+
+同S08r2原句真实op f3d520b3-61a4-4716-967d-f05080d2d744：6次SDK均HTTP200/completed，最后总143328ms（各8.6/33.4/23.6/23.7/30.0/23.7s），已实际跨90s完成六步，时限修复有效；但模型提案仍非法，耐久rejected、文档仍1版/0条，最终“提案尚未执行：属性选择无效。”，不能算场景通过。步骤证据取自既有logs/sd2-gray.log而非journal（实际Stdout=append），只导出该原号白名单耗时。原证s08r2-terminal1464-b.private.json、s08-1464-step-times.private.json。
+
+精确源码定位：此字串仅parseCatalogue首guard；可能未知原生trait ID、空state或enabled/locked缺失/非布尔，非法选项值反而已有属性名错误。失败耐久result无proposal，仅intent/resultIds/error，具体坏值当前无证，不臆断为身形值错误。继续最小补齐同轮模型诊断中的具体path/完整state要求/合法ID及选项，用户人话与模型诊断分离、不放宽解析、不扩6步。拟先用同句/同本人workspace+目录的真实LLM纯提案诊断核对，再正式构建；仅纯内存preflight，无reserve/apply/confirm或库写，私有凭据仅现有SDK内存解密调用、不导出/改policy/伪造consumer；该预检不冒真实UI验收，最终仍须同原句落4条及新词入库生成。
+
+<!-- /FUSION-UX21-LIVE-20261111 -->
+
+<!-- FUSION-UX22-IMPLEMENTATION-20261112 -->
+<a id="fusion-ux22-implementation"></a>
+## UX22 聊天配卡、点击生成与整体体验重构（2026-11-12）
+
+状态：用户本轮明确授权前述架构与体验方案查缺补漏、闭环检查、实施、真实测试及上线；实现/效果尚未完成。仅本工具，不扩其它页面。原单UX21失败和成功原证保留，新合同替代“聊天直接生成/新词入库后自动生成”的新请求默认流程；旧已受理/未知/待确认计划仍读原号，不重发或改历史。
+
+### 1. 目标、证据与保护
+
+目标：自然说想法，LLM同步配置原卡片，用户看懂后点击生成提示词，挑选、单条修改、撤销和下次继续均在同一创作完成。用户不用先学规则、填写三张表或管理词库。固定/变化/不要只是同一设置的展示。必需的母体/主题核心定义保留，不因非战斗删引擎必需项；不强加Boss定位。
+
+已核：正式根 /Volumes/Data/Projects/video-api-debugger 有其它脏改，不作代码打包来源；实际worktree /Volumes/Data/Projects/video-api-debugger-worktrees/fusion-catalog-agent-20261111，分支codex/fusion-catalog-agent-20261111，origin为既有goukiyang/seedance-api-debugger。2026-11-12鲜核线上c47b1adab9c0919159a928e663bbe86e786e2f44/v0.146.4/Jherg0NTkyoX2tAHg51Lt、服务active、无运行发布控制器；后续组源/切版再鲜核，保408多视图恢复修复。已有5文件属性诊断/句末标点候选保留，先核差异与相应工程再整合，不清空或无条件重写。
+
+实现已共用workspace.state.settings与原抽卡引擎；共享影响在studio、CreationChat、assistant route/adapter、card controls及目录/接续，改入口和职责即可，不新建一套配置存储或换数据库。主要现状问题：聊天可同时patch/generate/draft，LLM拼底层属性结构；设置区有重复/高级入口，结果与词库切换增加负担。UX21 S08六步143328ms后因非法trait state拒绝，0写；具体坏字段无原证不臆断。S07及其余7类分项有真证；旧S08正向新词链已在1464闭环，详下。
+
+UX21新词正向：doc cmwcul1ug00er16jvyym1tsic 3→4版、4→8条、2批；原4完整JSON和settings相同；原生双击确认只入库私人类别/词各1并生成一批，编辑英文含义进新4中英正文，刷新不重复；source f8d59e2f-1f7e-4548-bca8-45d6dcc2dce3、import a50f735b-7c4a-43f4-92b1-811b05524eae、generate c4f699f3-cff5-4f53-9268-5c34a7d97ece均committed。原证ux21/newterm-final-validation1464.private.json及final-newterm-phase1464.private.json（SHA256 3e1caa141331342b81c5ebc4e9db7a2c64a8ae8629d70fad3ef32f42adcd9929）。该链不冒S08岗位差异通过；原失败首4保留，当前fresh S08r2仍1版0条。
+
+### 2. 统一执行合同
+
+- 常驻聊天默认只配置本创作/下一批，明确“只本批”形成可见的本批条件，不能隐藏执行覆盖；“帮我出4套”先配置数量/语言/差异，聊天回合结果数量必须不增加。生成只由用户点击明确按钮，服务端也守此合同，不能仅前端过滤。
+- LLM表达卡片/词条及使用方式，程序复用controls/稳定ID将其转成合法、完整的原卡片操作；尽量不要求模型猜底层路径/必需布尔字段，不丢原人工锁/候选池/排除。外部输入入口校验，沿现有CAS/事务/原号，不加框架或重复校验层。
+- 同一份有效设置供手动卡、LLM、概要与生成；文案摘要无独立执行权。生成按钮先保存真实当前调整，再按同一修订生成；保存失败或结果未知保草稿/旧结果，只查原号，不换号重发。助手回合处理与手改重叠保护后手人工选择，不静默覆盖。
+- 多选用人话：每套都带（巨掌+巨脚）、从中随机（母体候选）、这批分别用（职业等至少各一次）；系统按意图决定，卡片直接显示含义，详细抽法按需调整。合法池不足不偷扩池/偷减数量，明确不同或严格分配不足时就地解释。
+- 默认追加旧批，未明确替换不改旧结果；“聊这张”显示准确目标，仅形成该条调整，用户点击“更新这条”后实际应用；其它行/下一批设置不变。原单条重抽等手动操作继续沿原能力。撤销写清对象，保聊天/编号及不可撤业务边界，不跨过保存等屏障误撤更早步骤。
+
+### 3. 页面与体验合同
+
+桌面两块主区：左侧本次相关原卡片，上下层级清楚，常驻输入在下方；右侧方案按批次组织。卡片默认折叠、可展开/拖动/锁定/移出，未加入项在“增加条件”入口区分已加入/未加入，可搜索/浏览完整目录。旧卡片、规则、配方/双视图能力不删；高级操作归位，不继续双套面板争抢。简短变化反馈+撤销，不新增逐步确认。
+
+当前创作名称附近统一新建空白/复制当前设置/打开历史，复制不带旧结果与对话；按账号记住既有安全偏好。词库/配方/模型为可识别次级入口，真实模型目录、可用性、账号选择与刷新失败保输入沿原范例。数量、语言与生成靠近，主按钮“生成N套提示词”，聊天发送为次级操作。
+
+结果先展示真实差异（按本批变化维度），全文中英/复制/导出/保留及原操作可达；不强制所有方案全文双语常驻，不仅复述“不同”冒实际不同。已有结果快照保持，新增一批可定位，阅读旧内容不突然跳走。生成期间旧结果仍可读/复制。
+
+空态可自然输入、点例句填入或直接手选，不强制填类目/教程；等待用真实状态与停止，不造百分比；失败说明有无应用与下一步，不让用户修属性JSON。刷新/返回恢复同创作和草稿、只查询在途原号。小屏要求/方案切换共源，输入/键盘/发送/生成/反馈避让，拖动有按钮及键盘等价操作。
+
+### 4. 新词与词库增长闭环
+
+新词可先作为已有inline卡片/补充条件用于当前创作并随文档持久保存，中英实际进正文，无需先入库、共享或二次模型；不能仅显示草稿却生成时忽略。用户主动“存入个人词库”才沿原可编辑预览/私人导入/幂等回执保存，保存本身不生成；保临时来源与正式词关联，避免重复显示/重复入库，不重写旧冻结结果。
+
+验证不仅临时描述生效，还须存库后刷新、在新创作中以LLM筛选该正式词并实际生成。已有“星潮光囊”可作正式词复用；新测试用唯一新词并保原件，不为测试删词。完整类目增长只增加可搜索材料，不堆满首页；复用有界目录查询/分页，服务器现有全量load不冒已优化，也不预建检索平台。
+
+### 5. 实施包与源码范围
+
+1. 配置/执行一条主线：agent-adapter.server.ts、assistant/route.ts、必要actions.ts/domain原命令和controls适配；新聊天合同、完整卡片操作、只本批可见约束、按钮生成/单条应用同源，旧在途回执相容。
+2. 一起完成主页面：studio.tsx、creation-chat.tsx、catalogue-editor.tsx、rule-card.tsx、choice-pills.tsx、studio.module.css和必要workspace-client.ts；两栏/小屏/统一入口/原卡片/变化反馈/结果差异及原操作。保站点现有视觉语言，主按钮突出，普通状态安静，无额外UI套件/演示产物。
+3. 词库与接续：library-manager.tsx、card-chat.tsx、必要cards/body-cards/catalogue/domain/continuation；临时词真实生成、可选正式入库及再复用，取消只取消。只有本目标需要才局部提取纯函数，不整体重写引擎。
+4. 整批工程、源码复核与真实8场景；确认源/保护构建，聚焦推送和同环境保护发布，再复核最终入口。先用隔离真实LLM纯提案预检减少构建后反复失败，该证据不代替UI验收；不改私有policy/伪造consumer或导出凭据，不允许则沿已授权真实UI链。
+
+### 6. 检查清单与完成标准
+
+- [ ] 统一新合同与原卡片/手动操作，无第二设置源；聊天只配卡，点击才生成。
+- [ ] 固定多选/随机候选/整批分配真实进中英，硬池/互斥/人工锁/数量与语言不暗改。
+- [ ] 新建/复制设置/历史继续及草稿恢复清楚，旧结果不变。
+- [ ] 单条目标预览→更新→撤销闭环，其它行/下批条件保持。
+- [ ] 临时新词→实际生成→私人入库→刷新→新文档正式词筛选→实际生成闭环，不重复、不提前共享/生成。
+- [ ] 原卡片展开/折叠/拖动/按钮移动/锁定/移出/再加入及已有双视图、复制/导出可用。
+- [ ] 空/忙/停止/拒绝/未知/冲突和小屏/键盘状态可理解且可恢复，历史只查不重放。
+- [ ] 真实LLM至少8类：家庭3D主角、黏土吉祥物、水墨配角、哥特Boss、像素普通敌人、水彩非战斗伙伴、赛博朋克反派、硬科幻双体研究搭档；每类先核聊天回合0新增，后点击实际出4条并逐条查要求、差异与中英正文。
+- [ ] 必要类型/工程/完整构建、同源guard/数据保护/程序恢复、聚焦Git推送、实际发布健康及资源检查。
+
+本次用户明确授权真实LLM与浏览器测试，主控单一浏览器控制，无图片/视频生成；工程/发布不代替实际效果，不把代理实测冒真人理解或实体触控。风险L3取决于设置/生成/持久历史的跨模块行为：主要验证真实目标/非目标、旧快照与原号幂等、词库权限及相容恢复。现有工程与已通过旧证据复用，改动和受影响链补查。必要普通手验仍列明。
+
+Git/发布：本worktree保护现有5脏改，先按目标整合，聚焦提交既有正确origin；正式根其它脏改不打包。实施前/组源前/切版前核真实在线源，合入继任修复再组源，不以历史c47冻结后续基线；保持同源关闭10门guard及程序恢复（含最新外部图片受理门），不回数据库或覆盖生产数据。构建/健康/明确权限风险失败阻止切版，按原发布恢复止损。
+
+当前负责：原lead接完整代码/隔离工程与Review，主控负责需求/正式记录、唯一真实浏览器和LLM验收、版本/发布/最终核对；不新派审核/浏览器执行者。用户称呼只用于聊天，不加入产品UI文案。
+
+### 7. 实施中合同预检记录
+
+配置合同的纯内存窄查已核聊天0新增→点击4行/4个真实岗位，单条stage不改正文→点击仅目标version+1、草稿消费；此为工程证据，不冒真实LLM或页面通过。主控按10文件SHA封装隔离候选至UX22/proposal-preview01，SDK坚持真实已部署c47，数据库仅Python SQLite URI mode=ro读取所需设置，无reserve/apply/store。
+
+两次CLI启动均0模型调用、0业务写：第一次缺server-only入口，第二次沿项目既有scripts/server-runtime.cjs进入后被真实SDK以PRIVATE_PROMPT_UNAVAILABLE停止。未改私有policy、consumer、revision，未导出密钥/运行进程环境，也不继续换路绕过私密保护。隔离模型预检不可用不冒产品失败；实际模型验收改沿已授权原站页面及其真实运行身份，仍须最终八类与全操作闭环。原证保留server UX22/proposal-preview01/S08-run01.private.json、S08-run02.private.json，执行状态沿implementation/ux22/execution-state.private.json。
+
+
+### 8. 实施复核中的已定位缺口
+
+- 主控源审查发现applyPreparedRow无条件复用reviseRow→bossRow→makeRow(new seed)，即使只改视觉要求，也可能重抽旧optional细节与重算名称；lead已源核属实。修法限定为requirements-only沿原patchRow/refreshRowSnapshot，卡片调整仅改涉及轴，未改字段/原名保留；工程须对具体旧detail与非目标行断言，不只比source。待整包验证，不冒已修复。
+- lead首轮真实隔离SQLite工程到“临时新词→正式词→新文档复用”时，发现configure/applyPreparedRow未计入鲜目录加载入口，正式ID误用builtin目录被拒；正按同一入口补齐，无生产写。此为本目标真实闭环缺口，不能只测临时描述进正文就收口。
+- UI“聊这张”会先建立空待应用草稿；需核尚无修改时不能让“更新这条”隐式重抽，保原独立重抽入口。此项待最终UI/工程证据，不推断已通过。
+
+
+### 9. 整包交接与同站新基线
+
+lead与原UI执行者已明确STOP-WRITING，聚焦提交bf17535b00c5ac6bdf3b0cc3046c9e23b25081ad（21文件，工作区干净、未推送）。最终41组工程通过；20目标ES5及末次软/硬边界均0诊断，语法/CSS/diff-check通过。单条精确保留、空草稿、正式词鲜目录、仅本批与撤销消费、人话末次失败及“尽量”不冒严格唯一均有源核/工程覆盖。原证/tmp/fusion-ux22-engineering-final.json、fusion-ux22-types-final.json、fusion-ux22-types-soft-hard.json、fusion-ux22-review.json。CodeGraph实际worktree索引同步成功；MCP结构查询未返回回执，已沿源码核调用，不冒查询成功。真实LLM/页面验收仍待。
+
+组源前发现同站EXT-TPL01候选c8a5ae27ccd61f83fc1b17fbdd6a5e229b8423b8/v0.147.0正在attempt02构建，真实付费验收已通过但正式站尚未切换；其相容guard已增加外部图片受理关闭门，共10门。不得用原c47九门保护覆盖这一新合同。主控仅在本任务隔离树本地接入精确候选，并将UX22计划版本让为0.148.0；发布/绑定基线前必须等待并核外部任务实际上线回执，未完成或不一致则不发布它的未验内容。已有正式根脏改、价格/权限与私有策略不打包或改写；不向其它聊天发消息，不停止他人的构建/服务。
+
+
+### 10. 发布组源、保护版与首轮准备接续
+
+EXT-TPL01现已真实部署c8a5ae27/v1470/WYB5qrC9wnawMnSgGmTO3，cutover0、7服务/内外健康、无运行发布控制器已核；六份批准JSON包SHA256 d1a690955418cafcae000fabab22d2c238882712d8aadf4ea9ccef655f153682保ux22/release01/external-baseline-evidence，不含DB/env/配置备份。
+
+本任务merge d7449bf3454fe04c69a549e6540785e7e0c63144后版本355be2dbb61eb78e632df4cf885eb23b7703ab0c/v1480，十门同源guard67305263189ecfddc79dcd11202764595bf2be1a；两分支已推并核远端。21融合文件字节等于lead bf175，61外部文件字节等于c8；相对实际c8仅24运行/版本差量，无schema或依赖改变。精确2533 Git文件和既有113排除封装，32件包5d9b171d1c40974c5a1b6866a59d080e0a43f3aa7a1b32a62e74aed0bd6b9775已上传并服务器核相同，正式根脏改未打包。导出先因外部版本policy记录格式不同停住，按实际c8记录及原c47已批准排除白名单核113后成功，未放宽排除。
+
+首构建控制器01在准备阶段即exit1、0真实模型/业务写/切换：主控预检创建的engineering任务父目录继承700，gouki无法进入正常TMPDIR，Prisma EACCES。已源核完整namei路径，只将本任务build父目录改标准755；私密proposal-preview01仍700，SDK/policy/consumer不改。原日志、隔离证明、价格快照与exit均保server stage initial-preparation-failure；控制器02沿同一已核配置/源码重启。尚未完成完整Linux构建或本次切版，不冒已上线。
+
+
+### 11. v0.148.0真实发布与未通过的验收
+
+主版BUILD e_hsRKcVhd5V_SQ-q0I_X、十门guard BUILD tX6SyfBNWAgTKvuak-X8k均完整构建通过，主41组及lint、保护版原生/计价/reader、独立恢复verify-only通过；cutover0/MainPID0，08:00:01Z公网、08:01:07Z健康，7服务/4timer及原多视图25、模板34、图片页5资源检查有证，价格/私有策略一致。18份批准JSON包a71d9ec45166d1c316749c0f2618254630e44201bc256c920a763b8cc0b8913d已核归档ux22/release01/evidence，不含DB/env/配置备份。未以该证冒功能通过。
+
+真实Chrome刷新需重新登录，飞书确认原杨波及此前已授予权限后正常续登，无本人验证/新增权限、未读取密码/cookie。沿同page1回原文档，确认v1480；新本机传输先隐藏OAuth查询再记日志，session26329，未新开/关闭其它页签。实际worktree源355的CodeGraph索引2098文件/fingerprint5ea3f803dc5b858dae180d3b43744cee4b7f05b4799455e2bc29fb07e18c7eb5，无missing/hashMismatch/parseError；结构MCP回执仍缺，源码复核沿原说明。
+
+S08首个原句实际发送到gpt-6.1-sol，op fc6fffd5-f93b-4c03-8288-ccba7072dbf3六步全部HTTP200，总77988ms；新doc cmwd9pjij004mis5tbglhy1hn仍1版0行，输入完整保留，human错误正确。失败发生在提案配置，未点生成、不手调目标字段凑通过。原私有result_json只有intent/resultIds/error，无末次proposalError或proposal，不能恢复具体坏值；此为已确认取证漏口，正在同原号私有JSON补有界机器原因与注册配置坏值，不给UI回传、无新表/公共日志。
+
+源与纯内存确定证明：实际CORE仅source/concept，新system却硬写4core；公开dimensionOptions里的source工业、concept深海科研被configure按具体term查找拒绝（mechanism无外置机关恰有同名具体term可用，不能泛化全坏）。这些是确定合同缺陷，仍不能断言本次唯一原因。正在沿原rules分组must/axis.groups分配修正，保候选池/排除/数量，不存抽样term为长期must，不盲调6步/23500/超时。
+
+真实390×844同页观测：workbench.top568.4/height280，gridRows0+369，conditions仅22px；generate.bottom883.4>844且中心hit=false，send34×40。私有截图mobile390-before1480.private.png已目视，DOM结果在本机task ledger。root已仅改studio/CSS两文件并聚焦提交80adccdcd：手机正常页滚动+底部预留实际dock高度，常驻输入/生成跟visualViewport避键盘；默认输入可滚80px并保展开、发送/展开44×44、更多弹层可达，旧现场恢复移入原新建方式而数据/操作不删，桌面原grid保留。TSX/PostCSS通过，真实新包手机复测仍待。后台lead只改8后台/工程文件并正在补必要原生分组卡片显示，共源模式不能假显random；root暂不写该文件或Git索引。
+
+
+### 12. v0.148.2返修候选（未验收）
+
+root手机修复80adccdcd后，lead聚焦提交d3626e88c4cc013f370e8298736a59715fb29d96（9文件）并STOP：原生分组each/random/distribute复用原rules分组must/axis.groups，保原池/顺序/排除，不持久写抽样term；实际CORE提示、分组卡片显示/锁与模式切换同步。失败仅同原号私有result_json.diagnostic保存有界code/reason/step及已解析注册configure坏值，省略reply/reads/raw/system/SDK，16k超限标记省略，query/历史白名单不回UI。完整43组通过（41+2），后台8目标及UI1目标ES5均0诊断；新S08真实通过仍未取得，不冒本次失败原因已被唯一证实。
+
+发布前再鲜核实际站已换媒体修复8f73f25a/v1481/rux_lj-5WkdLdQBnvZK3B，原stage legacy-thumbnail-complete-20261112/attempt01 cutover0/healthy有证；六份安全JSON包36954d3489bc69730616893435a483ea420d710b3dd1eb8f3b4926e5c91c13d8已核，十门保护合同保持。该修复已完整合入本任务，尚在验证的多视图1fe未混入。版本771ca034ab426114463942f7ec81fa82936d5c65/v1482、新十门guarddf1a16193eef27a800b5c9baf4625ba32c34184e均已推核远端；相对实际媒体基线仅11融合运行/工程＋3版本差量。
+
+2534精确Git文件、113既有排除，32件包f4fc898445f0f8fdaa1b93c7d1aa0f047d3ebdeb712133851b6e058e94900233服务器核相同，独立attempt02已组装并启动控制器sd2-fusion-intent-ux22-build-20261112-03。当前完整Linux类型已通过，43组及双完整构建继续；未切版。私密预检目录仍700，正常工程父目录755保留，不重复初轮权限错误。不再改动已启动发布工具。
+
+
+### 13. v0.148.2发布完成，真实验收进行中
+
+双完整类型/Next、43组/修改lint、十门guard原生/费用/reader和恢复verify-only均0，build/cutover0、发布控制器inactive/MainPID0。实际主771ca034/yiOz2rJDfC1vzPU20H5qB、guarddf1a1619/PUVv1_M_IBi4sV0b_25MM，09:34:18Z健康7服务4timer、54公网资源/10匿名401及原多视图/模板/图片页资源检查通过。18批准JSON包cd8298235a67c9a13771d4968109536f814a388edf2bbfefbd6c1bff7f625457已核并保存release02/evidence，无DB/env导出，无数据还原，价格/私密策略保持。CodeGraph771ca实际索引2099文件/fingerprint0a351cde1b65306d4c4fcfe5f7655e84e8008a96a4efb4b437f83f5f556d718d，无missing/hashMismatch/parseError；结构MCP仍缺回执，源码核对不冒查询成功。
+
+同Chrome原杨波会话刷新后已见v1482/API模型gpt-6.1-sol。S08原失败空文档仍1版0行0消息、原句完整保留，已用原生发送启动本版新操作；未手动预设目标字段，聊天0新增→用户点击实际四套等效果仍待，不把发布成功冒验收。
+
+### 14. v0.148.2真实验收查漏与最小返修
+
+S08原句新op b331332d-0967-43bb-b7ac-0d77928d089c仍6步rejected，doc仍1版0条。私有诊断确认为inlineCards[0].cardId误填dimension:concept，完整title/terms合法但被泛化反馈混报。另scene在requirementsEnabled=false仍提供默认3D全文，实际提案抄入。仅补精确字段反馈、新建省略cardId/编辑已有card-*；原生维度仍走cards，不放宽校验或静默猜ID。关闭要求在模型scene为空串，原保存值/历史保留，明确重新启用仍可复用。
+
+S07 doc cmwdcvgb4006prvpjbg6ygrxf，聊天0条→点击4条水彩小动物/无职业道具正文正确，但模型将普通要求当scope:batch，生成后退回默认设置，故不算闭环通过。新增同入口纠错：无单条目标、无既有临时条件，且用户非否定分句未明确仅本批/这一次时，要求scope:document；保显式临时、已有临时及单条，不加平台/步数。
+
+S01 doc cmwdcywjf00atrvpjnlqz46ss，真实模型聊天0条→点击4条；四母体/四职业、矮壮低头身/胆小勇敢及服装排除进冻结中英，设置持续。S02复制完整设置相等且0行0对话，doc cmwdd8nga00gjrvpj6vhoxghc；聊天0条→点击4条，黏土伙伴/短臂短腿/巨掌巨脚进每条中英，原主角与反差移除，S01未改。原证沿S01/S02的1482私有JSON。
+
+复制首请求POST500 HTML，Nginx日志确为body临时目录权限拒绝，未到应用。目录09:47:17已由同站维护恢复www-data700；root未改Nginx，原UI按原编号继续创建成功，无重复文档。前台补非JSON人话普通Error并保status，保unknown原号/草稿，不能用FusionRequestError<500误清原号。取证工具意外附认证请求头，已从任务ledger清除，未来driver先过滤，后续不读取请求头。
+
+四文件最小返修尚未提交/部署。43组第二轮PASS，无真实网络/生成/浏览器/生产写。Review发现的ES5迭代器、scope否定句及非JSON错误类型均已局部修正，定向类型检查继续。S07/S08仍须最终包原句重测，部分成功不冒八组通过。
+
+
+### 15. 追加、旧结果缓存与实测返修（仍未最终验收）
+
+四文件返修已聚焦提交2cd159f6222a04f71e2ffe254ef74e9f50274608并推核，43组及ES5目标通过。实际S03英文赛博潜入、S04中文水墨儿童配角和S06英文16-bit普通敌人，均聊天0新增→点击各4套，冻结中英及各自语言正确。S05暗黑哥特守关Boss仍误填dimension:concept，沿精确反馈修复待最终包实测。S03单条蒸汽朋克两次原句分别在上游第2/3步90秒超时，0结果改动、原输入/4条和全局设置保持，不冒单条或撤销已通。
+
+S04“剪纸仅本批、追加4套”聊天保原4及长期水墨，实际点击却删原4而生成新5–8，UI缓存仍显示8。原生近期操作撤销后已恢复原4全部ID/冻结中英及水墨设置。确认为旧独立batchMode会话值与聊天配置分叉，另合并缓存未按完整服务器顺序删行。6ff5f474da6857b2aa63abf03db17f399891bf3d最小修复：可选settings.generationMode，缺省append不回填旧JSON；按钮/聊天/仅本批/复制使用同一effective设置，明确替换按钮写“替换生成”，单条不改批模式；完整权威页/顺序清除旧缓存，分页/有效delta及草稿保留。46组工程、8个ES5目标0诊断和源码Review通过；最终真实追加、刷新继续、单条及新词全链仍待。
+
+S06实际卡片操作：解锁/重锁、移出/重新加入后完整设置与冻结4条恢复相等；折叠展开、卡片/分组切换均保设置/结果；展开标题原生拖动改变顺序，后移复原。390×844 dock/生成常驻且命中可达、无横向溢出，390×540保20行输入及切页内容；发送/展开44×44。实际物理手机键盘与触控未证。英文复制有真实成功反馈；CSV原生导出反馈4条，浏览器落盘未观察到。另同未改csvFor按实际4条生成可下载私有CSV，解析正文与冻结英文完全相等，不以此冒浏览器落盘。
+
+### 16. 新建500根因与隔离修复
+
+第二次新建POST500由Nginx body目录UID被测试改成nobody、mode700导致www-data不可写；10:07:35Z仅恢复目录owner为www-data，不递归、不改权限/业务文件，并验证服务账号可写。定位同站已部署check-updating.py缺少5个临时目录指令，root运行隔离nginx -t仍沿编译绝对路径chown正式临时目录；依据Nginx官方ngx_create_paths实现和client_body_temp_path文档核实。14858c634聚焦增加5个任务临时目录及初始-e临时错误日志；再从实际ae4e部署仅保留两文件API错误处理增量为00d407e59。最终维护脚本18项通过，正式5目录uid/gid/mode/inode前后完全相同，证明不再污染运行目录；原失败/新证保留。正式脏工作区只合相同7行，未覆盖其它作者改动。任务外发现另记统一discoveries及原维护单。
+
+当前待发布候选保实际已部署a4bcc44396b6d80a2b1341c1c3c19cbd74074a95/v1484及全部多视图/火山修复；仅讨论候选未上线的其它任务代码不混入。本轮最终8场景、追加/继续/单条/撤销/临时新词→只入库→新创作正式ID生成未完成，不能收口为验收通过。
+
+
+### 17. v0.148.5精确源与构建进行中
+
+实际已部署a4bcc/v1484/BUILD z1Zk5c2dmIDvI36EaZNq6及11:06健康证据8份已核归档，包c5c235414d40bed8b01f8f8842368dc54609260488fad9b0dfe370891d07596d；仅新真实基线，无候选替代。主df7f76bc551c7d8cb880984fd1db6172fe7443e6、guard4b6e1dab995c9cbe8b8250db37d0fe35973a896d已推核远端同头。2540精确Git文件/113既有排除，14项差量（融合8/维护3/版本3），32文件上传包86a0ced442e3f7ddc16613909cdb5541851f1a83ef3807a8820403aa4ee47cd3服务器核同；attempt03双源组装通过，unit sd2-fusion-intent-ux22-build-20261112-04已启动。Linux完整类型、修改lint及46组工程通过，双Next/guard继续，未切版。CodeGraph本工作区df7索引2102文件/fingerprintc4d156a24aacd82f618be955b35696e41687721b7b8ed9814c33bda15e94cf12无源码不一致/解析错误；结构MCP再次长时间未回，未当成功或继续重复调用，关系沿已核源码及lead实际部分callers证据。
+
+
+### 18. 实际单条请求再查出的持久配置接线缺口
+
+原gpt-6.1-sol两次上游超时后，用真实已开放gpt-5.6-sol同原句对照，op900bb8d0-ae26-4180-b96f-25c0fff188b9仍6步rejected，原因确定为“此结果的原配置尚未读取”。助手目标页已解析rowSettings，但workspace.rows仍用紧凑settingsRef行，configure预检settingsForRow再取原配置失败；不是应由用户重读或修改提示词的问题。4文件局部修复：getWorkspace仅内部resolveSelectedRow选项返回已核权限/版本/原操作指纹的解析行，普通GET仍紧凑；助手目标及明确结果读取使用此选项，同版随后紧凑批页保留已解析行；单条换画风提示同时编辑已有卡中的旧画风而保其它含义，避免叠加冲突。新增真实SQLite紧凑耐久行→选定行读取→configure预检→普通重读原行/全局不变检查，47组通过、源码Review完成；Linux及真实单条点击/撤销仍待。
+
+为不交付已知无法单条操作的候选，已主动停止本任务df7构建unit04，正式a4bcc未变。已有46组/Linux类型、工程与部分构建日志保留，不冒完整新包已构建或部署。新词额外流程沿同原生浏览器继续，无图片/视频生成；新doc cmwdh62tw008qmkym1a4zyykv已聊天0新增得到雾纹光鳍完整中英临时卡，正式入库/新创作复用尚待。
+
+
+### 19. 新词实际生成与首次保存入口返修
+
+真实gpt-5.6-sol临时新词op a21ab54a-d9cc-4d6c-9026-fdcfd9b1fd91，doc cmwdh62tw008qmkym1a4zyykv聊天1→2版0条，卡片保完整中英文含义；原生点击op c193d075-0827-45f2-8c87-7f9d38952b25后3版4条，四条冻结ZH/EN均完整含半透明背鳍、淡金细线如雾缓慢流动，实际稳定词44995a86-a533-4f6b-813b-362cdfc106e1，私人正式目录查询total0。旧1484模型选择仅本批，lang base en/effective both，生成后消费，未把此证当普通创作持久范围通过。
+
+用户式点击“存入个人词库”后出现“原创作计划不存在”，实际库中没有新的assistant reservation。确定assistant/saveInline在首次建立计划前错误调用只接受已有计划的queryFusionAgentContinuation；它抛404，代码期望unknown分支永远无法进入。局部改为既有queryWorkspaceOperation的本人原号查询，unknown才正常准备、已知原号原样返回；保原保存/幂等/私人权限/仅保存0生成。补显式“取消本次准备”沿已有cancel原号耐久封口，卡片/旧4条保留，避免旧失败只可无限核对；已取消/拒绝优先，不打开残留旧计划。新增保存流程的unknown原号语义断言，47组重跑中；真实取消旧失败、预览编辑、正式保存/刷新/新创作正式ID复用待最终包继续。
+
+af221a576eb4aeff18ea8034b871e9e9b6a021bf/v1486及guard73c8c844702865dc30a9fe3776940f6ccfcc7693仅本机候选/部分导出，尚未上传构建或上线；发现首次保存缺口后不交付该旧源，下一包纳入上述修复。正式根其它脏改保持。同站模板r05已启动真实构建/发布控制器，本任务继续本地修复与测试准备，生产切版待它实际完成后鲜核基线，不停止对方或覆盖最新源。
+
+
+补查单条旧画风来源发现模型controls只有自定义卡标题/选项，不能读取完整中英含义；已有读取协议加constraints.definitions分页，scene及controls仅给definitionsRead提示，不塞全量字库，沿本人文档卡片/原版本返回实际名称与双语说明。原scope/读预算/分页/写白名单不变。47组再次通过，含原卡片完整含义读取与初始提示断言；实际模型换画风是否同时改掉旧卡仍待冻结正文实测。
+
+
+实际新基线已为b6be9ff3830a8409f9c3fbebf569d281e42f959b/v1485/xxfpTW3xqJnBP_nnJzLSD，12:09:11Z公网/cutover0；本任务12:11:23Z独立只读核7服务active及内外health/API release200，未伪造对方尚未保存的health文件。7份批准JSON包b13bdb47bafec6ac7b006ede6a50b7aa325917a968a719fe8b89fd1a0adaa52a及本任务观察证明存release05。远端fetch已下载所需commit，但all-refs rev-list长期磁盘等待，停止仅该扫描，未声称fetch成功；线上SHA、本机同项目origin/commit及本库commit/tree均核实，再沿该精确commit合并。后续导出逐一核Git blob与实际基线manifest，不借此放宽来源检查。仅package/lock/notice三处版本冲突，保对方最新其它字段/依赖/版本算法，应用本工具1486版本及通知，其它已部署源码完整保留。
+
+
+### 20. v0.148.6同源候选已上传构建
+
+主e38401dfba913c409eb66693da8ffd8749602601、十门guard0485778dc9675e2c4bb8d1b4af2bbf745fd10928已推并核远端同头；原生成/卡片、单条hys、首次saveInline与明确取消、完整definitions读取均在此源。2540文件精确Git双导出，main16/guard24项overrides、113既有排除，无工作区/密钥打包；32文件包63e1843e1b9651fe722367781fdf96616e87acdedc62a24cc661951521c437c3服务器核同，双源组装及相对b6的16差量检查成功。local release05/server fusion-intent-workbench-ux22-20261112/attempt04，unit sd2-fusion-intent-ux22-build-20261112-05已启动，完整双构建/47组/恢复及实际最终验收继续；未切版。源码索引准备因git文件枚举30秒磁盘等待失败，不冒当前索引已更新；实际新增调用已直接源核，沿项目允许fallback继续，不把源码工具卡点变成用户阻点。
+
+
+### 21. 完整候选被更新基线接续；恢复反馈最小修正
+
+e384/v1486主BUILD WmwMcFz113ASWR19pNKl1、guard0485778d/r0yMsUlnZMknGlGW2RRIx双完整构建、47组/修改lint、十门原生/计价/reader及恢复verify-only0全部通过，build0/控制器inactive。但切前发现同站模板r06在cutover.sh明文占用窗口等待构建，未越过、停止对方或冒生产START；候选未部署。请求跨对话协调授权尚未取得，也未发送消息。随后r06已实际c3aeb766e2824400866a145564fef101f03d31f3/v1486/XPf2zt_jyRx_cp-avpxAA、13:07:01Z公网、cutover0/服务active，故接最新实际源，旧候选原证保留。
+
+额外原生“核对原操作”确认旧404仍遮住新的核对反馈，4条未变；一行checkInline开始清error已聚焦提交940947421c44a52390b328ece1e0eba51d94579a，不假称冻结e384已含它。新源合入c3并计划1487；为避免再被后续发布插入，下一包沿本站r06已有的有界等待构建/进程发布窗口方式，明确候选后才启动等待，全部原源/双构建/数据与恢复关卡仍在停服务之前执行，不新建锁平台、不扩大权限。
+
+c3的7份批准JSON包d06672f361dfcfdd94feb2c8ae21939b422246ba474af27a4c20c5a6279f8845已存release06。为避免此前全refs扫描磁盘长等，验证同项目本机仓库origin及已发布精确commit，以Git pack-objects(c3排除b6)与index-pack传282881字节已提交对象，SHA9677884a21b8ff534676c3a51597fc435e329e00875db73cc0b3ba1b05b90b52；Git验证对象完整性，未读脏工作树，未改对方仓库/生产。仅release通知冲突按最新算法保本工具说明；版本1487元信息跟随，实际最终八类/单条/入库生成仍待，不把已有47项冒验收。
+
+
+### 22. 保护版原检查与新开关冲突（2026-11-12 13:43Z）
+
+- attempt05 主版本 a963 / v0.148.7 完整 Next 与类型检查通过，47 项融合检查通过；保护版完整类型检查通过，但旧 `studio-restored-settings-engineering.ts` 在保护版正确关闭外部新提交时仍要求外部提交成功，因而 403。build-exit=1，release-exit=73，未开始切版；线上仍为 c3aeb766 / v0.148.6。
+- 仅修合成检查：按实际 EXTERNAL_IMAGE_ADMISSION_ENABLED 验证主版本允许；保护版对 current/historical 的提交及报价均拒绝且零任务、零报价写入。不改运行开关，不放宽权限。主版本本地该检查已通过；新保护版及完整构建待完成。
+- 对照实际 c3 源码后确认：单条解析、新词首次保存、作用域与追加修复仍在本轮候选，尚未上线；不以候选继承关系推断线上已包含。真实剩余场景须在修复实际部署后重测。
+
+
+- 13:58Z 新对 723a6d5f / b141411e 已推送并核实，Git-only 2540 文件（17/25 overrides）上传 SHA256 `5c02672409a9cff5b0a22b1ecc93204594ac471029c353ae676c4cbd7229f59f`。attempt06 / build07 / release04 已启动，先构建再原门禁，尚未切版。原10文档/44行及个人旧类别词条与初始完整对象逐项一致（`legacy-pre-final1486-compare.private.json`）。
+
+
+- attempt06 在完整 types 阶段发现新合成计数变量 TS7022（252058b5 仅加显式 number 类型修正），build=1 / release=73，未构建 Next、未切版。当前准备 release08 / attempt07，保失败原证，不复用其未通过类型结论。用户 14:00Z 明确授权联系同站模板任务；已通过桌面工具联系实际「生图模版 · 續」协调先让本轮上线/验收，未停止对方进程或改其文件。
+
+
+### 23. v0.148.7 实际部署与新词全链真实通过（2026-11-12）
+
+- 主252058b561c58867499d2c588b4d947235dd0817 / BUILD 4Xf2_mg7u4P9fd8g06OvE；十门guard b5f4a60c574057a7b9ddf05ca4bdbb912d40be0f / zfdF8xMKLYEGVkTs5vy1s。双完整types/Next、47融合、主17+17矩阵、guard新鲜原生/reader/计价、独立恢复verify-only全部通过。attempt07 build0/cutover0，14:33:09Z开始切版，控制器inactive；14:34:01Z独立7服务/内外health通过。价格与私有策略未变，一致数据库备份保留且恢复仅程序。批准18文件包SHA256 152002b4753055e16c573c9119e6ccd49265a855e44645a9b900337ebafdf954，local release08/evidence；三相关页25/35/5个公开静态资源逐字节200核对通过，不冒受保护页内容验收。
+- 旧S09“雾纹光鳍”准备失败在新页面明确取消原号后解锁，原生“存入个人词库”正确打开本人私有预览。原生编辑中文为示踪细线、英文为tracer filaments，校验后确认只入库；doc cmwdh62tw008qmkym1a4zyykv 4→5版但仍4条，与1484生成的4个完整行对象逐项完全相等。刷新后正式词total1，稳定类别daa66170-f54a-45c7-80b9-3ff202328331/词44995a86-a533-4f6b-813b-362cdfc106e1、scope private，不重复且未生成。
+- 原生新创作doc cmwdnkom7001bxu4ogkqc88ok 1版0条；恢复原模型gpt-6.1-sol，原句“用我个人词库里的雾纹光鳍，每套都带…4套中英双语科幻探险伙伴，母体各不相同”。op c30c1d9a-aa52-417c-9ea9-2767a23fcafc真实committed后2版仍0条，正式ID已锁定且要求lang both持续。原生点击生成后3版/第1批4条，蜗牛/磁力起重机/老式怀表/蘑菇各异，四份catalogueSnapshot.body中英均有新编辑的示踪/tracer含义及科幻探险共同要求，正式stable ID真入每行，不是旧inline描述。原证newterm-cancelled/saved/formal-saved/refreshed/formal-configured/formal-generated1487.private.json。
+- 其余S05/S08/S07重测、单条与撤销、两种追加及历史继续仍待；本段不冒八类已全部通过。
+
+
+### 24. S08 原空文档原句重测通过及模型限制
+
+- 原doc cmwd9pjij004mis5tbglhy1hn 仍1版0条，gpt-6.1-sol原句op16e50a79-2229-4eb2-b24e-68784a0ad7f3因上游Musk API超时耐久rejected，0改动、原输入保留；先核terminal后才新发请求，不把它冒功能通过。明确告知后从真实模型下拉切gpt-5.6-sol对照，未改母体/岗位等输入设置。
+- 同原句op90e9c9d0-2eed-451f-949d-a087edd52fb8 committed：2版0条，职业四项distribute、科研探索each、方形/等肩胯/适中/双体/独立站位each，长期要求含硬科幻工业、两人不同母体和岗位、全身独立及不粘连。点击后3版/1批4条，母体液压千斤顶/磁力起重机/卷线器/齿轮箱和岗位研究员/探险家/领航员/修理匠真实各异；每份冻结中英含两角色及完整边界，无单角色/off-screen矛盾句，无默认家庭3D/2.5头身。原证S08-configured/generated1487.private.json。工具生成的是提示词，未生成图验证两个人物的视觉执行，也不宣称已给每对八位参与者分别命名岗位。
+- 已确认残留：gpt-6.1-sol偶发上游90秒调用超时（同版新词复用成功，S08超时）。本工具已保留原输入/原号并明确结束，正常现有5.6型号可完成；不暗换默认、不放宽SDK/总预算、不把网络可靠性冒完全解决。其它场景和操作仍继续。
+
+### 25. 单条/撤销、多选及追加实测；母体冲突返修
+
+S05 原空文档真实 op31ab04f7-ad06-4daa-8dcf-6b890100f8f0：配卡后 2版0条，点击后3版4条。每份冻结中英均包含折叠＋旋转 each、高壮/壮硕/宽肩/低重心及哥特Boss，四母体各异。原证 S05-configured/generated1487.private.json。
+
+S03 op6280d2c5-00de-47d8-8e52-637b894ce942 准备后4个完整行和base设置均不变；点击更新 op c2e02d66-c108-477b-b1fc-5d550ead044b 仅方案02改蒸汽朋克，旧卡中的赛博朋克中英也同步替换。原液压母体、医生、瘦高长臂、反派及其它行保留。聊天撤销 op08f83515-5b54-4260-860d-fb51e4d4bd61 恢复原正文/design/cards，目标仅合法version变化，另外3行及base完整相等；准备消费后未复活，消息2→6保留。doc7版4行，原证 S03-before-single/staged/applied/undone1487.private.json。
+
+S01 op eb0cbf45-6fe6-4c62-9132-5ae0e7194415 配卡后仍4条；点击后8条/两批，旧4完整行逐项相等。新4保马里奥仅身型、家庭3D冒险主角、胆小勇敢及服装排除；新批四母体、四职业各异。跨两批仍可复用母体/职业，这是软差异，不冒全8绝不重复。原证 S01-append-configured/appended1487.private.json。
+
+S07 新doc cmwdnznpr00chxu4oiw05aauj 的水彩要求已正确持续，但模型另建“小动物母体”卡，睡鼠等附加母体与实际蜗牛等原生母体冲突，明确不通过。de4e72eec8a4d4c02b985054ef6b606f5c05241f/v1488 仅修配卡提示/绑定入口：新母体选择卡须回原source目录，正常纹理等描述卡、已有卡片和正式源扩展保留，不回改旧行。新增同轮拒绝纠错→0条配置→4真实母体回归，48项通过。
+
+主源 de4e72ee、十门guard22797c4c82e7e47bc2ae8284ace702c916146b3f 已推核；实际252058b5/v1487为基线，仅5应用文件差量。attempt08/build09/release06于15:08启动，完整main types、48项及主构建已通过，后续guard/切版和fresh S07仍待。Git-only包 SHA256 0e6c0a21559da6994892e9cd204c984961ee88708a76e0aed205564313796345。导出器对旧policy缺布尔字段只兼容读取，直接核实际集合无私有记录，旧原证不改；新policy补明确false。
+
+S04 前两次自动操作受页面/焦点变化影响，未判产品通过。15:11的a6ed4ae4-a69a-4270-b28d-8da79146f9c0已cancelled、旧4不变；期间职业开关误动，沿原生近期撤销恢复c7c0151e-521c-40d3-8095-d52995b45d3f，doc8版完整设置及旧4均与误操作前相等。原page1已在额度站、page8出现来源未确认新文档，均不覆盖或删除；改用background专用page9，先核URL/账号/已恢复文档与textarea焦点，再发送唯一原句。S04批内追加及继续/刷新仍待。
+
+### 26. 本批追加、历史继续及刷新已实测通过
+
+S04 background page9 同原句真实 op96340785-538b-4ac2-8f86-d132af76eb82 committed：9版仍4条，base完整相等，仅batch overlay存剪纸中英及append。原生点击后10版8条，旧4完整行对象逐项相等，新4方案09–12均仅剪纸风（中英正文无旧水墨），身体、温柔无武器、儿童配角和实际四职业分配保持。临时准备消费为none，长期水墨中英、语言和选择不变；仅全局目录snapshot.version因先前新词入库鲜读更新，不是创作方向变更。
+
+第2批是此前已撤销的历史批次，编号不回收；当前真实行只属第1及第3批，旧第2批metadata保留，不冒丢历史或重编号。原生离开至S01，从“打开历史”点击S04“继续”，再真正reload：完整workspace对象与生成后逐项相等，UI实际显示8条，长期要求仍水墨。原证S04-batch-configured/batch-generated/continued/continue-visible/refreshed1487.private.json。当前只余1488部署后的fresh S07重测与最后旧数据/记录收口。
+
+### 27. v1488已部署；最后一组真实验收再发现无职业回退
+
+v0.148.8主de4e72eec8a4d4c02b985054ef6b606f5c05241f / BUILD b96Yv0cZcZvIz2CaLIAw-、十门guard22797c4c82e7e47bc2ae8284ace702c916146b3f / 4l54MGIW1lrw_eEp0gaNU已实际部署：双types/Next、48项、原生/reader/计价/恢复均过，build0/cutover0，15:34:45Z独立7服务/内外健康通过。18证据包SHA256 f2cb0af38c7c02310958ed453b2f08141b20498840794ea45541556194b29fc8，local release09/evidence；价格/私有策略和持久链接保持。
+
+原生fresh doc cmwdpmo7p00051rwqwxgdmww9 1版0条，原句真实gpt-5.6-sol op859712e3-2915-4294-9e72-5d8629f25fa1配卡后2版0条，原生母体目录选对、无附加母体卡，点击后3版4条、lang zh与水彩要求持续，故母体修复实际有效。但是正文仍有巡游灯彩师/球员/导游职业：模型仅off职业卡，没选“无职业设定”，触发旧core概念职业回退，S07仍不通过。原证S07-fresh/configured/generated1488.private.json，不用工程成功掩盖。
+
+不修改旧引擎off语义，以免破坏旧卡片；仅在助手实际生成预览检查用户明确不要职业时是否仍渲染职业section，反馈沿原occupation each＋无职业设定纠错；提示不再允许仅关闭或口头声明。新增同轮错off→合法none、聊天0→点击4无职业/无道具且名称无旧职业回归，不误读“不要改变职业”，49项通过。聚焦提交7bd03a42fd15eab25b7a53fe45090b3daca00837/v1489，仅adapter/检查和三处版本说明；同源guard/发布及fresh实测仍待。
+
+最终旧10文档/44行、行位置/版本/操作与旧私人词/类别完整对象，在实际1488下与开局逐项完全相等。只读证据legacy-final1488及compare，原快照SHA256 4a2bae9e79ff6f98b68354975aead01b3b69e9569f263c781c6b4f3afa2b0f29；没有导出数据库。
+
+<!-- /FUSION-UX22-IMPLEMENTATION-20261112 -->

@@ -620,3 +620,31 @@ stage `/data/video-api-debugger/release-staging/fusion-workbench-ux20-20261111/a
 
 本轮无浏览器/真实模型或媒体生成，部署元证 `functionalAcceptance=false` 保原义。实际语言理解、界面/触控及A01–A13待用户手验；源工程不冒真实模型验收。[原单UX20实施与交付](../tasks/todo/2026-11-08-character-fusion.md#fusion-ux20-implementation)，[15份批准JSON](materials/2026-11-08-character-fusion-prototype/implementation/ux20/evidence/)。未导出DB/env/配置备份，原正式根脏改保留。
 <!-- /FUSION-UX20-DEPLOY-20261111 -->
+
+<!-- FUSION-UX21-RELEASE-20261111 -->
+历史发布记录：后续角色融合发布与验收以[UX22](#fusion-ux22-release)及原工单为准，保留本块当时证据。
+
+<a id="fusion-ux21-release"></a>
+### 2026-11-11 UX21真实LLM验收修复：v0.146.3
+
+已保护部署，指定真实LLM验收进行中。主源802e826c99931a00c52aeb874cab0eb6e2e4c422 / BUILD rYgAIUlQ7E0Vd51p7j_uN；同源9门关闭保护源8928c4eea9bebcdcfff8f7cd84121f673a1ac10b / BUILD g96FzKtLvyQdIa5n2zu6W。基于已实发408a3c795/v1462，精确保留多视图恢复控件，不从旧c7d覆盖最新基线；最初v1461/c7d中间修复已部署，后来b7/9f候选在源码Review时正常停止（143/无切版），均保原证。
+
+stage `/data/video-api-debugger/release-staging/fusion-live-fixes-ux21-20261111/attempt03`，本机原角色融合资料implementation/ux21/fix04。33组隔离工程、双完整类型/Next、同源guard/reader、独立恢复入口只读核验、6启动检查通过，build/cutover均0。03:44:53Z公网54资源/10匿名401，03:45:36Z7服务4timer健康；被保护的多视图页资源另查，源码与原408一致。无DDL/生产回填/数据恢复，价格与私有策略/持久链接保留；回退只回程序与配置，保数据库、原请求、账本、素材。
+
+16份批准JSON已归档到implementation/ux21/fix04/evidence，包SHA256 828bdc6079094729a0cb7da998919e811bfe993673d4cc5e4ef592b3b551af2e，本机核相同，不含DB/env/配置备份。部署证据functionalAcceptance=false保原义；本轮真实LLM与页面效果另沿[原单UX21](../tasks/todo/2026-11-08-character-fusion.md#fusion-ux21-live)和私有实测原证，不以构建冒功能通过。
+
+状态：S07r2/S08r2、新词确认入库生成最终实测继续；未结束本轮任务。
+<!-- /FUSION-UX21-RELEASE-20261111 -->
+
+<!-- FUSION-UX22-RELEASE-20261112 -->
+<a id="fusion-ux22-release"></a>
+### 2026-11-12 角色融合UX22聊天配卡与生成闭环
+
+当前状态（15:54Z）：实际v0.148.8已部署，主de4e72eec8a4d4c02b985054ef6b606f5c05241f / b96Yv0cZcZvIz2CaLIAw-、guard22797c4c82e7e47bc2ae8284ace702c916146b3f / 4l54MGIW1lrw_eEp0gaNU；15:34:45Z独立7服务健康，双构建/48项及原门禁通过。18项包f2cb0af38c7c02310958ed453b2f08141b20498840794ea45541556194b29fc8位于release09/evidence。S07母体冲突已真实消除，但无职业回退仍未通过；主7bd03a42fd15eab25b7a53fe45090b3daca00837/v1489、guard46907c87590164df46d7766ea090aa90ebca5b1e已推核，49项本地通过，attempt09完整构建和有界等待发布中。下文1487/1488候选叙述保留发布过程，不作为当前未部署结论。
+
+已部署v0.148.7，主源252058b561c58867499d2c588b4d947235dd0817 / BUILD 4Xf2_mg7u4P9fd8g06OvE；同源十门guard b5f4a60c574057a7b9ddf05ca4bdbb912d40be0f / zfdF8xMKLYEGVkTs5vy1s。双完整types/Next、47项融合、原生/reader/价格、数据备份及独立程序恢复通过；14:33Z切版0，14:34Z独立7服务/内外health通过，价格/私有策略及持久数据链接保持。18项批准证据在implementation/ux22/release08/evidence，包SHA256 152002b4753055e16c573c9119e6ccd49265a855e44645a9b900337ebafdf954，不含DB/env/配置备份。
+
+实测又发现水彩场景的新母体描述卡与原生母体冲突，v0.148.8仅修配卡边界与回归。主de4e72eec8a4d4c02b985054ef6b606f5c05241f、guard22797c4c82e7e47bc2ae8284ace702c916146b3f已推核；基于上述实际1487，应用差量5文件、无schema/dependency变化。attempt08/build09/release06已启动，48项、主完整构建及guard原生检查通过，guard最终构建/切版与fresh S07实测待完成。
+
+功能证据及剩余项统一见[原角色融合单UX22](../tasks/todo/2026-11-08-character-fusion.md#fusion-ux22-implementation)。已实测聊天0新增→点击生成、两种追加/历史继续刷新、单条更新与聊天撤销、临时词→私人编辑入库→正式ID新创作生成，原卡片操作沿仍匹配证据复用；不以工程或发布冒八组全部已过。实体触控及CSV浏览器落盘仍待手验。
+<!-- /FUSION-UX22-RELEASE-20261112 -->

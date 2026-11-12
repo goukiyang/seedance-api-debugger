@@ -642,3 +642,14 @@ v0.146.0已部署，待用户手动验收；原卡片与三批共用链、26组�
 
 正式根私有证据：[源层工程](2026-11-08-character-fusion-prototype/implementation/ux20/source-engineering.private.json)、[ES5/CSS](2026-11-08-character-fusion-prototype/implementation/ux20/source-types.private.json)、[两版构建/源绑定/启动/数据保护及公网健康批准JSON](2026-11-08-character-fusion-prototype/implementation/ux20/evidence/)。仅15份安全JSON，未复制生产DB、env或配置备份；包SHA已核。部署 `functionalAcceptance=false`，无浏览器/真实LLM/媒体调用，不冒A01–A13效果通过。
 <!-- /FUSION-UX20-MATERIALS-20261111 -->
+
+<!-- FUSION-UX21-MATERIAL-20261111 -->
+历史材料：UX21原证保留，当前接续与验收入口沿下方UX22。
+
+- **UX21 真实LLM八场景验收与修复**： [正式原单](../../tasks/todo/2026-11-08-character-fusion.md#fusion-ux21-live)。私有原证位于`2026-11-08-character-fusion-prototype/implementation/ux21/`：initial1460.private.json首轮（失败保留）、phase1461.private.json修后再测、S03单条/撤销和cancel-chat-status1462.private.json实际取消回显、native-card-mobile-proof.private.json真实拖动及手机命中/截图。local-final保存33组隔离工程/ES5/源码Review/CodeGraph原证；fix01记录已部署1461，baseline408核最新多视图1462，fix03仅未部署停止候选，fix04/evidence含最终1463的16份批准部署JSON（包SHA256 828bdc6079094729a0cb7da998919e811bfe993673d4cc5e4ef592b3b551af2e）。所有JSON均不含凭据，未导出生产数据库/env/配置备份；浏览器原件仅本机私有，不把工程与发布当真实模型成功。新文档、不同研究岗位及新词确认后的最终原证继续补齐；实体触屏未测。
+<!-- /FUSION-UX21-MATERIAL-20261111 -->
+
+<!-- FUSION-UX22-MATERIAL-20261112 -->
+- **最新接续**：release09/evidence已保存实际1488的18项批准证据（SHA256 f2cb0af38c7c02310958ed453b2f08141b20498840794ea45541556194b29fc8），legacy-final1488/compare确认旧10文档/44行及旧词完整对象一致。S07-generated1488保留无职业回退的失败原证；release10是49项修复的1489精确候选及构建配置，最终实测仍待，以下早期资料说明不替代最新原单状态。
+- **角色融合UX22聊天配卡与生成闭环**：[正式原单](../../tasks/todo/2026-11-08-character-fusion.md#fusion-ux22-implementation)，发布见[UX22部署记录](../ubuntu24-deployment.md#fusion-ux22-release)。私有原件位于`2026-11-08-character-fusion-prototype/implementation/ux22/`，包含8类原句实测、单条准备/更新/撤销、两种追加/原生历史继续/刷新、临时新词及私人入库编辑/正式ID复用、原卡片及手机视口证据；失败和未通过原件保留，不冒全部通过。旧10文档/44行及原私人词条的完整对象比较沿legacy-before1470和后续只读快照；未导出数据库或凭据。release08/evidence为实际1487的18项批准发布JSON（包SHA256 152002b4753055e16c573c9119e6ccd49265a855e44645a9b900337ebafdf954）；release09保存1488精确Git候选与构建配置，尚待该版本最终发布及fresh S07验收。CSV内容核对与浏览器落盘分开、视口检查与实体触屏分开。
+<!-- /FUSION-UX22-MATERIAL-20261112 -->
