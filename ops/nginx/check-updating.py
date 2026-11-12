@@ -52,6 +52,11 @@ error_log {root}/error.log;
 events {{ worker_connections 64; }}
 http {{
   access_log off;
+  client_body_temp_path {root}/client_body_temp;
+  proxy_temp_path {root}/proxy_temp;
+  fastcgi_temp_path {root}/fastcgi_temp;
+  uwsgi_temp_path {root}/uwsgi_temp;
+  scgi_temp_path {root}/scgi_temp;
   types {{ text/html html; }}
   server {{
     listen 127.0.0.1:{port};
@@ -64,7 +69,7 @@ http {{
   }}
 }}
 ''')
-        command = [nginx, '-p', str(root), '-c', str(root / 'nginx.conf')]
+        command = [nginx, '-p', str(root), '-e', str(root / 'error.log'), '-c', str(root / 'nginx.conf')]
         subprocess.run(command + ['-t'], check=True, capture_output=True)
         process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
