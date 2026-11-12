@@ -152,14 +152,15 @@ export async function POST(request: NextRequest) {
       { assistantFingerprint: intent.fingerprint, turn: { user: body.message.trim(), assistant: reply }, ...(catalogueSnapshot ? { catalogueVersion: catalogueSnapshot.version } : {}) });
     return json({ ...receipt, reply: receipt.reply || reply, drafts: [], scopeChoices: result.proposal.scopeChoices, reads: result.reads, iterations: result.iterations, limitReached: result.limitReached, model: selectedModel });
   } catch (error) {
+    const failureMessage = error instanceof FusionAgentError && error.userMessage || (error instanceof Error ? error.message : '本轮提案未完成。');
     if (intent && !deferred && !request.signal.aborted) {
       try {
-        const terminal = await finishAssistantOperation(intent.user, intent.workspaceId, intent.opId, { intentFingerprint: intent.fingerprint, status: 'rejected', message: error instanceof Error ? error.message : '本轮提案未完成。', proposal: proposed });
+        const terminal = await finishAssistantOperation(intent.user, intent.workspaceId, intent.opId, { intentFingerprint: intent.fingerprint, status: 'rejected', message: failureMessage, proposal: proposed });
         if (terminal.status !== 'planning' && terminal.status !== 'unknown') return json({ ...terminal, pending: false, submitted: terminal.status === 'committed' });
       }
       catch { /* The original receipt remains the only recovery route. */ }
     }
-    if (error instanceof AuthError || error instanceof FusionError || error instanceof FusionAgentError || error instanceof MuskApiError) return json({ error: error.message, code: 'code' in error ? error.code : undefined, details: { conflict: 'details' in error ? error.details : undefined, ...(proposed ? { proposal: proposed } : {}) }, submitted: false }, error.status);
+    if (error instanceof AuthError || error instanceof FusionError || error instanceof FusionAgentError || error instanceof MuskApiError) return json({ error: failureMessage, code: 'code' in error ? error.code : undefined, details: { conflict: 'details' in error ? error.details : undefined, ...(proposed ? { proposal: proposed } : {}) }, submitted: false }, error.status);
     if (error instanceof SyntaxError) return json({ error: '请求不是有效 JSON，输入已保留。', submitted: false }, 400);
     const known = error as { status?: number; code?: string } | null;
     return json({ error: request.signal.aborted ? '等待已中断，请核对原操作编号。' : '本轮回复未确认，请核对原操作编号；当前输入与结果已保留。', code: known?.code, pending: true }, known?.status || 503);

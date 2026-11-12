@@ -297,7 +297,15 @@ function allocationIds(axis: AllocationAxis, values: string[]) {
 export function allocateFusionBatch(s: FusionSettings, seed: number, options: { onceMust?: Record<string, string[]>; diversity?: 'prefer' | 'strict'; avoidSourceTermIds?: string[] } = {}): FusionAllocation {
   const error = validateGeneration(s); if (error) throw new Error(error);
   const axes = allocationAxes(s), random = seeded(seed), rows: FusionAllocation['rows'] = Array.from({ length: s.count }, () => ({ selections: {} }));
-  for (const id of Object.keys(options.onceMust || {})) if (!axes.some(axis => axis.id === id)) throw new Error('本批必出项所属类别未加入或不可用，请先调整组合。');
+  for (const [id, values] of Object.entries(options.onceMust || {})) if (values.length && !axes.some(axis => axis.id === id)) {
+    const builtin = builtinCatalogue(), categories = [...(s.catalogue?.dynamic?.snapshot.categories || []), ...builtin.categories], terms = [...(s.catalogue?.dynamic?.snapshot.terms || []), ...builtin.terms];
+    const referenced = Array.from(new Set(values.flatMap(value => { const term = terms.find(term => term.id === value); return term ? [term.categoryId] : []; })));
+    const category = categories.find(category => category.id === id) || (referenced.length === 1 ? categories.find(category => category.id === referenced[0]) : undefined);
+    const native = category && TRAITS.some(trait => trait.id === category.id) && !s.catalogue?.dynamic?.selections[category.id];
+    const path = category ? native ? ['catalogue', 'traits', category.id] : ['catalogue', 'dynamic', 'selections', category.id] : undefined;
+    const userMessage = category ? `本批“${category.nameZh}”未加入组合或当前不可用。请先加入该类别，或改选已可用的类别；原结果与输入保留。` : '本批必出项的类别未能确认。请从词库重新选择可用类别；原结果与输入保留。';
+    throw Object.assign(new Error(`${userMessage} onceMust[${JSON.stringify(id)}]所属类别未加入或不可用。${category ? `${category.nameZh}的真实categoryId为${JSON.stringify(category.id)}；${category.enabled ? `先在本批plan.overlay启用${JSON.stringify(path)}（已有选择仅改enabled:true；未配置才补完整selection），或用户明确持续启用时用patchSettings。` : '该目录类别已停用，不能用selection.enabled绕过，请重新查询可用类别。'}` : '该key不是当前已知目录categoryId，请查询catalogue/controls原样引用，不用名称或generationKind作key。'}保留已有锁定、候选池与排除；启用不会解除原限制。`), { userMessage });
+  }
   let diversity: FusionAllocation['diversity'];
   for (const axis of axes.filter(axis => axis.kind === 'source' || options.onceMust?.[axis.id]?.length)) {
     const must = Array.from(new Set([...axis.must, ...allocationIds(axis, options.onceMust?.[axis.id] || [])]));

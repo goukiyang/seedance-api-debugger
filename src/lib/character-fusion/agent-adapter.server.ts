@@ -9,7 +9,7 @@ import { FusionError, applyFusionCommands, isRecord, parseFusionCommands, sameFu
 export const FUSION_AGENT_MAX_STEPS = 6;
 const MAX_CONTEXT_CHARS = 23500;
 export class FusionAgentError extends Error {
-  constructor(message: string, readonly status = 400, readonly code = 'fusion_agent_invalid') { super(message); }
+  constructor(message: string, readonly status = 400, readonly code = 'fusion_agent_invalid', readonly userMessage?: string) { super(message); }
 }
 export type FusionAgentTarget = { rowId: string; version: number };
 export type FusionAgentRead = { kind: 'catalogue'; categoryId?: string; q?: string; cursor?: string; limit?: number }
@@ -52,11 +52,11 @@ export function validateFusionAgentExecution(commands: FusionCommand[], workspac
     const oldIds = new Set(workspace.rows.map(row => row.id)), generated = next.rows.filter(row => !oldIds.has(row.id));
     if (differentJobs && generated.length > 1) {
       const jobs = generated.map(row => (row.design?.traits.occupation || []).map(value => value.zh).sort().join('、'));
-      if (jobs.some(job => !job || job === '无职业设定') || new Set(jobs).size < generated.length) throw new FusionAgentError('用户要求各套职业/研究岗位不同，但实际岗位重复或未绑定；请查职业与身份目录，用合法occupation的plan.onceMust安排不同岗位，保科研/探索用途，不把所有方案锁成研究员。仅在共同要求写“岗位不同”不算分配，词条不足须如实说明。');
+      if (jobs.some(job => !job || job === '无职业设定') || new Set(jobs).size < generated.length) throw new FusionAgentError('用户要求各套职业/研究岗位不同，但实际岗位重复或未绑定；请查职业与身份目录，先按controls.selectionPath在本批overlay启用类别，再用其真实categoryId的plan.onceMust安排不同岗位。保科研/探索用途和原锁/池/排除，不把所有方案锁成研究员；仅写“岗位不同”不算分配，词条不足须如实说明。');
     }
   }
   catch (error) {
-    if (error instanceof FusionError || error instanceof Error && error.constructor === Error) throw new FusionAgentError(`提案尚未执行：${error.message} 请保留用户要求并修正合法设置。`, 400, 'fusion_agent_proposal_invalid');
+    if (error instanceof FusionError || error instanceof Error && error.constructor === Error) throw new FusionAgentError(`提案尚未执行：${error.message} 请保留用户要求并修正合法设置。`, 400, 'fusion_agent_proposal_invalid', 'userMessage' in error && typeof error.userMessage === 'string' ? error.userMessage : undefined);
     throw error;
   }
 }
@@ -154,7 +154,7 @@ export const FUSION_AGENT_COMMANDS = `注册命令，opId/owner/expected/版本/
 {type:"patchSettings",changes:[{path:[字段],value:值}]}。长列表增删用同结构加edit:"add"|"remove"，value仅本次明确增删的ID，服务器合并完整原表；整体替换需该类别/词条的明确授权，不能用预览子集。
 count只允许 ${COUNTS.join("、")} 数字；lang仅"zh"|"en"|"both"；role仅""|"主角"|"配角"|"伙伴"|"反派"|"Boss"|"路人"。requirementsEnabled布尔；requirements/requirementsEn为中英文本。例：要4条双语并抽卡，patchSettings改count:4/lang:"both"后再generate，不能只改设置冒生成；未要求生成不附generate。
 属性路径["catalogue","traits",属性ID]，新动态类别路径["catalogue","dynamic","selections",categoryId]：值{enabled:true,locked:true,values:[中文选项或动态termId],excluded:[],must:[]}；也可改单个enabled/locked/values/excluded/must/candidates，固定多选放同一values。原维度改["boss",维度ID]、["bossLocks",维度ID]；["rules",维度ID]为{label,status:"default"|"must"|"exclude",en?}数组；以selectionPath/multi及真实目录为准。
-{type:"generate",mode:"append"|"replace",plan:{formatVersion:1,scope:"document"|"batch",count?,overlay?:[{path:[设置字段],value:本批值}],onceMust?:{categoryId:[termId]},diversity?:"prefer"|"strict",targetRowIds?:[真实ID]}}。batch要求仅冻结本批，不回写；strict仅用户明确绝不重复时用，小池不减数量不扩池。replace本批须targetRowIds，不扩大全文。
+{type:"generate",mode:"append"|"replace",plan:{formatVersion:1,scope:"document"|"batch",count?,overlay?:[{path:[设置字段],value:本批值}],onceMust?:{categoryId:[termId]},diversity?:"prefer"|"strict",targetRowIds?:[真实ID]}}。onceMust先按selectionPath启用类别，key用真实categoryId；本批用overlay，保已有锁/池/排除。batch要求仅冻结本批，不回写；strict仅用户明确绝不重复时用，小池不减数量不扩池。replace本批须targetRowIds，不扩大全文。
 {type:"reviseRow",rowId,axis:属性或维度ID} 调该轴；{type:"changeRow",rowId,dimension?:原维度ID,value?:原中文大类} 换维度或重抽该条。
 {type:"patchRow",rowId,patch:{requirements:{zh:该条完整中文要求,en:等价英文}}} 仅允许中英视觉要求，保未改内容。
 {type:"selection",retainedIds?:[rowId],selectedIds?:[rowId]} 最终集合，保其它仍需保留ID。
@@ -429,7 +429,14 @@ export async function proposeFusionAgent(options: {
           if (!draftTerms.length || draftTerms.some(term => !referenced(term))) throw new FusionAgentError('确认后生成须真正引用新词UUID；在generate.plan.overlay启用新类别并绑定values。用户要求每条都带时用locked:true，不用onceMust冒共同特征。');
         }
         for (const command of commands) if (command.type === 'generate') for (const [categoryId, ids] of Object.entries(command.plan?.onceMust || {})) {
-          if (ids.some(id => knownTerms.get(id) !== categoryId)) throw new FusionAgentError('本批必出须原样引用已读目录的合法词条编号。');
+          const invalid = ids.find(id => knownTerms.get(id) !== categoryId);
+          if (invalid) {
+            const actual = knownTerms.get(invalid);
+            const path = actual ? TRAITS.some(trait => trait.id === actual) && !options.workspace.state.settings.catalogue?.dynamic?.selections[actual] ? ['catalogue', 'traits', actual] : ['catalogue', 'dynamic', 'selections', actual] : undefined;
+            const title = TRAITS.find(trait => trait.id === actual)?.title || options.workspace.state.settings.catalogue?.dynamic?.snapshot.categories.find(category => category.id === actual)?.nameZh;
+            const userMessage = `本批${title ? `“${title}”` : '必出项'}的类别与所选词条不一致。请从对应类别重新选择；原结果与输入保留。`;
+            throw new FusionAgentError(`${userMessage} onceMust[${JSON.stringify(categoryId)}]的词条引用不匹配：${JSON.stringify(invalid)}${actual ? `属于真实categoryId ${JSON.stringify(actual)}。先用该key，并在本批overlay启用${JSON.stringify(path)}` : '尚未核实，请先查询catalogue并原样使用其categoryId和termId'}；不以名称或generationKind代替类别key，不改变已有锁定/池/排除。`, 400, 'fusion_agent_invalid', userMessage);
+          }
         }
         for (const command of commands) for (const change of command.type === 'patchSettings' ? command.changes || [] : command.type === 'generate' ? command.plan?.overlay || [] : []) {
           const path = change.path;

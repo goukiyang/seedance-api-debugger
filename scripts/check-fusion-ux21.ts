@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
-import { CORE, defaults, textFor } from '../src/lib/character-fusion/engine';
+import { CORE, allocateFusionBatch, defaults, textFor } from '../src/lib/character-fusion/engine';
 import { builtinCatalogue } from '../src/lib/character-fusion/catalogue';
 import { emptyWorkspaceState, newCreationState, type FusionCommand } from '../src/lib/character-fusion/actions';
 import { FusionAgentError, bindFusionAgentCommands, fusionAgentCataloguePage, fusionAgentScene, fusionCatalogueGenerationRequested, needsFusionAgentScopeChoice, proposeFusionAgent, validateFusionAgentExecution } from '../src/lib/character-fusion/agent-adapter.server';
@@ -129,6 +129,48 @@ export async function checkFusionUx21(input: { actor: { id: string }; repository
   assert.equal(freshScene.settings.rules.source.filter(tag => tag.status === 'exclude').length, 1);
   assert.equal(freshScene.settings.rules.source.find(tag => tag.status === 'exclude')?.label, '职业');
   checks.push('UX21实际岗位差异：同锁研究员被拒并以既有onceMust分配四个合法岗位，科研用途保留；未加入旧定义不计基础职业排除');
+
+  const nativeUnjoined = { ...defaults(), count: 4 }, nativeBefore = structuredClone(nativeUnjoined);
+  assert.throws(() => allocateFusionBatch(nativeUnjoined, 2120, { onceMust: { occupation: jobTerms.map(term => term.id) } }), error => error instanceof Error && error.message.includes('onceMust["occupation"]') && error.message.includes('["catalogue","traits","occupation"]'));
+  assert.deepEqual(nativeUnjoined, nativeBefore);
+  const poolIds = jobTerms.map(term => term.id), excludedJob = catalogue.terms.find(term => term.categoryId === 'occupation' && !poolIds.includes(term.id))!;
+  const unjoinedState = emptyWorkspaceState(); unjoinedState.settings.count = 4; unjoinedState.settings.lang = 'both';
+  unjoinedState.settings.catalogue!.dynamic = { formatVersion: 1, snapshot: catalogue, selections: { occupation: { enabled: false, locked: false, values: [], excluded: [excludedJob.id], must: [], candidates: poolIds } } };
+  const hardSelection = structuredClone(unjoinedState.settings.catalogue!.dynamic!.selections.occupation);
+  assert.throws(() => allocateFusionBatch(unjoinedState.settings, 2120, { onceMust: { trait: poolIds } }), error => error instanceof Error && error.message.includes('onceMust["trait"]') && error.message.includes('真实categoryId为"occupation"') && error.message.includes('["catalogue","dynamic","selections","occupation"]'));
+  assert.equal(allocateFusionBatch(unjoinedState.settings, 2120, { onceMust: { unused_category: [] } }).rows.length, 4);
+  assert.deepEqual(unjoinedState.settings.catalogue!.dynamic!.selections.occupation, hardSelection);
+  const lockedSettings = structuredClone(unjoinedState.settings); Object.assign(lockedSettings.catalogue!.dynamic!.selections.occupation, { enabled: true, locked: true, values: [poolIds[0]] });
+  const lockedBefore = structuredClone(lockedSettings);
+  assert.throws(() => allocateFusionBatch(lockedSettings, 2120, { onceMust: { occupation: poolIds } }), /固定组合冲突/); assert.deepEqual(lockedSettings, lockedBefore);
+  const onceDocument = await repository.createFusionWorkspace(actor, { opId: 'ux21-once-category-create', state: unjoinedState });
+  let onceRounds = 0;
+  const onceResult = await proposeFusionAgent({ workspace: onceDocument.workspace, message: research, seed: 2120,
+    complete: async messages => {
+      onceRounds++;
+      if (onceRounds === 1) return JSON.stringify({ reply: '读取岗位真实categoryId', reads: [{ kind: 'catalogue', categoryId: 'occupation', limit: 20 }] });
+      if (onceRounds === 3) { const error = String(messages[messages.length - 1].content); assert(error.includes('occupation')); assert(error.includes('enabled:true')); assert(error.includes('dynamic')); }
+      if (onceRounds === 4) { const error = String(messages[messages.length - 1].content); assert(error.includes('trait')); assert(error.includes('occupation')); }
+      return JSON.stringify({ reply: '仅本批启用岗位并分配', commands: [{ type: 'patchSettings', changes: common }, { type: 'generate', mode: 'append', plan: { formatVersion: 1, scope: 'batch', onceMust: { [onceRounds === 3 ? 'trait' : 'occupation']: poolIds }, ...(onceRounds >= 3 ? { overlay: [{ path: ['catalogue', 'dynamic', 'selections', 'occupation', 'enabled'], value: true }] } : {}) } }] });
+    }, read: async () => fusionAgentCataloguePage({ catalogue: { ...catalogue, terms: jobTerms }, total: 4, nextCursor: null }, { categoryId: 'occupation' }),
+    validateCommands: commands => validateFusionAgentExecution(commands, onceDocument.workspace, catalogue, research),
+  });
+  assert.equal(onceResult.iterations, 4); assert.equal((await repository.getWorkspace(actor, onceDocument.workspace.id)).workspace.version, 1);
+  const onceApplied = await repository.executeWorkspaceOperation(actor, onceDocument.workspace.id, { opId: 'ux21-once-category-apply', baseVersion: 1, commands: bindFusionAgentCommands(onceResult.proposal.commands, onceDocument.workspace, 2120, { message: research }) });
+  assert.equal(onceApplied.rowsPage.total, 4); assert.equal(new Set(onceApplied.workspace.rows.map(row => row.design!.traits.occupation.map(value => value.zh).join('、'))).size, 4);
+  assert.deepEqual(onceApplied.workspace.state.settings.catalogue?.dynamic?.selections.occupation, hardSelection);
+  const onceFrozen = await repository.getWorkspace(actor, onceDocument.workspace.id, { rowId: onceApplied.workspace.rows[0].id }); assert('rowSettings' in onceFrozen);
+  assert.deepEqual(onceFrozen.rowSettings.settings.catalogue?.dynamic?.selections.occupation, { ...hardSelection, enabled: true, locked: true, values: onceApplied.workspace.rows[0].catalogueSnapshot!.selections.occupation });
+  let unavailableError: unknown;
+  try {
+    await proposeFusionAgent({ workspace: onceDocument.workspace, message: research,
+      complete: async () => JSON.stringify({ reply: '类别尚未加入', commands: [{ type: 'generate', mode: 'append', plan: { formatVersion: 1, scope: 'batch', onceMust: { occupation: poolIds } } }] }), read: async () => ({}),
+      validateCommands: commands => validateFusionAgentExecution(commands, onceDocument.workspace, catalogue, research),
+    });
+  } catch (error) { unavailableError = error; }
+  assert(unavailableError instanceof FusionAgentError); assert.match(unavailableError.message, /onceMust/);
+  assert.match(unavailableError.userMessage || '', /职业与身份/); assert(!/onceMust|categoryId|catalogue|\[/.test(unavailableError.userMessage || ''));
+  checks.push('UX21一次必出类别接线：未加入与错key提示真实categoryId/启用路径并四步纠正，本批启用不回写且保硬池排除锁，空项不造约束');
 
   // Execute the actual layout effect against measured DOM doubles; no browser or visual claim.
   const studioFile = ts.createSourceFile('studio.tsx', await readFile('src/app/tools/character-fusion/studio.tsx', 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
