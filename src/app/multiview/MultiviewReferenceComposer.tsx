@@ -28,7 +28,7 @@ export function MultiviewReferenceComposer(props: Props) {
   const [history, setHistory] = useState<MultiviewReferenceRecipe[]>([]), [future, setFuture] = useState<MultiviewReferenceRecipe[]>([]);
   const [hydrated, setHydrated] = useState(false), [busy, setBusy] = useState(false), [message, setMessage] = useState('');
   const [pending, setPending] = useState<Pending | null>(null), [blocked, setBlocked] = useState(false);
-  const { confirm, productDialog } = useProductDialog();
+  const { confirm, productDialog } = useProductDialog({ placement: 'center' });
   const [backgrounds, setBackgrounds] = useState<Record<string,BackgroundState>>({}), [backgroundBusy, setBackgroundBusy] = useState('');
   const [showStyle, setShowStyle] = useState(false), [precise, setPrecise] = useState(false);
   const [syncAdjust, setSyncAdjust] = useState(false), [dragging, setDragging] = useState(false);

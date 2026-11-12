@@ -1,11 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '角色融合配卡与手机操作修复',
+  title: '3D多视图模型与弹窗修复',
   outline: [
-    '分组选项与实际抽卡保持一致',
-    '手机输入、发送和生成更易操作',
-    '保留当前输入、卡片与已有方案'
+    '动作整理记住所选模型，可更新当前目录',
+    '失效模型说明原因并保留原动作',
+    '多视图弹窗居中，操作区更清楚'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

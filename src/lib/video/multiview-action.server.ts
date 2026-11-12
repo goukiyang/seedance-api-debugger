@@ -12,11 +12,12 @@ import { StudioError } from '@/lib/template-studio/errors';
 import { assertUsageProject, recordUsageAttribution } from '@/lib/admin/usage-attribution';
 import { getStudioCapabilities } from '@/lib/template-studio/capabilities';
 import { isSeedanceVideoModelId, isSeedanceVideoDuration, seedanceVideoDurationError, DEFAULT_SEEDANCE_VIDEO_MODEL_ID } from '@/lib/provider/seedance-models';
-import { isStudioTextModel } from '@/lib/template-studio/text-models';
 import { TEMPLATE_STUDIO_LIMITS, stableJson } from '@/lib/template-studio/validation';
 import { containsPrivateContext, visibleRunPrompt } from '@/lib/template-studio/projection';
 import { transformPrivateVideoRun, privateVideoRunOrigins } from '@/lib/template-studio/private-storage.server';
-import { assertPrivateMuskSend, getMuskApiSettings } from '@/lib/integrations/musk';
+import { assertPrivateMuskSend, getMuskApiSettings, resolveMuskChatModels } from '@/lib/integrations/musk';
+import { readModelAccessSettings } from '@/lib/pricing/model-access.server';
+import { supplementaryModelEnabled } from '@/lib/pricing/model-availability-contract';
 import { privatePromptState, type PrivateOrigin } from '@/lib/security/private-prompts.server';
 import type { StudioJsonValue, StudioRunSnapshot } from '@/lib/template-studio/types';
 import { getMultiviewWork, multiviewWorkRecipeHash, assertMultiviewWorkReference, MultiviewWorkError } from './multiview-works';
@@ -88,6 +89,11 @@ async function runDto(row: RunRow, db: Db = prisma): Promise<MultiviewActionRun>
 export async function getMultiviewActionCapabilities(user: SessionUser): Promise<MultiviewActionCapabilities> {
   requireStudioUser(user);
   const capabilities = await getStudioCapabilities(user);
+  const settings = await getMuskApiSettings();
+  const access = await readModelAccessSettings();
+  const models = (await resolveMuskChatModels(settings)).filter(model => supplementaryModelEnabled(access, 'text', model));
+  capabilities.llmModels = models.map(id => ({ id, label: id }));
+  capabilities.defaultLlmModel = models.includes(settings.default_model) ? settings.default_model : '';
   try {
     const [format, sync] = await Promise.all([multiviewActionContextMetadata(user, 'format'), multiviewActionContextMetadata(user, 'sync')]);
     const ready = format.configured && sync.configured && MULTIVIEW_ACTION_ENABLED && process.env.MULTIVIEW_ACTION_ACCEPTING !== '0';
@@ -156,59 +162,70 @@ function baseSnapshot(user: SessionUser, draft: DraftRow, prompt: string, parame
     owner: { userId: user.id, username: user.username, displayName: user.name || user.username, avatarUrl: user.avatar_url || null, accountType: user.account_type } };
 }
 export async function createMultiviewActionRun(user: SessionUser, input: unknown) {
-  requireStudioUser(user);
-  if (!object(input) || !identifier(input.draftId) || !Number.isSafeInteger(input.revision) || typeof input.requestId !== 'string'
-    || !/^[A-Za-z0-9:_-]{1,96}$/.test(input.requestId) || input.llmModel !== undefined && !isStudioTextModel(String(input.llmModel))) throw invalid('文案请求无效');
-  const requestId = `mv-action:${input.requestId}`;
-  const prior = await prisma.videoStudioRun.findUnique({ where: { owner_user_id_request_id: { owner_user_id: user.id, request_id: requestId } } });
-  if (prior) {
-    if (prior.purpose !== purpose || prior.draft_id !== input.draftId || prior.draft_revision !== input.revision || prior.mode !== 'llm'
-      || input.llmModel !== undefined && snapshot(prior).llmModel !== input.llmModel) throw conflict('原请求编号已用于另一份动作，请查看原记录');
-    return { run: await runDto(prior), status: 200 };
-  }
-  const draft = await ownedDraft(user, input.draftId, input.revision), parsed = draftDto(draft);
-  const work = await referenceDraftWork(user, parsed.workId);
-  const text = actionText(draft.prompt, true);
-  const capabilities = await getMultiviewActionCapabilities(user);
-  if (!capabilities.actionReady || !capabilities.llmEnabled) throw new StudioError(capabilities.actionReason || capabilities.llmReason || '文案服务当前不可用', 503, 'UNAVAILABLE');
-  const format = await readMultiviewActionContext('format');
-  if (!format.context.trim()) throw conflict('动作格式尚未配置');
-  const value = baseSnapshot(user, draft, text, parsed.parameters);
-  value.privateContext = { global: format.context, module: '', globalRevision: format.revision, moduleRevision: 0 };
-  value.llmModel = input.llmModel as string || capabilities.defaultLlmModel;
-  value.multiviewAction = { stage: 'format', workId: work.id, revision: work.draftRevision, recipeHash: multiviewWorkRecipeHash(work.recipe!), outputHash: '',
-    sourceTaskId: work.sourceTaskId, sourceVersion: work.recipe!.sourceVersion, geometry: workGeometry(work.recipe! as Parameters<typeof workGeometry>[0]), assetId: '', formatRevision: format.revision, syncRevision: 0 };
-  if (text.length + format.context.length > TEMPLATE_STUDIO_LIMITS.llmInput) throw invalid('动作和固定规则合计过长');
-  const settings = { ...await getMuskApiSettings(), default_model: value.llmModel };
-  const origins = privateVideoRunOrigins(value, draft.id);
-  assertPrivateMuskSend(settings, origins);
-  if (!['legacy-read', 'compatible-read'].includes(privatePromptState())) value.privateProvider = { kind: 'musk', settings };
-  const fingerprint = makeFingerprint({ revision: draft.revision, model: value.llmModel, snapshot: value });
-  const row = await prisma.$transaction(async tx => {
-    const existing = await tx.videoStudioRun.findUnique({ where: { owner_user_id_request_id: { owner_user_id: user.id, request_id: requestId } } });
-    if (existing) {
-      if (existing.purpose !== purpose || existing.draft_id !== draft.id || existing.draft_revision !== draft.revision || existing.mode !== 'llm' || snapshot(existing).llmModel !== value.llmModel) throw conflict('原请求编号已使用');
-      return existing;
+  let admitted = false;
+  try {
+    requireStudioUser(user);
+    if (!object(input) || !identifier(input.draftId) || !Number.isSafeInteger(input.revision) || typeof input.requestId !== 'string'
+      || !/^[A-Za-z0-9:_-]{1,96}$/.test(input.requestId) || input.llmModel !== undefined && (typeof input.llmModel !== 'string' || !input.llmModel || input.llmModel.length > 100)) throw invalid('文案请求无效');
+    const requestId = `mv-action:${input.requestId}`;
+    const prior = await prisma.videoStudioRun.findUnique({ where: { owner_user_id_request_id: { owner_user_id: user.id, request_id: requestId } } });
+    if (prior) {
+      admitted = true;
+      if (prior.purpose !== purpose || prior.draft_id !== input.draftId || prior.draft_revision !== input.revision || prior.mode !== 'llm'
+        || input.llmModel !== undefined && snapshot(prior).llmModel !== input.llmModel) throw conflict('原请求编号已用于另一份动作，请查看原记录');
+      return { run: await runDto(prior), status: 200 };
     }
-    await assertSupplementaryModelEnabled('text', value.llmModel!, tx);
-    const current = await tx.videoStudioDraft.findFirst({ where: { id: draft.id, owner_user_id: user.id, purpose, revision: draft.revision } });
-    if (!current) throw conflict('动作已变化，请重新保存');
-    const [active, pending, accepted] = await Promise.all([
-      tx.videoStudioRun.count({ where: { owner_user_id: user.id, mode: 'llm', status: { in: ['queued', 'running'] } } }),
-      tx.videoStudioRun.count({ where: { mode: 'llm', status: { in: ['queued', 'running'] } } }),
-      tx.videoStudioRun.count({ where: { owner_user_id: user.id, mode: 'llm', created_at: { gte: new Date(Date.now() - TEMPLATE_STUDIO_LIMITS.llmRequestWindowMs) } } }),
-    ]);
-    if (active >= TEMPLATE_STUDIO_LIMITS.activeLlmRunsPerUser || pending >= TEMPLATE_STUDIO_LIMITS.maxPendingLlmRuns || accepted >= TEMPLATE_STUDIO_LIMITS.llmRequestsPerUserWindow) throw new StudioError('AI 整理提交较频繁，请稍后再试', 429, 'RATE_LIMITED');
-    const id = randomUUID();
-    await assertUsageProject(tx, user, parsed.parameters.project_id || null);
-    const created = await tx.videoStudioRun.create({ data: { id, owner_user_id: user.id, purpose, draft_id: draft.id, draft_revision: draft.revision, request_id: requestId,
-      request_fingerprint: fingerprint, source: 'blank', mode: 'llm', status: 'queued', delivery_state: 'not_sent', model: value.llmModel,
-      snapshot_json: JSON.stringify(transformPrivateVideoRun(value, id, draft.id, true)) } });
-    await recordUsageAttribution(tx, { sourceKind: 'video_studio_run', sourceId: id, actorUserId: user.id, ownerUserId: user.id, billingSubjectType: 'user', billingSubjectId: user.id,
-      projectId: parsed.parameters.project_id || null, occurredAt: created.created_at, contextOrigin: 'multiview-action-explicit-project' });
-    return created;
-  });
-  return { run: await runDto(row), status: row.status === 'queued' || row.status === 'running' ? 202 : 200 };
+    const draft = await ownedDraft(user, input.draftId, input.revision), parsed = draftDto(draft);
+    const work = await referenceDraftWork(user, parsed.workId);
+    const text = actionText(draft.prompt, true);
+    const capabilities = await getMultiviewActionCapabilities(user);
+    if (!capabilities.actionReady || !capabilities.llmEnabled) throw new StudioError(capabilities.actionReason || capabilities.llmReason || '文案服务当前不可用', 503, 'UNAVAILABLE');
+    const model = input.llmModel as string || capabilities.defaultLlmModel;
+    if (!capabilities.llmModels.some(item => item.id === model)) throw new StudioError('所选文案模型当前不可用，请更新模型后重新选择；原动作保留。', 400, 'INVALID');
+    const format = await readMultiviewActionContext('format');
+    if (!format.context.trim()) throw conflict('动作格式尚未配置');
+    const value = baseSnapshot(user, draft, text, parsed.parameters);
+    value.privateContext = { global: format.context, module: '', globalRevision: format.revision, moduleRevision: 0 };
+    value.llmModel = model;
+    value.multiviewAction = { stage: 'format', workId: work.id, revision: work.draftRevision, recipeHash: multiviewWorkRecipeHash(work.recipe!), outputHash: '',
+      sourceTaskId: work.sourceTaskId, sourceVersion: work.recipe!.sourceVersion, geometry: workGeometry(work.recipe! as Parameters<typeof workGeometry>[0]), assetId: '', formatRevision: format.revision, syncRevision: 0 };
+    if (text.length + format.context.length > TEMPLATE_STUDIO_LIMITS.llmInput) throw invalid('动作和固定规则合计过长');
+    const settings = { ...await getMuskApiSettings(), default_model: value.llmModel };
+    const origins = privateVideoRunOrigins(value, draft.id);
+    assertPrivateMuskSend(settings, origins);
+    if (!['legacy-read', 'compatible-read'].includes(privatePromptState())) value.privateProvider = { kind: 'musk', settings };
+    const fingerprint = makeFingerprint({ revision: draft.revision, model: value.llmModel, snapshot: value });
+    const row = await prisma.$transaction(async tx => {
+      const existing = await tx.videoStudioRun.findUnique({ where: { owner_user_id_request_id: { owner_user_id: user.id, request_id: requestId } } });
+      if (existing) {
+        admitted = true;
+        if (existing.purpose !== purpose || existing.draft_id !== draft.id || existing.draft_revision !== draft.revision || existing.mode !== 'llm' || snapshot(existing).llmModel !== value.llmModel) throw conflict('原请求编号已使用');
+        return existing;
+      }
+      await assertSupplementaryModelEnabled('text', value.llmModel!, tx);
+      const current = await tx.videoStudioDraft.findFirst({ where: { id: draft.id, owner_user_id: user.id, purpose, revision: draft.revision } });
+      if (!current) throw conflict('动作已变化，请重新保存');
+      const [active, pending, accepted] = await Promise.all([
+        tx.videoStudioRun.count({ where: { owner_user_id: user.id, mode: 'llm', status: { in: ['queued', 'running'] } } }),
+        tx.videoStudioRun.count({ where: { mode: 'llm', status: { in: ['queued', 'running'] } } }),
+        tx.videoStudioRun.count({ where: { owner_user_id: user.id, mode: 'llm', created_at: { gte: new Date(Date.now() - TEMPLATE_STUDIO_LIMITS.llmRequestWindowMs) } } }),
+      ]);
+      if (active >= TEMPLATE_STUDIO_LIMITS.activeLlmRunsPerUser || pending >= TEMPLATE_STUDIO_LIMITS.maxPendingLlmRuns || accepted >= TEMPLATE_STUDIO_LIMITS.llmRequestsPerUserWindow) throw new StudioError('AI 整理提交较频繁，请稍后再试', 429, 'RATE_LIMITED');
+      const id = randomUUID();
+      await assertUsageProject(tx, user, parsed.parameters.project_id || null);
+      const created = await tx.videoStudioRun.create({ data: { id, owner_user_id: user.id, purpose, draft_id: draft.id, draft_revision: draft.revision, request_id: requestId,
+        request_fingerprint: fingerprint, source: 'blank', mode: 'llm', status: 'queued', delivery_state: 'not_sent', model: value.llmModel,
+        snapshot_json: JSON.stringify(transformPrivateVideoRun(value, id, draft.id, true)) } });
+      await recordUsageAttribution(tx, { sourceKind: 'video_studio_run', sourceId: id, actorUserId: user.id, ownerUserId: user.id, billingSubjectType: 'user', billingSubjectId: user.id,
+        projectId: parsed.parameters.project_id || null, occurredAt: created.created_at, contextOrigin: 'multiview-action-explicit-project' });
+      return created;
+    });
+    admitted = true;
+    return { run: await runDto(row), status: row.status === 'queued' || row.status === 'running' ? 202 : 200 };
+  } catch (error) {
+    if (!admitted && error instanceof StudioError) throw new StudioError(error.message, error.status, error.code, { ...error.details, notAccepted: true });
+    throw error;
+  }
 }
 export async function getMultiviewActionRun(user: SessionUser, id: string) {
   requireStudioUser(user);
