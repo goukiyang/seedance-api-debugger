@@ -53,7 +53,7 @@ export function MultiviewActionPanel(props: Props) {
   const [message,setMessage]=useState(''),[quoteError,setQuoteError]=useState(''),[quote,setQuote]=useState<Quote|null>(null),[quoting,setQuoting]=useState(false);
   const [llmModel,setLlmModel]=useState(''),[llmModels,setLlmModels]=useState<Array<{id:string;label:string}>>([]),[modelsBusy,setModelsBusy]=useState(false),[modelMessage,setModelMessage]=useState('');
   const [aiJournal,setAiJournal]=useState<AiJournal>({current:null,retained:[]}),[aiBusy,setAiBusy]=useState(false),[suggestion,setSuggestion]=useState<MultiviewActionRun|null>(null),[beforeAi,setBeforeAi]=useState<string|null>(null);
-  const aiPending=aiJournal.current,aiJournalRef=useRef(aiJournal);aiJournalRef.current=aiJournal;
+  const aiPending=aiJournal.current,aiJournalRef=useRef(aiJournal);
   const [context,setContext]=useState<MultiviewActionContextKind|null>(null),[confirming,setConfirming]=useState(false),[submitting,setSubmitting]=useState(false);
   const [original,setOriginal]=useState<Original|null>(null),[selectedRunId,setSelectedRunId]=useState(''),[baseline,setBaseline]=useState<string|null>(null);
   const [quoteRetry,setQuoteRetry]=useState(0);
