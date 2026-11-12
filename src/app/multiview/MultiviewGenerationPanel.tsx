@@ -304,6 +304,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   const [quoteError, setQuoteError] = useState('');
   const [presetState, setPresetState] = useState<MultiviewRotationPresetPublicState | null>(null);
   const [presetError, setPresetError] = useState('');
+  const presetSettings = useRef<HTMLDetailsElement>(null);
   const [presetRefresh, setPresetRefresh] = useState(0);
   const [promptOpen, setPromptOpen] = useState(false);
   const [promptRisk, setPromptRisk] = useState({ unsaved: false, busy: false });
@@ -645,7 +646,13 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
         const value = binding ? boundSettings?.id === binding.id && boundSettings.revision === binding.revision && boundSettings.kind === 'generation'
           && boundSettings.value.presetVersion === draftRef.current?.presetVersion
           ? parsePublicPresetState({ revision: binding.revision, preset: bound?.preset }) : null : parsePublicPresetState(payload);
-        if (!response.ok || !value) throw new Error(typeof bound?.error === 'string' && bound.code === 'MULTIVIEW_PRESET_LEGACY' ? bound.error : '模板暂不可读取，请重试；当前图片和补充要求已保留。');
+        if (!response.ok || !value) {
+          const knownReason = bound && ['MULTIVIEW_SETTINGS_NOT_FOUND', 'MULTIVIEW_SETTINGS_ACCESS_REVOKED', 'MULTIVIEW_SETTINGS_REVISION_CONFLICT', 'MULTIVIEW_PRESET_LEGACY'].includes(String(bound.code));
+          setPresetError(bound?.code === 'MULTIVIEW_SETTINGS_NOT_FOUND'
+            ? '这份生成预设已被删除或不存在，请更换生成预设；当前图片和补充要求已保留。'
+            : knownReason && typeof bound?.error === 'string' ? bound.error : '模板暂不可读取，请重试；当前图片和补充要求已保留。');
+          return;
+        }
         const scanned = refreshRequests();
         if (pendingActive(receiptRef.current) || submitLock.current || scanned.invalid || scanned.incomplete || scanned.records.some(blocksNewRequest)) {
           // Root cause of “生成视频 grey until the settings dropdown is touched”: this skip left the template unread
@@ -1226,7 +1233,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
         }}>重试原加入</button></div>}
       </div>
       <div className={styles.settings}>
-        <details className={styles.advanced}><summary>生成预设</summary>
+        <details ref={presetSettings} className={styles.advanced}><summary>生成预设</summary>
         <MultiviewSettingsPicker kind="generation" ownerId={owner} authorityKey={authorityKey} disabled={settingsDisabled}
           value={presetReady ? generationSettingsValue(draft) : null} binding={draft.settingsBinding}
           onApply={applyGenerationSettings} onReset={useCurrentRotationPreset} onSaved={adoptSavedGenerationSettings} onStateChange={setSettingsRisk}
@@ -1237,7 +1244,9 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
         <div className={styles.preset}><strong>360°旋转模板</strong>{user.role === 'admin' && <button type="button" className={styles.quiet} disabled={formDisabled} onClick={() => setPromptOpen(true)}>{draft.settingsBinding ? '默认模板提示词' : '模板提示词'}</button>}</div>
         {draft.settingsBinding && <small>使用这份设置保存时的默认配置。</small>}
         </details>
-        {presetError && !active && <p className={styles.feedback} role="status">{presetError}<button type="button" className={styles.quiet} onClick={() => setPresetRefresh(value => value + 1)}>重新读取</button></p>}
+        {presetError && !active && <p className={styles.feedback} role="status">{presetError}{draft.settingsBinding && <button type="button" className={styles.quiet} onClick={() => {
+          if (presetSettings.current) { presetSettings.current.open = true; presetSettings.current.querySelector<HTMLButtonElement>('button[aria-haspopup="dialog"]')?.focus(); }
+        }}>更换生成预设</button>}<button type="button" className={styles.quiet} onClick={() => setPresetRefresh(value => value + 1)}>重新读取</button></p>}
         <div className={styles.parameters}>
           <label>模型<select value={selectedModel ? draft.model : ''} disabled={formDisabled} onChange={event => change({ model: event.target.value })}><option value="" disabled>{modelAvailabilityReason || "请选择已开放模型"}</option>{availableModels.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
           <label>时长<select value={draft.duration} disabled={formDisabled} onChange={event => change({ duration: Number(event.target.value) })}>{!durationOptions.some(value => value === draft.duration) && <option value={draft.duration}>{draft.duration}秒（需确认）</option>}{durationOptions.map(value => <option key={value} value={value}>{value}秒</option>)}</select></label>
