@@ -3,10 +3,10 @@ import packageInfo from '../../package.json';
 const notice = {
   title: '角色融合对话工作台',
   outline: [
-    '原卡片与常驻对话共同创作，方案按批次整理',
-    '新创作、沿用组合与继续各有清楚入口',
-    '本批要求、单条调整与后续固定分开生效',
-    '对话撤销与新词入库接续实际抽卡'
+    '单条调整准确区分本次目标与保留要求',
+    '非战斗与不同岗位要求进入实际方案',
+    '新词确认后接续生成，取消状态清楚呈现',
+    '窄屏输入与反馈入口避让'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
