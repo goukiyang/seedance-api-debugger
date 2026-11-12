@@ -1,13 +1,10 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '角色融合对话工作台',
+  title: '角色融合对话等待修复',
   outline: [
-    '明确批量要求会接续实际生成',
-    '单条调整准确区分本次目标与保留要求',
-    '非战斗与不同岗位要求进入实际方案',
-    '新词确认后接续生成，取消状态清楚呈现',
-    '窄屏输入与反馈入口避让，发送按钮可识别'
+    '多步查询与纠错有足够时间接续完成',
+    '保留原卡片、取消操作及已有结果'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
