@@ -3,10 +3,11 @@ import packageInfo from '../../package.json';
 const notice = {
   title: '角色融合对话工作台',
   outline: [
+    '明确批量要求会接续实际生成',
     '单条调整准确区分本次目标与保留要求',
     '非战斗与不同岗位要求进入实际方案',
     '新词确认后接续生成，取消状态清楚呈现',
-    '窄屏输入与反馈入口避让'
+    '窄屏输入与反馈入口避让，发送按钮可识别'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
