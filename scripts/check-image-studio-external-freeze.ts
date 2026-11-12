@@ -1,12 +1,33 @@
 import './server-runtime.cjs';
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
-import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
 import ts from 'typescript';
+import { addCredits, sumCredits } from '../src/lib/credits/precision';
+import { externalStudioCanUsePresetId, isExternalImageStudioActor } from '../src/lib/image-studio/access';
+import { EXTERNAL_IMAGE_ADMISSION_ENABLED } from '../src/lib/image-studio/external-admission';
+
+function declarations(root: string, file: string, names: string[]) {
+  const source = ts.createSourceFile(file, fs.readFileSync(path.join(root, file), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  return names.map(name => {
+    const node = source.statements.find(statement => (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement))
+      ? statement.name?.text === name : ts.isVariableStatement(statement)
+        && statement.declarationList.declarations.some(declaration => ts.isIdentifier(declaration.name) && declaration.name.text === name));
+    assert.ok(node, `Missing production declaration ${file}:${name}`);
+    return node.getText(source);
+  }).join('\n');
+}
+
+function evaluate(source: string, bindings: Record<string, unknown>, filename: string) {
+  const scope = { exports: {}, Error, console, ...bindings };
+  vm.runInNewContext(ts.transpileModule(source, { compilerOptions: {
+    target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS,
+  } }).outputText, scope, { filename });
+  return scope.exports as Record<string, any>;
+}
 
 /** Production prepareBatch + real private storage; memory-only parent/items, no supplier or database. */
 async function main() {
@@ -35,11 +56,39 @@ async function main() {
     inventoryId: 'fixture', restoreId: 'fixture', writerFenceId: 'fixture',
     consumers: [{ id: 'fixture', reader: 1, permissionContract: 1, sourceRevision: 'a'.repeat(40) }] });
   try {
-    const require = createRequire(import.meta.url);
     const storage = await import('../src/lib/image-studio/private-storage.server');
     const crypto = await import('../src/lib/security/private-prompts.server');
+    const admissionSource = declarations(root, 'src/lib/image-studio/tasks.ts', ['StudioError', 'SharedStudioDefinitionError', 'assertExternalStudioAdmission']);
+    assert.equal(typeof EXTERNAL_IMAGE_ADMISSION_ENABLED, 'boolean');
+    const admissionBindings = { isExternalImageStudioActor, externalStudioCanUsePresetId, EXTERNAL_IMAGE_ADMISSION_ENABLED: true };
+    const admission = evaluate(admissionSource, admissionBindings, 'external-freeze-admission.vm.ts');
+    const { StudioError, SharedStudioDefinitionError, assertExternalStudioAdmission } = admission;
     const batchId = 'b'.repeat(64), requestId = 'r'.repeat(20);
     const intent = { protocol: 'shared-live-v1', presetId: source, definitionToken: 'source-version' };
+    const actor = { id: owner, role: 'user', account_type: 'external', externalStudioAccess: {
+      enabled: true, revision: 1, presetIds: [] as string[], allShared: true,
+    } };
+    const sharedUse = { binding: { mode: 'live', ownerId: owner }, definition: { intent, skills: [{ id: skillId, promptVersion }] } };
+    const denied = (run: () => void) => assert.throws(run, (error: any) => error instanceof StudioError && error.status === 403);
+    assert.doesNotThrow(() => assertExternalStudioAdmission(actor, 'fixture-module', sharedUse));
+    assert.doesNotThrow(() => assertExternalStudioAdmission(actor, 'fixture-module', {
+      ...sharedUse, definition: { ...sharedUse.definition, intent: { ...intent, presetId: 'fixture-new-shared-source' } },
+    }));
+    const legacy = { ...actor, externalStudioAccess: { enabled: true, revision: 1, presetIds: [source], allShared: false } };
+    assert.doesNotThrow(() => assertExternalStudioAdmission(legacy, 'fixture-module', sharedUse));
+    denied(() => assertExternalStudioAdmission({ ...legacy, externalStudioAccess: { ...legacy.externalStudioAccess, presetIds: [] } }, 'fixture-module', sharedUse));
+    denied(() => assertExternalStudioAdmission({ ...actor, externalStudioAccess: { ...actor.externalStudioAccess, enabled: false } }, 'fixture-module', sharedUse));
+    denied(() => assertExternalStudioAdmission({ id: owner, role: 'admin', account_type: 'external' }, 'fixture-module', sharedUse));
+    denied(() => assertExternalStudioAdmission(actor, undefined, sharedUse));
+    denied(() => assertExternalStudioAdmission(actor, 'fixture-module', null));
+    denied(() => assertExternalStudioAdmission(actor, 'fixture-module', { ...sharedUse, binding: { mode: 'publisher', ownerId: owner } }));
+    denied(() => assertExternalStudioAdmission(actor, 'fixture-module', { ...sharedUse, binding: { mode: 'live', ownerId: author } }));
+    denied(() => assertExternalStudioAdmission(actor, 'fixture-module', { ...sharedUse, definition: { ...sharedUse.definition,
+      intent: { ...intent, presetId: 'parameter-copy-11111111-1111-4111-8111-111111111111' } } }));
+    const guarded = evaluate(admissionSource, { ...admissionBindings, EXTERNAL_IMAGE_ADMISSION_ENABLED: false }, 'external-freeze-guard.vm.ts');
+    assert.throws(() => guarded.assertExternalStudioAdmission(actor, 'fixture-module', sharedUse),
+      (error: any) => error instanceof guarded.StudioError && error.status === 403);
+    assert.doesNotThrow(() => guarded.assertExternalStudioAdmission({ id: author, role: 'admin', account_type: 'internal' }, undefined, null));
     const batch = { version: 1, sizePolicyVersion: 2, id: batchId, ownerId: owner, requestId, fingerprint: 'fixture',
       moduleId: 'fixture-module', moduleName: 'Fixture', state: 'preparing', note: '', total: 2, budget: 2, committedCredits: 0,
       unitCredits: 1, prepared: 0, input: { sharedLive: intent, referenceIds: [] },
@@ -55,12 +104,11 @@ async function main() {
         if (!row) return { count: 0 }; Object.assign(row, data); return { count: 1 }; },
     } };
     db.$transaction = async (operation: (tx: any) => Promise<unknown>) => operation(db);
-    class StudioError extends Error { constructor(message: string, public status = 400) { super(message); } }
-    class SharedStudioDefinitionError extends StudioError {}
     const preparedSkills: string[] = [];
     const tasks = { StudioError, SharedStudioDefinitionError, parseSharedStudioIntent: (value: unknown) => value,
-      resolveOwnedStudioTaskSharedUse: async () => ({ definition: { skills: [{ id: skillId, promptVersion }] } }),
+      resolveOwnedStudioTaskSharedUse: async () => { assertExternalStudioAdmission(actor, batch.moduleId, sharedUse); return sharedUse; },
       submitStudioBatch: async (_owner: string, input: any, _avatar: unknown, preparation: any) => {
+        assertExternalStudioAdmission(actor, batch.moduleId, sharedUse);
         const id = `quote-task-${input.requestId.split('-').at(-1)}`;
         const raw = { id, owner_id: owner, module_id: batch.moduleId, source_preset_id: source, batch_id: batchId, ordinal: 1,
           prompt, context, unit_credits: 1, reference_ids: '[]', snapshot_json: JSON.stringify({ moduleId: batch.moduleId,
@@ -73,21 +121,19 @@ async function main() {
         await preparation.save(db, runtime);
       } };
     const file = path.join(root, 'src/lib/image-studio/batches.ts');
-    const sourceText = fs.readFileSync(file, 'utf8'), prepareStart = sourceText.indexOf('async function prepareBatch(');
-    assert.ok(prepareStart >= 0);
+    const batchSource = declarations(root, 'src/lib/image-studio/batches.ts', ['PREFIX', 'ITEM_PREFIX', 'CHANNEL_PREFIX', 'CHANNEL_ITEM_PREFIX',
+      'key', 'batchKeys', 'itemKey', 'childId', 'parse', 'validId', 'readOwned', 'writeBatch', 'sharedDefinitionError', 'invalidateUnacceptedDefinition', 'prepareBatch']);
     // Keep production failure behavior; expose the swallowed synthetic cause across native environments.
-    const diagnosticSource = sourceText.slice(0, prepareStart) + sourceText.slice(prepareStart).replace('  } catch (error) {',
+    const diagnosticSource = batchSource.replace('  } catch (error) {',
       `  } catch (error) { console.error('[external-freeze-diagnostic]', JSON.stringify({ name: error?.name, code: error?.code, message: error?.message, stack: error?.stack }));`);
-    const compiled = ts.transpileModule(`${diagnosticSource}\nexport const fixturePrepareBatch = prepareBatch;`,
-      { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText;
-    const module = { exports: {} as { fixturePrepareBatch: (owner: string, id: string) => Promise<void> } };
-    const imports: Record<string, unknown> = { '@/lib/prisma': { prisma: db }, './tasks': tasks, './private-storage.server': storage,
-      '@/lib/credits/precision': require(path.join(root, 'src/lib/credits/precision.ts')),
-      './submit-receipts.server': { assertStudioRequestWritable: async () => undefined },
-      './pricing-state': { PRICING_BATCH_PREFIX: 'pricing_batch:', PRICING_BATCH_ITEM_PREFIX: 'pricing_batch_item:' } };
-    const routeRequire = (id: string) => id.startsWith('node:') ? require(id) : imports[id] || {};
-    vm.runInThisContext(`(function(require,module,exports){${compiled}\n})`, { filename: file })(routeRequire, module, module.exports);
-    await module.exports.fixturePrepareBatch(owner, batchId);
+    const engine = evaluate(`${diagnosticSource}\nexport const fixturePrepareBatch = prepareBatch;`, {
+      prisma: db, ...tasks, ...storage, addCredits, sumCredits,
+      assertStudioRequestWritable: async (_tx: unknown, currentOwner: string, currentRequest: string) => {
+        assert.equal(currentOwner, owner); assert.equal(currentRequest, requestId);
+      },
+      PRICING_BATCH_PREFIX: 'pricing_batch:', PRICING_BATCH_ITEM_PREFIX: 'pricing_batch_item:',
+    }, file);
+    await engine.fixturePrepareBatch(owner, batchId);
     const completed = JSON.parse(rows.get(parentKey)!.value_json);
     assert.equal(completed.state, 'ready', completed.note);
     assert.equal(completed.prepared, 2);
@@ -111,7 +157,8 @@ async function main() {
         (error: unknown) => crypto.isPrivatePromptError(error) && error.code === 'PRIVATE_PROMPT_UNAVAILABLE');
     }
     console.log(JSON.stringify({ synthetic: true, checks: ['final-child-id-private-bindings', 'source-skill-version-preserved',
-      'no-plaintext-prepared-persistence', 'two-child-consistency', 'wrong-id-rejected'], supplierCalls: 0, productionWrites: 0 }));
+      'no-plaintext-prepared-persistence', 'two-child-consistency', 'wrong-id-rejected',
+      'global-and-legacy-admission-respect-closed-and-live-owner'], supplierCalls: 0, productionWrites: 0 }));
   } finally {
     for (const key of Object.keys(process.env).filter(key => key.startsWith('PRIVATE_PROMPTS_') || key === 'NODE_ENV')) delete process.env[key];
     Object.assign(process.env, prior); fs.rmSync(policyRoot, { recursive: true, force: true });

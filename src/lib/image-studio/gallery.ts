@@ -82,7 +82,8 @@ export async function readGalleryCatalog(user: ImageStudioIdentity, tx: Prisma.T
       bindingInvalid = true;
     }
     const source = row.source_preset_id ? sourceById.get(row.source_preset_id) : null;
-    const sourceVisible = Boolean(source && canViewStudioPreset(actor, source) && !await studioPresetArchived(source.id, client));
+    const sourceVisible = Boolean(source && canViewStudioPreset(actor, source) && !await studioPresetArchived(source.id, client)
+      && (!external || available.get(source.id) === true));
     const usable = !bindingInvalid && (!external || binding?.mode === 'live') && (!row.source_preset_id || sourceVisible && available.get(row.source_preset_id) === true);
     const merged = Boolean(binding && source && binding.presetId === source.id);
     const key = merged ? `image_template:${binding!.presetId}` : `image_module:${row.id}`;

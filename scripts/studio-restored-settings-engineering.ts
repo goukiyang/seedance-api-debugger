@@ -17,7 +17,7 @@ import { CURRENT_STUDIO_SIZE_POLICY_VERSION } from '../src/lib/image-studio/rati
 import { normalizeImageFeishuChoice } from '../src/lib/image-studio/feishu-contract';
 import { historicalStudioStyles } from '../src/lib/image-studio/style-history';
 import { freezeImageWorkMethodUse } from '../src/lib/works/method-reference';
-import { canAccessImageTemplates, isExternalImageStudioActor, externalStudioPresetIds } from '../src/lib/image-studio/access';
+import { canAccessImageTemplates, isExternalImageStudioActor, externalStudioCanUsePresetId } from '../src/lib/image-studio/access';
 import { EXTERNAL_IMAGE_ADMISSION_ENABLED } from '../src/lib/image-studio/external-admission';
 
 // This fixture evaluates selected production declarations with synthetic dependencies.
@@ -182,9 +182,9 @@ async function main() {
     defaultStudioModuleId: () => 'synthetic-default-module', validStudioModuleId: (id: string) => id === moduleId,
     getImageStudioSettings: async () => settings, withContextVersionRetry: (run: () => unknown) => run(),
     assertNoSynchronousImageAdmission: async () => {}, assertUsageProject: async () => {},
-    canAccessImageTemplates, isExternalImageStudioActor, externalStudioPresetIds, EXTERNAL_IMAGE_ADMISSION_ENABLED,
+    canAccessImageTemplates, isExternalImageStudioActor, externalStudioCanUsePresetId, EXTERNAL_IMAGE_ADMISSION_ENABLED,
     hydrateExternalStudioActor: async (actor: typeof user) => isExternalImageStudioActor(actor)
-      ? { ...actor, externalStudioAccess: { enabled: false, revision: 0, presetIds: [] } } : actor,
+      ? { ...actor, externalStudioAccess: { enabled: false, revision: 0, presetIds: [], allShared: false } } : actor,
     ensureDefaultProjectForUser: async () => { forbiddenCalls++; throw new Error('Internal restoration must not repair an external project'); },
     canViewStudioPreset: (_actor: unknown, preset: { owner_id: string; is_shared: boolean }) => preset.owner_id === owner || preset.is_shared,
     resolveStudioTaskSharedUse: async (_actor: unknown, _module: unknown, supplied: unknown) => { assert.deepEqual(plain(supplied), intent); return shared; },

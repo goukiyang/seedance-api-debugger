@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { IMAGE_STUDIO_MODELS } from './model-catalog';
 import { MAX_REFERENCE_IMAGES } from './limits';
-import { externalStudioPresetIds, isExternalImageStudioActor, type ImageStudioIdentity } from './access';
+import { externalStudioAllShared, externalStudioPresetIds, isExternalImageStudioActor, type ImageStudioIdentity } from './access';
+import { INTERNAL_EMAIL_FEATURE_PROFILE_ID } from '@/lib/users/profiles';
 import type { GalleryQuery } from './gallery-types';
 import { catalogVisibilitySql, CatalogSqlCompatibilityError } from '@/lib/assets/catalog-visibility-sql';
 import { sharedCommandFingerprint } from './shared-command-storage';
@@ -36,13 +37,30 @@ export async function galleryDirectorySql(db: Prisma.TransactionClient, actor: I
   const ownerHash = sharedCommandFingerprint(actor.id), deletedPrefix = `studio_deleted_workspace_v1:${ownerHash}:`;
   const sourceDeletedPrefix = `studio_deleted_workspace_source_v1:${ownerHash}:`;
   const external = isExternalImageStudioActor(actor);
-  const allowedSource = external ? catalogIdsSql(Prisma.sql`p."id"`, externalStudioPresetIds(actor)) : Prisma.sql`1 = 1`;
+  const parameterCopy = Prisma.sql`length(p."id") = 51 AND substr(p."id", 1, 15) = 'parameter-copy-'
+    AND substr(p."id", 16) NOT GLOB '*[^0-9a-f-]*'`;
+  const allowedSource = external ? externalStudioAllShared(actor)
+    ? Prisma.sql`p."scope" IN ('admin', 'creator') AND p."is_shared" = 1 AND NOT (${parameterCopy})`
+    : catalogIdsSql(Prisma.sql`p."id"`, externalStudioPresetIds(actor)) : Prisma.sql`1 = 1`;
+  const allowedTenant = process.env.FEISHU_ALLOWED_TENANT_KEY?.trim();
+  const sourceOwnerAllowed = Prisma.sql`source_owner."account_type" = 'internal' AND source_owner."status" = 'active'
+    AND (source_owner."expires_at" IS NULL OR source_owner."expires_at" > ${new Date()})
+    AND (source_owner."role" = 'admin' OR source_owner."role" = 'user' AND source_owner."feature_profile_id" = ${INTERNAL_EMAIL_FEATURE_PROFILE_ID}
+      OR length(COALESCE(source_owner."feishu_tenant_key", '')) > 0
+        AND (${allowedTenant ? Prisma.sql`source_owner."feishu_tenant_key" = ${allowedTenant}` : Prisma.sql`1 = 1`})
+        AND (length(COALESCE(source_owner."feishu_user_id", '')) > 0 OR length(COALESCE(source_owner."feishu_open_id", '')) > 0 OR length(COALESCE(source_owner."feishu_union_id", '')) > 0))`;
   const sourceVisible = Prisma.sql`${allowedSource} AND (p."owner_id" = ${actor.id} OR p."scope" IN ('admin', 'creator') AND p."is_shared" = 1)
+    AND (${external ? sourceOwnerAllowed : Prisma.sql`1 = 1`})
     AND NOT EXISTS (SELECT 1 FROM "PlatformSetting" a WHERE a."key" = 'studio_preset_archived_v1:' || p."id")`;
   const fixed = Prisma.sql`CASE WHEN reproduction IS NOT NULL THEN ${field(Prisma.sql`reproduction`, '$.templateFixedReferences')}
     ELSE COALESCE(${field(Prisma.sql`fixed_setting`, '$.references')}, '[]') END`;
   const policy = field(Prisma.sql`policy_setting`, '$.policy');
   const primary = Prisma.sql`CASE WHEN policy_setting IS NULL THEN refs ELSE COALESCE(json_extract(policy, '$.primaryIds'), '[]') END`;
+  const dependencyActorId = external ? Prisma.sql`p."owner_id"` : Prisma.sql`${actor.id}`;
+  const dependencyAdmin = external ? Prisma.sql`p.owner_admin` : Prisma.sql`${actor.role === 'admin' ? 1 : 0}`;
+  const ordinaryVisible = external ? visibility.visibleTo(Prisma.sql`a."original_url"`, dependencyActorId, dependencyAdmin)
+    : visibility.visible(Prisma.sql`a."original_url"`);
+  const readableSource = external ? Prisma.sql`p.visible = 1 AND p.available = 1` : Prisma.sql`p.visible = 1`;
   const validBinding = Prisma.sql`b."id" IS NOT NULL AND ${field(Prisma.sql`b."value_json"`, '$.ownerId')} = m."owner_id"
     AND ${field(Prisma.sql`b."value_json"`, '$.protocol')} = 'shared-live-v1'
     AND ${field(Prisma.sql`b."value_json"`, '$.mode')} IN ('publisher', 'live')
@@ -70,14 +88,15 @@ export async function galleryDirectorySql(db: Prisma.TransactionClient, actor: I
       AND (${keys ? catalogIdsSql(Prisma.sql`key`, keys) : Prisma.sql`1 = 1`})`;
   const ctes = Prisma.sql`${visibility.ctes},
     source_settings AS MATERIALIZED (
-      SELECT p.*, (${sourceVisible}) AS visible,
+      SELECT p.*, (${sourceVisible}) AS visible, source_owner."role" = 'admin' AS owner_admin,
         ${setting(Prisma.sql`'studio_fixed_references_v1:preset:' || p."id"`)} AS fixed_setting,
         ${setting(Prisma.sql`'studio_reference_policy_v1:preset:' || p."owner_id" || ':' || p."id"`)} AS policy_setting,
         ${setting(Prisma.sql`'studio_style_preset_selection_v1:' || p."id"`)} AS style_setting,
         ${setting(Prisma.sql`'studio_skill_selection_v1:preset:' || p."id"`)} AS skill_setting,
         ${setting(Prisma.sql`'studio_shared_reproduction_v1:' || p."id"`)} AS reproduction,
         (${publisherKnown}) AS author_known
-      FROM "ImageStudioPreset" p LEFT JOIN "PlatformSetting" publisher ON publisher."key" = 'studio_shared_publisher_v1:' || p."id"
+      FROM "ImageStudioPreset" p LEFT JOIN "User" source_owner ON source_owner."id" = p."owner_id"
+        LEFT JOIN "PlatformSetting" publisher ON publisher."key" = 'studio_shared_publisher_v1:' || p."id"
       WHERE (${allowedSource} OR p."id" IN (SELECT owned_module."source_preset_id" FROM "ImageStudioModule" owned_module WHERE owned_module."owner_id" = ${actor.id}))
         AND (${keys ? Prisma.sql`${catalogIdsSql(Prisma.sql`p."id"`, presetIds)} OR p."id" IN (SELECT wanted_module."source_preset_id" FROM "ImageStudioModule" wanted_module
         WHERE wanted_module."owner_id" = ${actor.id} AND ${catalogIdsSql(Prisma.sql`wanted_module."id"`, moduleIds)})` : Prisma.sql`1 = 1`})
@@ -94,16 +113,29 @@ export async function galleryDirectorySql(db: Prisma.TransactionClient, actor: I
         json_each(${json(Prisma.sql`sg."value_json"`)}, '$.references') r
       UNION ALL SELECT p."id", p."banner_asset_id", 'banner' FROM source_policy p WHERE p."banner_asset_id" IS NOT NULL
     ), source_state AS MATERIALIZED (
-      SELECT p.*, CASE WHEN ${external ? 1 : 0} = 1 THEN p.visible ELSE (p.visible = 1 AND p."model" IN (${Prisma.join(IMAGE_STUDIO_MODELS)})
+      SELECT p.*, (p.visible = 1 AND p."model" IN (${Prisma.join(IMAGE_STUDIO_MODELS)})
+        AND (${external ? Prisma.sql`p."model" <> 'gemini-nano-banana-2.1'
+          OR (p."quality" IS NULL OR p."quality" IN ('auto', 'low', 'medium', 'high', 'xhigh', 'max'))
+            AND (p."resolution" IS NULL OR p."resolution" IN ('0.5K', '1K', '2K', '4K'))` : Prisma.sql`1 = 1`})
         AND (skill_setting IS NULL OR ${field(Prisma.sql`skill_setting`, '$.ownerId')} = p."owner_id"
-          AND json_array_length(${field(Prisma.sql`skill_setting`, '$.ids')}) = 0)
-        AND (fixed_setting IS NULL OR ${field(Prisma.sql`fixed_setting`, '$.ownerId')} = p."owner_id")
+          AND (${external ? Prisma.sql`NOT EXISTS (
+            SELECT 1 FROM json_each(${field(Prisma.sql`skill_setting`, '$.ids')}) selected
+              LEFT JOIN "PlatformSetting" skill ON skill."key" = 'studio_skill_v1:' || p."owner_id" || ':' || selected.value
+            WHERE skill."id" IS NULL OR ${field(Prisma.sql`skill."value_json"`, '$.id')} IS NOT selected.value
+              OR ${field(Prisma.sql`skill."value_json"`, '$.ownerId')} IS NOT p."owner_id"
+              OR COALESCE(${field(Prisma.sql`skill."value_json"`, '$.deleted')}, 0) <> 0
+              OR json_type(${json(Prisma.sql`skill."value_json"`)}, '$.prompt') IS NOT 'text'
+              OR json_type(${json(Prisma.sql`skill."value_json"`)}, '$.promptVersion') IS NOT 'text'
+              OR length(${field(Prisma.sql`skill."value_json"`, '$.promptVersion')}) = 0
+          )` : Prisma.sql`json_array_length(${field(Prisma.sql`skill_setting`, '$.ids')}) = 0`}))
+        AND (${external ? Prisma.sql`reproduction IS NOT NULL` : Prisma.sql`0 = 1`} OR fixed_setting IS NULL OR ${field(Prisma.sql`fixed_setting`, '$.ownerId')} = p."owner_id")
+        AND (${external ? Prisma.sql`reproduction IS NULL OR ${field(Prisma.sql`reproduction`, '$.sourceOwnerId')} = p."owner_id"` : Prisma.sql`1 = 1`})
         AND (policy_setting IS NULL OR ${field(Prisma.sql`policy_setting`, '$.ownerId')} = p."owner_id")
         AND (style_setting IS NULL OR ${field(Prisma.sql`style_setting`, '$.ownerId')} = p."owner_id")
         AND NOT EXISTS (SELECT 1 FROM json_each(p.style_ids) selected LEFT JOIN "PlatformSetting" sg ON sg."key" = 'studio_style_group_v1:' || selected.value
           WHERE sg."id" IS NULL OR COALESCE(${field(Prisma.sql`sg."value_json"`, '$.deleted')}, 0) <> 0
             OR COALESCE(${field(Prisma.sql`sg."value_json"`, '$.disabled')}, 0) <> 0
-            OR (${field(Prisma.sql`sg."value_json"`, '$.shared')} = 0 AND ${field(Prisma.sql`sg."value_json"`, '$.ownerId')} <> ${actor.id} AND ${actor.role === 'admin' ? 1 : 0} = 0))
+            OR (${field(Prisma.sql`sg."value_json"`, '$.shared')} = 0 AND ${field(Prisma.sql`sg."value_json"`, '$.ownerId')} <> ${dependencyActorId} AND ${dependencyAdmin} = 0))
         AND (SELECT count(*) FROM source_refs r WHERE r.preset_id = p."id" AND r.kind = 'style') <= COALESCE(json_extract(policy, '$.styleMax'), ${MAX_REFERENCE_IMAGES})
         AND (SELECT count(DISTINCT r.asset_id) FROM source_refs r WHERE r.preset_id = p."id" AND r.kind = 'ordinary')
           + CASE WHEN COALESCE(json_extract(policy, '$.useFixedReferences'), 1) = 1 THEN json_array_length(COALESCE(fixed_refs, '[]')) ELSE 0 END
@@ -113,8 +145,8 @@ export async function galleryDirectorySql(db: Prisma.TransactionClient, actor: I
           + (SELECT count(*) FROM source_refs r WHERE r.preset_id = p."id" AND r.kind = 'style') <= min(COALESCE(json_extract(policy, '$.auxiliaryMax'), ${MAX_REFERENCE_IMAGES}), ${MAX_REFERENCE_IMAGES})
         AND NOT EXISTS (SELECT 1 FROM source_refs r LEFT JOIN "Asset" a ON a."id" = r.asset_id
           WHERE r.preset_id = p."id" AND (a."id" IS NULL OR a."status" <> 'active' OR a."type" <> 'image'
-            OR r.kind <> 'style' AND a."owner_id" <> p."owner_id" OR r.kind = 'ordinary' AND NOT (${visibility.visible(Prisma.sql`a."original_url"`)})))
-      ) END AS available FROM source_policy p
+            OR r.kind <> 'style' AND a."owner_id" <> p."owner_id" OR r.kind = 'ordinary' AND NOT (${ordinaryVisible})))
+      ) AS available FROM source_policy p
     ), module_bindings AS MATERIALIZED (
       SELECT m.*, CASE WHEN ${validBinding} THEN 1 ELSE 0 END AS binding_valid,
         b."id" IS NOT NULL AS binding_present, ${field(Prisma.sql`b."value_json"`, '$.mode')} AS binding_mode,
@@ -126,14 +158,14 @@ export async function galleryDirectorySql(db: Prisma.TransactionClient, actor: I
     ), module_entries AS MATERIALIZED (
       SELECT CASE WHEN m.binding_valid = 1 AND p."id" IS NOT NULL THEN 'image_template:' || p."id" ELSE 'image_module:' || m."id" END AS key,
         'module' AS targetKind, m."id" AS targetId,
-        CASE WHEN m.binding_valid = 1 AND p.visible = 1 THEN p."name" WHEN ${external ? 1 : 0} = 1 THEN '本人历史' ELSE m."name" END AS name,
-        COALESCE(NULLIF(CASE WHEN m.binding_valid = 1 AND p.visible = 1 THEN p."group_name" WHEN ${external ? 1 : 0} = 1 THEN '本人历史' ELSE m."group_name" END, ''), '未分组') AS groupName,
+        CASE WHEN m.binding_valid = 1 AND ${readableSource} THEN p."name" WHEN ${external ? 1 : 0} = 1 THEN '本人历史' ELSE m."name" END AS name,
+        COALESCE(NULLIF(CASE WHEN m.binding_valid = 1 AND ${readableSource} THEN p."group_name" WHEN ${external ? 1 : 0} = 1 THEN '本人历史' ELSE m."group_name" END, ''), '未分组') AS groupName,
         CASE WHEN m.binding_valid = 1 AND p."id" IS NOT NULL THEN p."owner_id" = ${actor.id} ELSE 1 END AS mine,
-        m.binding_valid = 1 AND p.visible = 1 AND p."is_shared" = 1 AS shared,
+        m.binding_valid = 1 AND ${readableSource} AND p."is_shared" = 1 AS shared,
         NOT (m.binding_present = 1 AND m.binding_valid = 0) AND (${external ? Prisma.sql`m.binding_valid = 1 AND m.binding_mode = 'live'` : Prisma.sql`1 = 1`}) AND (m."source_preset_id" IS NULL OR p.visible = 1 AND p.available = 1) AS available,
-        CASE WHEN m.binding_valid = 1 AND p."id" IS NOT NULL THEN CASE WHEN p.visible = 1 THEN p."created_at" ELSE NULL END ELSE m."created_at" END AS created,
-        CASE WHEN m.binding_valid = 1 AND p."id" IS NOT NULL THEN CASE WHEN p.visible = 1 THEN p."updated_at" ELSE NULL END ELSE m."updated_at" END AS updated,
-        CASE WHEN NOT (m.binding_present = 1 AND m.binding_valid = 0) AND (m."source_preset_id" IS NULL OR p.visible = 1)
+        CASE WHEN m.binding_valid = 1 AND p."id" IS NOT NULL THEN CASE WHEN ${readableSource} THEN p."created_at" ELSE NULL END ELSE m."created_at" END AS created,
+        CASE WHEN m.binding_valid = 1 AND p."id" IS NOT NULL THEN CASE WHEN ${readableSource} THEN p."updated_at" ELSE NULL END ELSE m."updated_at" END AS updated,
+        CASE WHEN NOT (m.binding_present = 1 AND m.binding_valid = 0) AND (m."source_preset_id" IS NULL OR ${readableSource})
           AND (m."source_preset_id" IS NULL OR p.author_known = 1) THEN COALESCE(p."owner_id", m."owner_id") ELSE NULL END AS authorId,
         m.natural AS natural, m.natural AS lastNatural,
         CASE WHEN m.binding_valid = 1 AND p."id" IS NOT NULL THEN p."id" ELSE NULL END AS presetId

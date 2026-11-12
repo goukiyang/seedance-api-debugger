@@ -17,7 +17,7 @@ import { resolveCutoutResult, type CutoutContentContext } from './cutout-content
 import { tryContentKeyParts } from './key';
 import { studioPresetArchived } from '@/lib/image-studio/preset-lifecycle';
 import { studioFixedCoverDTO } from '@/lib/image-studio/module-cover';
-import { assertStudioActor, studioSharedBinding } from '@/lib/image-studio/shared-contract';
+import { assertStudioActor, sharedStudioAvailability, studioSharedBinding } from '@/lib/image-studio/shared-contract';
 import { resolveStudioPinnedAsset } from '@/lib/image-studio/result-pins';
 import { multiviewOutputFileAccess } from '@/lib/video/multiview-output-access.server';
 import { archivedPresetKey } from '@/lib/image-studio/preset-lifecycle';
@@ -176,6 +176,7 @@ export async function resolveContent(user: SessionUser, input: ContentKey, conte
           : await prisma.imageStudioPreset.findUnique({ where: { id: workspace.source_preset_id } });
       }
       if (!row || await archived(row.id) || !canViewStudioPreset(studioActor, row)) return null;
+      if (user.account_type === 'external' && !await sharedStudioAvailability(studioActor, row, prisma)) return null;
       const item = summary(input, 'template', row.name, `/template-studio?type=image&presetId=${encodeURIComponent(row.id)}`);
       item.templateKind = 'definition'; item.templateMedium = 'image';
       item.actionLabel = '使用模板'; item.versionLabel = row.updated_at.toISOString(); item.owner = await projectedOwner(row.owner_id);
@@ -192,6 +193,7 @@ export async function resolveContent(user: SessionUser, input: ContentKey, conte
         : await prisma.imageStudioPreset.findUnique({ where: { id: row.source_preset_id } }) : null;
       if (source && await archived(source.id)) return null;
       if (!canViewStudioModule(studioActor, row, source)) return null;
+      if (user.account_type === 'external' && !await sharedStudioAvailability(studioActor, source!, prisma)) return null;
       const item = summary(input, 'template', user.account_type === 'external' ? source!.name : row.name, `/template-studio?type=image&moduleId=${id}`);
       item.templateKind = 'workpage'; item.templateMedium = 'image';
       item.actionLabel = '继续编辑'; item.versionLabel = String(row.revision); item.owner = await projectedOwner(row.owner_id);

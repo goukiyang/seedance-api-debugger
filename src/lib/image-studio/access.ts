@@ -18,8 +18,8 @@ export type ImageStudioIdentity = {
   feishu_open_id?: string | null;
   feishu_union_id?: string | null;
   feishu_tenant_key?: string | null;
-  /** Server-resolved, revision-bound image-only grants. Never a company identity. */
-  externalStudioAccess?: { enabled: boolean; revision: number; presetIds: string[] };
+  /** Server-resolved image-only capability. Never a company identity. */
+  externalStudioAccess?: { enabled: boolean; revision: number; presetIds: string[]; allShared?: boolean };
 };
 
 export type StudioPresetAccessRow = {
@@ -41,6 +41,17 @@ export function canAccessImageTemplates(user: ImageStudioIdentity | SessionUser)
 export function externalStudioPresetIds(user: ImageStudioIdentity | SessionUser): string[] {
   return 'externalStudioAccess' in user && user.externalStudioAccess?.enabled
     ? user.externalStudioAccess.presetIds : [];
+}
+
+/** The unified switch follows current shared sources, without enumerating or decrypting them at login. */
+export function externalStudioAllShared(user: ImageStudioIdentity | SessionUser): boolean {
+  return 'externalStudioAccess' in user && Boolean(user.externalStudioAccess?.enabled && user.externalStudioAccess.allShared);
+}
+
+/** Admission still resolves this exact source's current lifecycle and dependencies on the server. */
+export function externalStudioCanUsePresetId(user: ImageStudioIdentity | SessionUser, presetId: string): boolean {
+  if (/^parameter-copy-[0-9a-f-]{36}$/.test(presetId)) return false;
+  return externalStudioAllShared(user) || externalStudioPresetIds(user).includes(presetId);
 }
 
 function identityFeishu(user: ImageStudioIdentity) {
@@ -79,7 +90,8 @@ export function canViewStudioPreset(
   user: ImageStudioIdentity | SessionUser,
   preset: StudioPresetAccessRow,
 ) {
-  if (isExternalImageStudioActor(user)) return Boolean(preset.id && externalStudioPresetIds(user).includes(preset.id));
+  if (isExternalImageStudioActor(user)) return Boolean(preset.id && externalStudioCanUsePresetId(user, preset.id)
+    && preset.is_shared && (preset.scope === 'admin' || preset.scope === 'creator'));
   if (!canUseCompanyTemplates(user)) return false;
   if (preset.owner_id === user.id) return true;
   return (preset.scope === 'admin' || preset.scope === 'creator') && preset.is_shared;

@@ -66,6 +66,8 @@ export async function hydrateExternalStudioActor<T extends ImageStudioIdentity>(
   if (!isExternalImageStudioActor(user)) return user;
   const policy = await readExternalStudioAccessPolicy(client);
   const enabled = policy.mode === 'all-external' || policy.mode === 'pilot' && policy.userIds.includes(user.id);
+  // Global access follows fresh shared-source checks at the target. Login never decrypts a template directory.
+  if (policy.mode === 'all-external') return { ...user, externalStudioAccess: { enabled: true, revision: policy.revision, presetIds: [], allShared: true } };
   const presetIds: string[] = [];
   if (enabled) for (const grant of policy.templates) {
     const current = await externalStudioTemplateBinding(grant.presetId, client);
@@ -110,35 +112,11 @@ export async function getExternalStudioAccessOperation(actor: Actor, requestId: 
   });
 }
 
-export async function getExternalStudioAccessAdmin(actor: Actor, input: { q?: string; after?: string } = {}) {
-  const q = (input.q || '').trim();
-  if (q.length > 80 || input.after && !validId(input.after)) throw new ExternalStudioAccessError('查询条件无效');
+export async function getExternalStudioAccessAdmin(actor: Actor) {
   return prisma.$transaction(async client => {
     await freshAdmin(actor, client);
-    const policy = await readExternalStudioAccessPolicy(client);
-    const rows = await client.imageStudioPreset.findMany({ where: { is_shared: true, scope: { in: ['admin', 'creator'] },
-      ...(q ? { name: { contains: q } } : {}), ...(input.after ? { id: { gt: input.after } } : {}) }, orderBy: { id: 'asc' }, take: 41,
-      select: { id: true, name: true, owner_id: true } });
-    const templates: Array<ExternalStudioTemplateGrant & { name: string; approved: boolean; available: boolean }> = [];
-    for (const row of rows.slice(0, 40)) {
-      const binding = await externalStudioTemplateBinding(row.id, client);
-      if (binding) templates.push({ ...binding, name: row.name, available: true, approved: policy.templates.some(item => item.presetId === row.id
-        && item.sourceRevision === binding.sourceRevision && item.dependencyToken === binding.dependencyToken) });
-    }
-    for (const grant of policy.templates.filter(item => !templates.some(row => row.presetId === item.presetId))) {
-      const source = await client.imageStudioPreset.findUnique({ where: { id: grant.presetId }, select: { name: true } });
-      const binding = await externalStudioTemplateBinding(grant.presetId, client);
-      templates.push({ ...(binding || grant), name: source?.name || '已不可用模板', available: Boolean(binding),
-        approved: Boolean(binding && binding.sourceRevision === grant.sourceRevision && binding.dependencyToken === grant.dependencyToken) });
-    }
-    const users = await client.user.findMany({ where: { account_type: 'external', status: 'active',
-      ...(q ? { OR: [{ name: { contains: q } }, { email: { contains: q } }, { id: q }] } : {}) },
-      orderBy: { id: 'asc' }, take: 40, select: { id: true, name: true, email: true } });
-    const selectedUsers = policy.userIds.length ? await client.user.findMany({ where: { id: { in: policy.userIds } },
-      select: { id: true, name: true, email: true } }) : [];
-    return { policy, templates, users: Array.from(new Map([...selectedUsers, ...users].map(user => [user.id, user])).values()),
-      nextCursor: rows.length > 40 ? rows[39].id : null };
-  }, { timeout: 20000 });
+    return { policy: await readExternalStudioAccessPolicy(client) };
+  });
 }
 
 export async function saveExternalStudioAccess(actor: Actor, input: unknown) {
@@ -158,25 +136,16 @@ export async function saveExternalStudioAccess(actor: Actor, input: unknown) {
       await freshAdmin(actor, client);
       const previous = await replay(client);
       if (previous) return { operation: previous };
-      if (Object.keys(body).some(key => !['requestId', 'revision', 'mode', 'userIds', 'templates'].includes(key))) throw new ExternalStudioAccessError('设置包含未知字段');
-      let next: ExternalStudioAccessPolicy;
-      try { next = parseExternalStudioAccessPolicy(JSON.stringify({ version: 1, revision: body.revision, mode: body.mode, userIds: body.userIds, templates: body.templates })); }
-      catch { throw new ExternalStudioAccessError('请检查开放模式、账号和模板选择'); }
+      if (Object.keys(body).some(key => !['requestId', 'revision', 'enabled'].includes(key))) throw new ExternalStudioAccessError('设置包含未知字段');
+      if (!Number.isSafeInteger(body.revision) || Number(body.revision) < 0 || typeof body.enabled !== 'boolean') {
+        throw new ExternalStudioAccessError('请检查外部生图开关');
+      }
       const row = await client.platformSetting.findUnique({ where: { key: EXTERNAL_STUDIO_ACCESS_KEY } });
       const current = parseExternalStudioAccessPolicy(row?.value_json ?? null);
-      if (next.revision !== current.revision) throw new ExternalStudioAccessError('设置已更新，当前修改已保留，请重新读取后核对', 409);
-      if (next.mode === 'pilot' && next.userIds.length) {
-        const count = await client.user.count({ where: { id: { in: next.userIds }, account_type: 'external', status: 'active',
-          OR: [{ expires_at: null }, { expires_at: { gt: new Date() } }] } });
-        if (count !== next.userIds.length) throw new ExternalStudioAccessError('所选外部账号已失效，请重新读取');
-      }
-      for (const grant of next.mode === 'closed' ? [] : next.templates) {
-        const currentBinding = await externalStudioTemplateBinding(grant.presetId, client);
-        if (!currentBinding || currentBinding.sourceRevision !== grant.sourceRevision || currentBinding.dependencyToken !== grant.dependencyToken) {
-          throw new ExternalStudioAccessError('所选模板或依赖已变化，请重新读取并确认当前版本', 409);
-        }
-      }
-      next = { ...next, revision: current.revision + 1 };
+      if (body.revision !== current.revision) throw new ExternalStudioAccessError('设置已更新，当前修改已保留，请重新读取后核对', 409);
+      // Retain legacy lists for old readers/receipts; the unified switch never needs a source or user list.
+      const next: ExternalStudioAccessPolicy = { ...current, revision: current.revision + 1,
+        mode: body.enabled ? 'all-external' : 'closed' };
       const data = { value_json: JSON.stringify(next), updated_by: actor.id };
       if (row) {
         const result = await client.platformSetting.updateMany({ where: { key: EXTERNAL_STUDIO_ACCESS_KEY, value_json: row.value_json }, data });
