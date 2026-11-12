@@ -45,7 +45,11 @@ import { deferImageChannelVersionWrites, captureImageGenerationChannel, resolveI
 import { resolveImageGenerationRequestChannel, resolveImageGenerationRequestRoute } from '@/lib/integrations/image-generation-defaults';
 import { IMAGE_25_QUALITY_MODEL, parseImageQualityRouteSnapshot, assertImageQualityReferenceCount } from './quality-routing';
 import { defaultStudioModuleId, resolveStudioModuleGenerationConfig, validStudioModuleId } from './modules';
-import { canUseCompanyTemplates, canViewStudioPreset, type ImageStudioIdentity } from './access';
+import { canAccessImageTemplates, canViewStudioPreset, isExternalImageStudioActor, externalStudioPresetIds, type ImageStudioIdentity } from './access';
+import { hydrateExternalStudioActor } from './external-access.server';
+import { EXTERNAL_IMAGE_ADMISSION_ENABLED } from './external-admission';
+import { ensureDefaultProjectForUser } from '@/lib/projects/permissions';
+import { externalStudioTaskError } from './external-task-projection';
 import { resolveStudioAspectRatio, normalizeStudioRatio, CURRENT_STUDIO_SIZE_POLICY_VERSION, type StudioSizePolicyVersion } from './ratios';
 import { normalizeImageResolution, IMAGE_RESOLUTION_OPTIONS, studioFourToOneIssue } from '@/lib/image-generation/resolution';
 import { MAX_REFERENCE_IMAGES } from './limits';
@@ -163,14 +167,43 @@ export async function resolveStudioTaskSharedUse(user: ImageStudioIdentity, modu
 
 export async function resolveOwnedStudioTaskSharedUse(ownerId: string, moduleId: string | undefined,
   intent: SharedStudioIntent | undefined, tx: Prisma.TransactionClient, restoredInput?: ReturnType<typeof parseStudioRequest>) {
-  const user = await tx.user.findUnique({ where: { id: ownerId }, select: {
+  const storedUser = await tx.user.findUnique({ where: { id: ownerId }, select: {
     id: true, role: true, account_type: true, status: true, user_profile: true, feature_profile_id: true,
+    expires_at: true,
     feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true,
   } });
-  if (!user || user.status !== 'active' || !canUseCompanyTemplates(user)) throw new StudioError('当前账号无法生成', 403);
+  if (!storedUser || storedUser.status !== 'active' || storedUser.expires_at && storedUser.expires_at <= new Date()
+    || !canAccessImageTemplates(storedUser)) throw new StudioError('当前账号无法生成', 403);
+  const user = await hydrateExternalStudioActor(storedUser, tx);
   const shared = await resolveStudioTaskSharedUse(user, moduleId, intent, tx);
+  assertExternalStudioAdmission(user, moduleId, shared);
   if (restoredInput?.restoredSettings) await resolveStudioTaskRestoredSettings(user, moduleId, restoredInput, shared, tx);
   return shared;
+}
+
+/** New external use requires a current approved source and this actor's live workspace. */
+export function assertExternalStudioAdmission(user: ImageStudioIdentity, moduleId: string | undefined,
+  shared: Awaited<ReturnType<typeof resolveStudioTaskSharedUse>>) {
+  if (!isExternalImageStudioActor(user)) return;
+  if (!EXTERNAL_IMAGE_ADMISSION_ENABLED) throw new StudioError('外部生图暂未开放新生成，本人原任务和结果仍可查看', 403);
+  if (!moduleId || !shared || shared.binding.mode !== 'live' || shared.binding.ownerId !== user.id
+    || !externalStudioPresetIds(user).includes(shared.definition.intent.presetId)) {
+    throw new StudioError('当前模板暂不可生成，请重新选择已开放的模板；本人输入和历史保留', 403);
+  }
+}
+
+/** Reuse the existing default-project repair before entering the acceptance transaction. */
+export async function studioSubmissionProjectId(ownerId: string, requested: string | null | undefined) {
+  const user = await prisma.user.findUnique({ where: { id: ownerId }, select: { account_type: true } });
+  if (user?.account_type !== 'external') return requested;
+  return requested || (await ensureDefaultProjectForUser(ownerId)).id;
+}
+
+export async function assertExternalStudioProject(tx: Prisma.TransactionClient, user: ImageStudioIdentity, projectId: string | null) {
+  if (!isExternalImageStudioActor(user)) return;
+  const project = projectId ? await tx.project.findFirst({ where: { id: projectId, owner_user_id: user.id,
+    type: 'personal', visibility: 'private', status: 'active' }, select: { id: true } }) : null;
+  if (!project) throw new StudioError('请使用本人的个人项目生成图片', 403);
 }
 
 export async function resolveStudioTaskRestoredSettings(actor: ImageStudioIdentity, moduleId: string | undefined,
@@ -192,7 +225,7 @@ export async function resolveStudioTaskRestoredSettings(actor: ImageStudioIdenti
   const sourcePresetId = source.source_preset_id || (typeof snapshot.sourcePresetId === 'string' ? snapshot.sourcePresetId : null);
   let historicalPresetOwnerId: string | undefined;
   if (sourcePresetId) {
-    const preset = await tx.imageStudioPreset.findUnique({ where: { id: sourcePresetId }, select: { owner_id: true, scope: true, is_shared: true } });
+    const preset = await tx.imageStudioPreset.findUnique({ where: { id: sourcePresetId }, select: { id: true, owner_id: true, scope: true, is_shared: true } });
     if (!preset || !canViewStudioPreset(actor, preset) || await studioPresetArchived(sourcePresetId, tx)) throw new StudioError('原模板已不可用或无权使用，请重新选择模板', 403);
     historicalPresetOwnerId = preset.owner_id;
   }
@@ -535,6 +568,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   }
   // A new server-derived field must not change an already accepted legacy request.
   const input = parseStudioRequest(legacyAcceptedProjectContext ? { ...body, projectId: undefined } : body);
+  const submissionProjectId = await studioSubmissionProjectId(ownerId, input.projectId);
+  if (submissionProjectId !== undefined) input.projectId = submissionProjectId;
   const usageProjectId = canvasUse?.projectId !== undefined ? canvasUse.projectId : input.projectId ?? null;
   if (canvasUse?.projectId !== undefined && input.projectId !== undefined && input.projectId !== canvasUse.projectId) throw new StudioError('图片项目与画布上下文不一致', 409);
   const personalPrompt = input.personalPrompt ?? input.prompt;
@@ -616,14 +651,20 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     try { await assertNoSynchronousImageAdmission(tx, ownerId, input.requestId); }
     catch (error) { if (error instanceof SynchronousImageAdmissionError) throw new StudioError(error.message, error.status); throw error; }
     const user = await tx.user.findUnique({ where: { id: ownerId }, select: {
-      id: true, role: true, account_type: true, status: true,
+      id: true, role: true, account_type: true, status: true, expires_at: true,
       user_profile: true, feature_profile_id: true,
       feishu_user_id: true, feishu_open_id: true, feishu_union_id: true, feishu_tenant_key: true,
     } });
-    if (!user || user.status !== 'active') throw new StudioError('当前账号无法生成', 403);
+    if (!user || user.status !== 'active' || user.expires_at && user.expires_at <= new Date()) throw new StudioError('当前账号无法生成', 403);
     await assertUsageProject(tx, user, usageProjectId);
-    const identity: ImageStudioIdentity = user;
-    if (!canUseCompanyTemplates(identity)) throw new StudioError('仅限公司飞书账号生成图片', 403);
+    const identity = await hydrateExternalStudioActor(user, tx);
+    if (!canAccessImageTemplates(identity)) throw new StudioError('当前账号无法生成图片', 403);
+    await assertExternalStudioProject(tx, identity, usageProjectId);
+    if (isExternalImageStudioActor(identity) && (avatar || canvasUse || canvasPrompt || roleMedia || characterLabPlanId
+      || input.restoredSettings || input.reproduceFromTaskId || input.taskSettings?.sourceTaskId
+      || input.currentInputs?.privateDraft || input.draft && Object.keys(input.draft).some(key => key !== 'referencePolicy'))) {
+      throw new StudioError('请从已开放的生图模板使用当前设置生成', 403);
+    }
     const imageFeishuChoice = normalizeImageFeishuChoice(body.image_feishu);
     if (imageFeishuChoice?.enabled && (avatar || canvasUse || canvasPrompt || roleMedia || typeof moduleId !== 'string')) {
       throw new StudioError('图片飞书选择仅用于模板图片生成', 400);
@@ -644,6 +685,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     if (canvasUse && (canvasExpectedIds.size !== new Set(input.referenceIds).size || input.referenceIds.some(id => !canvasExpectedIds.has(id)))) throw new StudioError('画布参考图与持久请求不匹配', 403);
     if (moduleId && moduleId !== defaultStudioModuleId(ownerId) && !workspace) throw new StudioError('模块不存在或无权使用', 403);
     const sharedUse = await resolveStudioTaskSharedUse(identity, typeof moduleId === 'string' ? moduleId : undefined, input.sharedLive, tx);
+    assertExternalStudioAdmission(identity, typeof moduleId === 'string' ? moduleId : undefined, sharedUse);
     if (sharedUse) {
       await assertSharedStudioWorkerReady(tx);
       normalizeSharedAuthorDraftForUse(identity, sharedUse, input);
@@ -677,7 +719,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     if (reproduceFromTaskId && !restored) sourcePresetId = null;
     let sourcePresetOwnerId: string | null = null;
     if (workspace?.source_preset_id) {
-      const source = await tx.imageStudioPreset.findUnique({ where: { id: workspace.source_preset_id }, select: { owner_id: true, scope: true, is_shared: true } });
+      const source = await tx.imageStudioPreset.findUnique({ where: { id: workspace.source_preset_id }, select: { id: true, owner_id: true, scope: true, is_shared: true } });
       if ((!reproduceFromTaskId || restored) && (!source || !canViewStudioPreset(identity, source))) throw new StudioError('该模板已停止共享，不能新建任务', 403);
       sourcePresetOwnerId = source?.owner_id || null;
     }
@@ -845,7 +887,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         if (restored) historicalTemplateReferences = historicalStudioTemplateReferences(sourceSnapshot);
         const historicalSourcePresetId = source.source_preset_id || (typeof sourceSnapshot.sourcePresetId === 'string' ? sourceSnapshot.sourcePresetId : null);
         if (historicalSourcePresetId) {
-          const historicalSource = await tx.imageStudioPreset.findUnique({ where: { id: historicalSourcePresetId }, select: { owner_id: true, scope: true, is_shared: true } });
+          const historicalSource = await tx.imageStudioPreset.findUnique({ where: { id: historicalSourcePresetId }, select: { id: true, owner_id: true, scope: true, is_shared: true } });
           if (!historicalSource || !canViewStudioPreset(identity, historicalSource)) throw new StudioError('该模板已停止共享，不能新建任务', 403);
           if (!restored || !sharedDefinition) sourcePresetId = historicalSourcePresetId;
         }
@@ -990,6 +1032,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     if (!avatar && (!sharedDefinition || restored || input.currentInputs && input.draft?.skillIds !== undefined)) skills = reproduceFromTaskId && input.draft?.skillIds === undefined
       ? await historicalSkills(identity, historicalSnapshot?.skills, tx)
       : await resolveSkills(identity, input.draft?.skillIds ?? (workspace ? await getSkillSelection(ownerId, workspace.id, tx) : []), tx);
+    if (isExternalImageStudioActor(identity) && sharedDefinition?.skills) skills = sharedDefinition.skills;
     if (restored && input.draft?.skillIds === undefined && historicalSnapshot?.skillIds !== undefined) {
       const historicalSkillIds = parseSkillIds(historicalSnapshot.skillIds);
       if (historicalSkillIds.length !== skills.length || historicalSkillIds.some((id, index) => skills[index]?.id !== id)) {
@@ -1088,7 +1131,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const ownedTransientIds = uniqueTransientIds.filter(id => !canvasReferenceOwners.has(id));
     const visibleTransient = await tx.asset.count({ where: { id: { in: ownedTransientIds }, owner_id: ownerId, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(identity, tx)] } });
     if (visibleTransient !== ownedTransientIds.length) throw new StudioError('本次参考图已不可用或无权查看', 403);
-    if ((restored || input.currentInputs) && sourceTemplateReferenceIds.length) {
+    if ((restored || input.currentInputs) && sourceTemplateReferenceIds.length && !isExternalImageStudioActor(identity)) {
       const visibleTemplateReferences = await tx.asset.count({ where: { id: { in: sourceTemplateReferenceIds }, status: 'active', type: 'image',
         AND: [await studioVisibleAssetWhere(identity, tx)] } });
       if (visibleTemplateReferences !== new Set(sourceTemplateReferenceIds).size) throw new StudioError('原记录的模板参考图已不可用或无权使用，请使用当前模板', 403);
@@ -1320,7 +1363,10 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         safeRetryRuleIds: RETRY_RULES.filter(rule => retryPolicy.enabledIds.includes(rule.id)).map(rule => `${rule.id}@${rule.version}`) });
       const protectedTaskData = transformPrivateImageTask({ ...taskData, id, owner_id: ownerId,
         prompt: taskPrompt, context, snapshot_json: taskData.snapshot_json ?? null }, true, frozenDefinitionOrigins);
-      if (preparation) await preparation.save(tx, protectedTaskData);
+      // External batch preparation changes the final child id before persistence.
+      // Keep that server-only value decoded until its saver seals the final identity.
+      if (preparation) await preparation.save(tx, isExternalImageStudioActor(identity)
+        ? transformPrivateImageTask(protectedTaskData, false) : protectedTaskData);
       else {
         submissionStage = 'task-insert';
         await assertStudioRequestWritable(tx, ownerId, input.requestId);
@@ -1547,22 +1593,23 @@ export async function listStudioTasks(ownerId: string, cursor?: string, moduleId
 /** Owner-scoped callers only. Shared pins use a separate output-only projection. */
 export async function studioTaskDTOs(ownerId: string, isAdmin: boolean, items: ImageStudioTask[]) {
   if (items.some(item => item.owner_id !== ownerId)) throw new StudioError('生成记录归属不匹配', 403);
+  const owner = items.length ? await prisma.user.findUnique({ where: { id: ownerId },
+    select: { id: true, name: true, username: true, avatar_url: true, account_type: true } }) : null;
+  const external = owner?.account_type === 'external';
   const outputAssetIds = items.flatMap(item => item.asset_id ? [item.asset_id] : []);
   const referenceIds = Array.from(new Set(items.flatMap(item => {
     try { return JSON.parse(item.reference_ids) as string[]; } catch { return []; }
   })));
-  const assets = await prisma.asset.findMany({ where: { id: { in: [...outputAssetIds, ...referenceIds] }, ...(isAdmin ? {} : { owner_id: ownerId }), status: 'active' },
+  const assets = await prisma.asset.findMany({ where: { id: { in: [...outputAssetIds, ...referenceIds] }, ...(isAdmin && !external ? {} : { owner_id: ownerId }), status: 'active' },
     select: { id: true, original_url: true, thumbnail_url: true, width: true, height: true, file_size: true, file_name: true, mime_type: true } });
   const assetById = new Map(assets.map(asset => [asset.id, asset]));
-  const owner = items.length ? await prisma.user.findUnique({ where: { id: ownerId },
-    select: { id: true, name: true, username: true, avatar_url: true } }) : null;
   const publicOwner = owner ? { id: owner.id, name: displayUserName(owner), avatar_url: owner.avatar_url } : null;
   const deliveries = new Map(await Promise.all(items.map(async task => [task.id, await studioDeliveryStatus(task)] as const)));
   const retries = new Map(await Promise.all(items.map(async task => [task.id, publicRetry((await readRetry('image', task.id))?.value)] as const)));
   const feishu = await imageFeishuTaskStatuses(prisma, ownerId, items.map(task => task.id));
-  const contextVersions = new Map(await Promise.all(items.map(async task => [task.id, await snapshotModuleContextVersion(task.snapshot_json)] as const)));
+  const contextVersions = new Map(await Promise.all((external ? [] : items).map(async task => [task.id, await snapshotModuleContextVersion(task.snapshot_json)] as const)));
   return items.map(task => {
-    const snapshot = publicStudioSnapshot(task, assetById, isAdmin, ownerId);
+    const snapshot = publicStudioSnapshot(task, assetById, isAdmin && !external, ownerId, external);
     const mismatch = studioDimensionMismatch(task);
     const readableIds = new Set(assetById.keys());
     return { id: task.id, batchId: task.batch_id, moduleId: task.module_id, ordinal: task.ordinal,
@@ -1571,7 +1618,8 @@ export async function studioTaskDTOs(ownerId: string, isAdmin: boolean, items: I
       safeRetry: retries.get(task.id),
       feishu: feishu.get(task.id),
       prompt: snapshot.prompt, model: task.model, quality: task.quality, status: publicImageTaskStatus(task.status),
-      error: mismatch && studioTaskHasViewableOutput(task) ? studioDimensionMismatchNotice(mismatch.validation) : task.error, unitCredits: task.unit_credits,
+      error: mismatch && studioTaskHasViewableOutput(task) ? studioDimensionMismatchNotice(mismatch.validation)
+        : external ? externalStudioTaskError(task.error, publicImageTaskStatus(task.status)) : task.error, unitCredits: task.unit_credits,
       providerCostUsd: task.provider_cost_usd,
       billing: imageBillingView(task, ownerId, isAdmin),
       aspectRatio: task.aspect_ratio, outputSize: task.output_size,
@@ -1629,7 +1677,8 @@ export async function listAdminStudioTasks(cursor?: string, moduleId?: string, o
   return { tasks: items, nextCursor: rows.length > 24 ? items[items.length - 1].id : null };
 }
 
-export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'id' | 'snapshot_json' | 'prompt' | 'model' | 'quality' | 'reference_ids' | 'aspect_ratio' | 'output_size'> & Partial<Pick<ImageStudioTask, 'owner_id'>>, assets: Map<string, { id: string; original_url: string; thumbnail_url: string | null; width: number | null; height: number | null }>, isAdmin: boolean, viewerOwnerId?: string) {
+export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'id' | 'snapshot_json' | 'prompt' | 'model' | 'quality' | 'reference_ids' | 'aspect_ratio' | 'output_size'> & Partial<Pick<ImageStudioTask, 'owner_id'>>, assets: Map<string, { id: string; original_url: string; thumbnail_url: string | null; width: number | null; height: number | null }>, isAdmin: boolean, viewerOwnerId?: string, external = false) {
+  if (external) isAdmin = false;
   let parsed: Record<string, unknown> = {};
   try { parsed = task.snapshot_json ? JSON.parse(task.snapshot_json) as Record<string, unknown> : {}; } catch { parsed = {}; }
   const protectedModule = Boolean(typeof parsed.sourcePresetId === 'string' && privateOrigin('image-preset', parsed.sourcePresetId)
@@ -1647,7 +1696,7 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'id' | 'snapsho
   try { snapshotTemplateReferences = historicalStudioTemplateReferences(parsed); } catch {}
   const snapshotTransientReferences = Array.isArray(parsed.transientReferenceImages)
     ? parsed.transientReferenceImages
-    : snapshotFixedReferences.length ? [] : snapshotReferences;
+    : external || snapshotFixedReferences.length ? [] : snapshotReferences;
   const transientIds = snapshotTransientReferences.flatMap(item => item && typeof item === 'object' && typeof (item as Record<string, unknown>).id === 'string' ? [(item as Record<string, unknown>).id as string] : []);
   let referencePolicy: StudioReferencePolicy;
   try {
@@ -1679,6 +1728,7 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'id' | 'snapsho
       const record = item as Record<string, unknown>;
       if (typeof record.id !== 'string') return null;
       const asset = assets.get(record.id);
+      if (external && !asset) return null;
       return {
         id: record.id,
         comparison: { schema: 2 as const, kind: 'asset' as const, id: record.id, originalVersion: null },
@@ -1720,16 +1770,16 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'id' | 'snapsho
     ? { personalPromptState: 'unknown' as const, personalPromptReason: '旧角色记录未分离个人要求，请在角色工作台查看有权读取的内容。' }
     : serverStudioPersonalPromptProjection({ id: task.id, owner_id: task.owner_id, prompt: task.prompt, snapshot_json: task.snapshot_json }, parsed, viewerOwnerId);
   return {
-    ...(sharedLive ? { sharedLive } : {}),
-    ...(taskSettings ? { taskSettings } : {}),
+    ...(!external && sharedLive ? { sharedLive } : {}),
+    ...(!external && taskSettings ? { taskSettings } : {}),
     ...personalPromptProjection,
-    ...(restoredSettings ? { restoredSettings } : {}),
+    ...(!external && restoredSettings ? { restoredSettings } : {}),
     ...(isAdmin && sharedLive ? { templatePrompt: publicText(parsed.templatePrompt, protectedModule) } : {}),
     ...(imageChannel ? { imageChannel } : {}),
     ...(imageChannel && imageChannelLabel ? { imageChannelLabel } : {}),
     ...(imageChannel && imageSupplierName ? { imageSupplierName } : {}),
     prompt: personalPromptProjection.personalPrompt ?? '',
-    skills: Array.isArray(parsed.skills) ? parsed.skills.flatMap((skill, index) => skill && typeof skill === 'object'
+    skills: !external && Array.isArray(parsed.skills) ? parsed.skills.flatMap((skill, index) => skill && typeof skill === 'object'
       && (isAdmin || skill.ownerId === viewerOwnerId) && typeof skill.prompt === 'string'
       ? [publicSkillSnapshot(skill, task.id, index)] : []) : [],
     evolution: parsed.evolution && typeof parsed.evolution === 'object' && ['increase', 'decrease'].includes(String((parsed.evolution as Record<string, unknown>).direction))
@@ -1745,20 +1795,20 @@ export function publicStudioSnapshot(task: Pick<ImageStudioTask, 'id' | 'snapsho
     globalContext: isAdmin ? publicText(parsed.globalContext, protectedGlobal) : '',
     moduleContext: isAdmin ? publicText(parsed.moduleContext, protectedModule) : '',
     unitCredits,
-    sourceAvailable: characterRecipe ? false : sourceAvailable,
-    contextAvailable: !characterRecipe && typeof parsed.globalContext === 'string' && typeof parsed.moduleContext === 'string',
-    contextConfigured: Boolean((typeof parsed.globalContext === 'string' && parsed.globalContext.trim()) || (typeof parsed.moduleContext === 'string' && parsed.moduleContext.trim())),
+    sourceAvailable: !external && !characterRecipe && sourceAvailable,
+    contextAvailable: !external && !characterRecipe && typeof parsed.globalContext === 'string' && typeof parsed.moduleContext === 'string',
+    contextConfigured: !external && Boolean((typeof parsed.globalContext === 'string' && parsed.globalContext.trim()) || (typeof parsed.moduleContext === 'string' && parsed.moduleContext.trim())),
     referenceImages,
     fixedReferenceImages,
     templateReferenceImages,
-    templateReferenceCount: Array.isArray(parsed.templateReferenceImages) ? parsed.templateReferenceImages.length : snapshotTemplateReferences.length,
+    templateReferenceCount: external ? 0 : Array.isArray(parsed.templateReferenceImages) ? parsed.templateReferenceImages.length : snapshotTemplateReferences.length,
     primaryReferenceImages,
     auxiliaryReferenceImages,
     referencePolicy,
-    fixedReferenceCount: snapshotFixedReferences.length,
-    templateFixedCount: typeof parsed.templateFixedCount === 'number' ? parsed.templateFixedCount : snapshotFixedReferences.length,
-    styleGroupIds: Array.isArray(parsed.styleGroupIds) ? parsed.styleGroupIds.filter(id => typeof id === 'string') : [],
-    styleGroups: historicalStudioStyles(parsed, task.id, { id: viewerOwnerId || '', role: isAdmin ? 'admin' : 'user' }),
+    fixedReferenceCount: external ? 0 : snapshotFixedReferences.length,
+    templateFixedCount: external ? 0 : typeof parsed.templateFixedCount === 'number' ? parsed.templateFixedCount : snapshotFixedReferences.length,
+    styleGroupIds: !external && Array.isArray(parsed.styleGroupIds) ? parsed.styleGroupIds.filter(id => typeof id === 'string') : [],
+    styleGroups: external ? [] : historicalStudioStyles(parsed, task.id, { id: viewerOwnerId || '', role: isAdmin ? 'admin' : 'user' }),
     transientReferenceImages,
   };
 }

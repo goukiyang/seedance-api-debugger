@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { canUseCompanyTemplates } from '@/lib/image-studio/access';
+import { canAccessImageTemplates, isExternalImageStudioActor } from '@/lib/image-studio/access';
+import { externalStudioErrorMessage } from '@/lib/image-studio/external-task-projection';
 import { createStudioBatch, getStudioBatchItemInputMain, listStudioBatches, studioBatchView, updateStudioBatch, quoteStudioBatchContinuation } from '@/lib/image-studio/batches';
 import { StudioError, studioBusinessErrorStatus } from '@/lib/image-studio/tasks';
 import { quoteStudioBatch } from '@/lib/image-studio/batch-billing-quote';
@@ -24,7 +25,7 @@ async function handle(request: NextRequest, write = false) {
   const startedAt = Date.now();
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401 });
-  if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限公司飞书账号使用' }, { status: 403 });
+  if (!canAccessImageTemplates(user)) return NextResponse.json({ error: '当前账号没有图片使用权限' }, { status: 403 });
   let submittedBody: Record<string, unknown> | undefined, creating = false;
   try {
     if (write) {
@@ -80,7 +81,8 @@ async function handle(request: NextRequest, write = false) {
     const message = error instanceof VideoFeishuError ? videoFeishuErrorText(error.code)
       : expected ? (error as Error).message : error instanceof SyntaxError ? '提交内容无效'
         : write ? '操作结果待确认，请查询原批次，不要重复新建' : '批次读取失败，请重试';
-    return NextResponse.json({ error: message, code: receipt?.code || detail.code,
+    return NextResponse.json({ error: isExternalImageStudioActor(user) ? externalStudioErrorMessage(status,
+      error instanceof Error && error.message.startsWith('点数不足')) : message, code: receipt?.code || detail.code,
       ...(creating && requestId ? { requestId } : {}), ...(receipt ? { receipt, submitted: false } : {}) }, { status, headers: privateHeaders });
   }
 }

@@ -2,15 +2,19 @@ import 'server-only';
 import { prisma } from '@/lib/prisma';
 import type { Prisma } from '@prisma/client';
 import { getImageStudioSettings, IMAGE_STUDIO_SETTING_KEY, saveImageStudioSettingsInTx } from './settings';
+import { canUseCompanyTemplates } from './access';
 import { privateFieldOrigins } from '@/lib/security/private-prompt-fields.server';
 import { requirePrivatePromptRequest } from '@/lib/security/private-prompt-request.server';
 import { openPrivatePrompt, sealPrivatePrompt, privatePromptIndex, PrivatePromptError } from '@/lib/security/private-prompts.server';
 import { readPrivatePromptDraft, savePrivatePromptDraft, readPrivatePromptDraftReceipt, markPrivatePromptDraftApplied,
   PrivateDraftConflict } from '@/lib/security/private-prompt-drafts.server';
 
-type Client = Pick<Prisma.TransactionClient, 'platformSetting'>;
+type Client = Pick<Prisma.TransactionClient, 'platformSetting' | 'user'>;
 type Result = { state: 'saved' | 'not-applied'; requestId: string; revision: number };
 async function target(userId: string, client: Client = prisma) {
+  const actor = await client.user.findUnique({ where: { id: userId } });
+  if (!actor || actor.status !== 'active' || actor.expires_at && actor.expires_at <= new Date()
+    || !canUseCompanyTemplates(actor)) throw new PrivatePromptError();
   const settings = await getImageStudioSettings(client);
   const origins = privateFieldOrigins(settings, 'context');
   if (!origins.length) throw new PrivatePromptError();

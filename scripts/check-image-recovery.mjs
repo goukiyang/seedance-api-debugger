@@ -53,6 +53,8 @@ const dimensionMismatchChecks = [
   'plain_failure_corrupt_or_unproven_output_stays_unavailable',
   'valid_size_difference_completes_original_and_settles_once_without_provider',
 ];
+const externalImageTaskSources = ['src/lib/image-studio/access.ts', 'src/lib/image-studio/external-access.server.ts',
+  'src/lib/image-studio/external-admission.ts', 'src/lib/image-studio/external-task-projection.ts', 'src/lib/projects/permissions.ts'];
 const fixtures = [
   { file: 'scripts/works-engineering.ts', schema: 'works-engineering.v1', marker: 'Works engineering receipt: ', checks: WORKS_CHECKS, sources: WORKS_SOURCES },
   { file: 'scripts/arch03-engineering.ts', schema: 'arch03-engineering.v1', marker: 'ARCH03 engineering receipt: ', checks: ARCH03_CHECKS, sources: ARCH03_SOURCES },
@@ -88,12 +90,12 @@ const fixtures = [
     sources: ['src/lib/image-studio/worker.ts', 'src/lib/image-studio/provider.ts'] },
   { file: 'scripts/image-dispatch-fairness-engineering.ts', schema: 'image-dispatch-fairness-engineering.v1',
     marker: 'Image dispatch fairness engineering receipt: ', checks: dispatchChecks,
-    sources: ['src/lib/image-studio/batches.ts', 'src/lib/tools/toolflow-runtime.ts', 'src/lib/image-studio/queue-capacity.ts'] },
+    sources: ['src/lib/image-studio/batches.ts', 'src/lib/tools/toolflow-runtime.ts', 'src/lib/image-studio/queue-capacity.ts', ...externalImageTaskSources] },
   { file: 'scripts/image-async-recovery-engineering.ts', schema: 'image-async-recovery-engineering.v1',
     marker: 'Image async recovery engineering receipt: ', checks: asyncRecoveryChecks,
     sources: ['src/lib/image-studio/worker.ts', 'src/lib/image-studio/provider.ts', 'src/lib/image-studio/tasks.ts',
       'src/lib/image-studio/async-recovery.ts', 'src/lib/image-studio/delivery.ts', 'src/lib/image-studio/queue-capacity.ts',
-      'src/lib/image-studio/synchronous-admission.ts', 'src/app/api/image-studio/tasks/route.ts'] },
+      'src/lib/image-studio/synchronous-admission.ts', 'src/app/api/image-studio/tasks/route.ts', ...externalImageTaskSources] },
   { file: 'scripts/image-dimension-mismatch-engineering.ts', schema: 'image-dimension-mismatch-engineering.v1',
     marker: 'Image dimension mismatch engineering receipt: ', checks: dimensionMismatchChecks,
     sources: ['src/lib/image-studio/dimension-rejection.ts', 'src/lib/image-studio/dimension-mismatch.ts',
@@ -106,7 +108,7 @@ const fixtures = [
       'src/lib/image-studio/batches.ts', 'src/lib/image-studio/batch-contract.ts', 'src/app/image-studio/batch-results.tsx',
       'src/app/api/assets/picker/route.ts', 'src/app/api/assets/library/route.ts', 'src/lib/avatar-random/service.ts',
       'src/lib/avatar-random/handoff.ts', 'src/lib/canvas-roles/media.ts', 'src/lib/canvas-roles/media-bindings.ts',
-      'src/app/api/avatar-studio/route.ts', 'src/app/tools/avatar-studio/studio.tsx', 'src/app/story-studio/story-studio.tsx'] },
+      'src/app/api/avatar-studio/route.ts', 'src/app/tools/avatar-studio/studio.tsx', 'src/app/story-studio/story-studio.tsx', ...externalImageTaskSources] },
   { file: 'scripts/upload-recovery-engineering.mjs', schema: 'upload-recovery-engineering.v1',
     marker: 'Upload recovery engineering receipt: ', checks: ['private_directory_secure_alias', 'raw_nonce_preflight_history',
       'client_per_file_recovery', 'upload_entry_contracts_preserved'], sources: [
@@ -166,7 +168,7 @@ fixtures.push({ file: 'scripts/image-size-policy-engineering.ts', schema: 'image
     'src/lib/integrations/image-generation.ts', 'src/lib/image-studio/tasks.ts',
     'src/lib/image-studio/billing-quote-service.ts', 'src/lib/image-studio/billing-quote-store.ts',
     'src/lib/image-studio/batch-billing-quote.ts', 'src/lib/image-studio/batches.ts',
-    'src/lib/tools/toolflow-runtime.ts', 'src/app/api/assets/generate/route.ts', 'src/lib/image-studio/worker.ts',
+    'src/lib/tools/toolflow-runtime.ts', 'src/app/api/assets/generate/route.ts', 'src/lib/image-studio/worker.ts', ...externalImageTaskSources,
   ] });
 fixtures.push({ file: 'scripts/image-provider-error-engineering.ts', schema: 'image-provider-error-engineering.v1',
   marker: 'Image provider error engineering receipt: ', checks: [
@@ -236,7 +238,7 @@ const publicUsageFixtures = [
       'src/lib/media/hd-derivatives.ts', 'src/lib/media/image-comparison-version.ts',
       'src/lib/image-studio/shared-contract.ts', 'src/lib/image-studio/shared-command-storage.ts',
       'src/lib/image-studio/workspace-deletion.ts', 'src/lib/image-studio/preset-lifecycle.ts',
-      'src/lib/image-studio/context-version.ts', 'src/lib/image-studio/access.ts', 'src/lib/image-studio/dimension-mismatch.ts',
+      'src/lib/image-studio/context-version.ts', 'src/lib/image-studio/access.ts', 'src/lib/image-studio/external-access.server.ts', 'src/lib/image-studio/dimension-mismatch.ts',
       'src/lib/image-studio/parameter-copy.ts', 'src/lib/image-studio/model-catalog.ts', 'src/lib/image-studio/ratios.ts', 'src/lib/image-studio/preset-id.ts',
       'src/lib/image-studio/pricing-state.ts', 'src/lib/assets/site-url.ts', 'src/lib/access/external-role.ts',
       'src/lib/users/profiles.ts', 'src/lib/users/display.ts',
@@ -279,6 +281,8 @@ const publicUsageFixtures = [
       'src/lib/image-studio/feishu-contract.ts', 'src/lib/video/feishu-contract.ts',
       'src/lib/image-studio/style-history.ts',
       'src/lib/works/method-reference.ts', 'src/lib/image-studio/pricing-state.ts',
+      'src/lib/image-studio/access.ts', 'src/lib/image-studio/external-access.server.ts',
+      'src/lib/image-studio/external-admission.ts', 'src/lib/projects/permissions.ts',
     ] },
   { file: 'scripts/studio-definition-rebase-engineering.ts', schema: 'studio-definition-rebase-engineering.v1',
     databaseFlag: 'applicationDatabaseOpened', sources: [

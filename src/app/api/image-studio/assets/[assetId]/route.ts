@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
 import { authorizedImageResponse, discardHdViewingInterest, privateImageHeaders } from '@/lib/media/authorized-image-response';
 import { performance } from 'node:perf_hooks';
-import { canUseCompanyTemplates } from '@/lib/image-studio/access';
+import { canAccessImageTemplates } from '@/lib/image-studio/access';
 import { studioOutputTaskWhere, studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
 import { observeOriginalAssetDownload } from '@/lib/works/recommendation-events';
 
@@ -19,7 +19,8 @@ export async function GET(_request: NextRequest, { params }: { params: { assetId
     await discardHdViewingInterest(_request, user.id);
     return new Response('Not found', { status: 404, headers: privateImageHeaders });
   };
-  if (!canUseCompanyTemplates(user)) return unavailable();
+  // Existing own results stay readable when new external generation is closed.
+  if (!canAccessImageTemplates(user)) return unavailable();
   const assetId = params.assetId;
   const task = await prisma.imageStudioTask.findFirst({
     where: { owner_id: user.id, asset_id: assetId, deleted_at: null, AND: [studioOutputTaskWhere] },

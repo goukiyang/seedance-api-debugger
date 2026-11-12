@@ -13,7 +13,7 @@ import { DEFAULT_STUDIO_PRIMARY_MAX, MAX_REFERENCE_IMAGES } from './limits';
 import { IMAGE_STUDIO_MODELS, defaultImageResolution, normalizeImageStudioQuality, normalizeImageResolution } from './model-catalog';
 import { normalizeStudioRatio } from './ratios';
 import { studioModuleDTOForUser, StudioModuleError, validStudioModuleId } from './modules';
-import { canManageStudioPreset, canUseCompanyTemplates as canUseCompanyTemplatesForUser, canViewStudioPreset, type ImageStudioIdentity } from './access';
+import { canManageStudioPreset, canUseCompanyTemplates as canUseCompanyTemplatesForUser, canViewStudioPreset, externalStudioPresetIds, isExternalImageStudioActor, type ImageStudioIdentity } from './access';
 import { studioTemplateAssetUrl } from './media';
 import { getStudioModuleFixedReferences, getStudioPresetsFixedReferences, getStudioPresetFixedReferences, parseStudioFixedReferences, setStudioModuleFixedReferences, setStudioPresetFixedReferences, type StudioFixedReference } from './fixed-references';
 import { studioVisibleAssetWhere } from './protected-assets';
@@ -111,6 +111,7 @@ function decodeQuickPresetIds(value: string | undefined, ownerId: string): strin
 export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: string, presetId?: string) {
   const { resolveStudioTemplateAuthor } = await import('./template-author');
   user = await assertStudioActor(user.id);
+  if (isExternalImageStudioActor(user) && moduleId !== undefined) return [];
   if (presetId !== undefined) {
     const { publicDTO } = await resolveSharedStudioDefinition(user, presetId);
     const templateRead = (await resolveStudioTemplateAuthor(user, { presetId })).templateRead;
@@ -128,7 +129,7 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
     quickIds = Array.from(new Set([...decodeQuickPresetIds(stored?.value_json, user.id), ...(workspace.source_preset_id ? [workspace.source_preset_id] : [])]));
   }
   const rows = await prisma.imageStudioPreset.findMany({
-    where: { OR: [{ owner_id: user.id }, { is_shared: true }], ...(quickIds ? { id: { in: quickIds }, owner_id: user.id } : {}) },
+    where: { OR: [{ owner_id: user.id }, { is_shared: true }], ...(isExternalImageStudioActor(user) ? { id: { in: externalStudioPresetIds(user) } } : {}), ...(quickIds ? { id: { in: quickIds }, owner_id: user.id } : {}) },
     orderBy: [{ scope: 'asc' }, { updated_at: 'desc' }],
   });
   const archived = await prisma.platformSetting.findMany({ where: { key: { in: rows.map(row => archivedPresetKey(row.id)) } }, select: { key: true } });
@@ -235,6 +236,7 @@ export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDr
   const taskSettings = parseStudioTaskSettings(body.taskSettings);
   if (taskSettings && Object.prototype.hasOwnProperty.call(body, 'globalContext')) throw new StudioModuleError('通用上下文不能随模板覆盖', 400);
   user = await assertStudioActor(user.id);
+  if (isExternalImageStudioActor(user)) throw new StudioModuleError('外部账号不能创建或修改模板定义', 403);
   if (!replace && body.saveIntent === 'personal-parameters') return saveStudioParameterCopy(user, body as Record<string, unknown>);
   if (replace && typeof body.presetId === 'string' && isParameterCopyId(body.presetId)) throw new StudioModuleError('参数模板请另存为，不修改原模板默认设置', 403);
   if (body.saveIntent !== undefined && body.saveIntent !== 'personal-quick') throw new StudioModuleError('模板保存方式无效', 400);
@@ -699,6 +701,7 @@ export async function studioPresetLifecycleHistory(user: ImageStudioIdentity, pr
 }
 
 export async function applyStudioPreset(user: ImageStudioIdentity, presetId: string) {
+  if (isExternalImageStudioActor(user)) throw new StudioModuleError('请从获准模板目录打开工作区', 403);
   if (isParameterCopyId(presetId)) throw new StudioModuleError('请从模板目录打开个人参数模板，不能复制其内部定义', 409);
   const userId = user.id;
   const moduleId = await prisma.$transaction(async tx => {

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { ImageStudioTask, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { privateStoredValue } from '@/lib/security/private-prompt-fields.server';
-import { canUseCompanyTemplates } from './access';
+import { canAccessImageTemplates } from './access';
 import { readStudioAsyncReceipt, readStudioRequestReceipt, type StudioAsyncReceipt } from './delivery';
 import { PRICING_ASYNC_PREFIX, publicPricingTaskState, studioTaskState } from './pricing-state';
 
@@ -201,7 +201,8 @@ export async function releaseStudioAsyncSlot(task: ImageStudioTask, receipt: Stu
 export async function requestStudioAsyncRecheck(ownerId: string, id: string, bindingOrRequestId: string) {
   const task = await prisma.imageStudioTask.findFirst({ where: { id, owner_id: ownerId } });
   const user = await prisma.user.findUnique({ where: { id: ownerId } });
-  if (!task || !user || user.status !== 'active' || !canUseCompanyTemplates(user)) throw new StudioAsyncRecoveryError('原任务不存在或无权核对', 404);
+  if (!task || !user || user.status !== 'active' || user.expires_at && user.expires_at <= new Date()
+    || !canAccessImageTemplates(user)) throw new StudioAsyncRecoveryError('原任务不存在或无权核对', 404);
   const original = await evidence(task).catch(() => null);
   return prisma.$transaction(async tx => {
     const current = await tx.imageStudioTask.findUnique({ where: { id } });

@@ -1,7 +1,7 @@
 import { notFound, redirect } from 'next/navigation';
 import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
-import { canUseCompanyTemplates } from '@/lib/image-studio/access';
+import { canAccessImageTemplates } from '@/lib/image-studio/access';
 import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
 import { studioOutputTaskWhere, studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
 
@@ -11,7 +11,7 @@ export default async function ImageStudioOriginalPage({ params }: { params: { as
   const assetId = params.assetId;
   const user = await getSession();
   if (!user) redirect(`/login?next=${encodeURIComponent(`/image-studio/original/${encodeURIComponent(assetId)}`)}`);
-  if (!canUseCompanyTemplates(user)) notFound();
+  if (!canAccessImageTemplates(user)) notFound();
   const task = await prisma.imageStudioTask.findFirst({
     where: { owner_id: user.id, asset_id: assetId, deleted_at: null, AND: [studioOutputTaskWhere] },
     select: { asset_id: true, status: true, usage_json: true },

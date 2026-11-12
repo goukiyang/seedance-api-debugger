@@ -2,7 +2,7 @@ import { traceHttpRequest, tracePhase } from '@/lib/performance/request-trace';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { listStudioModules, saveStudioModule, shareSavedStudioModule, studioModuleSharingStatus, chooseStudioModuleSharing, deleteStudioModule, deleteStudioGroup, studioModuleDeletionStatus, studioModuleDTOForUser, StudioModuleError } from '@/lib/image-studio/modules';
-import { canUseCompanyTemplates } from '@/lib/image-studio/access';
+import { canAccessImageTemplates, isExternalImageStudioActor } from '@/lib/image-studio/access';
 import { openSharedStudioModule, studioSharedOpenStatus, StudioSharingError } from '@/lib/image-studio/shared-contract';
 import { StudioStyleError } from '@/lib/image-studio/style-groups';
 import { StudioFixedReferenceError } from '@/lib/image-studio/fixed-references';
@@ -50,12 +50,13 @@ export async function GET(request: NextRequest) {
   return traceHttpRequest('studio.modules', request.headers, async () => {
   const user = await tracePhase('auth', () => getSession());
   if (!user) return NextResponse.json({ error: '请先登录', reasonCode: 'login-required' }, { status: 401, headers: privateHeaders });
-  if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限公司飞书账号使用图片模板', reasonCode: 'access-revoked' }, { status: 403, headers: privateHeaders });
+  if (!canAccessImageTemplates(user)) return NextResponse.json({ error: '无权使用图片模板', reasonCode: 'access-revoked' }, { status: 403, headers: privateHeaders });
   const idsValue = request.nextUrl.searchParams.get('ids');
   const ids = idsValue ? Array.from(new Set(idsValue.split(','))) : undefined;
   if (ids && (ids.length > 12 || ids.some(id => !id || id.length > 100))) return NextResponse.json({ error: '模块读取参数无效' }, { status: 400, headers: privateHeaders });
   try {
     const mode = request.nextUrl.searchParams.get('mode');
+    if (isExternalImageStudioActor(user) && mode && !['open-status', 'delete-status'].includes(mode)) return NextResponse.json({ error: '无权管理模板定义', reasonCode: 'access-revoked' }, { status: 403, headers: privateHeaders });
     if (mode === 'sharing-status') {
       const params = request.nextUrl.searchParams;
       if (!['true', 'false'].includes(params.get('isShared') || '')) throw new StudioModuleError('原共享查询参数无效', 400);
@@ -88,10 +89,11 @@ export async function GET(request: NextRequest) {
 async function save(request: NextRequest, createOnly: boolean) {
   const user = await tracePhase('auth', () => getSession());
   if (!user) return NextResponse.json({ error: '请先登录', reasonCode: 'login-required' }, { status: 401, headers: privateHeaders });
-  if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '仅限公司飞书账号使用图片模板', reasonCode: 'access-revoked' }, { status: 403, headers: privateHeaders });
+  if (!canAccessImageTemplates(user)) return NextResponse.json({ error: '无权使用图片模板', reasonCode: 'access-revoked' }, { status: 403, headers: privateHeaders });
   try {
     const body = await tracePhase('parse', () => request.json());
     if (!body || typeof body !== 'object' || Array.isArray(body)) return NextResponse.json({ error: '模块内容无效' }, { status: 400, headers: privateHeaders });
+    if (isExternalImageStudioActor(user) && body.action !== undefined && body.action !== 'open-shared') return NextResponse.json({ error: '无权管理模板定义', reasonCode: 'access-revoked' }, { status: 403, headers: privateHeaders });
     if (!createOnly && (body.action === 'save-private-definition' || body.action === 'save-private-draft')) {
       if (typeof body.id !== 'string' || !body.id || body.id.length > 100) return NextResponse.json({ error: '模板编号无效' }, { status: 400, headers: privateHeaders });
       return NextResponse.json(body.action === 'save-private-definition'
@@ -124,10 +126,11 @@ export const PUT = (request: NextRequest) => traceHttpRequest('studio.modules', 
 export async function DELETE(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录', reasonCode: 'login-required' }, { status: 401, headers: privateHeaders });
-  if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '无权操作图片模板', reasonCode: 'access-revoked' }, { status: 403, headers: privateHeaders });
+  if (!canAccessImageTemplates(user)) return NextResponse.json({ error: '无权操作图片模板', reasonCode: 'access-revoked' }, { status: 403, headers: privateHeaders });
   try {
     const body = await request.json();
     if (!body || typeof body !== 'object' || Array.isArray(body)) return NextResponse.json({ error: '模板参数无效' }, { status: 400, headers: privateHeaders });
+    if (isExternalImageStudioActor(user) && body.action === 'delete-group') return NextResponse.json({ error: '无权管理模板分组' }, { status: 403, headers: privateHeaders });
     if (body?.action === 'delete-group') return NextResponse.json(await deleteStudioGroup(user, body), { headers: privateHeaders });
     if (body.action !== undefined && body.action !== 'delete-module') return NextResponse.json({ error: '删除方式无效' }, { status: 400, headers: privateHeaders });
     if (typeof body.requestId !== 'string' || !/^[A-Za-z0-9:_-]{1,160}$/.test(body.requestId)) {

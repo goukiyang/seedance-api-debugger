@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
-import { canUseCompanyTemplates } from '@/lib/image-studio/access';
+import { canAccessImageTemplates } from '@/lib/image-studio/access';
 import { IMAGE_SUBMIT_RECEIPT_SCHEMA, closeStudioSubmission, readStudioSubmitReceipt, StudioSubmitReceiptError, validStudioSubmitRequestId } from '@/lib/image-studio/submit-receipts.server';
 
 export const dynamic = 'force-dynamic';
@@ -8,7 +8,7 @@ const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
 export async function GET(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401, headers });
-  if (user.status !== 'active' || !canUseCompanyTemplates(user)) return NextResponse.json({ error: '无权核对图片提交' }, { status: 403, headers });
+  if (user.status !== 'active' || !canAccessImageTemplates(user)) return NextResponse.json({ error: '无权核对图片提交' }, { status: 403, headers });
   const requestId = request.nextUrl.searchParams.get('requestId');
   if (!validStudioSubmitRequestId(requestId)) return NextResponse.json({ error: '原提交编号无效' }, { status: 400, headers });
   try { return NextResponse.json(await readStudioSubmitReceipt(user.id, requestId), { headers }); }
@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401, headers });
-  if (user.status !== 'active' || !canUseCompanyTemplates(user)) return NextResponse.json({ error: '无权结束图片提交' }, { status: 403, headers });
+  if (user.status !== 'active' || !canAccessImageTemplates(user)) return NextResponse.json({ error: '无权结束图片提交' }, { status: 403, headers });
   let requestId: unknown;
   try {
     const origin = request.headers.get('origin');

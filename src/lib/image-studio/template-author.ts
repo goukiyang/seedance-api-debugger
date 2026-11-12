@@ -2,7 +2,7 @@ import 'server-only';
 import type { ImageStudioPreset } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { displayUserName } from '@/lib/users/display';
-import { canUseCompanyTemplates, canViewStudioPreset, type ImageStudioIdentity } from './access';
+import { canAccessImageTemplates, canViewStudioPreset, isExternalImageStudioActor, type ImageStudioIdentity } from './access';
 import { assertStudioActor, readStudioTemplateSourceIdentity, type SharedStudioClient } from './shared-contract';
 import type { StudioTemplateRead } from './shared-types';
 import { readStudioParameterCopy } from './parameter-copy';
@@ -28,7 +28,7 @@ const unknown = (sourceKind: StudioTemplateRead['sourceKind'], sourceId: string,
 export async function resolveStudioTemplateAuthor(user: ImageStudioIdentity,
   target: { presetId?: string; moduleId?: string }, client: SharedStudioClient = prisma): Promise<StudioTemplateAuthorResolution> {
   const actor = await assertStudioActor(user.id, client);
-  if (!canUseCompanyTemplates(actor)) throw new Error('无权读取模板作者');
+  if (!canAccessImageTemplates(actor)) throw new Error('无权读取模板作者');
   const hasPreset = typeof target.presetId === 'string' && target.presetId.length > 0 && target.presetId.length <= 160;
   const hasModule = typeof target.moduleId === 'string' && target.moduleId.length > 0 && target.moduleId.length <= 160;
   if (hasPreset === hasModule) throw new Error('模板来源参数无效');
@@ -56,6 +56,8 @@ export async function resolveStudioTemplateAuthor(user: ImageStudioIdentity,
   if (!preset) return { actor, preset: null, owner: null, bindingConfirmed: false, ordinarilyVisible: false,
     templateRead: unknown('unknown', presetId!, null) };
   const ordinarilyVisible = canViewStudioPreset(actor, preset);
+  if (isExternalImageStudioActor(actor) && !ordinarilyVisible) return { actor, preset: null, owner: null, bindingConfirmed: false, ordinarilyVisible: false,
+    templateRead: unknown('unknown', presetId!, null) };
   const { owner, bindingConfirmed } = await readStudioTemplateSourceIdentity(preset.owner_id, preset.id, client);
   const known = bindingConfirmed && owner?.account_type === 'internal';
   const sourceRevision = preset.updated_at.toISOString();

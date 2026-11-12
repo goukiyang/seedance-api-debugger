@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
-import { canUseCompanyTemplates } from '@/lib/image-studio/access';
+import { canAccessImageTemplates } from '@/lib/image-studio/access';
 import { changeStudioNavigationPreference, readStudioNavigationPreference, StudioNavigationPreferenceError } from '@/lib/image-studio/navigation-preferences';
 
 export const dynamic = 'force-dynamic';
@@ -13,14 +13,14 @@ function failure(cause: unknown) {
 export async function GET() {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401, headers });
-  if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '无权使用图片模板' }, { status: 403, headers });
+  if (!canAccessImageTemplates(user)) return NextResponse.json({ error: '无权使用图片模板' }, { status: 403, headers });
   try { return NextResponse.json({ viewerId: user.id, preference: await readStudioNavigationPreference(user.id) }, { headers }); }
   catch (cause) { return failure(cause); }
 }
 export async function PATCH(request: NextRequest) {
   const user = await getSession();
   if (!user) return NextResponse.json({ error: '请先登录' }, { status: 401, headers });
-  if (!canUseCompanyTemplates(user)) return NextResponse.json({ error: '无权使用图片模板' }, { status: 403, headers });
+  if (!canAccessImageTemplates(user)) return NextResponse.json({ error: '无权使用图片模板' }, { status: 403, headers });
   if (request.headers.get('origin') !== new URL(request.url).origin) return NextResponse.json({ error: '请求来源无效' }, { status: 403, headers });
   try {
     const body = await request.json();

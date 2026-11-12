@@ -51,6 +51,7 @@ export async function getStudioStyleGroup(user: ImageStudioIdentity, id: string,
   return group;
 }
 export async function studioStyleDTO(user: ImageStudioIdentity, group: StudioStyleGroup, client: Client = prisma) {
+  identity(user);
   const canManage = canManageStudioStyle(user, group);
   const assets = canManage ? await client.asset.findMany({ where: { id: { in: group.references.map(ref => ref.assetId) }, type: 'image', status: 'active' },
     select: { id: true, width: true, height: true } }) : [];

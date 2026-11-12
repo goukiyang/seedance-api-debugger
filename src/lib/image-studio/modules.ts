@@ -9,7 +9,7 @@ import { parseStudioTaskSettings } from './task-settings';
 import { assertStudioTaskSettingsWrite, readStudioWorkspaceSource, writeStudioWorkspaceSource, studioSettingsSourceContext } from './task-settings-storage';
 import { defaultImageStudioQuality, defaultImageResolution, normalizeImageStudioQuality, normalizeImageResolution, imageStudioModelForNewSelection, type ImageResolution } from './model-catalog';
 import { DEFAULT_STUDIO_PRIMARY_MAX, MAX_REFERENCE_IMAGES } from './limits';
-import { canManageStudioPreset, canViewStudioPreset, type ImageStudioIdentity, type StudioPresetAccessRow } from './access';
+import { canManageStudioPreset, canViewStudioPreset, isExternalImageStudioActor, type ImageStudioIdentity, type StudioPresetAccessRow } from './access';
 import { studioAssetUrl, studioTemplateAssetUrl } from './media';
 import { getStudioModuleFixedReferences, parseStudioFixedReferences, removeStudioModuleFixedReferences, setStudioModuleFixedReferences, StudioFixedReferenceError } from './fixed-references';
 import { getStudioModuleStyleIds, getStudioStyleGroup, parseStudioStyleIds, resolveStudioStyleReferences, setStudioModuleStyleIds, studioStyleDTO, StudioStyleError } from './style-groups';
@@ -75,12 +75,33 @@ type StudioModuleRow = {
 };
 
 async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageStudioSettings, saved = true, isAdmin = false, sourcePreset?: StudioPresetAccessRow & { id: string; updated_at?: Date }, identity?: ImageStudioIdentity, sharedReads?: Map<string, SharedStudioModuleRead>) {
+  const actor = identity || await assertStudioActor(ownerId);
+  const sharedRead = saved ? sharedReads?.get(row.id) ?? (await readSharedStudioModules(ownerId, [row.id])).get(row.id) : undefined;
+  if (sharedRead?.binding) return sharedModuleDTO(row, ownerId, settings, sharedRead, actor);
+  if (isExternalImageStudioActor(actor)) {
+    // Old workspaces remain a route to the owner's records, never a new blank recipe.
+    const generation = resolveStudioModuleGenerationConfig(row, settings);
+    const state = projectSharedStudioCapabilities({ objectKind: row.source_preset_id ? 'legacy-copy' : 'local', lifecycle: 'missing',
+      sharing: 'unknown', dependency: 'unknown', sourceRevision: null, moduleRevision: row.revision, definitionToken: null,
+      actorAllowed: true, ownsWorkspace: true, canViewSource: false, canManageSource: false, canViewDefinition: false, reasonCode: 'access-revoked' });
+    return { ...state, externalHistoryOnly: true, taskSettings: undefined, settingsSourceTaskId: null,
+      id: row.id, name: '本人历史', groupName: '本人历史', prompt: '', context: '', contextConfigured: false,
+      templateRead: { sourceKind: 'unknown' as const, sourceId: row.id, sourceRevision: null,
+        author: { state: 'unknown' as const, displayName: null, avatarUrl: null, isSelf: false }, canViewTemplateContext: false },
+      model: generation.model, quality: generation.quality, resolution: generation.resolution, count: row.count,
+      aspectRatio: row.aspect_ratio || 'auto', referenceLimit: row.reference_limit || DEFAULT_STUDIO_PRIMARY_MAX,
+      referencePolicy: studioTemplateDefaultPolicy(settings.templateDefaults!), revision: row.revision, saved,
+      prices: generation.prices, unitCredits: generation.prices[generation.model], images: [], fixedReferences: [], fixedReferenceCount: 0,
+      styleGroupIds: [], styleGroups: [], skillIds: [], skills: [], reproductionState: null, reproduceFromTaskId: null,
+      sourcePresetId: row.source_preset_id || null, sourcePresetShared: null, sourcePresetOwnedByViewer: false, sourcePresetCanManageSharing: false,
+      banner: null, fixedCover: null, cover: null, coverEditable: false, contextEditable: false, fixedReferencesEditable: false,
+      canChooseSharing: false, sharingPreference: null, moduleContextVersion: null, evolution: null,
+      deletion: studioWorkspaceDeletionCapability(ownerId, row.id, row.revision, saved), createdAt: row.created_at, updatedAt: row.updated_at };
+  }
   row = readPrivateStudioDefinition('image-module', { ...row, owner_id: ownerId });
   const privateOrigins = privateFieldOrigins(row, 'context');
   const promptOrigins = privateFieldOrigins(row, 'prompt');
   const privateCapabilities = await privatePromptRequestCapabilities(ownerId, [...privateOrigins, ...promptOrigins]);
-  const sharedRead = saved ? sharedReads?.get(row.id) ?? (await readSharedStudioModules(ownerId, [row.id])).get(row.id) : undefined;
-  if (sharedRead?.binding) return sharedModuleDTO(row, ownerId, settings, sharedRead, identity);
   // Author projection belongs to the Web DTO, not the shared Node worker graph.
   const { resolveStudioTemplateAuthor } = await import('./template-author');
   const ids = Array.isArray(row.reference_ids) ? row.reference_ids : JSON.parse(row.reference_ids) as string[];
@@ -204,9 +225,10 @@ async function moduleDTO(row: StudioModuleRow, ownerId: string, settings: ImageS
 }
 async function sharedModuleDTO(row: StudioModuleRow, ownerId: string, settings: ImageStudioSettings, sharedRead: SharedStudioModuleRead, identity?: ImageStudioIdentity) {
   const actor = identity || await assertStudioActor(ownerId);
+  const external = isExternalImageStudioActor(actor);
   const { binding, resolved } = sharedRead;
   if (!binding) throw new StudioModuleError('共享绑定已变化，请重新读取', 409);
-  const unavailableReason = sharedRead.unavailable?.message;
+  const unavailableReason = sharedRead.unavailable ? external ? '模板暂不可用，本人输入和历史保留' : sharedRead.unavailable.message : undefined;
   const unavailableIntent = sharedRead.unavailable?.intent;
   const ids = Array.isArray(row.reference_ids) ? row.reference_ids : JSON.parse(row.reference_ids) as string[];
   const assets = await prisma.asset.findMany({ where: { id: { in: ids }, owner_id: ownerId, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(actor)] }, select: { id: true, width: true, height: true } });
@@ -219,9 +241,9 @@ async function sharedModuleDTO(row: StudioModuleRow, ownerId: string, settings: 
   const canRepair = Boolean(repairDefinition && binding.mode === 'publisher');
   const overrides = resolved?.personalOverrides || await getSharedStudioPersonalOverrides(ownerId, row.id);
   const defaults = dto?.defaults;
-  const model = overrides.model ?? defaults?.model ?? settings.model;
-  const quality = normalizeImageStudioQuality(model, overrides.quality ?? defaults?.quality);
-  const resolution = normalizeImageResolution(model, overrides.resolution ?? defaults?.resolution);
+  const model = overrides.model ?? defaults?.model ?? (external ? resolveStudioModuleGenerationConfig(row, settings).model : settings.model);
+  const quality = normalizeImageStudioQuality(model, overrides.quality ?? defaults?.quality ?? (external ? row.quality : undefined));
+  const resolution = normalizeImageResolution(model, overrides.resolution ?? defaults?.resolution ?? (external ? row.resolution : undefined));
   const personalPolicy = await getStudioModuleReferencePolicy(ownerId, row.id, ids, defaults?.referenceLimit ?? row.reference_limit);
   const referencePolicy = defaults ? { ...defaults.referencePolicy, primaryIds: personalPolicy.primaryIds } : personalPolicy;
   const { resolveStudioTemplateAuthor } = await import('./template-author');
@@ -239,13 +261,13 @@ async function sharedModuleDTO(row: StudioModuleRow, ownerId: string, settings: 
   const sharedLive: SharedStudioLiveDTO = { ...viewState, templateRead, ...intent, intent, ...(dto?.generationIntent ? { generationIntent: dto.generationIntent } : {}), mode: binding.mode, available: Boolean(resolved), methodDraft,
     ...(unavailableReason ? { unavailableReason } : {}), overriddenFields: Object.keys(overrides) as SharedStudioLiveDTO['overriddenFields'],
     ...(defaults ? { defaults } : {}), ...(repairDefinition ? { repairDefinition } : {}) };
-  const fixedCover = dto?.fixedCover ?? await studioFixedCoverDTO(actor, { kind: 'preset', id: binding.presetId });
+  const fixedCover = external && !resolved ? null : dto?.fixedCover ?? await studioFixedCoverDTO(actor, { kind: 'preset', id: binding.presetId });
   return { ...viewState, templateRead, privateDefinition: Boolean(dto?.privateDefinition),
     canReadPrivatePrompt: Boolean(dto?.canReadPrivatePrompt), canEditPrivatePrompt: Boolean(dto?.canEditPrivatePrompt),
     requiresIdentityVerification: Boolean(dto?.requiresIdentityVerification),
     deletion: studioWorkspaceDeletionCapability(ownerId, row.id, row.revision), ...(repairDefinition ? { repairDefinition } : {}), id: row.id,
-    name: dto?.name || repairDefinition?.name || row.name.trim() || `历史模板 · ${row.id.slice(0, 8)}`,
-    groupName: dto?.groupName || repairDefinition?.groupName || row.group_name?.trim() || '未分组',
+    name: dto?.name || (external ? '本人历史' : repairDefinition?.name || row.name.trim() || `历史模板 · ${row.id.slice(0, 8)}`),
+    groupName: dto?.groupName || (external ? '本人历史' : repairDefinition?.groupName || row.group_name?.trim() || '未分组'),
     prompt: overrides.prompt ?? '', personalPrompt: overrides.prompt ?? '', templatePrompt: dto?.templatePrompt ?? repairDefinition?.templatePrompt ?? '',
     context: dto?.context ?? repairDefinition?.context ?? '', contextConfigured: dto?.contextConfigured ?? Boolean(repairDefinition?.context.trim()),
     contextEditable: binding.mode === 'publisher' && (Boolean(dto?.contextEditable) || canRepair),
@@ -262,11 +284,12 @@ async function sharedModuleDTO(row: StudioModuleRow, ownerId: string, settings: 
     styleGroupIds: dto?.styleGroupIds || [], styleGroups: dto?.styleGroups || [], skillIds: [], skills: [],
     reproductionState: dto?.reproductionConfigured ? { fixedReferenceCount: dto.fixedReferenceCount, skills: [], styleGroups: dto.styleGroups } : null,
     ...(await (async () => {
+      if (external) return { taskSettings: undefined, settingsSourceTaskId: null };
       const saved = await readStudioWorkspaceSource(prisma, ownerId, row.id);
       return { taskSettings: saved?.taskSettings ?? dto?.taskSettings ?? repairDefinition?.taskSettings,
         settingsSourceTaskId: saved?.sourceTaskId ?? null };
     })()),
-    reproduceFromTaskId: row.reproduce_task_id || null, sourcePresetId: binding.presetId,
+    reproduceFromTaskId: external ? null : row.reproduce_task_id || null, sourcePresetId: binding.presetId,
     sourcePresetShared: state.sharing === 'unknown' ? null : state.sharing === 'shared',
     sourcePresetOwnedByViewer: sharedRead.ownedByViewer ?? dto?.ownedByViewer ?? canRepair,
     sourcePresetCanManageSharing: state.capabilities.changeSharing.allowed,
@@ -282,6 +305,7 @@ export async function studioModuleDTOForUser(user: ImageStudioIdentity, moduleId
 }
 export async function readStudioModulePrivateDefinition(user: ImageStudioIdentity, moduleId: string) {
   const actor = await assertStudioActor(user.id);
+  if (isExternalImageStudioActor(actor)) throw new StudioModuleError('无权查看模板原文', 403);
   const stored = await prisma.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: actor.id } });
   if (!stored) throw new StudioModuleError('模块不存在或无权使用', 404);
   const shared = (await readSharedStudioModules(actor.id, [stored.id])).get(stored.id);
@@ -334,7 +358,7 @@ export async function listStudioModules(ownerId: string, cursor?: string, isAdmi
   // receives source metadata below and never hydrates every saved workspace.
   const sharedReads = await readSharedStudioModules(ownerId, [...visible, ...(defaultRow ? [defaultRow] : [])].map(row => row.id));
   const modules = await Promise.all(visible.map(row => moduleDTO(row, ownerId, settings, true, isAdmin, row.source_preset_id ? sourceById.get(row.source_preset_id) : undefined, identity, sharedReads)));
-  if (includeDefault) {
+  if (includeDefault && (defaultRow || !isExternalImageStudioActor(actor))) {
     const defaults = settings.templateDefaults;
     modules.unshift(await moduleDTO(defaultRow || { id: defaultId, name: '模块 1', prompt: '', context: '',
       model: defaults.model, quality: defaults.quality, resolution: defaults.resolution, count: defaults.count,
@@ -358,9 +382,9 @@ export async function listStudioModules(ownerId: string, cursor?: string, isAdmi
       sourceRevision: source && canViewSource ? source.updated_at.toISOString() : null, moduleRevision: item.revision, definitionToken: null,
       actorAllowed: true, ownsWorkspace: true, canViewSource, canManageSource });
     const deletion = studioWorkspaceDeletionCapability(ownerId, item.id, item.revision);
-    if (!binding) return { ...state, deletion, id: item.id, name: item.name.trim() || `历史模板 · ${item.id.slice(0, 8)}`,
-      groupName: item.group_name?.trim() || '未分组', sourcePresetId: item.source_preset_id,
-      sourcePresetShared: source ? source.is_shared : item.source_preset_id ? null : false, revision: item.revision, canManageGroup: true, coverEditable: true };
+    if (!binding) return { ...state, deletion, id: item.id, name: isExternalImageStudioActor(actor) ? '本人历史' : item.name.trim() || `历史模板 · ${item.id.slice(0, 8)}`,
+      groupName: isExternalImageStudioActor(actor) ? '本人历史' : item.group_name?.trim() || '未分组', sourcePresetId: item.source_preset_id,
+      sourcePresetShared: canViewSource && source ? source.is_shared : item.source_preset_id ? null : false, revision: item.revision, canManageGroup: !isExternalImageStudioActor(actor), coverEditable: !isExternalImageStudioActor(actor) };
     const resolved = sharedRead?.resolved;
     const repair = sharedRead?.repairDefinition;
     const intent = resolved?.definition.intent || sharedRead?.unavailable?.intent || { protocol: 'shared-live-v1' as const, presetId: binding.presetId, definitionToken: '' };
@@ -371,11 +395,11 @@ export async function listStudioModules(ownerId: string, cursor?: string, isAdmi
     const sharedLive: SharedStudioLiveDTO = { ...state, ...intent, intent, ...(resolved?.publicDTO.generationIntent ? { generationIntent: resolved.publicDTO.generationIntent } : {}), mode: binding.mode, available, methodDraft: methodDraftIds.has(item.id),
       overriddenFields: Object.keys(resolved?.personalOverrides || {}) as SharedStudioLiveDTO['overriddenFields'],
       ...(resolved ? { defaults: resolved.publicDTO.defaults } : {}),
-      ...(sharedRead?.unavailable ? { unavailableReason: sharedRead.unavailable.message } : {}) };
+      ...(sharedRead?.unavailable ? { unavailableReason: isExternalImageStudioActor(actor) ? '模板暂不可用，本人输入和历史保留' : sharedRead.unavailable.message } : {}) };
     const legalNavigationSource = source && canViewSource && !archived ? source : null;
     const canManageGroup = binding.mode === 'publisher' && canManageSource && !archived;
-    return { ...state, deletion, id: item.id, name: resolved?.definition.name || repair?.name || legalNavigationSource?.name || item.name.trim() || `历史模板 · ${item.id.slice(0, 8)}`,
-      groupName: resolved?.definition.groupName || repair?.groupName || legalNavigationSource?.group_name || item.group_name?.trim() || '未分组',
+    return { ...state, deletion, id: item.id, name: isExternalImageStudioActor(actor) ? legalNavigationSource?.name || '本人历史' : resolved?.definition.name || repair?.name || legalNavigationSource?.name || item.name.trim() || `历史模板 · ${item.id.slice(0, 8)}`,
+      groupName: isExternalImageStudioActor(actor) ? legalNavigationSource?.group_name || '本人历史' : resolved?.definition.groupName || repair?.groupName || legalNavigationSource?.group_name || item.group_name?.trim() || '未分组',
       sourcePresetId: binding.presetId, sourcePresetShared: state.sharing === 'unknown' ? null : state.sharing === 'shared',
       sourcePresetOwnedByViewer: source?.owner_id === ownerId, coverEditable: canManageGroup, revision: item.revision, canManageGroup, sharedLive,
       ...(sharedRead?.unavailable || reasonCode ? { unavailable: true } : {}) };
@@ -384,7 +408,7 @@ export async function listStudioModules(ownerId: string, cursor?: string, isAdmi
     removedDefaultGroups: await getStudioRemovedDefaultGroups(ownerId),
     deletedSourcePresetIds: (await listStudioDeletedSources(ownerId)).filter(item => !item.reopenedModuleId).map(item => item.presetId),
     ...(directory ? { directory: [
-      ...(directory.some(item => item.id === defaultId) ? [] : [{ id: defaultId, name: '模块 1', groupName: '未分组',
+      ...(isExternalImageStudioActor(actor) || directory.some(item => item.id === defaultId) ? [] : [{ id: defaultId, name: '模块 1', groupName: '未分组',
         deletion: studioWorkspaceDeletionCapability(ownerId, defaultId, 0, false) }]),
       ...projectedDirectory!,
     ] } : {}) };
@@ -484,6 +508,9 @@ export async function saveStudioModule(ownerId: string, body: Record<string, unk
   isAdmin = actor.role === 'admin';
   sourceIdentity = actor;
   const binding = await studioSharedBinding(ownerId, id);
+  if (isExternalImageStudioActor(actor) && (createOnly || binding?.mode !== 'live' || body.saveIntent !== 'personal')) {
+    throw new StudioModuleError('外部账号只能保存获准模板中的本人输入和参数', 403);
+  }
   if (!createOnly && body.saveIntent === 'definition') {
     let published: Awaited<ReturnType<typeof publishSharedStudioModule>>;
     try {

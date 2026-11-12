@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { IMAGE_STUDIO_MODELS } from './model-catalog';
 import { MAX_REFERENCE_IMAGES } from './limits';
-import type { ImageStudioIdentity } from './access';
+import { externalStudioPresetIds, isExternalImageStudioActor, type ImageStudioIdentity } from './access';
 import type { GalleryQuery } from './gallery-types';
 import { catalogVisibilitySql, CatalogSqlCompatibilityError } from '@/lib/assets/catalog-visibility-sql';
 import { sharedCommandFingerprint } from './shared-command-storage';
@@ -35,7 +35,9 @@ export async function galleryDirectorySql(db: Prisma.TransactionClient, actor: I
   const presetIds = keys?.filter(key => key.startsWith('image_template:')).map(key => key.slice('image_template:'.length)) || [];
   const ownerHash = sharedCommandFingerprint(actor.id), deletedPrefix = `studio_deleted_workspace_v1:${ownerHash}:`;
   const sourceDeletedPrefix = `studio_deleted_workspace_source_v1:${ownerHash}:`;
-  const sourceVisible = Prisma.sql`(p."owner_id" = ${actor.id} OR p."scope" IN ('admin', 'creator') AND p."is_shared" = 1)
+  const external = isExternalImageStudioActor(actor);
+  const allowedSource = external ? catalogIdsSql(Prisma.sql`p."id"`, externalStudioPresetIds(actor)) : Prisma.sql`1 = 1`;
+  const sourceVisible = Prisma.sql`${allowedSource} AND (p."owner_id" = ${actor.id} OR p."scope" IN ('admin', 'creator') AND p."is_shared" = 1)
     AND NOT EXISTS (SELECT 1 FROM "PlatformSetting" a WHERE a."key" = 'studio_preset_archived_v1:' || p."id")`;
   const fixed = Prisma.sql`CASE WHEN reproduction IS NOT NULL THEN ${field(Prisma.sql`reproduction`, '$.templateFixedReferences')}
     ELSE COALESCE(${field(Prisma.sql`fixed_setting`, '$.references')}, '[]') END`;
@@ -76,8 +78,9 @@ export async function galleryDirectorySql(db: Prisma.TransactionClient, actor: I
         ${setting(Prisma.sql`'studio_shared_reproduction_v1:' || p."id"`)} AS reproduction,
         (${publisherKnown}) AS author_known
       FROM "ImageStudioPreset" p LEFT JOIN "PlatformSetting" publisher ON publisher."key" = 'studio_shared_publisher_v1:' || p."id"
-      WHERE ${keys ? Prisma.sql`${catalogIdsSql(Prisma.sql`p."id"`, presetIds)} OR p."id" IN (SELECT wanted_module."source_preset_id" FROM "ImageStudioModule" wanted_module
-        WHERE wanted_module."owner_id" = ${actor.id} AND ${catalogIdsSql(Prisma.sql`wanted_module."id"`, moduleIds)})` : Prisma.sql`1 = 1`}
+      WHERE (${allowedSource} OR p."id" IN (SELECT owned_module."source_preset_id" FROM "ImageStudioModule" owned_module WHERE owned_module."owner_id" = ${actor.id}))
+        AND (${keys ? Prisma.sql`${catalogIdsSql(Prisma.sql`p."id"`, presetIds)} OR p."id" IN (SELECT wanted_module."source_preset_id" FROM "ImageStudioModule" wanted_module
+        WHERE wanted_module."owner_id" = ${actor.id} AND ${catalogIdsSql(Prisma.sql`wanted_module."id"`, moduleIds)})` : Prisma.sql`1 = 1`})
     ), source_policy AS MATERIALIZED (
       SELECT *, ${array(Prisma.sql`"reference_ids"`)} AS refs, ${policy} AS policy, ${fixed} AS fixed_refs,
         COALESCE(${field(Prisma.sql`style_setting`, '$.ids')}, '[]') AS style_ids
@@ -91,7 +94,7 @@ export async function galleryDirectorySql(db: Prisma.TransactionClient, actor: I
         json_each(${json(Prisma.sql`sg."value_json"`)}, '$.references') r
       UNION ALL SELECT p."id", p."banner_asset_id", 'banner' FROM source_policy p WHERE p."banner_asset_id" IS NOT NULL
     ), source_state AS MATERIALIZED (
-      SELECT p.*, (p.visible = 1 AND p."model" IN (${Prisma.join(IMAGE_STUDIO_MODELS)})
+      SELECT p.*, CASE WHEN ${external ? 1 : 0} = 1 THEN p.visible ELSE (p.visible = 1 AND p."model" IN (${Prisma.join(IMAGE_STUDIO_MODELS)})
         AND (skill_setting IS NULL OR ${field(Prisma.sql`skill_setting`, '$.ownerId')} = p."owner_id"
           AND json_array_length(${field(Prisma.sql`skill_setting`, '$.ids')}) = 0)
         AND (fixed_setting IS NULL OR ${field(Prisma.sql`fixed_setting`, '$.ownerId')} = p."owner_id")
@@ -111,7 +114,7 @@ export async function galleryDirectorySql(db: Prisma.TransactionClient, actor: I
         AND NOT EXISTS (SELECT 1 FROM source_refs r LEFT JOIN "Asset" a ON a."id" = r.asset_id
           WHERE r.preset_id = p."id" AND (a."id" IS NULL OR a."status" <> 'active' OR a."type" <> 'image'
             OR r.kind <> 'style' AND a."owner_id" <> p."owner_id" OR r.kind = 'ordinary' AND NOT (${visibility.visible(Prisma.sql`a."original_url"`)})))
-      ) AS available FROM source_policy p
+      ) END AS available FROM source_policy p
     ), module_bindings AS MATERIALIZED (
       SELECT m.*, CASE WHEN ${validBinding} THEN 1 ELSE 0 END AS binding_valid,
         b."id" IS NOT NULL AS binding_present, ${field(Prisma.sql`b."value_json"`, '$.mode')} AS binding_mode,
@@ -123,11 +126,11 @@ export async function galleryDirectorySql(db: Prisma.TransactionClient, actor: I
     ), module_entries AS MATERIALIZED (
       SELECT CASE WHEN m.binding_valid = 1 AND p."id" IS NOT NULL THEN 'image_template:' || p."id" ELSE 'image_module:' || m."id" END AS key,
         'module' AS targetKind, m."id" AS targetId,
-        CASE WHEN m.binding_valid = 1 AND p.visible = 1 THEN p."name" ELSE m."name" END AS name,
-        COALESCE(NULLIF(CASE WHEN m.binding_valid = 1 AND p.visible = 1 THEN p."group_name" ELSE m."group_name" END, ''), '未分组') AS groupName,
+        CASE WHEN m.binding_valid = 1 AND p.visible = 1 THEN p."name" WHEN ${external ? 1 : 0} = 1 THEN '本人历史' ELSE m."name" END AS name,
+        COALESCE(NULLIF(CASE WHEN m.binding_valid = 1 AND p.visible = 1 THEN p."group_name" WHEN ${external ? 1 : 0} = 1 THEN '本人历史' ELSE m."group_name" END, ''), '未分组') AS groupName,
         CASE WHEN m.binding_valid = 1 AND p."id" IS NOT NULL THEN p."owner_id" = ${actor.id} ELSE 1 END AS mine,
         m.binding_valid = 1 AND p.visible = 1 AND p."is_shared" = 1 AS shared,
-        NOT (m.binding_present = 1 AND m.binding_valid = 0) AND (m."source_preset_id" IS NULL OR p.visible = 1 AND p.available = 1) AS available,
+        NOT (m.binding_present = 1 AND m.binding_valid = 0) AND (${external ? Prisma.sql`m.binding_valid = 1 AND m.binding_mode = 'live'` : Prisma.sql`1 = 1`}) AND (m."source_preset_id" IS NULL OR p.visible = 1 AND p.available = 1) AS available,
         CASE WHEN m.binding_valid = 1 AND p."id" IS NOT NULL THEN CASE WHEN p.visible = 1 THEN p."created_at" ELSE NULL END ELSE m."created_at" END AS created,
         CASE WHEN m.binding_valid = 1 AND p."id" IS NOT NULL THEN CASE WHEN p.visible = 1 THEN p."updated_at" ELSE NULL END ELSE m."updated_at" END AS updated,
         CASE WHEN NOT (m.binding_present = 1 AND m.binding_valid = 0) AND (m."source_preset_id" IS NULL OR p.visible = 1)
@@ -147,7 +150,7 @@ export async function galleryDirectorySql(db: Prisma.TransactionClient, actor: I
         AND NOT EXISTS (SELECT 1 FROM "PlatformSetting" d WHERE d."key" GLOB ${sourceDeletedPrefix + '*'}
           AND ${field(Prisma.sql`d."value_json"`, '$.presetId')} = p."id" AND ${field(Prisma.sql`d."value_json"`, '$.reopenedModuleId')} IS NULL)
       UNION ALL SELECT ${'image_module:default-' + actor.id}, 'module', ${'default-' + actor.id}, '默认模块', '常用', 1, 0, 1, NULL, NULL, NULL, -1, NULL
-        WHERE NOT EXISTS (SELECT 1 FROM "ImageStudioModule" m WHERE m."id" = ${'default-' + actor.id} AND m."owner_id" = ${actor.id})
+        WHERE ${external ? Prisma.sql`0 = 1` : Prisma.sql`1 = 1`} AND NOT EXISTS (SELECT 1 FROM "ImageStudioModule" m WHERE m."id" = ${'default-' + actor.id} AND m."owner_id" = ${actor.id})
           AND NOT EXISTS (SELECT 1 FROM "PlatformSetting" d WHERE d."key" = ${deletedPrefix + 'default-' + actor.id})
     ), decorated AS MATERIALIZED (
       SELECT e.*, CASE WHEN u."account_type" = 'internal' THEN e.authorId ELSE NULL END AS knownAuthor,

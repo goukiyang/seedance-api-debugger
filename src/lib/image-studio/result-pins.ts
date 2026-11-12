@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
 import type { Prisma } from '@prisma/client';
 import type { SessionUser } from '@/lib/auth/session';
-import { canUseCompanyTemplates, canViewStudioPreset } from './access';
+import { canUseCompanyTemplates, canViewStudioPreset, isExternalImageStudioActor } from './access';
 import { studioPresetArchived } from './preset-lifecycle';
 import { studioSharedBinding, studioPublisherModule, studioMethodHistoryModuleId, type SharedStudioClient } from './shared-contract';
 import { defaultStudioModuleId } from './modules';
@@ -37,6 +37,7 @@ function decode(raw: string | undefined, presetId: string): Document {
   } catch { throw new StudioPinError('置顶记录暂时无法确认，请重试；原记录保留', 503); }
 }
 export async function studioPinScope(user: SessionUser, moduleId: string, db: SharedStudioClient = prisma, management = false) {
+  if (isExternalImageStudioActor(user)) return null;
   if (user.status !== 'active' || user.expires_at && user.expires_at <= new Date() || !canUseCompanyTemplates(user) || !validId(moduleId)) throw new StudioPinError('无权访问模板', 403);
   const studioModule = await db.imageStudioModule.findFirst({ where: { id: moduleId, owner_id: user.id } });
   if (!studioModule) return null;

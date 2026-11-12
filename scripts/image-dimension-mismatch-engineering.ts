@@ -26,7 +26,9 @@ const sourcePaths = ['src/lib/image-studio/dimension-rejection.ts', 'src/lib/ima
   'src/lib/image-studio/batches.ts', 'src/lib/image-studio/batch-contract.ts', 'src/app/image-studio/batch-results.tsx',
   'src/app/api/assets/picker/route.ts', 'src/app/api/assets/library/route.ts', 'src/lib/avatar-random/service.ts',
   'src/lib/avatar-random/handoff.ts', 'src/lib/canvas-roles/media.ts', 'src/lib/canvas-roles/media-bindings.ts',
-  'src/app/api/avatar-studio/route.ts', 'src/app/tools/avatar-studio/studio.tsx', 'src/app/story-studio/story-studio.tsx'];
+  'src/app/api/avatar-studio/route.ts', 'src/app/tools/avatar-studio/studio.tsx', 'src/app/story-studio/story-studio.tsx',
+  'src/lib/image-studio/access.ts', 'src/lib/image-studio/external-access.server.ts',
+  'src/lib/image-studio/external-admission.ts', 'src/lib/image-studio/external-task-projection.ts', 'src/lib/projects/permissions.ts'];
 const checks: string[] = [];
 
 async function main() {

@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { canUseCompanyTemplates } from '@/lib/image-studio/access';
+import { canAccessImageTemplates, isExternalImageStudioActor } from '@/lib/image-studio/access';
 import { isExternalUser, externalFallbackPath } from '@/lib/access/external-role';
 import { getSession } from '@/lib/auth/session';
 import TemplateStudioShell from '@/components/template-studio/TemplateStudioShell';
@@ -34,7 +34,7 @@ export default async function TemplateStudioPage({ searchParams = {} }: { search
   if (!user) redirect(`/login?next=${encodeURIComponent(next)}`);
 
   const allowedTypes: Array<'image' | 'video'> = [];
-  if (canUseCompanyTemplates(user)) allowedTypes.push('image');
+  if (canAccessImageTemplates(user)) allowedTypes.push('image');
   if (user.account_type === 'internal' && !isExternalUser(user)) allowedTypes.push('video');
   if (allowedTypes.length === 0) redirect(externalFallbackPath());
   if (!query && allowedTypes.includes('image')) redirect('/template-studio?type=image&view=covers');
@@ -48,6 +48,7 @@ export default async function TemplateStudioPage({ searchParams = {} }: { search
     <TemplateStudioShell
       userId={user.id}
       isAdmin={user.role === 'admin'}
+      externalActor={isExternalImageStudioActor(user)}
       allowedTypes={allowedTypes}
       initialType={initialType}
     />
