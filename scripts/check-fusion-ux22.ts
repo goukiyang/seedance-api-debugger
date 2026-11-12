@@ -5,7 +5,7 @@ import { builtinCatalogue } from '../src/lib/character-fusion/catalogue';
 import { BODY_CARDS } from '../src/lib/character-fusion/body-cards';
 import { emptyWorkspaceState, newCreationState, preparationFingerprint } from '../src/lib/character-fusion/actions';
 import { effectiveFusionSettings, fusionSettingsChanges, applyFusionSettingChanges, configureFusionSettings, parseFusionConfiguration, preparationForManualChange } from '../src/lib/character-fusion/configuration';
-import { bindFusionAgentCommands, proposeFusionAgent, validateFusionAgentExecution, fusionAgentScene, FUSION_CONFIGURATION_SYSTEM, FusionAgentError } from '../src/lib/character-fusion/agent-adapter.server';
+import { bindFusionAgentCommands, proposeFusionAgent, validateFusionAgentExecution, fusionAgentScene, FUSION_CONFIGURATION_SYSTEM, FusionAgentError, readFusionAgentControls } from '../src/lib/character-fusion/agent-adapter.server';
 import type * as Workspace from '../src/lib/character-fusion/workspace.server';
 import type * as Library from '../src/lib/character-fusion/catalogue-repository';
 import { mergeWorkspaceRows, mergeWorkspaceState, stateCommands } from '../src/app/tools/character-fusion/workspace-client';
@@ -135,6 +135,12 @@ export async function checkFusionUx22(input: { actor: { id: string }; repository
   assert(inline.tags[0].termId); assert(!(await library.readFusionCatalogue(actor)).catalogue.terms.some(term => term.id === inline.tags[0].termId));
   const wordRows = await repository.executeWorkspaceOperation(actor, wordDoc.workspace.id, { opId: 'ux22-inline-click', baseVersion: wordConfigured.workspace.version, commands: [{ type: 'generate', mode: 'append', seed: 2207 }] });
   for (const row of wordRows.workspace.rows) { assert(row.catalogueSnapshot!.selections[inline.id].includes(inline.tags[0].termId!)); assert.match(row.catalogueSnapshot!.body.zh, /肩背光纹随呼吸/); assert.match(row.catalogueSnapshot!.body.en, /brighten and dim slowly/); assert(!/breathing\.\s*\./.test(row.catalogueSnapshot!.body.en)); }
+  const fullWordDefinitions = readFusionAgentControls(wordConfigured.workspace, { kind: 'constraints', categoryId: inline.id, field: 'definitions', limit: 1 });
+  assert('items' in fullWordDefinitions);
+  assert.deepEqual(fullWordDefinitions.items, [{ nameZh: inline.tags[0].label, nameEn: inline.tags[0].en, descriptionZh: inline.tags[0].descriptionZh, descriptionEn: inline.tags[0].descriptionEn }]);
+  assert.equal(fullWordDefinitions.complete, true);
+  const wordScene = fusionAgentScene(wordConfigured.workspace);
+  assert.deepEqual(wordScene.settings.customCards.find(card => card.id === inline.id)?.definitionsRead, { kind: 'constraints', categoryId: inline.id, field: 'definitions', limit: 5 });
   const { prepareFusionAgentContinuation, previewFusionAgentContinuation, confirmFusionAgentContinuation } = await import('../src/lib/character-fusion/agent-continuation.server');
   assert.equal((await repository.queryWorkspaceOperation(actor, wordDoc.workspace.id, 'ux22-inline-save-source')).status, 'unknown');
   const reserve = await repository.reserveAssistantOperation(actor, wordDoc.workspace.id, { opId: 'ux22-inline-save-source', baseVersion: wordRows.workspace.version, message: '存入个人词库', model: 'inline-card' });
