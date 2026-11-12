@@ -1,18 +1,22 @@
-export type CardTag = { label: string; en: string; status: 'default' | 'must' | 'exclude' };
-export type FusionCard = { id: string; title: string; titleEn: string; tags: CardTag[]; joined: boolean; value: string; locked: boolean; multi?: boolean; values?: string[] };
-export type CardDraft = Pick<FusionCard, 'title' | 'titleEn' | 'tags' | 'multi'>;
+import { isExtensionId } from './catalogue-model';
+export type CardTag = { label: string; en: string; status: 'default' | 'must' | 'exclude'; termId?: string; descriptionZh?: string; descriptionEn?: string };
+export type FusionCard = { id: string; title: string; titleEn: string; tags: CardTag[]; joined: boolean; value: string; locked: boolean; multi?: boolean; values?: string[]; candidates?: string[]; catalogueCategoryId?: string };
+export type CardDraft = Pick<FusionCard, 'title' | 'titleEn' | 'tags' | 'multi' | 'catalogueCategoryId'>;
 export const cardValues = (card: FusionCard): string[] => card.multi ? card.values || [card.value] : [card.value];
 
 export function parseCardDraft(input: unknown): CardDraft {
   const c = input as CardDraft;
   if (!c || typeof c.title !== 'string' || !c.title.trim() || c.title.length > 40
     || typeof c.titleEn !== 'string' || !c.titleEn.trim() || c.titleEn.length > 100 || /[\u3400-\u9fff]/.test(c.titleEn)
-    || c.multi !== undefined && typeof c.multi !== 'boolean'
+    || c.multi !== undefined && typeof c.multi !== 'boolean' || c.catalogueCategoryId !== undefined && !isExtensionId(c.catalogueCategoryId)
     || !Array.isArray(c.tags) || !c.tags.length || c.tags.length > 40
     || c.tags.some(t => !t || typeof t.label !== 'string' || !t.label.trim() || t.label.length > 60
-      || typeof t.en !== 'string' || !t.en.trim() || t.en.length > 180 || /[\u3400-\u9fff]/.test(t.en))
+      || typeof t.en !== 'string' || !t.en.trim() || t.en.length > 180 || /[\u3400-\u9fff]/.test(t.en)
+      || t.termId !== undefined && !isExtensionId(t.termId)
+      || t.descriptionZh !== undefined && (typeof t.descriptionZh !== 'string' || t.descriptionZh.length > 2000)
+      || t.descriptionEn !== undefined && (typeof t.descriptionEn !== 'string' || t.descriptionEn.length > 2000 || /[\u3400-\u9fff]/.test(t.descriptionEn)))
     || new Set(c.tags.map(t => t.label.trim())).size !== c.tags.length) throw new Error('卡片需有名称及 1–40 个中英对应标签，请继续对话补齐。');
-  return { title: c.title.trim(), titleEn: c.titleEn.trim(), ...(c.multi !== undefined ? { multi: c.multi } : {}), tags: c.tags.map(t => ({ label: t.label.trim(), en: t.en.trim(), status: ['must', 'exclude'].includes(t.status) ? t.status : 'default' })) };
+  return { title: c.title.trim(), titleEn: c.titleEn.trim(), ...(c.multi !== undefined ? { multi: c.multi } : {}), ...(c.catalogueCategoryId ? { catalogueCategoryId: c.catalogueCategoryId } : {}), tags: c.tags.map(t => ({ label: t.label.trim(), en: t.en.trim(), status: ['must', 'exclude'].includes(t.status) ? t.status : 'default', ...(t.termId ? { termId: t.termId } : {}), ...(t.descriptionZh !== undefined ? { descriptionZh: t.descriptionZh } : {}), ...(t.descriptionEn !== undefined ? { descriptionEn: t.descriptionEn } : {}) })) };
 }
 
 export const CARD_CHAT_SYSTEM = `你是角色融合规则卡片设计助手。用户要新增一个可反复组合的维度卡片，不是直接新增一位角色。可讨论主角、配角、伙伴、反派、Boss等任何定位，不能默认Boss。先理解用户意图，必要时简短追问；每轮可按反馈修改草稿，不能声称已加入或保存。

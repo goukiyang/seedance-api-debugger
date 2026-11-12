@@ -9,6 +9,7 @@ import { assertCharacterFusionWritesEnabled } from './build-mode';
 import { FusionError, isRecord, parseOperationId, parseFusionOperationRequest, parseWorkspaceState, emptyWorkspaceState, applyFusionCommands, fusionDocumentDelta, sameFusionValue, type FusionWorkspace, type FusionWorkspaceRow, type FusionUndo, type FusionWorkspaceState } from './actions';
 import { fusionFingerprint, requireActiveFusionUser, loadFusionCatalogue, operationDto, type FusionActor, type FusionDb } from './catalogue-repository';
 import type { FusionBatchReceipt, FusionEffects } from './domain';
+import { effectiveFusionSettings } from './configuration';
 
 export type WorkspacePageQuery = { cursor?: string; limit?: number; allRows?: boolean; rowId?: string; batchId?: string; displayNo?: number };
 export type WorkspaceRowsPage = { nextCursor: string | null; total: number; matchedTotal?: number };
@@ -257,7 +258,8 @@ export async function executeWorkspaceOperation(actor: FusionActor, id: string, 
       continuationSource = source;
     }
     if (workspace.archived && request.commands.some(command => command.type !== 'archive')) throw new FusionError('请先恢复归档文档再继续编辑。', 409, 'FUSION_ARCHIVED');
-    const needsRows = request.commands.some(command => ['generate', 'addCurrent', 'changeRow', 'reviseRow', 'patchRow', 'removeRows', 'importDraft', 'undo'].includes(command.type));
+    const mutatesRows = request.commands.some(command => ['generate', 'addCurrent', 'changeRow', 'reviseRow', 'patchRow', 'removeRows', 'importDraft', 'undo', 'applyPreparedRow'].includes(command.type));
+    const needsRows = mutatesRows || request.commands.some(command => command.type === 'configure' && command.target || command.type === 'prepare' && command.value?.row);
     const storedRows = needsRows ? await tx.characterFusionResult.findMany({ where: { workspace_id: id }, orderBy: [{ position: 'asc' }, { id: 'asc' }] }) : [];
     const originalCurrent = workspaceDto(workspace, storedRows.map(resultDto));
     let nextDisplayNo = Math.max(originalCurrent.state.identity?.nextDisplayNo || 1, ...originalCurrent.rows.map(row => (row.displayNo || 0) + 1));
@@ -267,7 +269,7 @@ export async function executeWorkspaceOperation(actor: FusionActor, id: string, 
       metadataRows.add(row.id); return { ...row, displayNo: nextDisplayNo++ };
     });
     originalCurrent.state = { ...originalCurrent.state, formatVersion: 2, identity: { nextDisplayNo, nextBatchNo: originalCurrent.state.identity?.nextBatchNo || 1 } };
-    const targetIds = new Set(request.commands.flatMap(command => command.type === 'changeRow' || command.type === 'reviseRow' || command.type === 'patchRow' && command.patch.requirements ? [command.rowId] : []));
+    const targetIds = new Set(request.commands.flatMap(command => command.type === 'changeRow' || command.type === 'reviseRow' || command.type === 'applyPreparedRow' || command.type === 'patchRow' && command.patch.requirements ? [command.rowId] : command.type === 'configure' && command.target ? [command.target.rowId] : command.type === 'prepare' && command.value?.row ? [command.value.row.rowId] : []));
     const resolvedRows = [];
     for (const row of originalCurrent.rows) resolvedRows.push(targetIds.has(row.id) ? await resolveWorkspaceRow(tx, actor, id, row) : row);
     const current = { ...originalCurrent, rows: resolvedRows };
@@ -285,13 +287,15 @@ export async function executeWorkspaceOperation(actor: FusionActor, id: string, 
       // Old undo snapshots predate stable display identities; retaining them does not rewrite history.
       undo = { ...undo, rows: undo.rows.map(item => { const row = originalCurrent.rows.find(value => value.id === item.id); return { ...item, ...(item.before ? { before: { ...item.before, ...(row?.displayNo ? { displayNo: row.displayNo } : {}), ...(row?.originBatchId ? { originBatchId: row.originBatchId } : {}) } } : {}), ...(item.after && row ? { after: { ...item.after, displayNo: row.displayNo, ...(row.originBatchId ? { originBatchId: row.originBatchId } : {}) } } : {}) }; }) };
     }
-    const catalogue = request.commands.some(command => ['generate', 'addCurrent', 'patchSettings', 'saveRecipe', 'changeRow', 'reviseRow'].includes(command.type)) ? await loadFusionCatalogue(tx, actor.id) : builtinCatalogue();
-    if (options.catalogueVersion && catalogue.version !== options.catalogueVersion && request.commands.some(command => ['generate', 'addCurrent', 'patchSettings', 'saveRecipe', 'changeRow', 'reviseRow'].includes(command.type))) throw new FusionError('词库在本轮规划后已更新，原提案与输入已保留，请重新核对。', 409, 'FUSION_CATALOGUE_CHANGED');
+    const needsCatalogue = request.commands.some(command => ['generate', 'addCurrent', 'patchSettings', 'saveRecipe', 'changeRow', 'reviseRow', 'configure', 'prepare', 'applyPreparedRow'].includes(command.type));
+    const catalogue = needsCatalogue ? await loadFusionCatalogue(tx, actor.id) : builtinCatalogue();
+    if (options.catalogueVersion && catalogue.version !== options.catalogueVersion && needsCatalogue) throw new FusionError('词库在本轮规划后已更新，原提案与输入已保留，请重新核对。', 409, 'FUSION_CATALOGUE_CHANGED');
     const priorBatches = await recentBatches(tx, id, 2);
     const sourceTerms = (row: FusionWorkspaceRow) => Object.entries(row.catalogueSnapshot?.selections || {}).flatMap(([categoryId, values]) => categoryId === 'dimension:source' || row.catalogueSnapshot?.categories.some(category => category.id === categoryId && category.generationKind === 'source') ? values : []);
     const recentSourceIds = Array.from(new Set([...priorBatches.flatMap(batch => batch.allocation?.rows.flatMap(row => Object.entries(row.selections).flatMap(([key, values]) => key === 'dimension:source' || catalogue.categories.some(category => category.id === key && category.generationKind === 'source') ? values : [])) || []), ...current.rows.filter(row => current.state.retainedIds.includes(row.id)).flatMap(sourceTerms)]));
     let next;
     try { next = applyFusionCommands(current, request, catalogue, undo, { recentSourceIds }); } catch (error) { if (error instanceof FusionError) throw error; throw new FusionError(error instanceof Error ? error.message : '角色设置与当前目录不匹配。'); }
+    if (!mutatesRows) next.rows = originalCurrent.rows;
     const originalIds = new Set(originalCurrent.rows.map(row => row.id));
     const batches: FusionBatchReceipt[] = [];
     let batchNo = originalCurrent.state.identity?.nextBatchNo || 1;
@@ -316,9 +320,10 @@ export async function executeWorkspaceOperation(actor: FusionActor, id: string, 
     for (const command of request.commands) if (command.type === 'importDraft') for (const row of command.rows) if (row.catalogueSnapshot?.settingsRef && !row.catalogueSnapshot.settings) await resolveWorkspaceRow(tx, actor, id, { ...row, version: 1 });
     const originals = new Map(originalCurrent.rows.map(row => [row.id, row]));
     next.rows = next.rows.map(row => sameFusionValue(row, originals.get(row.id)) ? row : compactWorkspaceRow(row, request.opId, configurations));
-    const delta = fusionDocumentDelta(originalCurrent, next);
-    const effects: FusionEffects = { formatVersion: 1, addedIds: delta.rows.filter(item => !item.before && item.after).map(item => item.id), modifiedIds: delta.rows.filter(item => item.before && item.after).map(item => item.id), removedIds: delta.rows.filter(item => item.before && !item.after).map(item => item.id), retainedIds: next.state.retainedIds, settingsChanged: !sameFusionValue(originalCurrent.state.settings, next.state.settings), intentChanged: !sameFusionValue(originalCurrent.state.intent, next.state.intent), batches, ...(undoCommand?.type === 'undo' ? { undoneOperationId: undoCommand.operationId } : {}) };
-    const reply = describeFusionWorkspaceEffects(effects) || options.turn?.assistant;
+    const delta = fusionDocumentDelta(originalCurrent, next, request.commands.some(command => command.type === 'generate' || command.type === 'applyPreparedRow'));
+    const effects: FusionEffects = { formatVersion: 1, addedIds: delta.rows.filter(item => !item.before && item.after).map(item => item.id), modifiedIds: delta.rows.filter(item => item.before && item.after).map(item => item.id), removedIds: delta.rows.filter(item => item.before && !item.after).map(item => item.id), retainedIds: next.state.retainedIds, settingsChanged: !sameFusionValue(originalCurrent.state.settings, next.state.settings), intentChanged: !sameFusionValue(originalCurrent.state.intent, next.state.intent), preparationChanged: !sameFusionValue(originalCurrent.state.preparation, next.state.preparation), batches, ...(undoCommand?.type === 'undo' ? { undoneOperationId: undoCommand.operationId } : {}) };
+    const configured = request.commands.some(command => command.type === 'configure');
+    const reply = configured ? next.state.preparation?.row ? '这条的调整已配好，点击“更新这条”应用。' : `可见卡片已同步，点击“生成${effectiveFusionSettings(next.state.settings, next.state.preparation?.batch, catalogue).count}套提示词”开始。` : describeFusionWorkspaceEffects(effects) || options.turn?.assistant;
     const turn = options.turn ? { user: options.turn.user, assistant: reply || options.turn.assistant } : undefined;
     if (turn) next.state.messages = [...originalCurrent.state.messages, { role: 'user', content: turn.user }, { role: 'assistant', content: turn.assistant }].slice(-20) as FusionWorkspaceState['messages'];
     const rowChanges = { upsert: next.rows.filter(row => metadataRows.has(row.id) || delta.rows.some(item => item.id === row.id && item.after)), removedIds: effects.removedIds };
@@ -339,7 +344,8 @@ export async function executeWorkspaceOperation(actor: FusionActor, id: string, 
     }
     const recipeIds: string[] = [];
     for (const command of request.commands) if (command.type === 'saveRecipe') {
-      const settings = parseFusionSettings({ ...next.state.settings, catalogue: hydrateCatalogueSettings(next.state.settings.catalogue || { details: {}, traits: {} }, catalogue, next.state.settings) });
+      const effective = effectiveFusionSettings(next.state.settings, next.state.preparation?.batch, catalogue);
+      const settings = parseFusionSettings({ ...effective, catalogue: hydrateCatalogueSettings(effective.catalogue || { details: {}, traits: {} }, catalogue, effective) });
       const key = `character_fusion_recipe_v1:${command.id}`, old = await tx.userPreference.findUnique({ where: { user_id_key: { user_id: actor.id, key } } });
       if (old) { const recipe = JSON.parse(old.value_json) as FusionRecipe; if (recipe.name !== command.name.trim() || !sameFusionValue(recipe.settings, settings)) throw new FusionError('此配方保存编号已使用，请重新读取原配方。', 409, 'FUSION_OPERATION_REUSED'); }
       else { const recipe: FusionRecipe = { id: command.id, name: command.name.trim(), settings, revision: randomUUID(), updatedAt: new Date().toISOString() }; await tx.userPreference.create({ data: { user_id: actor.id, key, value_json: JSON.stringify(recipe) } }); }

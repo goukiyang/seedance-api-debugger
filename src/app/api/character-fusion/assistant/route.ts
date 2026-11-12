@@ -8,9 +8,11 @@ import { assertCharacterFusionWritesEnabled } from '@/lib/character-fusion/build
 import { FusionError, isRecord, parseOperationId, type FusionCommand } from '@/lib/character-fusion/actions';
 import { readFusionCatalogue } from '@/lib/character-fusion/catalogue-repository';
 import { executeWorkspaceOperation, getWorkspace, reserveAssistantOperation, finishAssistantOperation, cancelAssistantOperation, readAssistantOperationStatus, readWorkspaceHistory, listUndoableWorkspaceOperations } from '@/lib/character-fusion/workspace.server';
-import { bindFusionAgentCommands, fusionAgentCataloguePage, readFusionAgentControls, needsFusionAgentScopeChoice, validateFusionAgentExecution, FusionAgentError, proposeFusionAgent, type FusionAgentProposal, type FusionAgentTarget, type FusionAgentScopeChoice } from '@/lib/character-fusion/agent-adapter.server';
+import { bindFusionAgentCommands, fusionAgentCataloguePage, readFusionAgentControls, validateFusionAgentExecution, FusionAgentError, proposeFusionAgent, type FusionAgentProposal, type FusionAgentTarget } from '@/lib/character-fusion/agent-adapter.server';
 import { confirmFusionAgentContinuation, pageFusionAgentCatalogue, prepareFusionAgentContinuation, previewFusionAgentContinuation, queryFusionAgentContinuation } from '@/lib/character-fusion/agent-continuation.server';
 import type { FusionCatalogue } from '@/lib/character-fusion/catalogue-model';
+import type { FusionSettings } from '@/lib/character-fusion/engine';
+import { effectiveFusionSettings, applyFusionSettingChanges } from '@/lib/character-fusion/configuration';
 
 export const dynamic = 'force-dynamic';
 const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie' };
@@ -39,12 +41,38 @@ export async function POST(request: NextRequest) {
     if (body.action === 'previewCatalogue') return json(await previewFusionAgentContinuation(user, workspaceId, opId, body.entries));
     assertCharacterFusionWritesEnabled();
     if (body.action === 'confirmCatalogue') return json(await confirmFusionAgentContinuation(user, workspaceId, opId, { entries: body.entries, previewVersion: body.previewVersion }));
+    if (body.action === 'saveInline') {
+      if (typeof body.cardId !== 'string' || !Number.isSafeInteger(body.baseVersion) || Number(body.baseVersion) < 1) throw new FusionAgentError('请先保存当前卡片，再存入个人词库。');
+      const prior = await queryFusionAgentContinuation(user, workspaceId, opId); if (prior.status !== 'unknown') return json(prior);
+      const page = await getWorkspace(user, workspaceId, { limit: 20 }), current = page.workspace;
+      if (current.version !== Number(body.baseVersion)) throw new FusionAgentError('当前卡片已更新，请保留输入并重新预览。', 409, 'fusion_agent_scene_changed');
+      const catalogue = (await readFusionCatalogue(user)).catalogue;
+      let sourceSettings = effectiveFusionSettings(current.state.settings, current.state.preparation?.batch, catalogue);
+      if (typeof body.rowId === 'string') {
+        const rowPage = await getWorkspace(user, workspaceId, { rowId: body.rowId, limit: 1 });
+        if (!('rowSettings' in rowPage) || !rowPage.rowSettings || rowPage.workspace.version !== current.version) throw new FusionAgentError('这条的原卡片暂不可读，请保留输入后重试。', 409);
+        const rowDraft = current.state.preparation?.row;
+        sourceSettings = applyFusionSettingChanges(rowPage.rowSettings.settings, rowDraft?.rowId === body.rowId ? rowDraft.changes : [], catalogue);
+      }
+      const card = sourceSettings.cards.find(card => card.id === body.cardId);
+      if (!card?.catalogueCategoryId || card.tags.some(tag => !tag.termId)) throw new FusionAgentError('这张卡片没有可复用的新词来源，请从卡片或词库的原导入入口保存。');
+      const drafts: unknown[] = [];
+      if (!catalogue.categories.some(category => category.id === card.catalogueCategoryId)) drafts.push({ kind: 'category', data: { id: card.catalogueCategoryId, nameZh: card.title, nameEn: card.titleEn, descriptionZh: card.title, descriptionEn: card.titleEn, group: 'extra', multi: Boolean(card.multi), generationKind: 'trait' } });
+      for (const tag of card.tags) if (!catalogue.terms.some(term => term.id === tag.termId)) drafts.push({ kind: 'term', data: { id: tag.termId, categoryId: card.catalogueCategoryId, nameZh: tag.label, nameEn: tag.en, descriptionZh: tag.descriptionZh || tag.label, descriptionEn: tag.descriptionEn || tag.en } });
+      if (!drafts.length) throw new FusionAgentError('这张卡片的词条已在个人词库，未重复入库；可从词库查看或编辑。');
+      const message = `将本创作卡片${card.id}存入个人词库`;
+      const reserved = await reserveAssistantOperation(user, workspaceId, { opId, baseVersion: current.version, message, model: 'inline-card' });
+      if (reserved.status !== 'planning' || !reserved.claimed) return json(reserved);
+      intent = { user, workspaceId, opId, fingerprint: reserved.intentFingerprint };
+      const receipt = await prepareFusionAgentContinuation(user, current, { sourceOpId: opId, intentFingerprint: intent.fingerprint, drafts, commands: [], message, reply: '新词已备好，预览确认后仅存入个人词库；不会生成。', model: 'inline-card' });
+      deferred = true; return json(receipt);
+    }
     if (body.action !== undefined && body.action !== 'send') throw new FusionAgentError('未知的创作操作。');
     if (typeof body.message !== 'string' || !body.message.trim() || body.message.length > 4000
       || typeof body.model !== 'string' || !body.model || body.model.length > 80
       || !Number.isSafeInteger(body.baseVersion) || Number(body.baseVersion) < 1) throw new FusionAgentError('创作请求或所选模型无效，原输入已保留。');
     if (body.scopeChoice !== undefined && !['row', 'document'].includes(String(body.scopeChoice))) throw new FusionAgentError('作用范围选择无效。');
-    let target: FusionAgentTarget | undefined;
+    let target: FusionAgentTarget | undefined, targetSettings: FusionSettings | undefined;
     if (body.target !== undefined) {
       if (!isRecord(body.target) || typeof body.target.rowId !== 'string' || !body.target.rowId || body.target.rowId.length > 180 || !Number.isSafeInteger(body.target.version) || Number(body.target.version) < 1) throw new FusionAgentError('单条目标无效，原输入已保留。');
       target = { rowId: body.target.rowId, version: Number(body.target.version) };
@@ -63,13 +91,7 @@ export async function POST(request: NextRequest) {
       const row = page.workspace.rows.find(row => row.id === target!.rowId);
       if (page.workspace.version !== workspace.version || !row || row.version !== target.version) throw new FusionAgentError('目标方案版本已变，原输入已保留，请重新选择目标。', 409, 'fusion_agent_target_changed');
       workspace.rows = [...workspace.rows.filter(item => item.id !== row.id), row];
-    }
-    const scopeChoices: FusionAgentScopeChoice[] | undefined = target && !body.scopeChoice && needsFusionAgentScopeChoice(body.message)
-      ? [{ id: 'row', label: '仅调整当前方案' }, { id: 'document', label: '为整份创作追加一批' }] : undefined;
-    if (scopeChoices) {
-      const reply = '当前仍绑定单条方案，请明确本次作用范围；尚未新增或修改方案。';
-      const receipt = await executeWorkspaceOperation(user, workspaceId, { opId, baseVersion: workspace.version, commands: [{ type: 'context' }] }, { assistantFingerprint: intent.fingerprint, turn: { user: body.message.trim(), assistant: reply } });
-      return json({ ...receipt, reply, scopeChoices });
+      if ('rowSettings' in page && page.rowSettings) targetSettings = page.rowSettings.settings;
     }
     const settings = await getMuskApiSettings();
     if (!isMuskApiReady(settings)) throw new FusionAgentError('当前 LLM 服务未启用或缺少配置，手动操作仍可继续。', 503, 'musk_api_not_configured');
@@ -77,17 +99,21 @@ export async function POST(request: NextRequest) {
     await assertSupplementaryModelEnabled('text', body.model);
     const selectedModel = body.model, started = Date.now();
     let modelStep = 0;
-    let catalogueSnapshot: FusionCatalogue | undefined;
+    let catalogueSnapshot: FusionCatalogue | undefined = (await readFusionCatalogue(user)).catalogue;
+    const rowDraft = workspace.state.preparation?.row;
+    const sceneSettings = targetSettings ? applyFusionSettingChanges(targetSettings, rowDraft && rowDraft.rowId === target?.rowId ? rowDraft.changes : [], catalogueSnapshot)
+      : effectiveFusionSettings(workspace.state.settings, workspace.state.preparation?.batch, catalogueSnapshot);
+    const sceneWorkspace = { ...workspace, state: { ...workspace.state, settings: sceneSettings } };
     const assertPlanning = async () => {
       request.signal.throwIfAborted();
       const current = await readAssistantOperationStatus(user, workspaceId, opId);
       if (current.status !== 'planning') throw new FusionAgentError('原回合已结束，未继续请求模型或应用新提案。', 409, 'fusion_agent_cancelled');
     };
-    const binding = { target, message: body.message.trim(), sourceOpId: opId, scopeChoice: body.scopeChoice as 'row' | 'document' | undefined };
+    const binding = { target, message: body.message.trim(), sourceOpId: opId, contract: 'configure' as const };
     const executionSeed = randomInt(0, 2147480000);
-    const result = await proposeFusionAgent({ workspace, rowsPage: initial.rowsPage, binding, message: body.message.trim(), signal: request.signal, seed: executionSeed,
+    const result = await proposeFusionAgent({ workspace, rowsPage: initial.rowsPage, binding, sceneSettings, message: body.message.trim(), signal: request.signal, seed: executionSeed,
       validateCommands: async commands => {
-        if (!commands.some(command => ['patchSettings', 'generate', 'intent'].includes(command.type))) return;
+        if (!commands.some(command => ['patchSettings', 'generate', 'intent', 'configure'].includes(command.type))) return;
         catalogueSnapshot ||= (await readFusionCatalogue(user)).catalogue;
         validateFusionAgentExecution(commands, workspace, catalogueSnapshot, body.message as string);
       },
@@ -118,7 +144,7 @@ export async function POST(request: NextRequest) {
       },
       read: async read => {
         await assertPlanning();
-        if (read.kind === 'controls' || read.kind === 'constraints') return readFusionAgentControls(workspace, read);
+        if (read.kind === 'controls' || read.kind === 'constraints') return readFusionAgentControls(sceneWorkspace, read);
         if (read.kind === 'operations') return listUndoableWorkspaceOperations(user, workspaceId, { limit: read.limit || 10 });
         if (read.kind === 'history' || read.kind === 'batches') {
           const history = await readWorkspaceHistory(user, workspaceId, { cursor: read.cursor, limit: read.kind === 'batches' ? 1 : read.limit || 1 });

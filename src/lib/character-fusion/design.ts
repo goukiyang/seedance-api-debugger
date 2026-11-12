@@ -274,7 +274,7 @@ export function decorateRow(row: FusionRow, s: FusionSettings, random: () => num
   else add(`融合连接：让${anchorCn}融入角色的轮廓、动作和自身功能，形成可解释的关联。`, `Fusion connection: integrate ${anchorEn} into the character’s silhouette, actions and intrinsic function with a clear causal relationship.`);
   if (row.category.signature && !resolved.signatureArea && !resolved.signatureKind) add(`识别特征：${row.detail.signature}；按母体实际部位或拟人化结构适配，以经历或使用痕迹解释。`, `Signature: ${detailEn('signature')}; adapt it to the source anatomy or anthropomorphic structure and explain it through history or use.`);
   const personalityPool = correctedPersonalities[row.category.personality];
-  const personality = personalityPool ? personalityPool[Math.floor(random() * personalityPool.length)] : pair(row.personality.pose, row.personality.en);
+  const personality = retained ? pair(row.personality.pose, row.personality.en) : personalityPool ? personalityPool[Math.floor(random() * personalityPool.length)] : pair(row.personality.pose, row.personality.en);
   if (row.category.personality && !resolved.primaryPersonality) add(`主性格：${row.category.personality}。${personality.zh}。`, `Primary personality: ${personality.en}.`);
   const legacyRole: Record<string, string> = { '主角': 'narrative', '配角': 'narrative', '路人': 'narrative', '反派': 'allegiance', '伙伴': 'relationship', Boss: 'gameRole' };
   const roleId = row.role && legacyRole[row.role];
@@ -292,11 +292,15 @@ export function decorateRow(row: FusionRow, s: FusionSettings, random: () => num
   if (row.category.entity && !explicitComposition) add(`组合结构：${row.detail.entity}，明确连接关系和拆合空间。`, `Composition: ${detailEn('entity')}, with explicit connections and assembly space.`);
   for (const t of traitDefinitions) {
     const values = resolved[t.id]; if (!values?.length || t.id === 'occupation' || !explicitBody && t.group === 'body' || t.id === 'equipmentPolicy' && !noProps || noProps && t.id.startsWith('equipment') && t.id !== 'equipmentPolicy') continue;
-    add(`${t.title}：${values.map(p => p.descriptionZh || p.zh).join('、')}。`, `${t.en}: ${values.map(p => p.descriptionEn || p.en).join(', ')}.`);
+    const zh = values.map(p => p.descriptionZh || p.zh).join('、').trimEnd(), en = values.map(p => p.descriptionEn || p.en).join(', ').trimEnd();
+    add(`${t.title}：${zh}${/[。.!?！？…]$/.test(zh) ? '' : '。'}`, `${t.en}: ${en}${/[。.!?！？…]$/.test(en) ? '' : '.'}`);
   }
   if (!explicitBody && row.category.physique) add(`形体轮廓：${row.detail.physique}。`, `Silhouette: ${detailEn('physique')}.`);
   if (explicitBody && resolved.headScale && !resolved.headRatio && !resolved.headBody) add(`头部与躯干：${resolved.headScale[0].zh}。`, `Head and body: ${resolved.headScale[0].en}.`);
-  for (const c of row.cards || []) if ((!c.id.startsWith('card-body-') || !explicitBody) && c.id !== customOccupation?.id && !(noProps && /道具|装备|武器|工具/.test(c.title))) add(`${c.title}：${c.label}。`, `${c.titleEn}: ${c.en}.`);
+  for (const c of row.cards || []) if ((!c.id.startsWith('card-body-') || !explicitBody) && c.id !== customOccupation?.id && !(noProps && /道具|装备|武器|工具/.test(c.title))) {
+    const zh = (c.descriptionZh || c.label).trimEnd(), en = (c.descriptionEn || c.en).trimEnd();
+    add(`${c.title}：${zh}${/[。.!?！？…]$/.test(zh) ? '' : '。'}`, `${c.titleEn}: ${en}${/[。.!?！？…]$/.test(en) ? '' : '.'}`);
+  }
   if (bodies === '单体' && resolved.relationship?.length) add('角色关系为故事背景，同伴不要求入画，只展示当前主体。', 'Relationships describe story context; companions remain off-screen and only the current character is shown.');
   if (bodies === '单体') add('单体角色全身设定，三分之四正面视角。', 'One full-body character, front three-quarter view.');
   else add(`${bodies === '双体' ? '两位' : bodies === '三体' ? '三位' : '多位'}角色完整组合设定，清楚展示各主体与空间关系。`, `A complete composition of ${bodies === '双体' ? 'two characters' : bodies === '三体' ? 'three characters' : 'multiple characters'}, showing each participant and their spatial relationships.`);
