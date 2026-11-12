@@ -432,10 +432,15 @@ export async function proposeFusionAgent(options: {
           const invalid = ids.find(id => knownTerms.get(id) !== categoryId);
           if (invalid) {
             const actual = knownTerms.get(invalid);
-            const path = actual ? TRAITS.some(trait => trait.id === actual) && !options.workspace.state.settings.catalogue?.dynamic?.selections[actual] ? ['catalogue', 'traits', actual] : ['catalogue', 'dynamic', 'selections', actual] : undefined;
-            const title = TRAITS.find(trait => trait.id === actual)?.title || options.workspace.state.settings.catalogue?.dynamic?.snapshot.categories.find(category => category.id === actual)?.nameZh;
+            const control = actual ? rawFusionAgentControls(options.workspace).find(control => control.id === actual) : undefined;
+            const dimension = control?.kind === 'dimension' ? CONFIG.find(card => builtinCategoryId(card.id) === actual) : undefined;
+            const activation = control?.joined ? '该类别已加入，只纠正key，保留现有设置，不另启用或创建动态覆盖。'
+              : dimension ? `仅本批使用时在plan.overlay的["bossDimensions"]保留原项目并加入${JSON.stringify(dimension.id)}，不改boss或sourceFusion选值。`
+              : control ? `仅本批使用时在plan.overlay将${JSON.stringify([...control.selectionPath, control.kind === 'custom' ? 'joined' : 'enabled'])}设为true，保留其它字段。`
+              : '请查询controls取得当前类别的真实加入方式，不猜动态覆盖路径。';
+            const title = control?.title || options.workspace.state.settings.catalogue?.dynamic?.snapshot.categories.find(category => category.id === actual)?.nameZh;
             const userMessage = `本批${title ? `“${title}”` : '必出项'}的类别与所选词条不一致。请从对应类别重新选择；原结果与输入保留。`;
-            throw new FusionAgentError(`${userMessage} onceMust[${JSON.stringify(categoryId)}]的词条引用不匹配：${JSON.stringify(invalid)}${actual ? `属于真实categoryId ${JSON.stringify(actual)}。先用该key，并在本批overlay启用${JSON.stringify(path)}` : '尚未核实，请先查询catalogue并原样使用其categoryId和termId'}；不以名称或generationKind代替类别key，不改变已有锁定/池/排除。`, 400, 'fusion_agent_invalid', userMessage);
+            throw new FusionAgentError(`${userMessage} onceMust[${JSON.stringify(categoryId)}]的词条引用不匹配：${JSON.stringify(invalid)}${actual ? `属于真实categoryId ${JSON.stringify(actual)}。先用该key。${activation}` : '尚未核实，请先查询catalogue并原样使用其categoryId和termId'}；不以名称或generationKind代替类别key，不改变已有锁定/池/排除。`, 400, 'fusion_agent_invalid', userMessage);
           }
         }
         for (const command of commands) for (const change of command.type === 'patchSettings' ? command.changes || [] : command.type === 'generate' ? command.plan?.overlay || [] : []) {

@@ -301,10 +301,17 @@ export function allocateFusionBatch(s: FusionSettings, seed: number, options: { 
     const builtin = builtinCatalogue(), categories = [...(s.catalogue?.dynamic?.snapshot.categories || []), ...builtin.categories], terms = [...(s.catalogue?.dynamic?.snapshot.terms || []), ...builtin.terms];
     const referenced = Array.from(new Set(values.flatMap(value => { const term = terms.find(term => term.id === value); return term ? [term.categoryId] : []; })));
     const category = categories.find(category => category.id === id) || (referenced.length === 1 ? categories.find(category => category.id === referenced[0]) : undefined);
-    const native = category && TRAITS.some(trait => trait.id === category.id) && !s.catalogue?.dynamic?.selections[category.id];
-    const path = category ? native ? ['catalogue', 'traits', category.id] : ['catalogue', 'dynamic', 'selections', category.id] : undefined;
-    const userMessage = category ? `本批“${category.nameZh}”未加入组合或当前不可用。请先加入该类别，或改选已可用的类别；原结果与输入保留。` : '本批必出项的类别未能确认。请从词库重新选择可用类别；原结果与输入保留。';
-    throw Object.assign(new Error(`${userMessage} onceMust[${JSON.stringify(id)}]所属类别未加入或不可用。${category ? `${category.nameZh}的真实categoryId为${JSON.stringify(category.id)}；${category.enabled ? `先在本批plan.overlay启用${JSON.stringify(path)}（已有选择仅改enabled:true；未配置才补完整selection），或用户明确持续启用时用patchSettings。` : '该目录类别已停用，不能用selection.enabled绕过，请重新查询可用类别。'}` : '该key不是当前已知目录categoryId，请查询catalogue/controls原样引用，不用名称或generationKind作key。'}保留已有锁定、候选池与排除；启用不会解除原限制。`), { userMessage });
+    const joined = category && axes.some(axis => axis.id === category.id), dynamic = category && s.catalogue?.dynamic?.selections[category.id];
+    const dimension = category && !dynamic && CONFIG.find(dimension => builtinCategoryId(dimension.id) === category.id);
+    const trait = category && !dynamic && TRAITS.find(trait => trait.id === category.id), cardIndex = category && !dynamic ? s.cards.findIndex(card => card.id === category.id) : -1;
+    const path = category && (dynamic || category.scope !== 'builtin') ? ['catalogue', 'dynamic', 'selections', category.id] : trait ? ['catalogue', 'traits', trait.id] : undefined;
+    const activation = joined ? '该类别已加入，只纠正onceMust的key，保留现有设置，不另启用或创建动态覆盖。'
+      : dimension ? `先在本批plan.overlay的["bossDimensions"]保留原项目并加入${JSON.stringify(dimension.id)}，不改boss或sourceFusion选值。`
+      : cardIndex >= 0 ? `先在本批plan.overlay将${JSON.stringify(['cards', String(cardIndex), 'joined'])}设为true，保留原卡其它字段。`
+      : path ? `先在本批plan.overlay启用${JSON.stringify(path)}（已有选择仅改enabled:true；未配置才补完整selection），或用户明确持续启用时用patchSettings。`
+      : '请查询controls取得当前类别的真实加入方式，不猜动态覆盖路径。';
+    const userMessage = category ? joined ? `本批“${category.nameZh}”的类别编号与所选词条不一致。请重新选择对应类别；原结果与输入保留。` : `本批“${category.nameZh}”未加入组合或当前不可用。请先加入该类别，或改选已可用的类别；原结果与输入保留。` : '本批必出项的类别未能确认。请从词库重新选择可用类别；原结果与输入保留。';
+    throw Object.assign(new Error(`${userMessage} onceMust[${JSON.stringify(id)}]未匹配当前组合类别。${category ? `${category.nameZh}的真实categoryId为${JSON.stringify(category.id)}；${category.enabled ? activation : '该目录类别已停用，不能用selection.enabled绕过，请重新查询可用类别。'}` : '该key不是当前已知目录categoryId，请查询catalogue/controls原样引用，不用名称或generationKind作key。'}保留已有锁定、候选池与排除；启用不会解除原限制。`), { userMessage });
   }
   let diversity: FusionAllocation['diversity'];
   for (const axis of axes.filter(axis => axis.kind === 'source' || options.onceMust?.[axis.id]?.length)) {

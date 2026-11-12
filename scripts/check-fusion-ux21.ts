@@ -4,9 +4,10 @@ import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import { CORE, allocateFusionBatch, defaults, textFor } from '../src/lib/character-fusion/engine';
-import { builtinCatalogue } from '../src/lib/character-fusion/catalogue';
-import { emptyWorkspaceState, newCreationState, type FusionCommand } from '../src/lib/character-fusion/actions';
-import { FusionAgentError, bindFusionAgentCommands, fusionAgentCataloguePage, fusionAgentScene, fusionCatalogueGenerationRequested, needsFusionAgentScopeChoice, proposeFusionAgent, validateFusionAgentExecution } from '../src/lib/character-fusion/agent-adapter.server';
+import { builtinCatalogue, hydrateCatalogueSettings } from '../src/lib/character-fusion/catalogue';
+import { applyFusionCommands, emptyWorkspaceState, newCreationState, type FusionCommand } from '../src/lib/character-fusion/actions';
+import { BODY_CARDS } from '../src/lib/character-fusion/body-cards';
+import { FusionAgentError, bindFusionAgentCommands, fusionAgentCataloguePage, fusionAgentScene, fusionCatalogueGenerationRequested, needsFusionAgentScopeChoice, proposeFusionAgent, readFusionAgentControls, validateFusionAgentExecution } from '../src/lib/character-fusion/agent-adapter.server';
 import type * as Workspace from '../src/lib/character-fusion/workspace.server';
 import type * as Library from '../src/lib/character-fusion/catalogue-repository';
 
@@ -170,7 +171,78 @@ export async function checkFusionUx21(input: { actor: { id: string }; repository
   } catch (error) { unavailableError = error; }
   assert(unavailableError instanceof FusionAgentError); assert.match(unavailableError.message, /onceMust/);
   assert.match(unavailableError.userMessage || '', /职业与身份/); assert(!/onceMust|categoryId|catalogue|\[/.test(unavailableError.userMessage || ''));
-  checks.push('UX21一次必出类别接线：未加入与错key提示真实categoryId/启用路径并四步纠正，本批启用不回写且保硬池排除锁，空项不造约束');
+  const sourceTerm = catalogue.terms.find(term => term.categoryId === 'dimension:source' && term.data?.group === '动物')!;
+  const optionalTerm = catalogue.terms.find(term => term.categoryId === 'dimension:signature')!;
+  const bodyCard = structuredClone(BODY_CARDS[0]), bodyTerm = catalogue.terms.find(term => term.categoryId === bodyCard.id && term.nameZh === bodyCard.value)!;
+  bodyCard.locked = true; bodyCard.tags.find(tag => tag.label !== bodyCard.value)!.status = 'exclude';
+  for (const scenario of [
+    { name: 'native-source', wrong: 'source', actual: 'dimension:source', term: sourceTerm, diagnostic: '已加入，只纠正', path: undefined },
+    { name: 'native-optional', wrong: 'signature', actual: 'dimension:signature', term: optionalTerm, diagnostic: '["bossDimensions"]', path: ['bossDimensions'] },
+    { name: 'native-body', wrong: 'body-card', actual: bodyCard.id, term: bodyTerm, diagnostic: '["cards","0","joined"]', path: ['cards', '0', 'joined'] },
+  ]) {
+    const state = structuredClone(unjoinedState);
+    state.settings.bossLocks.source = true;
+    state.settings.catalogue!.sourceFusion = { enabled: true, locked: true, values: [sourceTerm.nameZh], excluded: [], must: [] };
+    if (scenario.name === 'native-optional') { state.settings.boss.signature = optionalTerm.data!.group!; state.settings.bossLocks.signature = true; state.settings.catalogue!.details.signature = { locked: true, value: optionalTerm.nameZh }; }
+    if (scenario.name === 'native-body') state.settings.cards = [structuredClone(bodyCard), structuredClone(BODY_CARDS[1])];
+    const before = structuredClone(state.settings), workspace = { ...onceDocument.workspace, id: `ux21-${scenario.name}`, state, rows: [] };
+    const validateDiagnostic = (error: unknown) => error instanceof Error && error.message.includes(scenario.diagnostic) && !error.message.includes(`["catalogue","dynamic","selections","${scenario.actual}"]`);
+    assert.throws(() => allocateFusionBatch(state.settings, 2121, { onceMust: { [scenario.wrong]: [scenario.term.id] } }), validateDiagnostic);
+    if (scenario.path) assert.throws(() => allocateFusionBatch(state.settings, 2121, { onceMust: { [scenario.actual]: [scenario.term.id] } }), validateDiagnostic);
+    let nativeRounds = 0;
+    const nativeResult = await proposeFusionAgent({ workspace, message: '生成4套伙伴，本批沿用原锁定和候选限制。', seed: 2121,
+      complete: async messages => {
+        nativeRounds++;
+        if (nativeRounds > 1) { const diagnostic = JSON.parse(String(messages[messages.length - 1].content)).proposalError as string; assert(diagnostic.includes(scenario.diagnostic), `${scenario.name} round ${nativeRounds}: ${diagnostic}`); assert(!diagnostic.includes(`["catalogue","dynamic","selections","${scenario.actual}"]`)); }
+        return JSON.stringify({ reply: '按原控制只纠正key并加入本批', commands: [{ type: 'generate', mode: 'append', plan: { formatVersion: 1, scope: 'batch', onceMust: { [nativeRounds === 1 ? scenario.wrong : scenario.actual]: [scenario.term.id] }, ...(scenario.path && nativeRounds >= 3 ? { overlay: [{ path: scenario.path, value: scenario.name === 'native-optional' ? [...before.bossDimensions, 'signature'] : true }] } : {}) } }] });
+      }, read: async () => { throw new Error('已读快照包含本例词条'); }, validateCommands: commands => validateFusionAgentExecution(commands, workspace, catalogue),
+    });
+    assert.equal(nativeResult.iterations, scenario.path ? 3 : 2);
+    const nativeApplied = applyFusionCommands(workspace, { opId: `ux21-${scenario.name}-apply`, baseVersion: workspace.version, commands: bindFusionAgentCommands(nativeResult.proposal.commands, workspace, 2121) }, catalogue);
+    assert.equal(nativeApplied.rows.length, 4); assert.deepEqual(nativeApplied.state.settings, { ...before, catalogue: hydrateCatalogueSettings(before.catalogue!, catalogue, before) }); assert.deepEqual(state.settings, before);
+    assert(nativeApplied.rows.some(row => row.catalogueSnapshot?.selections[scenario.actual]?.includes(scenario.term.id)));
+    for (const row of nativeApplied.rows) { assert(row.catalogueSnapshot?.settings); assert.deepEqual(row.catalogueSnapshot.settings.catalogue?.dynamic?.selections, before.catalogue?.dynamic?.selections); }
+  }
+  assert.throws(() => allocateFusionBatch(unjoinedState.settings, 2121, { onceMust: { [bodyCard.id]: [bodyTerm.id] } }), error => error instanceof Error && error.message.includes('查询controls') && !error.message.includes(`["catalogue","dynamic","selections","${bodyCard.id}"]`));
+  checks.push('UX21一次必出类别接线：未加入与错key四步纠正；原生已加入/可选维度/身形卡按真实控制纠错不造dynamic，本批不回写且保硬池排除锁，空项不造约束');
+
+  const indexedState = emptyWorkspaceState(); indexedState.settings.count = 4;
+  indexedState.settings.cards = [structuredClone(bodyCard), structuredClone(BODY_CARDS[1])];
+  indexedState.settings.rules.source.push({ label: '待加入旧定义', en: 'legacy source definition', status: 'exclude', definitionOnly: true });
+  const indexedDocument = await repository.createFusionWorkspace(actor, { opId: 'ux21-indexed-create', state: indexedState });
+  const indexedBefore = structuredClone(indexedDocument.workspace.state.settings), indexedScene = fusionAgentScene(indexedDocument.workspace);
+  const cardPage = readFusionAgentControls(indexedDocument.workspace, { kind: 'controls', categoryId: bodyCard.id }); assert('controls' in cardPage && cardPage.controls);
+  const cardControl = cardPage.controls.items.find(control => control.id === bodyCard.id); assert(cardControl && Array.isArray(cardControl.selectionPath));
+  const ruleControl = indexedScene.availableRuleDefinitions.items.find(control => control.label === '待加入旧定义')!;
+  const cardPath = [...cardControl.selectionPath, 'joined'], rulePath = ruleControl.selectionPath;
+  const indexedCommands = bindFusionAgentCommands([{ type: 'patchSettings', changes: [{ path: cardPath, value: true }, { path: rulePath, value: 'default' }] }], indexedDocument.workspace, 2122);
+  assert.equal(indexedCommands[0].type, 'patchSettings'); if (indexedCommands[0].type !== 'patchSettings') throw new Error('缺少局部设置');
+  assert.deepEqual(indexedCommands[0].changes?.map(change => change.expected), [false, 'exclude']);
+  const indexedSaved = await repository.executeWorkspaceOperation(actor, indexedDocument.workspace.id, { opId: 'ux21-indexed-save', baseVersion: indexedDocument.workspace.version, commands: indexedCommands });
+  const indexedExpected = structuredClone(indexedBefore); indexedExpected.cards[0].joined = true;
+  const ruleIndex = Number(rulePath[2]); indexedExpected.rules.source[ruleIndex].status = 'default'; delete indexedExpected.rules.source[ruleIndex].definitionOnly;
+  assert.deepEqual(indexedSaved.workspace.state.settings, indexedExpected); assert.equal(indexedSaved.rowsPage.total, 0);
+  assert.deepEqual((await repository.getWorkspace(actor, indexedDocument.workspace.id)).workspace.state.settings, indexedExpected);
+  const indexedUndone = await repository.executeWorkspaceOperation(actor, indexedDocument.workspace.id, { opId: 'ux21-indexed-undo', baseVersion: indexedSaved.workspace.version, commands: [{ type: 'undo', operationId: 'ux21-indexed-save' }] });
+  assert.deepEqual(indexedUndone.workspace.state.settings, indexedBefore);
+  const pendingCard = bindFusionAgentCommands([{ type: 'patchSettings', changes: [{ path: cardPath, value: true }] }], indexedUndone.workspace, 2122);
+  const pendingRule = bindFusionAgentCommands([{ type: 'patchSettings', changes: [{ path: rulePath, value: 'default' }] }], indexedUndone.workspace, 2122);
+  const reordered = await repository.executeWorkspaceOperation(actor, indexedDocument.workspace.id, { opId: 'ux21-indexed-old-array', baseVersion: indexedUndone.workspace.version, commands: [{ type: 'patchSettings', patch: { cards: [...indexedBefore.cards].reverse() }, expected: { cards: indexedBefore.cards } }] });
+  assert.deepEqual(reordered.workspace.state.settings.cards, [...indexedBefore.cards].reverse());
+  for (const [index, commands] of Object.entries([pendingCard, pendingRule])) await assert.rejects(() => repository.executeWorkspaceOperation(actor, indexedDocument.workspace.id, { opId: `ux21-indexed-stale-${index}`, baseVersion: indexedUndone.workspace.version, commands }), error => error instanceof Error && 'code' in error && error.code === 'FUSION_CONFLICT');
+  await assert.rejects(() => repository.executeWorkspaceOperation(actor, indexedDocument.workspace.id, { opId: 'ux21-indexed-wrong-expected', baseVersion: reordered.workspace.version, commands: [{ type: 'patchSettings', changes: [{ path: rulePath, value: 'default', expected: 'default' }] }] }), error => error instanceof Error && 'code' in error && error.code === 'FUSION_CONFLICT');
+  const currentCardPath = ['cards', '1', 'joined'];
+  const indexedAgain = await repository.executeWorkspaceOperation(actor, indexedDocument.workspace.id, { opId: 'ux21-indexed-save-again', baseVersion: reordered.workspace.version, commands: bindFusionAgentCommands([{ type: 'patchSettings', changes: [{ path: currentCardPath, value: true }] }], reordered.workspace, 2122) });
+  const otherCard = await repository.executeWorkspaceOperation(actor, indexedDocument.workspace.id, { opId: 'ux21-indexed-other-card', baseVersion: indexedAgain.workspace.version, commands: [{ type: 'patchSettings', changes: [{ path: ['cards', '0', 'joined'], value: true, expected: false }] }] });
+  await assert.rejects(() => repository.executeWorkspaceOperation(actor, indexedDocument.workspace.id, { opId: 'ux21-indexed-undo-conflict', baseVersion: otherCard.workspace.version, commands: [{ type: 'undo', operationId: 'ux21-indexed-save-again' }] }), error => error instanceof Error && 'code' in error && error.code === 'FUSION_CONFLICT');
+  for (const [index, change] of Object.entries([
+    { path: ['cards', '-1', 'joined'], value: true }, { path: ['cards', '01', 'joined'], value: true }, { path: ['cards', '2', 'joined'], value: true },
+    { path: ['cards', 'length'], value: 1 }, { path: ['rules', 'source', String(indexedBefore.rules.source.length), 'status'], value: 'default' }, { path: ['cards', '0'], value: null },
+  ])) await assert.rejects(() => repository.executeWorkspaceOperation(actor, indexedDocument.workspace.id, { opId: `ux21-indexed-invalid-${index}`, baseVersion: otherCard.workspace.version, commands: [{ type: 'patchSettings', changes: [change] }] }), error => error instanceof Error && 'code' in error && error.code === 'FUSION_INVALID');
+  await assert.rejects(() => repository.executeWorkspaceOperation({ id: 'ux21-different-owner' }, indexedDocument.workspace.id, { opId: 'ux21-indexed-other-owner', baseVersion: otherCard.workspace.version, commands: [{ type: 'patchSettings', changes: [{ path: currentCardPath, value: false }] }] }));
+  const indexedFinal = await repository.getWorkspace(actor, indexedDocument.workspace.id);
+  assert.equal(indexedFinal.workspace.version, otherCard.workspace.version); assert.deepEqual(indexedFinal.workspace.state.settings, otherCard.workspace.state.settings); assert.equal(indexedFinal.rowsPage.total, 0);
+  checks.push('UX21数组局部写真实SQLite：公开卡片/旧规则路径保存刷新撤销，保其它项顺序锁与中英；旧全数组可写，过期索引/错误CAS/撤销冲突/非法索引/越权均零写入');
 
   // Execute the actual layout effect against measured DOM doubles; no browser or visual claim.
   const studioFile = ts.createSourceFile('studio.tsx', await readFile('src/app/tools/character-fusion/studio.tsx', 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);

@@ -170,11 +170,33 @@ export function parseFusionOperationRequest(value: unknown): FusionOperationRequ
   return { opId: parseOperationId(value.opId), baseVersion: value.baseVersion as number, commands: parseFusionCommands(value.commands) };
 }
 export const parseActionRequest = parseFusionOperationRequest;
-function getPath(value: unknown, path: string[]): unknown { for (const key of path) value = isRecord(value) && own(value, key) ? value[key] : undefined; return value; }
+function arrayIndex(value: unknown[], key: string) {
+  const index = Number(key);
+  if (!/^(0|[1-9]\d*)$/.test(key) || !Number.isSafeInteger(index) || index >= value.length || !own(value, key)) throw new FusionError('列表索引无效，请重新读取原卡片或规则。');
+  return index;
+}
+function getPath(value: unknown, path: string[], staleIndexed = false): unknown {
+  for (const key of path) {
+    if (Array.isArray(value)) {
+      if (staleIndexed) throw new FusionError('列表内容已更新，请重新读取后修改原卡片或规则。', 409, 'FUSION_CONFLICT', { path });
+      value = value[arrayIndex(value, key)];
+    } else value = isRecord(value) && own(value, key) ? value[key] : undefined;
+  }
+  return value;
+}
 function setPath(target: object, path: string[], value: unknown) {
   validPath(path); let current = target as Record<string, unknown>;
-  for (const key of path.slice(0, -1)) { if (!isRecord(current[key])) current[key] = {}; current = current[key] as Record<string, unknown>; }
-  if (value === undefined || value === null) delete current[path[path.length - 1]]; else current[path[path.length - 1]] = copy(value);
+  for (const key of path.slice(0, -1)) {
+    if (Array.isArray(current)) arrayIndex(current, key);
+    if (!isRecord(current[key]) && !Array.isArray(current[key])) {
+      if (Array.isArray(current)) throw new FusionError('该列表项不能继续按字段编辑，请重新读取。');
+      current[key] = {};
+    }
+    current = current[key] as Record<string, unknown>;
+  }
+  const key = path[path.length - 1];
+  if (Array.isArray(current)) { arrayIndex(current, key); if (value === undefined || value === null) throw new FusionError('不能通过索引删除列表项，请使用原列表操作。'); }
+  if (value === undefined || value === null) delete current[key]; else current[key] = copy(value);
 }
 function leaves(value: Record<string, unknown>, path: string[] = []): Array<{ path: string[]; value: unknown }> {
   return Object.entries(value).flatMap(([key, item]) => { const next = [...path, key]; validPath(next); return isRecord(item) && Object.keys(item).length ? leaves(item, next) : [{ path: next, value: item }]; });
@@ -273,7 +295,7 @@ export function applyFusionCommands(current: FusionDocument, request: FusionOper
     switch (command.type) {
       case 'patchSettings': {
         const changes: FusionFieldChange[] = [...(command.patch ? leaves(command.patch as Record<string, unknown>).map(change => ({ ...change, ...(getPath(command.expected, change.path) !== undefined ? { expected: getPath(command.expected, change.path) } : {}) })) : []), ...(command.changes || [])];
-        for (const change of changes) { if (!own(defaults(), change.path[0])) throw new FusionError('不支持的设置字段。'); compare(stale, ['settings', ...change.path], getPath(next.state.settings, change.path), own(change, 'expected'), change.expected); setPath(next.state.settings, change.path, change.value); }
+        for (const change of changes) { if (!own(defaults(), change.path[0])) throw new FusionError('不支持的设置字段。'); compare(stale, ['settings', ...change.path], getPath(next.state.settings, change.path, stale), own(change, 'expected'), change.expected); setPath(next.state.settings, change.path, change.value); }
         if (next.state.settings.catalogue?.dynamic) {
           bindFreshDynamicSnapshot(next.state.settings, catalogue);
           next.state.settings.catalogue = hydrateCatalogueSettings(next.state.settings.catalogue, catalogue, next.state.settings);
@@ -292,7 +314,7 @@ export function applyFusionCommands(current: FusionDocument, request: FusionOper
         const batchSettings = copy(documentSettings);
         for (const change of command.plan?.overlay || []) {
           if (!own(defaults(), change.path[0])) throw new FusionError('不支持的本批设置字段。');
-          compare(stale, ['settings', ...change.path], getPath(batchSettings, change.path), own(change, 'expected'), change.expected);
+          compare(stale, ['settings', ...change.path], getPath(batchSettings, change.path, stale), own(change, 'expected'), change.expected);
           setPath(batchSettings, change.path, change.value);
         }
         if (command.plan?.count !== undefined) batchSettings.count = command.plan.count;
