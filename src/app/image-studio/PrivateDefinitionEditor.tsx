@@ -20,10 +20,10 @@ type Props = { userId: string; moduleId: string; dialog: RefObject<HTMLElement>;
   beforeClose: MutableRefObject<(() => Promise<boolean>) | null>; legacyDraftKey?: string; legacyDraftKeys?: string[];
   endpoint?: string; contextOnly?: boolean; label?: string; maxLength?: number; allowEmpty?: boolean;
   sourceTaskId?: string; currentDraft?: StudioPrivateDraftReference | null; onEdit?: () => void;
-  onCurrentDraft?: (reference: StudioPrivateDraftReference | null) => void; saveLabel?: string };
+  onCurrentDraft?: (reference: StudioPrivateDraftReference | null) => void; saveLabel?: string; dialogPlacement?: 'center' };
 
 export function PrivateDefinitionEditor(props: Props) {
-  const { confirm, productDialog } = useProductDialog();
+  const { confirm, productDialog } = useProductDialog({ placement: props.dialogPlacement });
   const endpoint = props.endpoint || '/api/image-studio/modules';
   const label = props.label || '模板原文';
   const [loaded, setLoaded] = useState<Loaded | null>(null);

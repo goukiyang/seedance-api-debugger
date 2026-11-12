@@ -79,7 +79,7 @@ export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, o
   const [pending, setPending] = useState<Pending | null>(null);
   const [checking, setChecking] = useState(false);
   const [sharing, setSharing] = useState(false);
-  const { prompt, productDialog } = useProductDialog();
+  const { prompt, productDialog } = useProductDialog({ placement: 'center' });
   const actionHandled = useRef(false);
   const listEpoch = useRef(0), detailEpoch = useRef(0);
   const controllers = useRef(new Set<AbortController>());

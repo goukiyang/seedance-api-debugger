@@ -1,11 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '角色融合先聊清楚再生成',
+  title: '3D多视图模型与弹窗修复',
   outline: [
-    '聊天自动整理卡片，检查后点击生成方案',
-    '原卡片与常驻对话同屏，支持单条调整和撤销',
-    '新词先用于本次创作，再按需存入个人词库'
+    '动作整理记住所选模型，可更新当前目录',
+    '失效模型说明原因并保留原动作',
+    '多视图弹窗居中，操作区更清楚'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

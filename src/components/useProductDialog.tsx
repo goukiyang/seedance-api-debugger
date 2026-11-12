@@ -108,7 +108,7 @@ function ProductDialog({ request, onResolve }: { request: Request; onResolve: (v
   </dialog>, document.body);
 }
 
-export function useProductDialog() {
+export function useProductDialog({ placement }: { placement?: 'center' } = {}) {
   const [request, setRequest] = useState<Request | null>(null);
   const trigger = useRef<HTMLElement | null>(null);
   const resolver = useRef<((value: string | null) => void) | null>(null);
@@ -138,9 +138,9 @@ export function useProductDialog() {
       resolver.current = done;
       const focused = document.activeElement instanceof HTMLElement
         ? document.activeElement.closest<HTMLElement>('button, [role="button"], a[href], input, textarea, select, summary') : null;
-      setRequest({ ...options, message, value, anchor: options.anchor !== undefined ? options.anchor : trigger.current || focused });
+      setRequest({ ...options, message, value, anchor: placement === 'center' ? null : options.anchor !== undefined ? options.anchor : trigger.current || focused });
     });
-  }, []);
+  }, [placement]);
   const confirm = useCallback(async (message: string, options: Options = {}) => (await ask(message, options)) !== null, [ask]);
   const prompt = useCallback((message: string, value = '', options: Options = {}) => ask(message, options, value), [ask]);
   return { confirm, prompt, productDialog: request ? <ProductDialog request={request} onResolve={resolve} /> : null };

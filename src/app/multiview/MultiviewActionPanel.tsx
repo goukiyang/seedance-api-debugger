@@ -5,7 +5,8 @@ import { useProjectCatalogRevision } from '@/lib/projects/selector-client';
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Copy, X } from 'lucide-react';
+import { Copy, RefreshCw, X } from 'lucide-react';
+import { useProductDialog } from '@/components/useProductDialog';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import { PrivateDefinitionEditor } from '@/app/image-studio/PrivateDefinitionEditor';
 import { isResolvedCreationIntent, useCreationContext } from '@/lib/hooks/use-creation-context';
@@ -22,6 +23,8 @@ import { MultiviewVideoResults } from './MultiviewVideoResults';
 type Props = { active?: boolean; ownerId: string; authority: string; work: MultiviewWorkDto | null; videoDefaults?: {model:string;duration:number;resolution:string;projectId:string;videoCardId:string|null}; outputReady: boolean; snapshotKey: string; onPrepare(): Promise<MultiviewWorkDto>; ratio: '16:9'|'9:16'|'1:1'; activeView: 'reference'|'video'; onView(value: 'reference'|'video'): void };
 type Quote = { key: string; text: string; parameters: MultiviewActionParameters; points: number | null; pricingRevision: string | null; token?: string };
 type Original = { key: string; runId: string; taskId: string | null };
+type AiRequest = { requestId: string; runId?: string; edit: number; status?: string; model?: string };
+type AiJournal = { current: AiRequest | null; retained: AiRequest[] };
 const finished = new Set(['succeeded','failed','cancelled','canceled','completed','error']);
 function RuleDialog({ kind, ownerId, onClose, onSaved }: { kind: MultiviewActionContextKind; ownerId: string; onClose(): void; onSaved(): void }) {
   const dialog = useRef<HTMLDialogElement>(null), before = useRef<(() => Promise<boolean>) | null>(null);
@@ -29,7 +32,7 @@ function RuleDialog({ kind, ownerId, onClose, onSaved }: { kind: MultiviewAction
   const close = async () => { if (!before.current || await before.current()) onClose(); };
   useDialogDismiss({ open: true, dialogRef: dialog, nativeDialog: true, onDismiss: () => void close() });
   useEffect(() => { dialog.current?.showModal(); return () => dialog.current?.close(); }, []);
-  return createPortal(<dialog ref={dialog} className={styles.dialog} aria-labelledby={titleId}><header><h2 id={titleId}>{kind === 'format' ? '动作格式' : '镜头与同步'}</h2><button type="button" aria-label="关闭规则编辑" onClick={()=>void close()}><X size={18}/></button></header><PrivateDefinitionEditor userId={ownerId} moduleId={kind} endpoint={`/api/video/multiview/actions/contexts/${kind}`} dialog={dialog} beforeClose={before} open blocked={false} canRead needsIdentity={false} contextOnly label={kind==='format'?'动作格式':'镜头与同步'} maxLength={12000} onSaved={(_,keepEditing)=>{onSaved();if(!keepEditing)onClose();}} /></dialog>, document.body);
+  return createPortal(<dialog ref={dialog} className={styles.dialog} aria-labelledby={titleId}><header><h2 id={titleId}>{kind === 'format' ? '动作格式' : '镜头与同步'}</h2><button type="button" aria-label="关闭规则编辑" onClick={()=>void close()}><X size={18}/></button></header><PrivateDefinitionEditor dialogPlacement="center" userId={ownerId} moduleId={kind} endpoint={`/api/video/multiview/actions/contexts/${kind}`} dialog={dialog} beforeClose={before} open blocked={false} canRead needsIdentity={false} contextOnly label={kind==='format'?'动作格式':'镜头与同步'} maxLength={12000} onSaved={(_,keepEditing)=>{onSaved();if(!keepEditing)onClose();}} /></dialog>, document.body);
 }
 function ConfirmDialog({ quote, parameters, busy, onClose, onConfirm }: { quote: Quote; parameters: MultiviewActionParameters; busy: boolean; onClose(): void; onConfirm(): void }) {
   const dialog=useRef<HTMLDialogElement>(null);
@@ -40,20 +43,24 @@ function ConfirmDialog({ quote, parameters, busy, onClose, onConfirm }: { quote:
   return createPortal(<dialog ref={dialog} className={styles.dialog} aria-labelledby={titleId} aria-busy={busy}><header><h2 id={titleId}>生成动作视频</h2><button disabled={busy} aria-label="关闭费用确认" onClick={close}><X size={18}/></button></header><p>{seedanceVideoModelLabel(parameters.model)} · {parameters.duration} 秒 · {parameters.resolution} · {parameters.ratio}</p><p className={styles.frozenText}>{quote.text}</p><p className={styles.price}>{quote.points===null?'费用待确认':<>本次预计 <strong>{quote.points} 点</strong></>}</p><footer><button disabled={busy} onClick={close}>返回修改</button><button disabled={busy} onClick={onConfirm}>{busy?'正在准备…':quote.points===null?'继续':'确认生成'}</button></footer></dialog>,document.body);
 }
 export function MultiviewActionPanel(props: Props) {
-  const { isAvailable: modelAvailable, reason: modelAvailabilityReason } = usePricingModelAvailability();
+  const { isAvailable: modelAvailable, reason: modelAvailabilityReason, refresh: refreshAvailability } = usePricingModelAvailability();
+  const { confirm, productDialog } = useProductDialog({ placement: 'center' });
   const [state,setState]=useState<MultiviewActionState|null>(null),[draft,setDraft]=useState<MultiviewActionDraft|null>(null);
   const [text,setText]=useState('');
   const [parameters,setParameters]=useState<MultiviewActionParameters>({provider:'seedance',model:DEFAULT_SEEDANCE_VIDEO_MODEL_ID,duration:12,resolution:'720p',ratio:props.ratio,project_id:props.videoDefaults?.projectId||props.work?.projectId||'',video_card_id:props.videoDefaults?.videoCardId||props.work?.videoCardId||null});
   const [projects,setProjects]=useState<Array<{id:string;name:string}>>([]),[cards,setCards]=useState<Array<{id:string;title:string}>>([]);
   const [hydrated,setHydrated]=useState(false),[saving,setSaving]=useState(false),[draftBlocked,setDraftBlocked]=useState(false);
   const [message,setMessage]=useState(''),[quoteError,setQuoteError]=useState(''),[quote,setQuote]=useState<Quote|null>(null),[quoting,setQuoting]=useState(false);
-  const [llmModel,setLlmModel]=useState(''),[aiPending,setAiPending]=useState<{requestId:string;runId?:string;edit:number}|null>(null),[aiBusy,setAiBusy]=useState(false),[suggestion,setSuggestion]=useState<MultiviewActionRun|null>(null),[beforeAi,setBeforeAi]=useState<string|null>(null);
+  const [llmModel,setLlmModel]=useState(''),[llmModels,setLlmModels]=useState<Array<{id:string;label:string}>>([]),[modelsBusy,setModelsBusy]=useState(false),[modelMessage,setModelMessage]=useState('');
+  const [aiJournal,setAiJournal]=useState<AiJournal>({current:null,retained:[]}),[aiBusy,setAiBusy]=useState(false),[suggestion,setSuggestion]=useState<MultiviewActionRun|null>(null),[beforeAi,setBeforeAi]=useState<string|null>(null);
+  const aiPending=aiJournal.current,aiJournalRef=useRef(aiJournal);aiJournalRef.current=aiJournal;
   const [context,setContext]=useState<MultiviewActionContextKind|null>(null),[confirming,setConfirming]=useState(false),[submitting,setSubmitting]=useState(false);
   const [original,setOriginal]=useState<Original|null>(null),[selectedRunId,setSelectedRunId]=useState(''),[baseline,setBaseline]=useState<string|null>(null);
   const [quoteRetry,setQuoteRetry]=useState(0);
   const [attemptId,setAttemptId]=useState('initial'),[newAttemptRequired,setNewAttemptRequired]=useState(false);
   const [appliedRunId,setAppliedRunId]=useState<string|undefined>();
   const aiPoll=useRef({key:'',count:0}),videoPoll=useRef({key:'',count:0});
+  const modelController=useRef<AbortController|null>(null);
   const scope=`${props.ownerId}:${props.authority}:${props.work?.id||''}`;
   const liveScope=useRef(scope);liveScope.current=scope;
   const workRef=useRef(props.work);workRef.current=props.work;
@@ -62,12 +69,28 @@ export function MultiviewActionPanel(props: Props) {
   const saveLock=useRef(false),submitLock=useRef(false),aiLock=useRef(false);
   const requestKey=`sd2:multiview-action-request:v1:${props.ownerId}:${props.work?.id||'pending'}`;
   const attemptKey=requestKey+':attempt';
-  const aiKey=`sd2:multiview-action-text-request:v1:${props.ownerId}:${props.work?.id||'pending'}`;
+  const legacyAiKey=`sd2:multiview-action-text-request:v1:${props.ownerId}:${props.work?.id||'pending'}`;
+  const aiKey=`sd2:multiview-action-text-request:v2:${props.ownerId}:${props.work?.id||'pending'}`;
+  const modelKey=`sd2:multiview-action-llm:v1:${props.ownerId}`;
   const projectCatalogRevision = useProjectCatalogRevision();
   const active=useCallback((value=scope)=>liveScope.current===value&&!isClientSessionBlocked(),[scope]);
   const headers=useCallback(()=>({'Content-Type':'application/json','x-app-session-user':props.ownerId}),[props.ownerId]);
-  const api=useCallback(async<T,>(url:string,body?:unknown,method='POST'):Promise<T>=>{const response=await fetch(url,{method:body===undefined?'GET':method,cache:'no-store',headers:headers(),...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(45000)});const value=await response.json();if(!response.ok)throw Object.assign(new Error(value.error||value.message||'暂时无法完成，当前输入保留。'),{status:response.status,result:value});return value as T;},[headers]);
+  const api=useCallback(async<T,>(url:string,body?:unknown,method='POST',signal?:AbortSignal):Promise<T>=>{const response=await fetch(url,{method:body===undefined?'GET':method,cache:'no-store',headers:headers(),...(body===undefined?{}:{body:JSON.stringify(body)}),signal:signal||AbortSignal.timeout(45000)});const value=await response.json();if(!response.ok)throw Object.assign(new Error(value.error||value.message||'暂时无法完成，当前输入保留。'),{status:response.status,result:value});return value as T;},[headers]);
   const creation=useCreationContext({ownerId:props.ownerId,entry:'multiview',draftId:`action:${props.work?.id||'preparing'}`,projectId:parameters.project_id||null,legacyCardId:parameters.video_card_id,enabled:Boolean(hydrated&&parameters.project_id),onProjectChange:id=>setParameters(value=>({...value,project_id:id}))});
+  useEffect(()=>{setLlmModels([]);setModelMessage('');try{setLlmModel(localStorage.getItem(modelKey)||'');}catch{setLlmModel('');setModelMessage('模型选择暂不能在本机记住，当前仍可选择。');}},[modelKey]);
+  const loadModels=useCallback(async(force=false)=>{
+    const captured=scope;modelController.current?.abort();const controller=new AbortController();modelController.current=controller;const timeout=setTimeout(()=>controller.abort(),45000);setModelsBusy(true);setModelMessage('');
+    try{const value=await api<{models:Array<{id:string;label:string}>;default:string}>(`/api/llm/models${force?'?refresh=1':''}`,undefined,'GET',controller.signal);if(!active(captured)||modelController.current!==controller)return;
+      if(!Array.isArray(value.models)||typeof value.default!=='string')throw new Error('模型目录读取失败，原选择已保留。');
+      setLlmModels(value.models);setLlmModel(current=>current||value.default);if(force)setModelMessage(value.models.length?'模型目录已更新。':'模型目录已更新，当前没有可用型号。');
+    }catch(cause){if(active(captured)&&modelController.current===controller)setModelMessage(controller.signal.aborted?'模型更新超时，原目录和选择已保留。':cause instanceof Error?cause.message:'模型更新失败，原选择已保留。');}
+    finally{clearTimeout(timeout);if(active(captured)&&modelController.current===controller)setModelsBusy(false);}
+  },[scope,api,active]);
+  useEffect(()=>{void loadModels();const refresh=()=>{if(document.visibilityState!=='hidden')void loadModels();};window.addEventListener('focus',refresh);document.addEventListener('visibilitychange',refresh);return()=>{modelController.current?.abort();modelController.current=null;window.removeEventListener('focus',refresh);document.removeEventListener('visibilitychange',refresh);};},[loadModels]);
+  function rememberModel(model:string){setLlmModel(model);try{localStorage.setItem(modelKey,model);}catch{setModelMessage('模型选择暂不能在本机记住，当前选择仍可使用。');}}
+  function keepAiJournal(value:AiJournal){localStorage.setItem(aiKey,JSON.stringify(value));aiJournalRef.current=value;setAiJournal(value);}
+  const modelOptions=llmModels.filter(model=>modelAvailable('text',model.id));
+  const llmReady=modelOptions.some(model=>model.id===llmModel);
   const content=JSON.stringify([text,parameters,props.work?.draftRevision]);
   const quoteKey=JSON.stringify([scope,content,props.snapshotKey,state?.capabilities.rules.sync.revision,state?.capabilities.rules.format.revision,appliedRunId,attemptId]);
   const currentQuote=quote?.key===quoteKey?quote:null;
@@ -89,14 +112,16 @@ export function MultiviewActionPanel(props: Props) {
     if(!active(captured))return;
     setState(previous=>cursor&&previous?{...value,runs:[...previous.runs,...value.runs.filter(run=>!previous.runs.some(item=>item.id===run.id))]}:value);
     if(!selectedRunId){const newest=value.runs.find(run=>run.tasks.length);if(newest)setSelectedRunId(newest.id);}
-    if(adopt){setDraft(value.draft);draftRef.current=value.draft;if(value.draft){setText(value.draft.text);setParameters({...value.draft.parameters,ratio:props.ratio});saved.current=JSON.stringify([value.draft.text,value.draft.parameters,props.work.draftRevision]);}setLlmModel(value.capabilities.defaultLlmModel);setHydrated(true);}
+    if(adopt){setDraft(value.draft);draftRef.current=value.draft;if(value.draft){setText(value.draft.text);setParameters({...value.draft.parameters,ratio:props.ratio});saved.current=JSON.stringify([value.draft.text,value.draft.parameters,props.work.draftRevision]);}setHydrated(true);}
   }
   useEffect(()=>{
-    setState(null);setDraft(null);draftRef.current=null;setText('');setQuote(null);setHydrated(false);setOriginal(null);setMessage('');setAiPending(null);saved.current='';
+    setState(null);setDraft(null);draftRef.current=null;setText('');setQuote(null);setHydrated(false);setOriginal(null);setMessage('');setAiJournal({current:null,retained:[]});aiJournalRef.current={current:null,retained:[]};saved.current='';
     const captured=scope;let cancelled=false;
     if(!props.work)return;
     setParameters(value=>({...value,ratio:props.ratio,project_id:props.videoDefaults?.projectId||props.work?.projectId||'',video_card_id:props.videoDefaults?.videoCardId||props.work?.videoCardId||null}));
-    void (async()=>{try{await refresh(true);if(cancelled||!active(captured))return;const local=localStorage.getItem(requestKey+':input');if(local){const value=JSON.parse(local);if(typeof value.text==='string'&&value.parameters&&typeof value.parameters==='object'){setText(value.text);setParameters({...value.parameters,ratio:props.ratio});}}const attempt=localStorage.getItem(attemptKey);if(attempt){const value=JSON.parse(attempt);if(value.id==='initial'||/^[a-f0-9-]{36}$/i.test(value.id)){setAttemptId(value.id);setNewAttemptRequired(value.needsNew===true);}}const old=localStorage.getItem(requestKey);if(old){const value=JSON.parse(old);if(typeof value.key!=='string'||typeof value.runId!=='string')throw new Error('原视频请求记录无法确认，请保留页面。');setOriginal(value);setSelectedRunId(value.runId);}const ai=localStorage.getItem(aiKey);if(ai){const value=JSON.parse(ai);if(typeof value.requestId!=='string')throw new Error('原文案请求记录无法确认。');setAiPending({...value,edit:-1});}}catch(cause){if(active(captured)){setDraftBlocked(true);setMessage(cause instanceof Error?cause.message:'草稿暂不可恢复。');}}})();
+    void (async()=>{try{await refresh(true);if(cancelled||!active(captured))return;const local=localStorage.getItem(requestKey+':input');if(local){const value=JSON.parse(local);if(typeof value.text==='string'&&value.parameters&&typeof value.parameters==='object'){setText(value.text);setParameters({...value.parameters,ratio:props.ratio});}}const attempt=localStorage.getItem(attemptKey);if(attempt){const value=JSON.parse(attempt);if(value.id==='initial'||/^[a-f0-9-]{36}$/i.test(value.id)){setAttemptId(value.id);setNewAttemptRequired(value.needsNew===true);}}const old=localStorage.getItem(requestKey);if(old){const value=JSON.parse(old);if(typeof value.key!=='string'||typeof value.runId!=='string')throw new Error('原视频请求记录无法确认，请保留页面。');setOriginal(value);setSelectedRunId(value.runId);}const ai=localStorage.getItem(aiKey)||localStorage.getItem(legacyAiKey);if(ai){const value=JSON.parse(ai);const journal:AiJournal=typeof value.requestId==='string'?{current:value,retained:[]}:value;
+      if(!journal||!Array.isArray(journal.retained)||[journal.current,...journal.retained].some(item=>item!==null&&(!item||typeof item.requestId!=='string'||item.runId!==undefined&&typeof item.runId!=='string')))throw new Error('原文案请求记录无法确认。');
+      const restored={current:journal.current?{...journal.current,edit:-1}:null,retained:journal.retained.map(item=>({...item,edit:-1}))};aiJournalRef.current=restored;setAiJournal(restored);}}catch(cause){if(active(captured)){setDraftBlocked(true);setMessage(cause instanceof Error?cause.message:'草稿暂不可恢复。');}}})();
     return()=>{cancelled=true;};
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[scope,api]);
@@ -130,21 +155,33 @@ export function MultiviewActionPanel(props: Props) {
     return()=>{cancelled=true;clearTimeout(timer);};
   },[quoteKey,quoteRetry,hydrated,content,text,parameters,state?.capabilities.actionReady,newAttemptRequired,original?.key,original?.taskId,scope,active,api]);
   async function organize(){
-    if(aiLock.current||aiPending||!state?.capabilities.llmEnabled||!text.trim())return;
-    const savedDraft=await saveDraft();if(!savedDraft)return;
-    const pending={requestId:crypto.randomUUID(),edit:editRevision.current};aiLock.current=true;setAiBusy(true);setMessage('');
-    try{localStorage.setItem(aiKey,JSON.stringify({requestId:pending.requestId}));setAiPending(pending);const value=await api<{run:MultiviewActionRun}>('/api/video/multiview/actions/runs',{draftId:savedDraft.id,revision:savedDraft.revision,requestId:pending.requestId,llmModel});if(active())setAiPending({...pending,runId:value.run.id});}
-    catch(cause){if(active())setMessage('文案提交结果待确认，请查询原请求。');}
+    if(aiLock.current||aiPending&&aiPending.status!=='uncertain'||!state?.capabilities.llmEnabled||!llmReady||!text.trim())return;
+    if(aiPending&&!await confirm('原文案结果仍未确认，原记录会保留，不会重发。继续将用当前所选模型新建一次整理，上游文字费用由平台承担。', {title:'新建一次动作整理',confirmLabel:'新建整理'}))return;
+    const sourceEdit=editRevision.current,savedDraft=await saveDraft();if(!savedDraft)return;
+    const pending:AiRequest={requestId:crypto.randomUUID(),edit:sourceEdit,model:llmModel};aiLock.current=true;setAiBusy(true);setMessage('');rememberModel(llmModel);
+    let retained=false;
+    try{
+      const previous=aiJournalRef.current;
+      keepAiJournal({current:pending,retained:previous.current?[...previous.retained,previous.current]:previous.retained});retained=true;
+      const value=await api<{run:MultiviewActionRun}>('/api/video/multiview/actions/runs',{draftId:savedDraft.id,revision:savedDraft.revision,requestId:pending.requestId,llmModel});if(active())consumeAi(value.run,pending);
+    }catch(cause){if(active()){
+      if((cause as {result?:{details?:{notAccepted?:boolean}}})?.result?.details?.notAccepted===true){keepAiJournal({...aiJournalRef.current,current:null});setMessage(cause instanceof Error?cause.message:'本次整理未受理，原动作保留。');}
+      else setMessage(retained?'文案提交结果待确认，请查询原请求。':'原文案记录未能在本机保留，尚未提交；请保留页面。');
+    }}
     finally{aiLock.current=false;setAiBusy(false);}
   }
-  const consumeAi=useCallback((run:MultiviewActionRun,pending:{requestId:string;runId?:string;edit:number})=>{
-    if(!finished.has(run.status)&&run.status!=='uncertain')return;
-    if(run.status==='succeeded'&&run.text){if(editRevision.current===pending.edit){setBeforeAi(input.current.text);setAppliedRunId(run.id);setText(run.text);editRevision.current++;setMessage('动作已整理。');}else setSuggestion(run);}
+  function consumeAi(run:MultiviewActionRun,pending:AiRequest){
+    const journal=aiJournalRef.current,isCurrent=journal.current?.requestId===pending.requestId;
+    const next={...pending,runId:run.id,status:run.status,model:run.llmModel||pending.model};
+    const done=finished.has(run.status);
+    keepAiJournal({current:isCurrent?(done?null:next):journal.current,retained:journal.retained.flatMap(item=>item.requestId===pending.requestId?(done?[]:[next]):[item])});
+    setState(value=>value?{...value,runs:[run,...value.runs.filter(item=>item.id!==run.id)]}:value);
+    if(!done&&run.status!=='uncertain')return;
+    if(run.status==='succeeded'&&run.text){if(isCurrent&&editRevision.current===pending.edit){setBeforeAi(input.current.text);setAppliedRunId(run.id);setText(run.text);editRevision.current++;setMessage('动作已整理。');}else setSuggestion(run);}
     else setMessage(run.error|| (run.status==='uncertain'?'文案发送结果待确认，请保留原请求，不会自动重试。':'文案未完成，原动作保留。'));
-    if(run.status!=='uncertain'){setAiPending(null);localStorage.removeItem(aiKey);}
-  },[aiKey]);
-  async function queryAi(manual=true){if(!aiPending)return;if(manual)aiPoll.current={key:aiPending.requestId,count:0};try{const value=await api<{run:MultiviewActionRun|null}>(aiPending.runId?`/api/video/multiview/actions/runs/${aiPending.runId}`:`/api/video/multiview/actions/runs?requestId=${encodeURIComponent(aiPending.requestId)}`);if(!active())return;if(value.run){setAiPending({...aiPending,runId:value.run.id});consumeAi(value.run,aiPending);}else setMessage('原文案尚未查到，继续保留原号。');}catch(cause){if(active())setMessage(cause instanceof Error?cause.message:'原文案暂不可查询。');}}
-  useEffect(()=>{if(!aiPending)return;if(aiPoll.current.key!==aiPending.requestId)aiPoll.current={key:aiPending.requestId,count:0};if(aiPoll.current.count>=12)return;const timer=setTimeout(()=>{aiPoll.current.count++;void queryAi(false);},4000);return()=>clearTimeout(timer);});
+  }
+  async function queryAi(manual=true,pending=aiJournalRef.current.current){if(!pending)return;if(manual)aiPoll.current={key:pending.requestId,count:0};try{const value=await api<{run:MultiviewActionRun|null}>(pending.runId?`/api/video/multiview/actions/runs/${pending.runId}`:`/api/video/multiview/actions/runs?requestId=${encodeURIComponent(pending.requestId)}`);if(!active())return;if(value.run)consumeAi(value.run,pending);else setMessage('原文案尚未查到，继续保留原号。');}catch(cause){if(active())setMessage(cause instanceof Error?cause.message:'原文案暂不可查询。');}}
+  useEffect(()=>{if(!aiPending||aiPending.status==='uncertain')return;if(aiPoll.current.key!==aiPending.requestId)aiPoll.current={key:aiPending.requestId,count:0};if(aiPoll.current.count>=12)return;const timer=setTimeout(()=>{aiPoll.current.count++;void queryAi(false);},4000);return()=>clearTimeout(timer);});
   async function queryOriginal(manual=true){if(!original)return;if(manual)videoPoll.current={key:original.key,count:0};const captured=scope;try{const value=await api<{task:{id:string}|null;new_request_allowed?:boolean;request_receipt?:{key?:string;state?:string;accepted?:boolean;message?:string}}>(`/api/tasks/request-status?idempotency_key=${encodeURIComponent(original.key)}`);if(!active(captured))return;if(value.task){const next={...original,taskId:value.task.id};setOriginal(next);localStorage.setItem(requestKey,JSON.stringify(next));await refresh();}else if(value.new_request_allowed===true&&value.request_receipt?.state==='rejected'&&value.request_receipt.accepted===false&&value.request_receipt.key===original.key){setOriginal(null);setNewAttemptRequired(true);localStorage.setItem(attemptKey,JSON.stringify({id:attemptId,needsNew:true}));localStorage.removeItem(requestKey);setMessage(value.request_receipt.message||'本次未受理，请调整后重新确认费用。');}else setMessage('提交结果待确认，原请求尚未查到，不会重新提交。');}catch(cause){if(active(captured))setMessage('原请求暂不可查询，保留最后已知状态。');}}
   useEffect(()=>{if(!hydrated||!props.work)return;const waiting=original&&!original.taskId||state?.runs.some(run=>['queued','running'].includes(run.status)||run.tasks.some(task=>!finished.has(task.status)));if(!waiting)return;if(original&&!original.taskId){if(videoPoll.current.key!==original.key)videoPoll.current={key:original.key,count:0};if(videoPoll.current.count>=12)return;}const timer=setTimeout(()=>{if(original&&!original.taskId){videoPoll.current.count++;void queryOriginal(false);}else void refresh().catch(()=>undefined);},5000);return()=>clearTimeout(timer);});
   async function submit(){
@@ -217,14 +254,24 @@ export function MultiviewActionPanel(props: Props) {
       {showVideo && <details><summary>动作生成记录</summary><div className={styles.history}>{state?.runs.filter(run => run.tasks.length).map(run => <button type="button" key={run.id} aria-pressed={selectedRunId === run.id} onClick={() => setSelectedRunId(run.id)}>{seedanceVideoModelLabel(run.parameters.model)} · <RelativeTime value={run.createdAt} /></button>)}{state?.nextCursor && <button type="button" onClick={() => void refresh(false, state.nextCursor!)}>加载更多</button>}</div></details>}
       {showVideo&&selectedRun?<><p className={styles.frozenText}>{selectedRun.text}</p><p className={styles.notice}>{seedanceVideoModelLabel(selectedRun.parameters.model)} · {selectedRun.parameters.duration} 秒 · {selectedRun.parameters.resolution}</p><button onClick={()=>{if(!newAttempt())return;updateText(selectedRun.text||'');setParameters(selectedRun.parameters);props.onView('reference');}}>修改动作再做</button></>:<>
         <textarea aria-label="动作" placeholder="例如：原地挥拳三次，从轻到重。" maxLength={12000} value={text} disabled={!hydrated} onChange={event=>updateText(event.target.value)}/>
-        <div className={styles.compact}><button type="button" disabled={!state?.capabilities.llmEnabled||!text.trim()||aiBusy||Boolean(aiPending)||saving||draftBlocked} onClick={()=>void organize()}>{aiPending?'正在整理…':'AI整理动作'}</button><select aria-label="文案模型" value={modelAvailable('text',llmModel) ? llmModel : ''} onChange={event=>setLlmModel(event.target.value)}><option value="" disabled>{modelAvailabilityReason || "请选择已开放模型"}</option>{state?.capabilities.llmModels.filter(model=>modelAvailable('text',model.id)).map(model=><option key={model.id} value={model.id}>{model.label}</option>)}</select>{beforeAi!==null&&<button onClick={()=>{updateText(beforeAi);setAppliedRunId(undefined);setBeforeAi(null);}}>撤销整理</button>}</div>
+        <div className={styles.aiControls}>
+          <button type="button" disabled={!state?.capabilities.llmEnabled||!llmReady||!text.trim()||aiBusy||Boolean(aiPending&&aiPending.status!=='uncertain')||saving||draftBlocked} onClick={()=>void organize()}>{aiBusy?'正在提交…':aiPending?.status==='uncertain'?'新建一次整理':aiPending?(aiPending.runId?'正在整理…':'提交结果待确认'):'AI整理动作'}</button>
+          <div className={styles.modelPicker}><select aria-label="文案模型" value={llmReady?llmModel:''} onChange={event=>rememberModel(event.target.value)}><option value="" disabled>{modelsBusy&&!llmModels.length?'正在读取模型…':modelAvailabilityReason||'请选择可用文案模型'}</option>{modelOptions.map(model=><option key={model.id} value={model.id}>{model.label}</option>)}</select><button type="button" disabled={modelsBusy} aria-busy={modelsBusy} onClick={()=>{void loadModels(true);void refreshAvailability();}}><RefreshCw size={15}/>{modelsBusy?'更新中…':'更新'}</button></div>
+          {beforeAi!==null&&<button onClick={()=>{updateText(beforeAi);setAppliedRunId(undefined);setBeforeAi(null);}}>撤销整理</button>}
+        </div>
+        {llmModel&&!llmReady&&!modelsBusy&&<p className={styles.notice} role="status">上次选择的 {llmModel} 当前不可用，请更新模型后重新选择；原动作保留。</p>}
+        {modelMessage&&<p className={styles.notice} role="status">{modelMessage}</p>}
         {!state?.capabilities.llmEnabled&&state?.capabilities.llmReason&&<p className={styles.notice}>{state.capabilities.llmReason}</p>}
         {state?.capabilities.billingLabel&&<p className={styles.notice}>{state.capabilities.billingLabel}</p>}
-        {aiPending&&<button onClick={()=>void queryAi()}>查询原文案</button>}
+        {aiPending&&<div className={styles.requestNotice} role="status"><span>{aiPending.status==='uncertain'?`原文案结果待确认${aiPending.model?'（'+aiPending.model+'）':''}，原请求保留，不会重发。`:aiPending.runId?'正在查询原文案进度。':'文案提交结果待确认，原请求保留。'}</span><button type="button" onClick={()=>void queryAi()}>查询原文案</button></div>}
+        {aiJournal.retained.length>0&&<details className={styles.retained}><summary>待核对的原文案（{aiJournal.retained.length}）</summary>{aiJournal.retained.map(item=><div className={styles.requestNotice} key={item.requestId}><span>{item.model||'原文案'} · 结果待确认</span><button type="button" onClick={()=>void queryAi(true,item)}>查询此原文案</button></div>)}</details>}
         {suggestion&&<div className={styles.notice}><p>新整理已就绪，当前动作保留。</p><button onClick={()=>{setBeforeAi(text);setAppliedRunId(suggestion.id);updateText(suggestion.text||'');setSuggestion(null);}}>使用此整理</button><button onClick={()=>setSuggestion(null)}>保留当前动作</button></div>}
         {state?.runs.find(run=>run.mode==='llm'&&run.status==='succeeded')&&<details><summary>原需求与整理记录</summary>{state.runs.filter(run=>run.mode==='llm').map(run=><div key={run.id}><p className={styles.frozenText}>{run.inputText}</p><button disabled={!run.text} onClick={()=>updateText(run.inputText)}>使用原需求</button><button disabled={!run.text} onClick={()=>updateText(run.text||'')}>使用整理</button></div>)}</details>}
         <div className={styles.compact}>{(['format','sync'] as const).map(kind=><button className={styles.ruleLink} key={kind} disabled={!state?.capabilities.rules[kind].canEdit} onClick={()=>setContext(kind)}>{kind==='format'?'动作格式':'镜头与同步'} · 编辑</button>)}</div>
-        <div className={`${styles.compact} ${styles.params}`}><select aria-label="视频型号" value={modelAvailable('video',parameters.model,{},'seedance') ? parameters.model : ''} onChange={event=>applyParameters({model:event.target.value})}><option value="" disabled>{modelAvailabilityReason || "请选择已开放模型"}</option>{SEEDANCE_VIDEO_MODEL_OPTIONS.filter(model=>modelAvailable('video',model.id,{},'seedance')).map(model=><option key={model.id} value={model.id}>{model.label}</option>)}</select><select aria-label="视频时长" value={parameters.duration} onChange={event=>applyParameters({duration:Number(event.target.value)})}>{seedanceVideoDurationOptions(parameters.model).map(duration=><option key={duration} value={duration}>{duration} 秒</option>)}</select><select aria-label="分辨率" value={parameters.resolution} onChange={event=>applyParameters({resolution:event.target.value as MultiviewActionParameters['resolution']})}>{['480p','720p','1080p'].map(value=><option key={value}>{value}</option>)}</select><ProjectSelector  aria-label="项目" name="project_id" value={parameters.project_id} onChange={event=>applyParameters({project_id:event.target.value,video_card_id:null})}><option value="">选择项目</option>{projects.map(project=><option key={project.id} value={project.id}>{project.name}</option>)}</ProjectSelector><select aria-label="视频卡，可选" name="video_card_id" value={parameters.video_card_id||''} onChange={event=>applyParameters({video_card_id:event.target.value||null})}><option value="">视频卡（可选）</option>{cards.map(card=><option key={card.id} value={card.id}>{card.title}</option>)}</select></div>
+        <div className={styles.params}>
+          <div className={styles.videoParameters}><select aria-label="视频型号" value={modelAvailable('video',parameters.model,{},'seedance') ? parameters.model : ''} onChange={event=>applyParameters({model:event.target.value})}><option value="" disabled>{modelAvailabilityReason || "请选择已开放模型"}</option>{SEEDANCE_VIDEO_MODEL_OPTIONS.filter(model=>modelAvailable('video',model.id,{},'seedance')).map(model=><option key={model.id} value={model.id}>{model.label}</option>)}</select><select aria-label="视频时长" value={parameters.duration} onChange={event=>applyParameters({duration:Number(event.target.value)})}>{seedanceVideoDurationOptions(parameters.model).map(duration=><option key={duration} value={duration}>{duration} 秒</option>)}</select><select aria-label="分辨率" value={parameters.resolution} onChange={event=>applyParameters({resolution:event.target.value as MultiviewActionParameters['resolution']})}>{['480p','720p','1080p'].map(value=><option key={value}>{value}</option>)}</select></div>
+          <div className={styles.destinationParameters}><div className={styles.projectField}><ProjectSelector  aria-label="项目" name="project_id" value={parameters.project_id} onChange={event=>applyParameters({project_id:event.target.value,video_card_id:null})}><option value="">选择项目</option>{projects.map(project=><option key={project.id} value={project.id}>{project.name}</option>)}</ProjectSelector></div><div className={styles.cardField}><select aria-label="视频卡，可选" name="video_card_id" value={parameters.video_card_id||''} onChange={event=>applyParameters({video_card_id:event.target.value||null})}><option value="">视频卡（可选）</option>{cards.map(card=><option key={card.id} value={card.id}>{card.title}</option>)}</select></div></div>
+        </div>
         <CreationAvailability controller={creation} onBaselineChange={setBaseline}/>
         {state&&!state.capabilities.actionReady&&<p className={styles.notice}>{state.capabilities.actionReason}</p>}
         {props.work && ['queued','rendering'].includes(props.work.status)&&<p className={styles.notice}>拼图准备中…</p>}
@@ -239,6 +286,7 @@ export function MultiviewActionPanel(props: Props) {
       {message&&<p className={styles.notice} role="status">{message}</p>}
       {!showVideo&&<button type="button" className={styles.primary} disabled={!hydrated||!text.trim()||!parameters.project_id||!state?.capabilities.actionReady||newAttemptRequired||submitting||saving||creation.loading||Boolean(original&&!original.taskId)||draftBlocked} onClick={()=>setConfirming(true)}>{submitting?'正在准备并提交…':'制作动作视频'}</button>}
     </aside>
+    {productDialog}
     {context&&<RuleDialog key={`${scope}:${context}`} kind={context} ownerId={props.ownerId} onClose={()=>setContext(null)} onSaved={()=>{setQuote(null);void refresh().catch(()=>undefined);}}/>}
     {confirming&&<ConfirmDialog quote={confirmationQuote} parameters={confirmationQuote.parameters} busy={submitting} onClose={()=>setConfirming(false)} onConfirm={()=>void submit()}/>}
   </>;
