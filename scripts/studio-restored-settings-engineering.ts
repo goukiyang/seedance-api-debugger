@@ -514,12 +514,19 @@ async function main() {
     Reflect.set(shared.definition, 'reproduction', { version: 2, sourceOwnerId: owner, sourceTaskId: 'private-author-task',
       moduleContext: shared.definition.context, globalContext: 'synthetic-author-global',
       taskSettings: { protocol: 'task-settings-v2', mode, sourceTaskId: 'private-author-task' } });
-    const inherited = await prepare(externalBody);
-    assert.equal(inherited.snapshot.globalContext, mode === 'current' ? settings.context : 'synthetic-author-global');
-    assert.equal(inherited.snapshot.moduleContext, shared.definition.context);
-    const quoteAt = specificationInputs.length;
-    await engine.prepareImageBillingQuote(owner, externalBody);
-    assert.equal(JSON.stringify(specificationInputs[quoteAt]), JSON.parse(inherited.task.billing_contract_json).specification);
+    if (EXTERNAL_IMAGE_ADMISSION_ENABLED) {
+      const inherited = await prepare(externalBody);
+      assert.equal(inherited.snapshot.globalContext, mode === 'current' ? settings.context : 'synthetic-author-global');
+      assert.equal(inherited.snapshot.moduleContext, shared.definition.context);
+      const quoteAt = specificationInputs.length;
+      await engine.prepareImageBillingQuote(owner, externalBody);
+      assert.equal(JSON.stringify(specificationInputs[quoteAt]), JSON.parse(inherited.task.billing_contract_json).specification);
+    } else {
+      const before = { tasks: created.length, specifications: specificationInputs.length };
+      await assert.rejects(() => prepare(externalBody), /外部生图暂未开放/);
+      await assert.rejects(() => engine.prepareImageBillingQuote(owner, externalBody), /外部生图暂未开放/);
+      assert.deepEqual({ tasks: created.length, specifications: specificationInputs.length }, before);
+    }
     await assert.rejects(() => prepare({ ...externalBody,
       taskSettings: { protocol: 'task-settings-v2', mode, sourceTaskId: 'another-users-task' } }));
   }
@@ -527,7 +534,9 @@ async function main() {
   user.account_type = 'internal'; user.role = 'admin'; shared.binding.mode = 'publisher';
   await assert.rejects(() => prepare(externalBody), /新的设置模式/);
   Reflect.deleteProperty(shared.definition, 'reproduction');
-  checks.push('external_v2_current_and_historical_recipes_inherit_server_settings_with_matching_quotes',
+  checks.push(EXTERNAL_IMAGE_ADMISSION_ENABLED
+    ? 'external_v2_current_and_historical_recipes_inherit_server_settings_with_matching_quotes'
+    : 'external_v2_guard_rejects_current_and_historical_generation_and_quotes_without_writes',
     'external_source_task_injection_and_closed_access_rejected_internal_settings_guard_preserved');
 
   assert.equal(forbiddenCalls, 0);
