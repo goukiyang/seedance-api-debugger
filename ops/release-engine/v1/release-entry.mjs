@@ -1097,7 +1097,7 @@ export function validateEngineInstall(value) {
   return value;
 }
 
-function verifyInstalledEngine(input) {
+export function verifyInstalledEngine(input) {
   assert.equal(fs.realpathSync(input.engine.root), input.engine.root); const directory = fs.lstatSync(input.engine.root);
   assert.ok(directory.isDirectory() && !directory.isSymbolicLink() && directory.uid === 0 && (directory.mode & 0o077) === 0);
   const names = fs.readdirSync(input.engine.root).filter(name => name.endsWith('.mjs')).sort();
@@ -1135,6 +1135,14 @@ function print(value) { process.stdout.write(JSON.stringify(value) + '\n'); }
 
 export async function releaseEntryCli(argv = process.argv.slice(2)) {
   const [command, ...args] = argv;
+  if (['prepare-seamless', 'release', 'resume-release', 'status-release'].includes(command) && args.length === 1) {
+    const delivery = await import('./seamless-release.mjs');
+    if (command === 'prepare-seamless') return print(delivery.prepareSeamless(args[0]));
+    if (command === 'status-release') return print(delivery.seamlessStatus(args[0]));
+    const result = await delivery.releaseSeamless(args[0], { resume: command === 'resume-release' });
+    print(result); if (result.status !== 'complete') process.exitCode = result.status === 'pending' ? 75 : 1;
+    return result;
+  }
   if (command === 'package' && args.length === 2) return print(await packageReleaseCandidates(args[0], args[1]));
   if (command === 'native' && args.length >= 2) return invokeNativeFixture({ contextFile: args[0], fixture: args[1], args: args.slice(2) });
   if (command === 'child' && args.length === 1) return print(await invokeReleaseChild({ invocationFile: args[0] }));

@@ -1,3 +1,4 @@
+import { releaseWorkerKey } from './process-provenance';
 import { createHash, randomUUID } from 'node:crypto';
 import { parseStudioCurrentInputs } from './current-inputs';
 import { observeOperation } from '@/lib/performance/server-operations';
@@ -306,6 +307,7 @@ export function normalizeSharedAuthorDraftForUse(actor: ImageStudioIdentity,
 }
 
 export const STUDIO_SHARED_WORKER_KEY = 'studio_shared_worker_v1';
+export const studioSharedWorkerKey = () => releaseWorkerKey(STUDIO_SHARED_WORKER_KEY);
 export const STUDIO_SHARED_WORKER_FILES = [
   'src/lib/image-studio/shared-contract.ts', 'src/lib/image-studio/shared-types.ts',
   'src/lib/image-studio/read-snapshot.ts',
@@ -317,7 +319,7 @@ export const STUDIO_SHARED_WORKER_FILES = [
 let sharedWorkerModuleHashes: Record<string, string> | undefined;
 
 export async function assertSharedStudioWorkerReady(tx: Prisma.TransactionClient) {
-  const row = await tx.platformSetting.findUnique({ where: { key: STUDIO_SHARED_WORKER_KEY } });
+  const row = await tx.platformSetting.findUnique({ where: { key: studioSharedWorkerKey() } });
   try {
     const receipt = JSON.parse(row?.value_json || 'null');
     if (!sharedWorkerModuleHashes) sharedWorkerModuleHashes = Object.fromEntries(STUDIO_SHARED_WORKER_FILES

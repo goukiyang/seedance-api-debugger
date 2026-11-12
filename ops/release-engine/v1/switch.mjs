@@ -1173,6 +1173,7 @@ function sharedHdAdmissionBounds(m, builds, manifestSha256) {
 }
 
 export async function switchPair(m, { mode = 'switch', safety } = {}) {
+  if (isSharedEngine(m)) throw new Error('Cold/503 cutover is disabled. Use ops/sd2-release.mjs prepare-seamless, then release; incompatible changes retain the current site.');
   assert.ok(['switch', 'rollback'].includes(mode));
   assert.equal(safety?.protocol, SAFETY_PROTOCOL, 'An explicit reviewed release safety adapter is required');
   for (const method of mode === 'switch' ? ['beforeMaintenance', 'installFence', 'restoreBeforeStart'] : ['assertRollbackAllowed']) {

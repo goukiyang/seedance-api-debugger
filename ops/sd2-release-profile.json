@@ -8,6 +8,20 @@
   "artifactPolicy": "immutable-original-full-build",
   "attemptPolicy": "fresh-window-distinct-attempt",
   "recoveryPolicy": "fixed-compatible-guard-no-business-data-restore",
+  "delivery": {
+    "schema": "sd2-release-delivery.v1",
+    "mode": "seamless",
+    "prepareCommand": "prepare-seamless",
+    "releaseCommand": "release",
+    "resumeCommand": "resume-release",
+    "statusCommand": "status-release",
+    "primaryPort": 3302,
+    "candidatePort": 3303,
+    "recoveryPort": 3304,
+    "incompatible": "retain-current-and-refuse",
+    "publicMaintenance": false,
+    "compatibility": "same-schema-same-persisted-contracts-retained-compatible-guard"
+  },
   "fullRelease": {
     "schema": "sd2-full-release-contract.v1",
     "prepareCommand": "prepare-full",

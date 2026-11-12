@@ -15,10 +15,11 @@ function rootJson(file, maximumBytes = 1024 * 1024) {
   return readTypedJson({ file, category: 'root_control', maximumBytes }).value;
 }
 
-function installedEntry(batchFile) {
+function installedEntry(batchFile, readOnly = false) {
   const batch = rootJson(batchFile);
   assert.equal(batch.schema, 'sd2-release-batch.v1'); assert.match(batch.taskId, UUID); assert.match(batch.attemptId, UUID);
   assert.equal(batch.runId, batch.attemptId); assert.equal(batch.engine?.schema, 'sd2-release-engine.v1');
+  if (!readOnly) assert.equal(batch.engine.version, '1.1.0', 'Historical cold engines are read-only; use the seamless delivery entry');
   assert.ok(path.isAbsolute(batch.projectRoot));
   assert.equal(batch.engine.root,
     `${batch.projectRoot}/release-engines/${batch.engine.version}-${batch.engine.controllerSetSha256}`);
@@ -41,6 +42,27 @@ function forward(entry, args) {
 
 export async function sd2ReleaseCli(argv = process.argv.slice(2)) {
   const [command, ...args] = argv;
+  if (command === 'policy' && args.length === 0) {
+    const { DEFAULT_DELIVERY } = await import('./release-engine/v1/seamless-policy.mjs');
+    process.stdout.write(JSON.stringify({ engineVersion: '1.1.0', delivery: DEFAULT_DELIVERY,
+      prepare: 'prepare-seamless INSTALL.json MAIN-IMMUTABLE-SUCCESS.json',
+      release: 'release PLAN.json', resume: 'resume-release PLAN.json', status: 'status-release PLAN.json' }) + '\n');
+    return;
+  }
+  if (command === 'prepare-seamless' && args.length === 2) {
+    const module = await import('./release-engine/v1/release-entry.mjs');
+    const install = module.validateEngineInstall(rootJson(args[0]));
+    module.verifyInstalledEngine(install);
+    return forward(path.join(install.engine.root, 'release-entry.mjs'), [command, args[1]]);
+  }
+  if (['release', 'resume-release', 'status-release'].includes(command) && args.length === 1) {
+    const plan = rootJson(args[0], 64 * 1024 * 1024);
+    assert.equal(plan.schema, 'sd2-seamless-plan.v1');
+    assert.match(plan.engineRoot, /^\/data\/video-api-debugger\/release-engines\/1\.1\.0-[a-f0-9]{64}$/);
+    const entry = path.join(plan.engineRoot, 'release-entry.mjs');
+    const stat = fs.lstatSync(entry); assert.ok(stat.isFile() && stat.uid === 0 && !(stat.mode & 0o022));
+    return forward(entry, [command, ...args]);
+  }
   if (command === 'new-identity' && args.length <= 1) {
     const taskId = args[0] || randomUUID(); assert.match(taskId, UUID);
     const attemptId = randomUUID();
@@ -68,9 +90,9 @@ export async function sd2ReleaseCli(argv = process.argv.slice(2)) {
     process.stdout.write(JSON.stringify(await module.packageReleaseCandidates(args[0], args[1])) + '\n'); return;
   }
   const counts = { start: 2, status: 1, inspect: 1, resume: 2, 'continue-failed': 3 };
-  if (Object.hasOwn(counts, command) && args.length === counts[command]) return forward(installedEntry(args[0]), [command, ...args]);
+  if (Object.hasOwn(counts, command) && args.length === counts[command]) return forward(installedEntry(args[0], ['status', 'inspect'].includes(command)), [command, ...args]);
   if (command === 'run' && args.length >= 2 && args.length <= 4) return forward(installedEntry(args[0]), [command, ...args]);
-  throw new Error('Usage: sd2-release.mjs new-identity [TASK_UUID] | package CONTEXT.json REQUEST.json | plan-install INSTALL.json | install-engine INSTALL.json | start BATCH.json WINDOW.json | status BATCH.json | inspect BATCH.json | resume BATCH.json WINDOW.json | continue-failed BATCH.json WINDOW.json FAILURE.json | run BATCH.json WINDOW.json [PHASE [APPROVAL.json]]');
+  throw new Error('Default delivery: policy | prepare-seamless INSTALL.json MAIN-IMMUTABLE-SUCCESS.json | release PLAN.json | resume-release PLAN.json | status-release PLAN.json. Build/inspect: new-identity | package CONTEXT.json REQUEST.json | plan-install INSTALL.json | install-engine INSTALL.json | start BATCH.json WINDOW.json | status BATCH.json | inspect BATCH.json | resume BATCH.json WINDOW.json | continue-failed BATCH.json WINDOW.json FAILURE.json | run BATCH.json WINDOW.json [PHASE [APPROVAL.json]] (cold switch disabled).');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

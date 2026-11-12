@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Prisma } from '@prisma/client';
 import { assertPricingWriterIsolation } from './isolation';
+import { releaseWorkerKey } from '../image-studio/process-provenance';
 
 export const PRICING_RUNTIME_PROTOCOL = 'pricing-policy-v1';
 export const PRICING_AUTHORING_RUNTIME_CAPABILITY = 'pricing-authoring-v1:video-scope-v1:image-spec-v1:image-quality-route-v1';
@@ -126,25 +127,25 @@ export async function renewPricingWorkerCapability(client: Client, captured: Pri
     || parentIdentity(captured.parent.pid).start !== captured.parent.start
     || JSON.stringify(pricingRuntimeModuleHashes()) !== JSON.stringify(captured.loadedModuleSha)) throw new PricingRuntimeError();
   const value = { ...captured, expiresAt: new Date(Date.now() + TTL_MS).toISOString() };
-  await client.platformSetting.upsert({ where: { key: PRICING_IMAGE_CAPABILITY_KEY },
-    create: { key: PRICING_IMAGE_CAPABILITY_KEY, value_json: JSON.stringify(value) },
+  await client.platformSetting.upsert({ where: { key: releaseWorkerKey(PRICING_IMAGE_CAPABILITY_KEY) },
+    create: { key: releaseWorkerKey(PRICING_IMAGE_CAPABILITY_KEY), value_json: JSON.stringify(value) },
     update: { value_json: JSON.stringify(value) } });
 }
 
 export async function revokePricingWorkerCapability(client: Client, captured: PricingWorkerCapability) {
-  const row = await client.platformSetting.findUnique({ where: { key: PRICING_IMAGE_CAPABILITY_KEY } });
+  const row = await client.platformSetting.findUnique({ where: { key: releaseWorkerKey(PRICING_IMAGE_CAPABILITY_KEY) } });
   if (!row) return;
   try {
     const current = JSON.parse(row.value_json) as PricingWorkerCapability;
     if (current.workerId !== captured.workerId) return;
-    await client.platformSetting.updateMany({ where: { key: PRICING_IMAGE_CAPABILITY_KEY, id: row.id, value_json: row.value_json },
+    await client.platformSetting.updateMany({ where: { key: releaseWorkerKey(PRICING_IMAGE_CAPABILITY_KEY), id: row.id, value_json: row.value_json },
       data: { value_json: JSON.stringify({ ...current, expiresAt: new Date(0).toISOString() }) } });
   } catch { /* An unreadable receipt already denies all new contracts. */ }
 }
 
 export async function assertPricingImageConsumerReady(client: Client, raw?: string | null) {
   assertPricingWriterIsolation();
-  const row = raw === undefined ? await client.platformSetting.findUnique({ where: { key: PRICING_IMAGE_CAPABILITY_KEY } })
+  const row = raw === undefined ? await client.platformSetting.findUnique({ where: { key: releaseWorkerKey(PRICING_IMAGE_CAPABILITY_KEY) } })
     : raw === null ? null : { value_json: raw };
   try {
     const value = JSON.parse(row?.value_json || 'null') as PricingWorkerCapability;

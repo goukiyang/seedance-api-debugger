@@ -10,7 +10,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import packageInfo from '../package.json';
 import { IMAGE_BILLING_VERSION } from '../src/lib/image-studio/billing-contract';
-import { STUDIO_SHARED_WORKER_KEY, STUDIO_SHARED_WORKER_FILES } from '../src/lib/image-studio/tasks';
+import { studioSharedWorkerKey, STUDIO_SHARED_WORKER_FILES } from '../src/lib/image-studio/tasks';
 import { capturePricingWorkerCapability, renewPricingWorkerCapability, revokePricingWorkerCapability } from '../src/lib/pricing/runtime';
 import { isImageStudioDraining } from '../src/lib/pricing/isolation';
 import { STUDIO_TASK_SETTINGS_PROTOCOL } from '../src/lib/image-studio/task-settings';
@@ -48,8 +48,8 @@ async function main() {
   let readinessWork: Promise<void> | null = null;
   const renewReadiness = async () => {
     const value = { protocol: 'shared-live-v1', taskSettingsProtocol: STUDIO_TASK_SETTINGS_PROTOCOL, workerId, source, loadedModuleSha, expiresAt: new Date(Date.now() + 90_000).toISOString() };
-    await prisma.platformSetting.upsert({ where: { key: STUDIO_SHARED_WORKER_KEY },
-      create: { key: STUDIO_SHARED_WORKER_KEY, value_json: JSON.stringify(value) }, update: { value_json: JSON.stringify(value) } });
+    await prisma.platformSetting.upsert({ where: { key: studioSharedWorkerKey() },
+      create: { key: studioSharedWorkerKey(), value_json: JSON.stringify(value) }, update: { value_json: JSON.stringify(value) } });
     if (pricingCapability) await renewPricingWorkerCapability(prisma, pricingCapability);
   };
   await renewReadiness();
@@ -104,11 +104,11 @@ async function main() {
     clearInterval(readinessTimer);
     await readinessWork;
     if (pricingCapability) await revokePricingWorkerCapability(prisma, pricingCapability);
-    const row = await prisma.platformSetting.findUnique({ where: { key: STUDIO_SHARED_WORKER_KEY } });
+    const row = await prisma.platformSetting.findUnique({ where: { key: studioSharedWorkerKey() } });
     if (row) {
       try {
         const value = JSON.parse(row.value_json);
-        if (value.workerId === workerId) await prisma.platformSetting.updateMany({ where: { id: row.id, key: STUDIO_SHARED_WORKER_KEY, value_json: row.value_json },
+        if (value.workerId === workerId) await prisma.platformSetting.updateMany({ where: { id: row.id, key: studioSharedWorkerKey(), value_json: row.value_json },
           data: { value_json: JSON.stringify({ ...value, expiresAt: new Date(0).toISOString() }) } });
       } catch {}
     }
