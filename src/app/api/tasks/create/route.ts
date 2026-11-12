@@ -2086,8 +2086,7 @@ export async function POST(request: NextRequest) {
   let h3ReferenceTransfer: Awaited<ReturnType<typeof uploadH3ReferenceImagesForTask>> | null = null;
   let seedanceReferenceTransport: Partial<CreateVideoInput> = {};
   // Each caller has authorized its images above; private URLs are not upstream-fetch grants.
-  if (requestedProvider === 'seedance' && (multiviewGeneration || multiviewAction || body.canvas_document_id
-    || cleanSourceMetadata(body.source_metadata).canvas_document_id || requestSource.source_metadata?.canvas_document_id)) {
+  if (requestedProvider === 'seedance') {
     try {
       seedanceReferenceTransport = await seedanceLocalReferenceTransport(
         { ...providerInput, callback_url: requestCallbackUrl || undefined },

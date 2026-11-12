@@ -198,7 +198,8 @@ export async function POST(request: NextRequest) {
     const failureMessage = error instanceof FusionAgentError && error.userMessage || (error instanceof Error ? error.message : '本轮提案未完成。');
     if (intent && !deferred && !request.signal.aborted) {
       try {
-        const terminal = await finishAssistantOperation(intent.user, intent.workspaceId, intent.opId, { intentFingerprint: intent.fingerprint, status: 'rejected', message: failureMessage, proposal: proposed });
+        const terminal = await finishAssistantOperation(intent.user, intent.workspaceId, intent.opId, { intentFingerprint: intent.fingerprint, status: 'rejected', message: failureMessage, proposal: proposed,
+          ...(error instanceof FusionAgentError && error.diagnostic ? { diagnostic: error.diagnostic } : {}) });
         if (terminal.status !== 'planning' && terminal.status !== 'unknown') return json({ ...terminal, pending: false, submitted: terminal.status === 'committed' });
       }
       catch { /* The original receipt remains the only recovery route. */ }

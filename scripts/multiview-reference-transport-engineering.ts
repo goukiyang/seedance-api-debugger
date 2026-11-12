@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import sharp from 'sharp';
 import { seedanceLocalReferenceTransport } from '../src/lib/provider/reference-image-transport';
 import { buildSeedanceVideoPayload, redactInlineImageTransport } from '../src/lib/provider/jimeng';
+import { videoDeliveryStageForTask, videoPlayableAvailableForTask } from '../src/lib/video/delivery-status';
 import type { CreateVideoInput } from '../src/types';
 
 async function main() {
@@ -33,6 +35,7 @@ async function main() {
   visit(ast);
   assert.equal(branches.length, 1);
   const branch = branches[0];
+  assert.equal(branch.expression.getText(ast), "requestedProvider === 'seedance'", 'Every Seedance caller must prepare its authorized local originals');
   const authorization = source.indexOf('await getAuthorizedReferenceImagesForUse(user, generationReferenceImageIds)');
   assert.ok(authorization > 0 && authorization < branch.pos);
   assert.ok(branch.end < source.indexOf('const task = await tx.videoTask.create('), 'prepare before accepting/freezing a new task');
@@ -148,9 +151,7 @@ async function main() {
     ${branch.getText(ast)}
     return seedanceReferenceTransport;
   }`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-  const scratch = path.join(root, '.role-tests');
-  mkdirSync(scratch, { recursive: true });
-  const folder = mkdtempSync(path.join(scratch, 'multiview-original-'));
+  const folder = mkdtempSync(path.join(os.tmpdir(), 'seedance-original-'));
   mkdirSync(path.join(folder, 'public/uploads/assets'), { recursive: true });
   const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=', 'base64');
   const guideBytes = await sharp({ create: { width: 2, height: 2, channels: 4,
@@ -164,11 +165,13 @@ async function main() {
   const file = path.join(folder, 'public', local);
   writeFileSync(file, bytes, { flag: 'wx' });
   const asset = { original_url: url, type: 'image', status: 'active', mime_type: 'image/png', file_size: bytes.length };
-  const input: CreateVideoInput = { generation_mode: 'all_in_one_reference', prompt: 'synthetic rotation', reference_image_urls: [url], model: 'dreamina-seedance-2-5-260628' };
+  const input: CreateVideoInput = { generation_mode: 'all_in_one_reference', prompt: 'synthetic rotation', reference_image_urls: [url], model: 'dreamina-seedance-2-5-260628', client_request_id: 'synthetic-original-request' };
   const before = structuredClone(input);
   let transportCount = 0, networkCalls = 0;
+  const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => { networkCalls++; throw new Error('Network prohibited in original-transport fixture'); };
   const context: Record<string, any> = {
+    Error,
     requestedProvider: 'seedance', multiviewGeneration: { presetId: 'multiview-360' }, body: {},
     multiviewSystemReference: null, multiviewAction: null, actionImageForTransport: null,
     cleanSourceMetadata: (value: unknown) => value || {}, requestSource: { source_metadata: {} },
@@ -198,6 +201,7 @@ async function main() {
       assert.equal(patch.status, undefined, `Preparation must succeed, not hide a VM error: ${patch.error || ''}`);
       const payload = buildSeedanceVideoPayload({ ...context.providerInput, ...patch });
       assert.equal(payload.model, model);
+      assert.equal(payload.clientRequestId, input.client_request_id);
       assert.ok(Array.isArray(payload.content));
       const image = payload.content.find((item: { type: string }) => item.type === 'image_url');
       assert.equal(image?.image_url?.url, `data:image/png;base64,${bytes.toString('base64')}`);
@@ -242,13 +246,58 @@ async function main() {
     context.body = { multiview_generation: { presetId: 'forged' }, client_name: 'multiview',
       multiviewSystemReference: guide, source_metadata: { protected_module: 'forged' } };
     const called = transportCount;
-    assert.equal(Object.keys(await context.prepare()).length, 0); assert.equal(transportCount, called);
+    const ordinary = await context.prepare();
+    assert.equal(transportCount, called + 1, 'Ordinary video must use the same authorized original transport');
+    assert.deepEqual(Array.from(ordinary.reference_image_base64_data), [`data:image/png;base64,${bytes.toString('base64')}`]);
+    assert.ok(!JSON.stringify(ordinary).includes(guideBytes.toString('base64')), 'Unvalidated browser fields must not add a private reference');
     context.body = { canvas_document_id: 'existing-canvas' };
     assert.ok((await context.prepare()).reference_image_base64_data);
-    context.requestedProvider = 'h3';
-    assert.equal(Object.keys(await context.prepare()).length, 0);
-    checks.push('validated_multiview_only_existing_canvas_and_other_provider_scope_preserved');
-    context.requestedProvider = 'seedance'; context.body = {}; context.multiviewGeneration = { presetId: 'multiview-360' };
+    for (const provider of ['h3', 'ark', 'veo', 'kling']) {
+      context.requestedProvider = provider;
+      const beforeProvider = transportCount;
+      assert.equal(Object.keys(await context.prepare()).length, 0);
+      assert.equal(transportCount, beforeProvider, 'Other providers must not invoke Seedance transport');
+    }
+    checks.push('ordinary_authorized_video_and_existing_canvas_transport_without_private_browser_field_or_other_provider_changes');
+    context.requestedProvider = 'seedance'; context.body = {}; context.multiviewGeneration = null;
+    const secondLocal = '/uploads/assets/second-original.png', secondUrl = `https://sd2.youdooart.com${secondLocal}`;
+    const secondFile = path.join(folder, 'public', secondLocal);
+    writeFileSync(secondFile, guideBytes, { flag: 'wx' });
+    const second = { url: secondUrl, asset: { ...asset, original_url: secondUrl, file_size: guideBytes.length } };
+    const external = 'https://example.invalid/ordinary-external.png';
+    const imageUrl = (value: Buffer) => `data:image/png;base64,${value.toString('base64')}`;
+    const originals = new Map([[file, hash(bytes)], [secondFile, hash(guideBytes)]]);
+    for (const model of ['dreamina-seedance-2-0-260128', 'dreamina-seedance-2-5-260628']) {
+      context.generationReferenceImages = [{ url, asset }, second];
+      for (const mode of ['all_in_one_reference', 'first_last_frame', 'smart_multi_frame'] as const) {
+        context.providerInput = { ...input, model, generation_mode: mode,
+          reference_image_urls: [secondUrl, external, url], first_frame_url: secondUrl, last_frame_url: url,
+          frame_image_urls: [secondUrl, url, secondUrl] };
+        const originalInput = structuredClone(context.providerInput);
+        const patch = await context.prepare();
+        assert.equal(patch.status, undefined, `Ordinary ${mode} must prepare: ${patch.error || ''}`);
+        const payload = buildSeedanceVideoPayload({ ...context.providerInput, ...patch });
+        const images = (payload.content as Array<{ type: string; image_url?: { url: string }; role?: string }>)
+          .filter(item => item.type === 'image_url');
+        const expected = mode === 'all_in_one_reference' ? [imageUrl(guideBytes), external, imageUrl(bytes)]
+          : mode === 'first_last_frame' ? [imageUrl(guideBytes), imageUrl(bytes)]
+            : [imageUrl(guideBytes), imageUrl(bytes), imageUrl(guideBytes)];
+        assert.deepEqual(images.map(item => item.image_url?.url), expected);
+        if (mode === 'all_in_one_reference') assert.ok(images.every(item => item.role === 'reference_image'));
+        if (mode === 'first_last_frame') assert.deepEqual(images.map(item => item.role), ['first_frame', 'last_frame']);
+        assert.equal(payload.clientRequestId, input.client_request_id, 'Inline preparation must preserve the original request identity');
+        assert.deepEqual(context.providerInput, originalInput, 'Durable input stays URL-based');
+      }
+    }
+    for (const [originalFile, originalHash] of Array.from(originals)) assert.equal(hash(readFileSync(originalFile)), originalHash);
+    checks.push('ordinary_both_models_all_reference_first_last_and_multi_frame_order_original_hashes_external_url_and_request_identity_preserved');
+    context.providerInput = { ...input, reference_image_urls: [url, url, url] };
+    context.generationReferenceImages = [{ url, asset: { ...asset, file_size: 20_000_000 } }];
+    const oversized = await context.prepare();
+    assert.equal(oversized.status, 400);
+    assert.match(oversized.error, /64MB/, 'Repeated image occurrences must count toward the full request limit before reading');
+    checks.push('ordinary_request_64mb_limit_rejects_before_freezing_or_dispatch');
+    context.providerInput = input;
     context.generationReferenceImages = [];
     assert.equal(Object.keys(await context.prepare()).length, 0, 'no unauthorized filesystem source');
     context.generationReferenceImages = [{ url, asset: { ...asset, status: 'deleted' } }];
@@ -265,7 +314,78 @@ async function main() {
     assert.equal((await context.prepare()).status, 400);
     checks.push('authorized_record_required_deleted_changed_oversize_and_path_escape_guarded');
     assert.equal(networkCalls, 0);
-  } finally { process.chdir(root); }
-  console.log(JSON.stringify({ completed: true, checks, productionWrites: 0, generationCalls: 0, billingChanges: 0 }));
+  } finally { process.chdir(root); globalThis.fetch = originalFetch; rmSync(folder, { recursive: true, force: true }); }
+
+  const permissionSource = readFileSync('src/lib/reference-albums/permissions.ts', 'utf8');
+  const permissionAst = ts.createSourceFile('permissions.ts', permissionSource, ts.ScriptTarget.Latest, true);
+  const permissionFunctions = permissionAst.statements.filter((node): node is ts.FunctionDeclaration => ts.isFunctionDeclaration(node)
+    && Boolean(node.name && ['getAuthorizedReferenceImagesForUse', 'uniquePreserveOrder'].includes(node.name.text)));
+  assert.equal(permissionFunctions.length, 2);
+  const permissionCode = ts.transpileModule(permissionFunctions.map(node => node.getText(permissionAst).replace(/^export\s+/, '')).join('\n'), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const permissionReads: string[] = [], fixtureUser = { id: 'synthetic-owner' };
+  const permissionContext: Record<string, any> = {
+    assertCanUseReferenceImage: async (user: unknown, id: string) => {
+      assert.equal(user, fixtureUser); permissionReads.push(id);
+      if (id === 'denied') throw new Error('synthetic reference denied');
+      return { id };
+    },
+    AuthError: Error,
+  };
+  runInNewContext(permissionCode, permissionContext);
+  const allowed = await permissionContext.getAuthorizedReferenceImagesForUse(fixtureUser, ['second', 'first', 'second']);
+  assert.deepEqual(Array.from(allowed, (value: { id: string }) => value.id), ['second', 'first']);
+  assert.deepEqual(permissionReads, ['second', 'first']);
+  await assert.rejects(permissionContext.getAuthorizedReferenceImagesForUse(fixtureUser, ['first', 'denied', 'second']), /synthetic reference denied/);
+  assert.deepEqual(permissionReads, ['second', 'first', 'first', 'denied']);
+  checks.push('actual_authorization_entry_checks_each_reference_in_order_and_stops_on_denied_before_transport');
+
+  const assetsSource = readFileSync('src/app/assets/page.tsx', 'utf8');
+  const assetsAst = ts.createSourceFile('page.tsx', assetsSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const labelFunctions = assetsAst.statements.filter((node): node is ts.FunctionDeclaration => ts.isFunctionDeclaration(node) && node.name?.text === 'statusLabel');
+  assert.equal(labelFunctions.length, 1);
+  const labels: Record<string, any> = {};
+  runInNewContext(ts.transpileModule(labelFunctions[0].getText(assetsAst), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, labels);
+  assert.equal(labels.statusLabel('submission_unknown'), '提交结果待确认');
+  for (const [status, label] of Object.entries({ succeeded: '已完成', running: '生成中', submitted: '排队中', failed: '失败', cancelled: '已取消', active: '可用', hidden: '已隐藏', deleted: '已删除' })) {
+    assert.equal(labels.statusLabel(status), label);
+  }
+  assert.equal(labels.statusLabel('unrecognized'), 'unrecognized');
+  checks.push('actual_assets_status_label_submission_unknown_translated_existing_labels_preserved');
+
+  for (const task of [
+    { local_status: 'submission_unknown' },
+    { local_status: 'submission_unknown', result_last_frame_url: '/synthetic/last-frame.png' },
+    { local_status: 'submission_unknown', result_video_url: 'h3-internal-output://synthetic' },
+    { local_status: 'submission_unknown', result_video_url: 'https://example.invalid/preview.mp4' },
+  ]) {
+    const originalTask = structuredClone(task);
+    const stage = videoDeliveryStageForTask(task);
+    assert.equal(stage.key, 'unavailable');
+    assert.equal(stage.label, '等待提交确认，暂无可下载视频');
+    assert.equal(stage.stableDownloadReady, false);
+    assert.equal(stage.previewAvailable, Boolean(task.result_last_frame_url || videoPlayableAvailableForTask(task)));
+    assert.deepEqual(task, originalTask, 'Display must not transition unknown tasks or change billing inputs');
+  }
+  for (const status of ['running', 'submitted']) assert.equal(videoDeliveryStageForTask({ local_status: status }).key, 'generating');
+  assert.equal(videoDeliveryStageForTask({ local_status: 'succeeded', public_video_url: '/synthetic/video.mp4' }).key, 'ready');
+  assert.equal(videoDeliveryStageForTask({ local_status: 'succeeded', delivery_status: 'failed' }).key, 'failed');
+  assert.equal(videoDeliveryStageForTask({ local_status: 'succeeded', local_video_path: '/synthetic/video.mp4' }).key, 'preparing');
+  assert.equal(videoDeliveryStageForTask({ local_status: 'succeeded' }).key, 'unavailable');
+  checks.push('actual_delivery_unknown_waiting_without_false_generating_and_existing_preview_or_terminal_behavior_preserved');
+
+  const sourcePaths = [
+    'scripts/multiview-reference-transport-engineering.ts', 'src/app/api/tasks/create/route.ts',
+    'src/app/assets/page.tsx', 'src/lib/video/delivery-status.ts', 'src/lib/provider/reference-image-transport.ts',
+    'src/lib/provider/jimeng.ts', 'src/lib/generation-retry/video.ts', 'src/lib/reference-albums/permissions.ts',
+    'src/lib/assets/site-url.ts', 'src/types/index.ts', 'scripts/server-runtime.cjs',
+  ];
+  const sourceSha256 = Object.fromEntries(sourcePaths.map(sourcePath => [sourcePath,
+    createHash('sha256').update(readFileSync(sourcePath)).digest('hex')]));
+  console.log(JSON.stringify({ completed: true, checks, count: checks.length, sourceSha256,
+    productionWrites: 0, generationCalls: 0, billingChanges: 0,
+    isolation: { temporaryOriginals: true, originalsRemoved: !existsSync(folder), databaseCalls: 0, networkCalls, providerSubmissions: 0,
+      browserCalls: 0, realUploads: 0, productionAccess: false } }));
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

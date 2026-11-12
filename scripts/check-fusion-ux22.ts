@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { defaults, textFor, settingsForRow, generateBatch, applyRowConfiguration } from '../src/lib/character-fusion/engine';
+import { defaults, textFor, settingsForRow, generateBatch, applyRowConfiguration, allocateFusionBatch } from '../src/lib/character-fusion/engine';
 import { builtinCatalogue } from '../src/lib/character-fusion/catalogue';
 import { BODY_CARDS } from '../src/lib/character-fusion/body-cards';
 import { emptyWorkspaceState, newCreationState, preparationFingerprint } from '../src/lib/character-fusion/actions';
 import { effectiveFusionSettings, fusionSettingsChanges, applyFusionSettingChanges, configureFusionSettings, preparationForManualChange } from '../src/lib/character-fusion/configuration';
-import { bindFusionAgentCommands, proposeFusionAgent, validateFusionAgentExecution } from '../src/lib/character-fusion/agent-adapter.server';
+import { bindFusionAgentCommands, proposeFusionAgent, validateFusionAgentExecution, FUSION_CONFIGURATION_SYSTEM, FusionAgentError } from '../src/lib/character-fusion/agent-adapter.server';
 import type * as Workspace from '../src/lib/character-fusion/workspace.server';
 import type * as Library from '../src/lib/character-fusion/catalogue-repository';
 
@@ -163,5 +163,69 @@ export async function checkFusionUx22(input: { actor: { id: string }; repository
   const correctedConfiguration = await proposeFusionAgent({ workspace: kept.workspace, message: '做4套水彩伙伴', binding: { contract: 'configure' }, complete: async messages => { missingConfiguration++; if (missingConfiguration === 2) assert.match(String(messages[messages.length - 1].content), /必须用configure同步可见卡片/); return JSON.stringify({ reply: '先配卡片', commands: missingConfiguration === 1 ? [{ type: 'context', summary: '只有说明，尚未配置' }] : [{ type: 'configure', configuration: { count: 4 } }] }); }, read: async () => ({}) });
   assert.equal(correctedConfiguration.iterations, 2);
   checks.push('UX22可见配置并发：手动后改本批条件覆盖同源overlay，旧按钮/hash拒绝且仅当前条件进正文；明确保留真绑定、聊天直接改结果拒绝');
+  return checks;
+}
+
+/** Fix01: actual public native groups and a private terminal rejection, without any model/network call. */
+export async function checkFusionUx22Fix01(input: { actor: { id: string }; repository: typeof Workspace; library: typeof Library }) {
+  const { actor, repository } = input, catalogue = builtinCatalogue(), checks: string[] = [];
+  assert.match(FUSION_CONFIGURATION_SYSTEM, /当前必要core仅为母体\(source\)、跨界概念\(concept\)/);
+  assert(!FUSION_CONFIGURATION_SYSTEM.includes('personality是必要core'));
+  for (const [dimension, groups] of [['source', ['工业', '动物']], ['concept', ['深海科研', '蒸汽科技']], ['mechanism', ['无外置机关', '展开折叠类']]] as const) {
+    for (const use of ['each', 'random', 'distribute'] as const) {
+      const state = emptyWorkspaceState(); state.settings.count = 4; state.settings.lang = 'both';
+      state.settings.catalogue!.traits.exaggeration = { enabled: true, locked: true, values: ['巨掌', '巨脚'], excluded: [], must: [] };
+      const doc = await repository.createFusionWorkspace(actor, { opId: `ux22-fix01-${dimension}-${use}-new`, state });
+      const values = use === 'each' ? [groups[0]] : [...groups];
+      const configured = await repository.executeWorkspaceOperation(actor, doc.workspace.id, { opId: `ux22-fix01-${dimension}-${use}-config`, baseVersion: 1, commands: [{ type: 'configure', configuration: { cards: [{ id: `dimension:${dimension}`, use, values }] } }] });
+      assert.equal(configured.rowsPage.total, 0);
+      const selection = configured.workspace.state.settings.catalogue?.dynamic?.selections[`dimension:${dimension}`];
+      assert.deepEqual(selection?.must || [], []);
+      assert.deepEqual(configured.workspace.state.settings.catalogue!.traits.exaggeration, state.settings.catalogue!.traits.exaggeration);
+      const generated = await repository.executeWorkspaceOperation(actor, doc.workspace.id, { opId: `ux22-fix01-${dimension}-${use}-click`, baseVersion: configured.workspace.version, commands: [{ type: 'generate', mode: 'append', seed: 1481 }] });
+      assert.equal(generated.rowsPage.total, 4);
+      assert(generated.workspace.rows.every(row => values.includes(row.category[dimension] as typeof values[number])));
+      if (use === 'distribute') for (const group of groups) assert(generated.workspace.rows.some(row => row.category[dimension] === group));
+      for (const row of generated.workspace.rows) { assert.match(row.catalogueSnapshot!.body.zh, /巨掌/); assert.match(row.catalogueSnapshot!.body.en, /oversized palms/); }
+      assert.deepEqual(generated.workspace.state.settings, configured.workspace.state.settings);
+    }
+  }
+  const constrained = emptyWorkspaceState().settings;
+  const sourceTerms = catalogue.terms.filter(term => term.categoryId === 'dimension:source');
+  const industrial = sourceTerms.filter(term => term.data?.group === '工业').slice(0, 2), animal = sourceTerms.find(term => term.data?.group === '动物')!;
+  const candidates = [...industrial, animal].map(term => term.id), excluded = [industrial[0].id];
+  constrained.catalogue!.dynamic = { formatVersion: 1, selections: { 'dimension:source': { enabled: true, locked: false, values: [], must: [], candidates, excluded } }, snapshot: catalogue };
+  for (const use of ['each', 'random', 'distribute'] as const) {
+    const next = configureFusionSettings(constrained, { cards: [{ id: 'dimension:source', use, values: use === 'each' ? ['工业'] : ['工业', '动物'] }] }, catalogue, 'fix01-hard-pool');
+    const selection = next.catalogue!.dynamic!.selections['dimension:source'];
+    assert(selection.candidates!.every(id => candidates.includes(id))); assert.deepEqual(selection.excluded, excluded); assert.deepEqual(selection.must, []);
+    if (use !== 'each') assert.deepEqual(selection.candidates, candidates);
+  }
+  assert.throws(() => configureFusionSettings(constrained, { cards: [{ id: 'dimension:source', use: 'random', values: ['植物'] }] }, catalogue, 'fix01-outside-pool'), /原候选池/);
+  assert.throws(() => configureFusionSettings(constrained, { cards: [{ id: 'dimension:source', use: 'each', values: ['职业'] }] }, catalogue, 'fix01-excluded-group'), /已被排除/);
+  assert.deepEqual(constrained.catalogue!.dynamic.selections['dimension:source'].candidates, candidates);
+  const tooManyGroups = configureFusionSettings({ ...defaults(), count: 4 }, { cards: [{ id: 'dimension:source', use: 'distribute', values: ['动物', '植物', '工业', '建筑', '食物'] }] }, catalogue, 'fix01-group-limit');
+  assert.throws(() => allocateFusionBatch(tooManyGroups, 1481), /超过|无法/);
+  checks.push('UX22原生分组合同：source/concept/mechanism的each/random/distribute真实配置0新增→点击4条，分组必出不变成全部term必出，原硬池/排除与未提多选锁保留');
+
+  const doc = await repository.createFusionWorkspace(actor, { opId: 'ux22-fix01-diagnostic-new' });
+  const reserved = await repository.reserveAssistantOperation(actor, doc.workspace.id, { opId: 'ux22-fix01-diagnostic-op', baseVersion: 1, message: '核对非法配置', model: 'isolated-only' });
+  let failure: FusionAgentError | undefined;
+  try { await proposeFusionAgent({ workspace: doc.workspace, message: '核对非法配置', binding: { contract: 'configure' }, complete: async () => JSON.stringify({ reply: '不应保存的模型reply', commands: [{ type: 'configure', configuration: { cards: [{ id: 'silhouette', use: 'bad-value' }] } }] }), read: async () => ({}) }); }
+  catch (error) { assert(error instanceof FusionAgentError); failure = error; }
+  assert(failure?.diagnostic); assert.equal(failure.diagnostic.step, 6); assert.match(failure.diagnostic.reason, /each\/random\/distribute/);
+  const receipt = await repository.finishAssistantOperation(actor, doc.workspace.id, 'ux22-fix01-diagnostic-op', { intentFingerprint: reserved.intentFingerprint!, status: 'rejected', message: failure.userMessage, diagnostic: failure.diagnostic });
+  assert.equal(receipt.status, 'rejected'); assert.equal(receipt.workspace.version, 1); assert.equal(receipt.rowsPage.total, 0);
+  const { prisma } = await import('../src/lib/prisma');
+  const stored = await prisma.characterFusionOperation.findUnique({ where: { owner_id_op_id: { owner_id: actor.id, op_id: 'ux22-fix01-diagnostic-op' } } });
+  const result = JSON.parse(stored!.result_json); assert.equal(result.diagnostic.commands[0].configuration.cards[0].use, 'bad-value');
+  assert(!JSON.stringify(result.diagnostic).includes('不应保存的模型reply')); assert(!JSON.stringify(receipt).includes('bad-value')); assert(!JSON.stringify(receipt).includes('"diagnostic":'));
+  const lookup = await repository.queryWorkspaceOperation(actor, doc.workspace.id, 'ux22-fix01-diagnostic-op'); assert(!JSON.stringify(lookup).includes('bad-value'));
+  assert.match(String('error' in lookup && lookup.error), /输入、当前卡片和已有方案都保留/);
+  let largeFailure: FusionAgentError | undefined;
+  try { await proposeFusionAgent({ workspace: doc.workspace, message: '非法配置', binding: { contract: 'configure' }, complete: async () => JSON.stringify({ reply: '', commands: [{ type: 'configure', configuration: { cards: [{ id: 'x'.repeat(17000), use: 'bad-value' }] } }] }), read: async () => ({}) }); }
+  catch (error) { assert(error instanceof FusionAgentError); largeFailure = error; }
+  assert.equal(largeFailure?.diagnostic?.commandsOmitted, true); assert.equal(largeFailure?.diagnostic?.commands, undefined);
+  checks.push('UX22拒绝私有诊断：六步末次原号保存机器reason/code和有界配置坏值，超限省略；人话与原查询不泄露诊断，文档仍1版0条/0业务写');
   return checks;
 }

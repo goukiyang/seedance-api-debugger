@@ -8,7 +8,7 @@ import type { FusionRecipe } from './recipes';
 import { assertCharacterFusionWritesEnabled } from './build-mode';
 import { FusionError, isRecord, parseOperationId, parseFusionOperationRequest, parseWorkspaceState, emptyWorkspaceState, applyFusionCommands, fusionDocumentDelta, sameFusionValue, type FusionWorkspace, type FusionWorkspaceRow, type FusionUndo, type FusionWorkspaceState } from './actions';
 import { fusionFingerprint, requireActiveFusionUser, loadFusionCatalogue, operationDto, type FusionActor, type FusionDb } from './catalogue-repository';
-import type { FusionBatchReceipt, FusionEffects } from './domain';
+import type { FusionBatchReceipt, FusionEffects, FusionProposalDiagnostic } from './domain';
 import { effectiveFusionSettings } from './configuration';
 
 export type WorkspacePageQuery = { cursor?: string; limit?: number; allRows?: boolean; rowId?: string; batchId?: string; displayNo?: number };
@@ -442,7 +442,7 @@ export async function completeAssistantPlan(actor: FusionActor, id: string, opId
     return queryInDb(tx, actor, id, opId);
   }));
 }
-export async function finishAssistantOperation(actor: FusionActor, id: string, opId: string, result: { intentFingerprint: string; status: 'cancelled' | 'rejected'; message?: string; proposal?: { reply: string; commands: unknown[]; drafts: unknown[] } }) {
+export async function finishAssistantOperation(actor: FusionActor, id: string, opId: string, result: { intentFingerprint: string; status: 'cancelled' | 'rejected'; message?: string; proposal?: { reply: string; commands: unknown[]; drafts: unknown[] }; diagnostic?: FusionProposalDiagnostic }) {
   assertCharacterFusionWritesEnabled(); parseOperationId(opId);
   if (!['cancelled', 'rejected'].includes(result.status) || typeof result.intentFingerprint !== 'string') throw new FusionError('回合终态无效。');
   if (result.proposal && JSON.stringify(result.proposal).length > 30000) throw new FusionError('未应用提案内容过长。');
@@ -450,7 +450,7 @@ export async function finishAssistantOperation(actor: FusionActor, id: string, o
     await requireActiveFusionUser(tx, actor); await owned(tx, actor, id);
     const operation = await tx.characterFusionOperation.findUnique({ where: { owner_id_op_id: { owner_id: actor.id, op_id: opId } } });
     if (!operation || operation.workspace_id !== id || operation.target_kind !== 'assistant' || operation.fingerprint !== result.intentFingerprint) throw new FusionError('原对话回合不匹配。', 409, 'FUSION_OPERATION_REUSED');
-    if (operation.status === 'planning') await tx.characterFusionOperation.updateMany({ where: { id: operation.id, status: 'planning' }, data: { status: result.status, result_json: JSON.stringify({ ...JSON.parse(operation.result_json), ...(result.proposal ? { proposal: result.proposal } : {}), error: (result.message || (result.status === 'cancelled' ? '该回合已取消，未应用提案。' : '该回合未应用，请保留输入后重试。')).slice(0, 1000) }) } });
+    if (operation.status === 'planning') await tx.characterFusionOperation.updateMany({ where: { id: operation.id, status: 'planning' }, data: { status: result.status, result_json: JSON.stringify({ ...JSON.parse(operation.result_json), ...(result.proposal ? { proposal: result.proposal } : {}), ...(result.status === 'rejected' && result.diagnostic ? { diagnostic: result.diagnostic } : {}), error: (result.message || (result.status === 'cancelled' ? '该回合已取消，未应用提案。' : '该回合未应用，请保留输入后重试。')).slice(0, 1000) }) } });
     return queryInDb(tx, actor, id, opId);
   }));
 }

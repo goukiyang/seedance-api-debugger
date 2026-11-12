@@ -346,7 +346,7 @@ function serializeAsset(asset: {
   const originalUrl = publicAssetUrl(asset.original_url);
   const storedThumbnailUrl = publicAssetUrl(asset.thumbnail_url);
   const thumbnailUrl = asset.type === 'image'
-    ? storedThumbnailUrl || originalUrl
+    ? asset.status === 'active' ? `/api/content-reactions/media?key=${encodeURIComponent(`asset:${asset.id}`)}&variant=thumbnail` : storedThumbnailUrl || originalUrl
     : storedThumbnailUrl;
   const owner = userSummary(asset.owner) || legacyAssetOwnerSummary(asset.owner_id);
   const deliveryStage = nonTaskDeliveryStage(Boolean(originalUrl));
@@ -408,10 +408,12 @@ function serializeReferenceImage(image: {
   owner: LibraryUser | null;
   album: { id: string; name: string } | null;
   asset_id: string | null;
-  asset: { width: number | null; height: number | null } | null;
+  asset: { width: number | null; height: number | null; status: string } | null;
 }): LibraryItem {
   const originalUrl = publicAssetUrl(image.url);
-  const thumbnailUrl = publicAssetUrl(image.thumbnail_url) || originalUrl;
+  const thumbnailUrl = image.status === 'active' && (!image.asset || image.asset.status === 'active')
+    ? `/api/reference-images/${encodeURIComponent(image.id)}/content?variant=thumbnail`
+    : publicAssetUrl(image.thumbnail_url) || originalUrl;
   const deliveryStage = nonTaskDeliveryStage(Boolean(originalUrl));
   return {
     id: `reference_image:${image.id}`,
@@ -930,7 +932,7 @@ async function loadReferenceItems(options: {
         status: true,
         created_at: true,
         asset_id: true,
-        asset: { select: { id: true, owner_id: true, metadata_json: true, width: true, height: true } },
+        asset: { select: { id: true, owner_id: true, metadata_json: true, width: true, height: true, status: true } },
         project: { select: { id: true, name: true, type: true, status: true } },
         owner: { select: { id: true, name: true, username: true, email: true, avatar_url: true, account_type: true } },
         album: { select: { id: true, name: true } },
