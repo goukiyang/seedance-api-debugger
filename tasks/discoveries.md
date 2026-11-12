@@ -198,3 +198,6 @@ UX17收口：v0.145.5按本轮用户授权完成实际新建A/B/C、A/B及C/B互
 
 最终补证：9eec/v0.145.9同源Linux完整类型exit0、改动lint与17组融合/完整Next通过；本机依赖缺失仍待独立维护，本轮不冒已修本机环境，也未新增范围外线上故障结论。
 <!-- /FUSION-UX18-DISCOVERIES-20261111 -->
+
+
+- **D-20261112-RELEASE-PROCESS-SCOPE｜待核线索，未改。** Ark受控传图发布准备复用既有pre-cutover时发现，含`/release-engine/`或`sd2-release-run.mjs`的命令行会统一按其他发布器阻止，未解析实际build/cutover动作。尚未证本轮被此条件阻止；最终须核实际健康基线与mutating controller，普通candidate build本身不占切版窗口，也不在未知CLI协议下放宽保护。源码及判断见[本轮原单](todo/2026-11-12-feedback-submit-rootcause.md)和本机私有ark-reference-transport01/deploy/pre-cutover.py。主任务按原发布入口继续，通用维护另核实际动作协议。

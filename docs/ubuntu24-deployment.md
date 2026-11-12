@@ -1,3 +1,11 @@
+<!-- ARK-REFERENCE-TRANSPORT-1484-RELEASE-20261112 -->
+## 2026-11-12 火山受控传图与安全错误留存 v0.148.4
+
+已部署，待用户手动验收。main a4bcc44396b6d80a2b1341c1c3c19cbd74074a95 / BUILD z1Zk5c2dmIDvI36EaZNq6，继承实际健康cd331/v1483；实际九门相容guard仍b52d40fa8828faaea16918215c633f7abec8e5ac / Ql6C1Qe9HoUVfqN5Fjt10原完整成品。11:05:20Z公网、11:06:29Z七服务健康；9组隔离模拟/20源hash、完整types/lint/Next、34原生/关联30复用4刷新、fresh计价、59资源/10匿名401和四timer通过，build0/cutover0。原图、权限、旧请求、账务、36目标私密策略、持久链接和2h delivery看护保持；零真实上传/生成/浏览器功能验收，无DDL或业务数据恢复。
+
+stage `/data/video-api-debugger/release-staging/ark-reference-transport-20261112/attempt01`，原writer自然退出，配置/一致DB备份仅服务器；恢复为本stage `program-recovery.sh release-input.json`，只回程序/config，不回DB、账本、媒体或回执，guard不包含本轮改进，未实际回退。后继必须鲜核并继承本次健康a4bcc443，不能用同版号另一候选覆盖。完整反馈、原号与发布材料仅本机私有，[原单](../tasks/todo/2026-11-12-feedback-submit-rootcause.md)和[脱敏发布摘要](materials/2026-11-12-feedback-rootcause/ark-reference-transport-release-summary.json)分开记录已部署及手验边界。普通提交转圈缺回执后客户端事件，仍待核，不重发原请求或补造旧错误。
+<!-- /ARK-REFERENCE-TRANSPORT-1484-RELEASE-20261112 -->
+
 <!-- LEGACY-THUMB-1481-RELEASE-20261112 -->
 ## 2026-11-12 完整旧缩略图与普通Seedance参考修复 v0.148.1
 

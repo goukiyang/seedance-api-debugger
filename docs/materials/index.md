@@ -1,8 +1,7 @@
 <!-- FB-PULL-20261112-MATERIALS -->
-## 2026-11-12 后台视频提交等待反馈诊断
+## 2026-11-12 后台提交反馈与Ark受控传图修复（v0.148.4已部署待手验）
 
-近24小时1条/2原截图已采集并核同大小/SHA，已有请求时序与线上源码确认同步等待供应商创建回执和本地状态展示滞后；后续任务已成功。详[私有原工单](../../tasks/todo/2026-11-12-feedback-submit-rootcause.md)，完整资料仅正式根本地`docs/materials/2026-11-12-feedback-rootcause/collection01/`，权限700/600且Git exclude，不公开原文/编号/用户/截图或完整JSON。只读，未改状态/代码/费用，未收费/生成/部署，修复未实施。
-增量02另采1条/0图：Ark普通图片的受保护URL被直接外发，4组逐图404；4次各75预留均已原路返还。实际v1482源码、完整原件hash、账务及错误明细丢失边界见同一私有原工单；collection02仅本机私有，本轮无代码/业务/上游写入。
+两案原证保本机私有collection01/02，完整原文/编号/用户/截图/JSON均Git exclude且权限700/600。[原工单](../../tasks/todo/2026-11-12-feedback-submit-rootcause.md)与[发布摘要](2026-11-12-feedback-rootcause/ark-reference-transport-release-summary.json)记录a4bcc443/v0.148.4/z1Zk5c2dmIDvI36EaZNq6，11:05:20Z公网、11:06:29Z七服务健康，build/cutover0；原图/权限/旧请求/账务和2h看护保持。9组隔离模拟、完整types/lint/Next及34原生/关联、计价/恢复/59资源/10匿名401有证，无真实生成或浏览器功能验收，待用户手验。提交等待的GET不能证明React状态，历史事件仍缺；未改未证状态机或重发旧任务。完整13份完成元证保本地私有release/ark-reference-transport01/completed。
 <!-- /FB-PULL-20261112-MATERIALS -->
 
 <!-- ARK-CHARACTER-ASSET01-MATERIALS-20261111 -->
