@@ -103,7 +103,7 @@ function compactWorkspaceRow(row: FusionWorkspaceRow, opId: string, configuratio
   configurations[configurationId] = settings;
   return { ...row, catalogueSnapshot: { ...snapshot, settingsRef: { operationId: opId, configurationId } } };
 }
-export async function getWorkspace(actor: FusionActor, id: string, query: WorkspacePageQuery = {}) {
+export async function getWorkspace(actor: FusionActor, id: string, query: WorkspacePageQuery = {}, internal: { resolveSelectedRow?: boolean } = {}) {
   return retrySqliteBusy(() => prisma.$transaction(async tx => { await requireActiveFusionUser(tx, actor); const row = await owned(tx, actor, id), page = await pageWorkspace(tx, row, query);
     if (!query.rowId && query.displayNo === undefined) return page;
     const targetId = query.rowId || page.workspace.rows[0]?.id;
@@ -112,6 +112,7 @@ export async function getWorkspace(actor: FusionActor, id: string, query: Worksp
     if (!result) throw new FusionError('目标结果不存在。', 404, 'FUSION_NOT_FOUND');
     const resolved = await resolveWorkspaceRow(tx, actor, id, resultDto(result));
     const settings = settingsForRow(resolved.catalogueSnapshot?.settings || page.workspace.state.settings, resolved);
+    if (internal.resolveSelectedRow) page.workspace.rows = page.workspace.rows.map(item => item.id === resolved.id ? resolved : item);
     return { ...page, rowSettings: { rowId: result.row_id, version: result.version, settings, body: { zh: textFor(resolved, { ...settings, lang: 'zh' }), en: textFor(resolved, { ...settings, lang: 'en' }) } } }; }));
 }
 export async function listFusionWorkspaces(actor: FusionActor, query: { archived?: boolean; q?: string; cursor?: string; limit?: number } = {}) {

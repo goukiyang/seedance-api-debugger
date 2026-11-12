@@ -112,6 +112,20 @@ export async function checkFusionUx22(input: { actor: { id: string }; repository
   assert.equal(cardAdjusted.design!.traits.stature[0].zh, '瘦长');
   const emptyDraft = await repository.executeWorkspaceOperation(actor, doc.workspace.id, { opId: 'ux22-empty-row-stage', baseVersion: refreshed.workspace.version, commands: [{ type: 'prepare', value: { formatVersion: 1, row: { rowId: target.id, version: rowUndo.workspace.rows.find(row => row.id === target.id)!.version, changes: [] } }, expected: null }] });
   await assert.rejects(() => repository.executeWorkspaceOperation(actor, doc.workspace.id, { opId: 'ux22-empty-row-apply', baseVersion: emptyDraft.workspace.version, commands: [{ type: 'applyPreparedRow', rowId: target.id, expectedVersion: rowUndo.workspace.rows.find(row => row.id === target.id)!.version, seed: 1234 }] }), /还没有待应用/);
+  // Read the durable compact row, exactly as a later assistant HTTP request does.
+  const compactPage = await repository.getWorkspace(actor, doc.workspace.id, { rowId: target.id });
+  const compactTarget = compactPage.workspace.rows.find(row => row.id === target.id)!;
+  assert(compactTarget.catalogueSnapshot?.settingsRef); assert.equal(compactTarget.catalogueSnapshot.settings, undefined);
+  const agentPage = await repository.getWorkspace(actor, doc.workspace.id, { rowId: target.id }, { resolveSelectedRow: true });
+  const agentTarget = agentPage.workspace.rows.find(row => row.id === target.id)!;
+  assert(agentTarget.catalogueSnapshot?.settings);
+  const hydratedPlan = bindFusionAgentCommands([{ type: 'configure', configuration: { requirements: { zh: '蒸汽朋克，保其它明确要求', en: 'Steampunk, retaining the other explicit requirements', enabled: true } } }], agentPage.workspace, 2251,
+    { contract: 'configure', target: { rowId: agentTarget.id, version: agentTarget.version } });
+  assert.doesNotThrow(() => validateFusionAgentExecution(hydratedPlan, agentPage.workspace, catalogue, '只改这张画风'));
+  const selectedByNumber = await repository.getWorkspace(actor, doc.workspace.id, { displayNo: agentTarget.displayNo }, { resolveSelectedRow: true });
+  assert(selectedByNumber.workspace.rows.find(row => row.id === target.id)?.catalogueSnapshot?.settings);
+  assert.deepEqual((await repository.getWorkspace(actor, doc.workspace.id, { rowId: target.id })).workspace, compactPage.workspace);
+  checks.push('UX22单条HTTP接线：耐久settingsRef默认紧凑返回，助手显式读目标或序号在同一权限事务解析原配置，真实configure预检通过且只读不改原行/全局');
   checks.push('UX22单条待应用：配置0结果改动且下批settings不变，点击仅更新绑定行，撤销恢复正文不复活旧version草稿，刷新与旧应用均安全');
 
   const wordDoc = await repository.createFusionWorkspace(actor, { opId: 'ux22-inline-create', state: { ...emptyWorkspaceState(), settings: { ...defaults(), count: 4, lang: 'both' } } });
