@@ -18,6 +18,7 @@ export class FusionRequestError extends Error {
 }
 export async function fusionRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { cache: 'no-store', ...init });
+  if (!response.headers.get('content-type')?.includes('json')) throw Object.assign(new Error('暂时无法确认服务器返回的结果，原操作编号、输入和已有方案均已保留。请稍后按原编号继续核对。'), { status: response.status });
   const data = await response.json();
   if (!response.ok) throw new FusionRequestError(data.error || '操作未确认，当前草稿已保留。', response.status, data.code, data.details, data.submitted);
   return data as T;

@@ -4,8 +4,8 @@ import { defaults, textFor, settingsForRow, generateBatch, applyRowConfiguration
 import { builtinCatalogue } from '../src/lib/character-fusion/catalogue';
 import { BODY_CARDS } from '../src/lib/character-fusion/body-cards';
 import { emptyWorkspaceState, newCreationState, preparationFingerprint } from '../src/lib/character-fusion/actions';
-import { effectiveFusionSettings, fusionSettingsChanges, applyFusionSettingChanges, configureFusionSettings, preparationForManualChange } from '../src/lib/character-fusion/configuration';
-import { bindFusionAgentCommands, proposeFusionAgent, validateFusionAgentExecution, FUSION_CONFIGURATION_SYSTEM, FusionAgentError } from '../src/lib/character-fusion/agent-adapter.server';
+import { effectiveFusionSettings, fusionSettingsChanges, applyFusionSettingChanges, configureFusionSettings, parseFusionConfiguration, preparationForManualChange } from '../src/lib/character-fusion/configuration';
+import { bindFusionAgentCommands, proposeFusionAgent, validateFusionAgentExecution, fusionAgentScene, FUSION_CONFIGURATION_SYSTEM, FusionAgentError } from '../src/lib/character-fusion/agent-adapter.server';
 import type * as Workspace from '../src/lib/character-fusion/workspace.server';
 import type * as Library from '../src/lib/character-fusion/catalogue-repository';
 
@@ -209,6 +209,25 @@ export async function checkFusionUx22Fix01(input: { actor: { id: string }; repos
   checks.push('UX22原生分组合同：source/concept/mechanism的each/random/distribute真实配置0新增→点击4条，分组必出不变成全部term必出，原硬池/排除与未提多选锁保留');
 
   const doc = await repository.createFusionWorkspace(actor, { opId: 'ux22-fix01-diagnostic-new' });
+  const inline = { title: '硬科幻工业研究', titleEn: 'Industrial research', use: 'each' as const, terms: [{ nameZh: '硬科幻研究', nameEn: 'Hard science research', descriptionZh: '围绕可信工程结构展开研究与探索。', descriptionEn: 'Research and exploration based on credible engineering structures.' }] };
+  assert.throws(() => parseFusionConfiguration({ inlineCards: [{ ...inline, cardId: 'dimension:concept' }] }), /inlineCards\[0\]\.cardId.*新建卡片请省略cardId/);
+  let inlineCalls = 0;
+  const correctedInline = await proposeFusionAgent({ workspace: doc.workspace, message: '准备4套硬科幻伙伴', binding: { contract: 'configure' }, complete: async messages => { inlineCalls++; if (inlineCalls === 2) assert.match(String(messages[messages.length - 1].content), /inlineCards\[0\]\.cardId/); return JSON.stringify({ reply: '配置卡片', commands: [{ type: 'configure', configuration: { inlineCards: [{ ...inline, ...(inlineCalls === 1 ? { cardId: 'dimension:concept' } : {}) }] } }] }); }, read: async () => ({}) });
+  assert.equal(correctedInline.iterations, 2);
+  const configuredInline = configureFusionSettings(doc.workspace.state.settings, parseFusionConfiguration({ inlineCards: [inline] }), catalogue, 'ux22-fix02-inline');
+  const existingInline = configuredInline.cards.find(card => card.title === inline.title)!;
+  const editedInline = configureFusionSettings(configuredInline, { inlineCards: [{ ...inline, cardId: existingInline.id, title: '研究外观' }] }, catalogue, 'ux22-fix02-edit');
+  assert.equal(editedInline.cards.length, 1); assert.equal(editedInline.cards[0].id, existingInline.id); assert.equal(editedInline.cards[0].title, '研究外观');
+  const savedRequirements = doc.workspace.state.settings.requirements;
+  assert(savedRequirements.includes('3D')); assert.equal(fusionAgentScene(doc.workspace).settings.requirements, ''); assert.equal(fusionAgentScene(doc.workspace).settings.requirementsEn, '');
+  assert.equal(doc.workspace.state.settings.requirements, savedRequirements);
+  const enabledScene = fusionAgentScene({ ...doc.workspace, state: { ...doc.workspace.state, settings: { ...doc.workspace.state.settings, requirementsEnabled: true, requirementsEn: 'Preserved original requirement' } } });
+  assert.equal(enabledScene.settings.requirements, savedRequirements); assert.equal(enabledScene.settings.requirementsEn, 'Preserved original requirement');
+  const batchConfiguration = [{ type: 'configure', configuration: { scope: 'batch', count: 4 } }];
+  assert.throws(() => bindFusionAgentCommands(batchConfiguration, doc.workspace, 1482, { contract: 'configure', message: '做4套中文水彩伙伴，本次创作不要道具' }), /scope改为document/);
+  assert.throws(() => bindFusionAgentCommands(batchConfiguration, doc.workspace, 1482, { contract: 'configure', message: '不要只用于这一批，以后都按这个来' }), /scope改为document/);
+  for (const message of ['剪纸风仅用于这一批', '这一次做4套剪纸风', 'Only for this batch, use paper-cut style']) assert.equal(bindFusionAgentCommands(batchConfiguration, doc.workspace, 1482, { contract: 'configure', message })[0].type, 'configure');
+  assert.equal(bindFusionAgentCommands(batchConfiguration, { ...doc.workspace, state: { ...doc.workspace.state, preparation: { formatVersion: 1, batch: { formatVersion: 1, scope: 'batch', overlay: [] } } } }, 1482, { contract: 'configure', message: '再加圆头' })[0].type, 'configure');
   const reserved = await repository.reserveAssistantOperation(actor, doc.workspace.id, { opId: 'ux22-fix01-diagnostic-op', baseVersion: 1, message: '核对非法配置', model: 'isolated-only' });
   let failure: FusionAgentError | undefined;
   try { await proposeFusionAgent({ workspace: doc.workspace, message: '核对非法配置', binding: { contract: 'configure' }, complete: async () => JSON.stringify({ reply: '不应保存的模型reply', commands: [{ type: 'configure', configuration: { cards: [{ id: 'silhouette', use: 'bad-value' }] } }] }), read: async () => ({}) }); }
