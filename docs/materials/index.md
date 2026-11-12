@@ -4,6 +4,7 @@
 两案原证保本机私有collection01/02，完整原文/编号/用户/截图/JSON均Git exclude且权限700/600。[原工单](../../tasks/todo/2026-11-12-feedback-submit-rootcause.md)与[发布摘要](2026-11-12-feedback-rootcause/ark-reference-transport-release-summary.json)记录a4bcc443/v0.148.4/z1Zk5c2dmIDvI36EaZNq6，11:05:20Z公网、11:06:29Z七服务健康，build/cutover0；原图/权限/旧请求/账务和2h看护保持。9组隔离模拟、完整types/lint/Next及34原生/关联、计价/恢复/59资源/10匿名401有证，无真实生成或浏览器功能验收，待用户手验。提交等待的GET不能证明React状态，历史事件仍缺；未改未证状态机或重发旧任务。完整13份完成元证保本地私有release/ark-reference-transport01/completed。
 新增REGRESSION-ORIGIN01按实际提交/上线时序追溯共享权限变更与旧消费者冲突，8项旧新函数重放及只读元数据/HEAD证据保本机私有`2026-11-12-feedback-rootcause/regression-origin01/`。新同因残留明确标注未实施，旧遗留/已证新回归/尚未归因分开；本轮未改程序、业务或收费调用，详同一原单。
 ORIGIN02继续补同址Nginx前后对照、分发布窗口的脱敏请求聚合、12项运行源哈希及真实202返回/前端条件表达式回放；早期下载超时、后续匿名404和普通未知状态消费者漏接分开。原始与摘要JSON沿同一私有目录origin02-*，Nginx检查副作用沿原融合单核对，未将无新提交当验收成功，未新增应用或生产写入。
+ORIGIN03沿同一私有目录新增历史跨模块摘要/运行源JSON：10/18图片结果发布目录与共享上传冲突、10/21项目预览写事务、10/27安全整改单连接与缺tx调用的同提交引入；复用原上传/FB-2322/PROJ-ERR证据，另列直接视频恢复改造。6份原证SHA及5项当前源hash核同，历史已修/当前未证逐笔归因分开，不重放旧请求、不冒新增当前事故，详同一原单ORIGIN03。
 <!-- /FB-PULL-20261112-MATERIALS -->
 
 <!-- ARK-CHARACTER-ASSET01-MATERIALS-20261111 -->
