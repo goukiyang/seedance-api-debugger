@@ -59,6 +59,17 @@ export async function catalogVisibilitySql(db: Db, session: { id: string }, publ
       SELECT json_extract(r.value, '$.assetId') AS asset_id, ${bindingOwner} AS owner_id,
         CASE WHEN p."key" GLOB 'studio_style_group_v1:*' THEN 'style' ELSE 'template' END AS kind
       FROM "PlatformSetting" p, json_each(COALESCE(${bindingReferences}, '[]')) r WHERE ${studioKeys}
+    ), audience_urls AS MATERIALIZED (
+      SELECT b.asset_id, b.owner_id, b.kind, a."original_url" AS url FROM protected_bindings b JOIN "Asset" a ON a."id" = b.asset_id
+      UNION ALL SELECT b.asset_id, b.owner_id, b.kind, a."thumbnail_url" FROM protected_bindings b JOIN "Asset" a ON a."id" = b.asset_id WHERE a."thumbnail_url" IS NOT NULL
+      UNION ALL SELECT NULL, json_extract(${safeJson}, '$.ownerId'), 'system', u.value
+        FROM "PlatformSetting" p, json_each(${safeJson}, '$.urls') u WHERE ${fileKeys}
+      UNION ALL SELECT a."id", json_extract(${safeJson}, '$.preset.compositionReference.ownerId'), 'system', a."original_url"
+        FROM "PlatformSetting" p JOIN "Asset" a ON a."id" = json_extract(${safeJson}, '$.preset.compositionReference.assetId') WHERE ${recipeKeys}
+      UNION ALL SELECT a."id", json_extract(${safeJson}, '$.preset.compositionReference.ownerId'), 'system', a."thumbnail_url"
+        FROM "PlatformSetting" p JOIN "Asset" a ON a."id" = json_extract(${safeJson}, '$.preset.compositionReference.assetId') WHERE ${recipeKeys} AND a."thumbnail_url" IS NOT NULL
+    ), audience_paths AS MATERIALIZED (
+      SELECT *, ${uploadPath} AS pathname FROM audience_urls
     ), private_urls AS MATERIALIZED (
       SELECT a."original_url" AS url FROM protected_bindings b JOIN "Asset" a ON a."id" = b.asset_id
         WHERE ${admin ? Prisma.sql`0 = 1` : Prisma.sql`b.kind = 'template' OR NOT EXISTS (SELECT 1 FROM protected_bindings own
@@ -83,5 +94,16 @@ export async function catalogVisibilitySql(db: Db, session: { id: string }, publ
       OR (substr(trim(url), 1, 9) <> '/uploads/' AND (instr(url, ' ') > 0 OR url GLOB '*[^ -~]*'))
       OR (substr(trim(url), 1, 9) <> '/uploads/' AND NOT (${Prisma.join(bases.map(base => Prisma.sql`substr(trim(url), 1, ${base.length + 9}) = ${base + '/uploads/'}`), ' OR ')}))) LIMIT 1`);
   if (unsupported.length) throw new CatalogSqlCompatibilityError('历史文件别名需要原兼容读取');
-  return { current, ctes, visible: (url: Prisma.Sql) => Prisma.sql`NOT EXISTS (SELECT 1 FROM hidden_urls hidden WHERE hidden.url = ${url})` };
+  return { current, ctes, visible: (url: Prisma.Sql) => Prisma.sql`NOT EXISTS (SELECT 1 FROM hidden_urls hidden WHERE hidden.url = ${url})`,
+    // Execution may use a different, freshly validated company owner. This is
+    // never a grant to expose that owner's source bytes to the current reader.
+    visibleTo: (url: Prisma.Sql, ownerId: Prisma.Sql, internalAdmin: Prisma.Sql) => Prisma.sql`(${internalAdmin} OR NOT EXISTS (
+      SELECT 1 FROM audience_paths hidden WHERE
+        (hidden.kind = 'template' OR hidden.kind = 'style' AND NOT EXISTS (
+          SELECT 1 FROM protected_bindings own WHERE own.asset_id = hidden.asset_id AND own.kind = 'style' AND own.owner_id = ${ownerId}
+            AND EXISTS (SELECT 1 FROM "User" owner WHERE owner."id" = ${ownerId} AND owner."account_type" = 'internal'))
+          OR hidden.kind = 'system' AND hidden.owner_id <> ${ownerId})
+        AND (hidden.url = ${url} OR hidden.pathname = ${url}
+          OR hidden.pathname IS NOT NULL AND (${Prisma.join(bases.map(base => Prisma.sql`${base} || hidden.pathname = ${url}`), ' OR ')}))
+    ))` };
 }

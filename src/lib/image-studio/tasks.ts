@@ -45,7 +45,7 @@ import { deferImageChannelVersionWrites, captureImageGenerationChannel, resolveI
 import { resolveImageGenerationRequestChannel, resolveImageGenerationRequestRoute } from '@/lib/integrations/image-generation-defaults';
 import { IMAGE_25_QUALITY_MODEL, parseImageQualityRouteSnapshot, assertImageQualityReferenceCount } from './quality-routing';
 import { defaultStudioModuleId, resolveStudioModuleGenerationConfig, validStudioModuleId } from './modules';
-import { canAccessImageTemplates, canViewStudioPreset, isExternalImageStudioActor, externalStudioPresetIds, type ImageStudioIdentity } from './access';
+import { canAccessImageTemplates, canViewStudioPreset, isExternalImageStudioActor, externalStudioCanUsePresetId, type ImageStudioIdentity } from './access';
 import { hydrateExternalStudioActor } from './external-access.server';
 import { EXTERNAL_IMAGE_ADMISSION_ENABLED } from './external-admission';
 import { ensureDefaultProjectForUser } from '@/lib/projects/permissions';
@@ -187,7 +187,7 @@ export function assertExternalStudioAdmission(user: ImageStudioIdentity, moduleI
   if (!isExternalImageStudioActor(user)) return;
   if (!EXTERNAL_IMAGE_ADMISSION_ENABLED) throw new StudioError('外部生图暂未开放新生成，本人原任务和结果仍可查看', 403);
   if (!moduleId || !shared || shared.binding.mode !== 'live' || shared.binding.ownerId !== user.id
-    || !externalStudioPresetIds(user).includes(shared.definition.intent.presetId)) {
+    || !externalStudioCanUsePresetId(user, shared.definition.intent.presetId)) {
     throw new StudioError('当前模板暂不可生成，请重新选择已开放的模板；本人输入和历史保留', 403);
   }
 }
