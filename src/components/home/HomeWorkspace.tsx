@@ -36,8 +36,8 @@ function CardSkeletons({ className, count }: { className: string; count: number 
   </div>;
 }
 
-export default function HomeWorkspace({ accountId, internal, images, admin, worksEnabled, showWorks, detailOpen = false }: {
-  accountId: string; internal: boolean; images: boolean; admin: boolean; worksEnabled: boolean; showWorks: boolean; detailOpen?: boolean;
+export default function HomeWorkspace({ accountId, internal, images, imageTemplates = images, admin, worksEnabled, showWorks, detailOpen = false }: {
+  accountId: string; internal: boolean; images: boolean; imageTemplates?: boolean; admin: boolean; worksEnabled: boolean; showWorks: boolean; detailOpen?: boolean;
 }) {
   const { user, hasLoadedUser } = useAppSession();
   const router = useRouter();
@@ -114,7 +114,7 @@ export default function HomeWorkspace({ accountId, internal, images, admin, work
 
   const loadTemplates = useCallback(async (after: string | null = null, retained: HomeTemplate[] = []) => {
     templatesRequest.current?.abort();
-    if (!overviewIdentity || !images) return;
+    if (!overviewIdentity || !imageTemplates) return;
     const requestIdentity = identity;
     const controller = new AbortController();
     templatesRequest.current = controller;
@@ -153,7 +153,7 @@ export default function HomeWorkspace({ accountId, internal, images, admin, work
         setTemplateLoaded(true);
       }
     }
-  }, [identity, images, overviewIdentity]);
+  }, [identity, imageTemplates, overviewIdentity]);
 
   useEffect(() => {
     projectsRequest.current?.abort();
@@ -186,8 +186,8 @@ export default function HomeWorkspace({ accountId, internal, images, admin, work
   }, [overviewIdentity, internal, loadProjects]);
 
   useEffect(() => {
-    if (!overviewIdentity || !images || !needed) {
-      if (!overviewIdentity || !images) {
+    if (!overviewIdentity || !imageTemplates || !needed) {
+      if (!overviewIdentity || !imageTemplates) {
         setTemplates([]);
         setCursor(null);
         setTemplateError('');
@@ -198,7 +198,7 @@ export default function HomeWorkspace({ accountId, internal, images, admin, work
     }
     void loadTemplates();
     return () => templatesRequest.current?.abort();
-  }, [overviewIdentity, images, needed, loadTemplates]);
+  }, [overviewIdentity, imageTemplates, needed, loadTemplates]);
 
   useEffect(() => {
     if (!overviewIdentity || detailOpen) return;
@@ -252,7 +252,7 @@ export default function HomeWorkspace({ accountId, internal, images, admin, work
   const entries = [
     { title: '普通视频', href: '/generate', icon: Clapperboard, visible: internal, tone: 'blue' },
     { title: 'IP视频', href: '/generate/ip', icon: Film, visible: internal, tone: 'yellow' },
-    { title: '图片生成', href: '/template-studio?type=image', icon: ImageIcon, visible: images, tone: 'mint' },
+    { title: internal ? '图片生成' : '生图模板', href: internal ? '/template-studio?type=image' : '/template-studio?type=image&view=covers', icon: ImageIcon, visible: imageTemplates, tone: 'mint' },
     { title: '分镜提示词', href: '/template-studio?type=video&view=prompts', icon: ListTodo, visible: internal, tone: 'rose' },
     { title: '随机真人', href: '/tools/avatar-studio', icon: UserRound, visible: images, tone: 'violet' },
     { title: '角色参考图', href: '/tools/character-lab', icon: UserRound, visible: images, tone: 'violet' },
@@ -261,7 +261,7 @@ export default function HomeWorkspace({ accountId, internal, images, admin, work
   ];
 
   return <div className={styles.page}>
-    <WorkspaceSidebar accountId={accountId} internal={internal} images={images} worksEnabled={worksEnabled}
+    <WorkspaceSidebar accountId={accountId} internal={internal} images={images} imageTemplates={imageTemplates} worksEnabled={worksEnabled}
       activeView={showWorks ? 'works' : 'overview'} onReset={showWorks ? undefined : resetScroll} onReadyChange={setPreferencesReady} />
 
     {showWorks ? <div className={styles.gallery}><Suspense fallback={<div className="container" role="status">正在读取作品…</div>}><WorksWorkspace /></Suspense></div> : <div className={styles.content}>
@@ -307,7 +307,7 @@ export default function HomeWorkspace({ accountId, internal, images, admin, work
         {(!authorized || !accountDataReady) && <span className={styles.visuallyHidden} role="status">正在确认账号…</span>}
       </section>}
 
-      {images && <section className={styles.section} aria-labelledby="home-templates-title" aria-busy={templateLoading} data-remember-scroll-anchor="home-templates">
+      {imageTemplates && <section className={styles.section} aria-labelledby="home-templates-title" aria-busy={templateLoading} data-remember-scroll-anchor="home-templates">
         <header className={styles.sectionHeader}>
           <h2 id="home-templates-title"><button type="button" className={styles.sectionToggle} aria-expanded={needed} aria-controls="home-favorite-templates" disabled={!identity || preferencesIdentity !== identity} onClick={toggleTemplates}>收藏模板<ChevronDown size={17} aria-hidden="true" /></button></h2>
           <Link href="/template-studio?type=image&view=covers">模板工作台<ArrowRight size={14} aria-hidden="true" /></Link>

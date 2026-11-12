@@ -9,10 +9,11 @@ import { useAppSession } from '@/lib/context/AppSessionContext';
 import { useDialogDismiss } from '@/components/useDialogDismiss';
 import styles from '@/app/home.module.css';
 
-export default function WorkspaceSidebar({ accountId, internal, images, worksEnabled, activeView, onReset, onReadyChange }: {
+export default function WorkspaceSidebar({ accountId, internal, images, imageTemplates = images, worksEnabled, activeView, onReset, onReadyChange }: {
   accountId: string;
   internal: boolean;
   images: boolean;
+  imageTemplates?: boolean;
   worksEnabled: boolean;
   activeView?: 'works' | 'overview' | WorkspaceSection;
   onReset?: () => void;
@@ -99,7 +100,7 @@ export default function WorkspaceSidebar({ accountId, internal, images, worksEna
     { title: '新建项目', href: '/projects#create-project', icon: Plus, visible: internal },
     { title: '我的项目', href: '/projects', icon: Folder, visible: internal, current: current === 'projects' },
     { title: '资产管理', href: '/assets', icon: ImageIcon, visible: true, current: activeView === 'assets' },
-    { title: '模板工作台', href: '/template-studio?type=image&view=covers', icon: LayoutTemplate, visible: internal || images },
+    { title: internal ? '模板工作台' : '生图模板', href: '/template-studio?type=image&view=covers', icon: LayoutTemplate, visible: internal || imageTemplates },
     { title: '我的任务', href: '/tasks', icon: ListTodo, visible: true, current: current === 'tasks' },
     { title: '参考图集', href: '/collections', icon: BookImage, visible: true, current: current === 'collections' },
   ];

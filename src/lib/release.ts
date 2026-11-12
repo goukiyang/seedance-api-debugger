@@ -1,11 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '3D多视图模型与弹窗修复',
+  title: '外部账号可直接使用生图模板',
   outline: [
-    '动作整理记住所选模型，可更新当前目录',
-    '失效模型说明原因并保留原动作',
-    '多视图弹窗居中，操作区更清楚'
+    '统一开关开放全部共享生图模板，登录后即可使用',
+    '新账号和新共享模板自动适用，生成价格保持不变',
+    '个人输入与结果独立保留，关闭后仍可查看本人历史'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
