@@ -3,6 +3,8 @@
 
 [原工单](../../tasks/todo/2026-11-11-seedance-private-character-assets.md)；[用户红框截图原件](2026-11-11-seedance-private-character-assets/codex-clipboard-d499faa9-4bef-40c4-b7ec-dea9668b6960.png)为用户附件本地归档，核字节一致，非新功能验收截图，未公开上传。v0.144.0实际发布与一次真实4秒任务结果见[部署摘要](2026-11-11-seedance-private-character-assets/release-summary.json)和[脱敏实际请求结构](2026-11-11-seedance-private-character-assets/provider-request.redacted.json)。后续v0.144.1提示词组急修见[提示词组发布摘要](2026-11-11-seedance-private-character-assets/prompt-groups-release-summary.json)，按用户顺序接续的v0.144.2缩略图下拉见[缩略图发布摘要](2026-11-11-seedance-private-character-assets/thumbnail-release-summary.json)。v0.145.2新增/编辑缩略图直接上传见[上传发布摘要](2026-11-11-seedance-private-character-assets/thumbnail-upload-release-summary.json)，完整工程/部署与手验边界沿原单§14。完整私有日志/原片保存在本目录release下；无密钥入库，未发送MJ，界面与成片效果待用户手验。
 截图裁切诊断（2026-11-12）：[原工单§15](../../tasks/todo/2026-11-11-seedance-private-character-assets.md#15-上传素材看似被切割历史缩略图根因核对2026-11-12)登记完整原图/旧裁切缩略图及根因；原截图和媒体仅保正式根本地私有diagnostics/2026-11-12-preview-crop，不公开Git。
+旧缩略图修复、submission_unknown截图与只读诊断及风险见[原工单§16](../../tasks/todo/2026-11-11-seedance-private-character-assets.md#16-旧缩略图完整显示修复与提交未知排查2026-11-12)；新增截图/诊断仅保本地私有diagnostics/2026-11-12-submission-unknown，发布工程原件保私有release/legacy-thumbnail-complete01。
+v0.148.1完整缩略图与普通参考传输修复已保护部署，20工程/完整Next与健康、手验及两旧未知风险见[发布摘要](2026-11-11-seedance-private-character-assets/legacy-thumbnail-complete-release-summary.json)和原单§16；原件/旧缩略图未改写，无重传或新收费。
 <!-- /ARK-CHARACTER-ASSET01-MATERIALS-20261111 -->
 
 <!-- FUSION-UX12-MATERIALS-20261110 -->

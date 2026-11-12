@@ -1,0 +1,86 @@
+{
+  "version": "0.148.1",
+  "source": "8f73f25a7a6a83c461178f9097258ca7f507c1b5",
+  "build": "rux_lj-5WkdLdQBnvZK3B",
+  "deployedAtUtc": "2026-11-12T08:37:42.068191+00:00",
+  "healthAtUtc": "2026-11-12T08:38:40.500760+00:00",
+  "branch": "codex/legacy-thumbnail-complete-20261112",
+  "baseline": {
+    "source": "355be2dbb61eb78e632df4cf885eb23b7703ab0c",
+    "version": "0.148.0",
+    "build": "e_hsRKcVhd5V_SQ-q0I_X"
+  },
+  "guard": {
+    "readerContract": "works-method-reader.1",
+    "cutoutReaderContract": "cutout-owner-reader.1",
+    "bodyPairReaderContract": "character-body-pair-reader.1",
+    "recipeReaderContract": "character-lab-recipe-reader.1",
+    "contextReaderContract": "character-independent-context.1",
+    "gridReaderContract": "character-explicit-grid.1",
+    "source": "67305263189ecfddc79dcd11202764595bf2be1a",
+    "version": "0.148.0+points-pricing-guard.1",
+    "build": "tX6SyfBNWAgTKvuak-X8k"
+  },
+  "stage": "/data/video-api-debugger/release-staging/legacy-thumbnail-complete-20261112/attempt01",
+  "checks": {
+    "thumbnailEngineering": 9,
+    "transportEngineering": 11,
+    "boundEngineeringSources": 22,
+    "completeTypesAndLint": true,
+    "fullNextBuild": true,
+    "native": {
+      "records": 17,
+      "reused": 12,
+      "fresh": 5
+    },
+    "linked": {
+      "records": 17,
+      "reused": 13,
+      "fresh": 4
+    },
+    "freshPricing": true,
+    "startup": 6,
+    "services": 7,
+    "timers": 4,
+    "publicAssets": 54,
+    "anonymous401": 12,
+    "health": true
+  },
+  "runtimeDeltaFiles": 13,
+  "gitExportFiles": 2534,
+  "privatePolicyUnchanged": true,
+  "pricesUnchanged": true,
+  "originalsOrOldThumbnailsRewritten": false,
+  "databaseDdlExecuted": false,
+  "businessDataRestored": false,
+  "newPaidGenerations": 0,
+  "realUploads": 0,
+  "browserAcceptance": false,
+  "userManualAcceptance": "pending",
+  "oldUnknownTasks": {
+    "count": 2,
+    "observedAtUtc": "2026-11-12T08:40:09.158002+00:00",
+    "frozenPointsEach": 135,
+    "upstreamTaskId": null,
+    "actualCost": null,
+    "preciseOriginalKeyLookups": 1,
+    "lookupResponse": "HTTP200 empty body for each",
+    "resubmitted": false,
+    "refunded": false,
+    "remaining": "supplier acceptance and fee receipts required for original keys"
+  },
+  "recovery": {
+    "command": "bash /data/video-api-debugger/release-staging/legacy-thumbnail-complete-20261112/attempt01/program-recovery.sh /data/video-api-debugger/release-staging/legacy-thumbnail-complete-20261112/attempt01/release-input.json",
+    "programAndConfigurationOnly": true,
+    "productionRehearsal": false,
+    "guardHasThisFix": false
+  },
+  "sourceIndex": {
+    "files": 2099,
+    "fingerprint": "fa0753c3f3836b765d1711d3a2ec3f0b3ba9c63dd3f9819080210b08304dee32",
+    "source": "8f73f25a7a6a83c461178f9097258ca7f507c1b5",
+    "synchronized": true,
+    "mcpContextQuery": "timed out; targeted source/module evidence used"
+  },
+  "additionalDiscovery": "D-20261112-MEDIA-ERROR-COPY"
+}

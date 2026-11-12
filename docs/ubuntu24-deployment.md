@@ -1,3 +1,13 @@
+<!-- LEGACY-THUMB-1481-RELEASE-20261112 -->
+## 2026-11-12 完整旧缩略图与普通Seedance参考修复 v0.148.1
+
+08:37:42Z已部署，08:38:40Z健康，待用户手验。main `8f73f25a7a6a83c461178f9097258ca7f507c1b5` / BUILD `rux_lj-5WkdLdQBnvZK3B`，继承健康355be/v1480；十门guard仍实际67305263189ecfddc79dcd11202764595bf2be1a / tX6SyfBNWAgTKvuak-X8k原成品。分支codex/legacy-thumbnail-complete-20261112已推。20工程/22绑定SHA、完整types/lint/Next、34记录25复用9刷新、fresh计价通过；build/cutover0、6启动/7服务4timer、54公网资源/12匿名401/内外health正常，2h看护保持。
+
+stage `/data/video-api-debugger/release-staging/legacy-thumbnail-complete-20261112/attempt01`，自然停writer/配置和一致SQLite备份，既有三迁移仅只读核，无新DDL/业务数据恢复/原图或旧thumb覆写/真实上传/收费生成。恢复为本stage `program-recovery.sh release-input.json`，只回程序/config，不回DB/账本/媒体/回执；guard不含本轮显示/传输修正，未实际回退。价格/私密36目标及持久链接保持。两旧任务仍各135冻结/无上游ID，原key精准只读仍空回执，未重发退款，待供应商核对。首读仍可能等待原件；功能待手验。
+
+后继请鲜核并继承本轮实际健康8f73，另一个同版候选1fe不是本次主源；不得用旧355或同版号覆盖，既有pre-cutover基线保护继续有效。[原单§16](../tasks/todo/2026-11-11-seedance-private-character-assets.md#16-旧缩略图完整显示修复与提交未知排查2026-11-12)与[发布摘要](materials/2026-11-11-seedance-private-character-assets/legacy-thumbnail-complete-release-summary.json)保原证/风险。仅索引同步成功，MCP结构查询超时，不冒功能验收。
+<!-- /LEGACY-THUMB-1481-RELEASE-20261112 -->
+
 <!-- FUSION-MODEL01-RELEASE-20261109 -->
 ## 2026-11-09 角色融合模型设置与原位清除
 
