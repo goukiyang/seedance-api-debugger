@@ -162,7 +162,7 @@ function baseSnapshot(user: SessionUser, draft: DraftRow, prompt: string, parame
     owner: { userId: user.id, username: user.username, displayName: user.name || user.username, avatarUrl: user.avatar_url || null, accountType: user.account_type } };
 }
 export async function createMultiviewActionRun(user: SessionUser, input: unknown) {
-  let accepted = false;
+  let admitted = false;
   try {
     requireStudioUser(user);
     if (!object(input) || !identifier(input.draftId) || !Number.isSafeInteger(input.revision) || typeof input.requestId !== 'string'
@@ -170,7 +170,7 @@ export async function createMultiviewActionRun(user: SessionUser, input: unknown
     const requestId = `mv-action:${input.requestId}`;
     const prior = await prisma.videoStudioRun.findUnique({ where: { owner_user_id_request_id: { owner_user_id: user.id, request_id: requestId } } });
     if (prior) {
-      accepted = true;
+      admitted = true;
       if (prior.purpose !== purpose || prior.draft_id !== input.draftId || prior.draft_revision !== input.revision || prior.mode !== 'llm'
         || input.llmModel !== undefined && snapshot(prior).llmModel !== input.llmModel) throw conflict('原请求编号已用于另一份动作，请查看原记录');
       return { run: await runDto(prior), status: 200 };
@@ -198,7 +198,7 @@ export async function createMultiviewActionRun(user: SessionUser, input: unknown
     const row = await prisma.$transaction(async tx => {
       const existing = await tx.videoStudioRun.findUnique({ where: { owner_user_id_request_id: { owner_user_id: user.id, request_id: requestId } } });
       if (existing) {
-        accepted = true;
+        admitted = true;
         if (existing.purpose !== purpose || existing.draft_id !== draft.id || existing.draft_revision !== draft.revision || existing.mode !== 'llm' || snapshot(existing).llmModel !== value.llmModel) throw conflict('原请求编号已使用');
         return existing;
       }
@@ -220,10 +220,10 @@ export async function createMultiviewActionRun(user: SessionUser, input: unknown
         projectId: parsed.parameters.project_id || null, occurredAt: created.created_at, contextOrigin: 'multiview-action-explicit-project' });
       return created;
     });
-    accepted = true;
+    admitted = true;
     return { run: await runDto(row), status: row.status === 'queued' || row.status === 'running' ? 202 : 200 };
   } catch (error) {
-    if (!accepted && error instanceof StudioError) throw new StudioError(error.message, error.status, error.code, { ...error.details, notAccepted: true });
+    if (!admitted && error instanceof StudioError) throw new StudioError(error.message, error.status, error.code, { ...error.details, notAccepted: true });
     throw error;
   }
 }
