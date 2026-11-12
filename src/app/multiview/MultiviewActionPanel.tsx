@@ -168,7 +168,7 @@ export function MultiviewActionPanel(props: Props) {
       if((cause as {result?:{details?:{notAccepted?:boolean}}})?.result?.details?.notAccepted===true){keepAiJournal({...aiJournalRef.current,current:null});setMessage(cause instanceof Error?cause.message:'本次整理未受理，原动作保留。');}
       else setMessage(retained?'文案提交结果待确认，请查询原请求。':'原文案记录未能在本机保留，尚未提交；请保留页面。');
     }}
-    finally{aiLock.current=false;if(active())setAiBusy(false);}
+    finally{aiLock.current=false;setAiBusy(false);}
   }
   function consumeAi(run:MultiviewActionRun,pending:AiRequest){
     const journal=aiJournalRef.current,isCurrent=journal.current?.requestId===pending.requestId;
