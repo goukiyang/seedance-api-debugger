@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth/api-helpers';
 import { AuthError } from '@/lib/auth/session';
 import { assertSupplementaryModelEnabled } from '@/lib/pricing/model-access.server';
-import { createMuskChatCompletion, getMuskApiSettings, isMuskApiReady, resolveMuskChatModels, MuskApiError } from '@/lib/integrations/musk';
+import { createMuskChatCompletion, getMuskApiSettings, isMuskApiReady, resolveMuskChatModels, MuskApiError, type MuskChatDiagnostics } from '@/lib/integrations/musk';
 import { assertCharacterFusionWritesEnabled } from '@/lib/character-fusion/build-mode';
 import { FusionError, isRecord, parseOperationId, type FusionCommand } from '@/lib/character-fusion/actions';
 import { readFusionCatalogue } from '@/lib/character-fusion/catalogue-repository';
@@ -76,6 +76,7 @@ export async function POST(request: NextRequest) {
     if (!(await resolveMuskChatModels(settings)).includes(body.model)) throw new FusionAgentError('所选模型已不在当前目录，请更新目录后重新选择；输入已保留。', 400, 'model_not_allowed');
     await assertSupplementaryModelEnabled('text', body.model);
     const selectedModel = body.model, started = Date.now();
+    let modelStep = 0;
     let catalogueSnapshot: FusionCatalogue | undefined;
     const assertPlanning = async () => {
       request.signal.throwIfAborted();
@@ -92,12 +93,28 @@ export async function POST(request: NextRequest) {
       },
       complete: async messages => {
         await assertPlanning();
-        const remaining = 90000 - (Date.now() - started);
-        if (remaining < 1000) throw new FusionAgentError('本轮模型请求已达时限，未提交的新提案已停止。', 504, 'fusion_agent_timeout');
         const latest = await getMuskApiSettings();
         if (!isMuskApiReady(latest) || !(await resolveMuskChatModels(latest)).includes(selectedModel)) throw new FusionAgentError('所选模型当前不可用，输入和已有结果已保留。', 503, 'model_not_allowed');
         await assertSupplementaryModelEnabled('text', selectedModel);
-        return (await createMuskChatCompletion({ settings: latest, model: selectedModel, messages, temperature: .4, jsonMode: false, timeoutMs: remaining, signal: request.signal })).content;
+        await assertPlanning();
+        const timeoutMs = Math.max(0, Math.min(90000, 240000 - (Date.now() - started))), step = ++modelStep;
+        if (timeoutMs < 1000) {
+          console.info('[character-fusion-planner-step]', JSON.stringify({ opId, step, phase: 'budget_exhausted', elapsedMs: 0, totalElapsedMs: Date.now() - started, timeoutMs, httpStatus: null }));
+          throw new FusionAgentError('本轮模型请求已达时限，未提交的新提案已停止。', 504, 'fusion_agent_timeout');
+        }
+        const callStarted = Date.now();
+        let diagnostics: MuskChatDiagnostics | undefined;
+        try {
+          const completion = await createMuskChatCompletion({ settings: latest, model: selectedModel, messages, temperature: .4, jsonMode: false, timeoutMs, signal: request.signal });
+          diagnostics = completion.diagnostics;
+          return completion.content;
+        } catch (error) {
+          if (error instanceof MuskApiError) diagnostics = error.diagnostics;
+          throw error;
+        } finally {
+          console.info('[character-fusion-planner-step]', JSON.stringify({ opId, step, phase: diagnostics?.phase || 'request_failed', elapsedMs: diagnostics?.elapsedMs ?? Date.now() - callStarted,
+            totalElapsedMs: Date.now() - started, timeoutMs, httpStatus: diagnostics?.httpStatus ?? null, headersMs: diagnostics?.headersMs ?? null, bodyMs: diagnostics?.bodyMs ?? null }));
+        }
       },
       read: async read => {
         await assertPlanning();

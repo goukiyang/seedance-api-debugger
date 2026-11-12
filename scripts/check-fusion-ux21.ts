@@ -244,6 +244,66 @@ export async function checkFusionUx21(input: { actor: { id: string }; repository
   assert.equal(indexedFinal.workspace.version, otherCard.workspace.version); assert.deepEqual(indexedFinal.workspace.state.settings, otherCard.workspace.state.settings); assert.equal(indexedFinal.rowsPage.total, 0);
   checks.push('UX21数组局部写真实SQLite：公开卡片/旧规则路径保存刷新撤销，保其它项顺序锁与中英；旧全数组可写，过期索引/错误CAS/撤销冲突/非法索引/越权均零写入');
 
+  const assistantFile = ts.createSourceFile('route.ts', await readFile('src/app/api/character-fusion/assistant/route.ts', 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  let plannerComplete: ts.ArrowFunction | undefined;
+  const findPlanner = (node: ts.Node) => { if (ts.isCallExpression(node) && node.expression.getText(assistantFile) === 'proposeFusionAgent' && node.arguments[0] && ts.isObjectLiteralExpression(node.arguments[0])) {
+    const property = node.arguments[0].properties.find(property => ts.isPropertyAssignment(property) && property.name.getText(assistantFile) === 'complete');
+    if (property && ts.isPropertyAssignment(property) && ts.isArrowFunction(property.initializer)) plannerComplete = property.initializer;
+  } ts.forEachChild(node, findPlanner); };
+  findPlanner(assistantFile); assert(plannerComplete);
+  const muskFile = ts.createSourceFile('musk.ts', await readFile('src/lib/integrations/musk.ts', 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const muskErrorClass = muskFile.statements.find(statement => ts.isClassDeclaration(statement) && statement.name?.text === 'MuskApiError'); assert(muskErrorClass);
+  const sdkErrorEnvironment = { exports: {} as { MuskApiError?: typeof import('../src/lib/integrations/musk').MuskApiError } };
+  runInNewContext(ts.transpileModule(muskErrorClass.getText(muskFile), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS } }).outputText, sdkErrorEnvironment);
+  assert(sdkErrorEnvironment.exports.MuskApiError); const MuskApiError = sdkErrorEnvironment.exports.MuskApiError;
+  type CompletionParams = Parameters<typeof import('../src/lib/integrations/musk').createMuskChatCompletion>[0];
+  const plannerHarness = (options: { validationMs?: number; callMs?: number; fail?: boolean; cancelled?: boolean; alwaysRead?: boolean } = {}) => {
+    let now = 0, settingsReads = 0, planning = true;
+    const controller = new AbortController(), calls: CompletionParams[] = [], logs: Array<Record<string, unknown>> = [];
+    const latest = { enabled: true, base_url: 'https://example.invalid', default_model: 'kept-model', api_key: 'PRIVATE_TEST_KEY', allowed_models: ['kept-model'] };
+    const environment = { module: { exports: undefined as unknown }, selectedModel: 'kept-model', started: 0, modelStep: 0, opId: 'ux21-planner-budget', request: { signal: controller.signal },
+      Date: { now: () => now }, Math, JSON, FusionAgentError, MuskApiError,
+      console: { info: (label: string, raw: string) => { assert.equal(label, '[character-fusion-planner-step]'); logs.push(JSON.parse(raw)); } },
+      assertPlanning: async () => { controller.signal.throwIfAborted(); if (!planning) throw new FusionAgentError('原回合已取消', 409, 'fusion_agent_cancelled'); },
+      getMuskApiSettings: async () => { settingsReads++; now += options.validationMs ?? 1800; if (options.cancelled) planning = false; return latest; },
+      isMuskApiReady: (settings: CompletionParams['settings']) => settings === latest,
+      resolveMuskChatModels: async (settings: CompletionParams['settings']) => { assert.equal(settings, latest); return ['kept-model']; },
+      assertSupplementaryModelEnabled: async (kind: string, model: string) => { assert.equal(kind, 'text'); assert.equal(model, 'kept-model'); },
+      createMuskChatCompletion: async (params: CompletionParams) => {
+        calls.push(params); assert.equal(settingsReads, calls.length); assert.equal(params.settings, latest); assert.equal(params.model, 'kept-model');
+        assert.equal(params.signal, controller.signal); assert.equal(params.jsonMode, false); assert.equal(params.temperature, .4);
+        const elapsedMs = options.callMs ?? 35000; assert(elapsedMs <= params.timeoutMs!); now += elapsedMs;
+        const diagnostics = { model: 'kept-model', requestChars: 999, requestBytes: 999, timeoutMs: params.timeoutMs!, phase: options.fail ? 'reading_body' as const : 'completed' as const,
+          elapsedMs, headersMs: elapsedMs / 2, bodyMs: elapsedMs / 2, httpStatus: options.fail ? 502 : 200, upstreamRequestId: 'PRIVATE_UPSTREAM_ID' };
+        if (options.fail) throw new MuskApiError('PRIVATE_UPSTREAM_BODY', 502, 'engineering_failure', diagnostics);
+        return { content: JSON.stringify(calls.length < 6 || options.alwaysRead ? { reply: '继续查控制', reads: [{ kind: 'controls', categoryId: 'occupation', limit: 1 }] } : { reply: '保持讨论', commands: [{ type: 'context', summary: '保持讨论' }] }), diagnostics };
+      },
+    };
+    runInNewContext(ts.transpileModule(`module.exports = ${plannerComplete!.getText(assistantFile)}`, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS } }).outputText, environment);
+    return { complete: environment.module.exports as Parameters<typeof proposeFusionAgent>[0]['complete'], controller, calls, logs };
+  };
+  const budgetWorkspace = { ...document.workspace, state: emptyWorkspaceState(), rows: [] }, budget = plannerHarness();
+  const budgetResult = await proposeFusionAgent({ workspace: budgetWorkspace, message: '仅讨论现有组合', complete: budget.complete, read: async read => readFusionAgentControls(budgetWorkspace, read as { kind: 'controls'; categoryId: string; limit: number }) });
+  assert.equal(budgetResult.iterations, 6); assert.equal(budgetResult.limitReached, false); assert.equal(budget.calls.length, 6);
+  assert.equal(budget.calls[0].timeoutMs, 90000); assert.equal(budget.calls[5].timeoutMs, 54200);
+  assert(Number(budget.logs[5].totalElapsedMs) > 90000 && Number(budget.logs[5].totalElapsedMs) < 240000);
+  for (const [index, log] of Object.entries(budget.logs)) { assert.equal(log.step, Number(index) + 1); assert.equal(log.phase, 'completed'); assert.equal(log.httpStatus, 200);
+    assert.deepEqual(Object.keys(log).sort(), ['opId', 'step', 'phase', 'elapsedMs', 'totalElapsedMs', 'timeoutMs', 'httpStatus', 'headersMs', 'bodyMs'].sort()); }
+  const limitedBudget = plannerHarness({ alwaysRead: true });
+  const limitedResult = await proposeFusionAgent({ workspace: budgetWorkspace, message: '仅讨论现有组合', complete: limitedBudget.complete, read: async () => ({ controls: [] }) });
+  assert.equal(limitedResult.limitReached, true); assert.equal(limitedBudget.calls.length, 6); assert.deepEqual(limitedResult.proposal.commands, []);
+  const exhaustedBudget = plannerHarness({ validationMs: 239001 });
+  await assert.rejects(() => exhaustedBudget.complete([]), error => error instanceof FusionAgentError && error.code === 'fusion_agent_timeout');
+  assert.equal(exhaustedBudget.calls.length, 0); assert.equal(exhaustedBudget.logs[0].phase, 'budget_exhausted'); assert.equal(exhaustedBudget.logs[0].timeoutMs, 999);
+  const lastBudget = plannerHarness({ validationMs: 239000, callMs: 500 }); await lastBudget.complete([]); assert.equal(lastBudget.calls[0].timeoutMs, 1000);
+  const cancelledBudget = plannerHarness({ cancelled: true });
+  await assert.rejects(() => cancelledBudget.complete([]), error => error instanceof FusionAgentError && error.code === 'fusion_agent_cancelled'); assert.equal(cancelledBudget.calls.length, 0);
+  const abortedBudget = plannerHarness(); abortedBudget.controller.abort(); await assert.rejects(() => abortedBudget.complete([])); assert.equal(abortedBudget.calls.length, 0);
+  const failedBudget = plannerHarness({ fail: true }); await assert.rejects(() => failedBudget.complete([]), error => error instanceof MuskApiError);
+  assert.equal(failedBudget.logs[0].phase, 'reading_body'); assert.equal(failedBudget.logs[0].httpStatus, 502); assert.equal(failedBudget.logs[0].elapsedMs, 35000);
+  assert(!/PRIVATE_|保持讨论|继续查控制|kept-model/.test(JSON.stringify([...budget.logs, ...failedBudget.logs, ...exhaustedBudget.logs])));
+  checks.push('UX21模型整轮时间预算：实际route回调跨90秒完成六步、单次至多90秒/总240秒且最新校验计时，余量不足1秒不调用、取消零调用、SDK阶段耗时HTTP日志仅白名单');
+
   // Execute the actual layout effect against measured DOM doubles; no browser or visual claim.
   const studioFile = ts.createSourceFile('studio.tsx', await readFile('src/app/tools/character-fusion/studio.tsx', 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   let positioningEffect: ts.ArrowFunction | undefined;
