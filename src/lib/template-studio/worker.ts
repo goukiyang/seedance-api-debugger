@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { SessionUser } from '@/lib/auth/session';
 import { prisma } from '@/lib/prisma';
-import { getMuskApiSettings, isMuskApiReady, createMuskChatCompletion, assertPrivateMuskSend, MuskApiError } from '@/lib/integrations/musk';
+import { getMuskApiSettings, isMuskApiReady, createMuskChatCompletion, assertPrivateMuskSend, resolveMuskChatModels, MuskApiError } from '@/lib/integrations/musk';
 import { isPrivatePromptError } from '@/lib/security/private-prompts.server';
 import { privateVideoRunOrigins } from './private-storage.server';
 import { authorizeStudioAssets } from './assets';
@@ -161,7 +161,9 @@ export async function processStudioPromptOnce() {
       await markTerminal(run.id, token, 'failed', 'AI 整理当前未启用或服务未就绪，未提交上游。', 'not_sent');
       return true;
     }
-    if (snapshot.llmModel !== undefined && !isStudioTextModel(snapshot.llmModel)) {
+    if (snapshot.llmModel !== undefined && !(snapshot.purpose === 'multiview-action'
+      ? (await resolveMuskChatModels(settings)).includes(snapshot.llmModel)
+      : isStudioTextModel(snapshot.llmModel))) {
       await markTerminal(run.id, token, 'failed', '所选文案模型已不可用，请重新选择。未提交上游。', 'not_sent');
       return true;
     }
@@ -221,12 +223,13 @@ export async function processStudioPromptOnce() {
       });
       return true;
     }
-    const definiteClientRejection = error instanceof MuskApiError && error.code === 'musk_api_upstream_error' && error.status >= 400 && error.status < 500;
+    const unavailableModel = error instanceof MuskApiError && error.code === 'musk_api_model_unavailable';
+    const definiteClientRejection = unavailableModel || error instanceof MuskApiError && error.code === 'musk_api_upstream_error' && error.status >= 400 && error.status < 500;
     await markTerminal(
       run.id,
       token,
       sent && !definiteClientRejection ? 'uncertain' : 'failed',
-      sent && !definiteClientRejection ? '上游结果未确认；系统不会自动重复提交。' : error instanceof StudioError ? error.message : 'AI 整理失败，未保存上游原始输出。',
+      sent && !definiteClientRejection ? '上游结果未确认；系统不会自动重复提交。' : unavailableModel ? '所选文案模型没有可用渠道，本次整理未受理。请更新模型后重新选择，原动作保留。' : error instanceof StudioError ? error.message : 'AI 整理失败，未保存上游原始输出。',
       sent && !definiteClientRejection ? 'unknown' : sent ? 'response_received' : 'not_sent',
     );
   }

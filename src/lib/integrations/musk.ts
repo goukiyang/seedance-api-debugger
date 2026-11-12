@@ -228,10 +228,11 @@ function muskUpstreamErrorReason(text: string) {
 
 function muskUpstreamError(status: number, text: string) {
   const reason = muskUpstreamErrorReason(text);
+  const unavailableModel = status === 503 && /^No available channel for model \S+ under group /i.test(reason);
   return new MuskApiError(
     `Musk API 调用失败 (HTTP ${status})${reason ? `：${reason}` : ''}`,
     status,
-    'musk_api_upstream_error',
+    unavailableModel ? 'musk_api_model_unavailable' : 'musk_api_upstream_error',
   );
 }
 
@@ -320,11 +321,12 @@ export async function createMuskChatCompletion(params: {
       if (response.ok) break;
 
       logMuskUpstreamError(response.status, text, attempt);
-      if (attempt === 1 && RETRYABLE_MUSK_HTTP_STATUSES.has(response.status) && !controller.signal.aborted) {
+      const upstreamError = muskUpstreamError(response.status, text);
+      if (attempt === 1 && upstreamError.code !== 'musk_api_model_unavailable' && RETRYABLE_MUSK_HTTP_STATUSES.has(response.status) && !controller.signal.aborted) {
         await waitForMuskRetry(params.retryDelayMs ?? DEFAULT_MUSK_RETRY_DELAY_MS, controller.signal);
         continue;
       }
-      throw muskUpstreamError(response.status, text);
+      throw upstreamError;
     }
     if (!response) throw new MuskApiError('Musk API 调用失败', 500, 'musk_api_request_failed');
 
@@ -481,11 +483,12 @@ export async function openMuskChatStream(params: {
       const status = response.ok ? 502 : response.status || 502;
       const text = await response.text();
       logMuskUpstreamError(status, text, attempt);
-      if (attempt === 1 && RETRYABLE_MUSK_HTTP_STATUSES.has(status) && !controller.signal.aborted) {
+      const upstreamError = muskUpstreamError(status, text);
+      if (attempt === 1 && upstreamError.code !== 'musk_api_model_unavailable' && RETRYABLE_MUSK_HTTP_STATUSES.has(status) && !controller.signal.aborted) {
         await waitForMuskRetry(params.retryDelayMs ?? DEFAULT_MUSK_RETRY_DELAY_MS, controller.signal);
         continue;
       }
-      throw muskUpstreamError(status, text);
+      throw upstreamError;
     }
     throw new MuskApiError('Musk API 调用失败', 500, 'musk_api_request_failed');
   } catch (error) {

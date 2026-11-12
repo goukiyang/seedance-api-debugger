@@ -18,10 +18,28 @@
 .syncAdjust { display:inline-flex;align-items:center;gap:5px; }.syncAdjust[aria-pressed=true] { color:var(--primary);border-color:var(--primary); }
 @media(hover:hover) { .subjectControl:hover button { opacity:1; } }
 .action { min-width:0; }.action h3 { margin:0 0 12px;font-size:20px; }.action textarea { width:100%;box-sizing:border-box;min-height:240px;resize:vertical;padding:14px;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border-color);border-radius:8px;line-height:1.8;font:inherit; }
-.action .compact { margin-top:12px; }.action .params { margin-top:18px;padding-top:16px;border-top:1px solid var(--border-color); }
+.action .compact { margin-top:12px; }.params { margin-top:18px;padding-top:16px;border-top:1px solid var(--border-color); }
+.aiControls { display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:10px; }
+.modelPicker { display:flex;align-items:center;flex:1 1 220px;min-width:0;gap:6px; }
+.modelPicker select { flex:1;min-width:0;width:100%; }
+.modelPicker button { display:inline-flex;align-items:center;justify-content:center;gap:5px;flex-shrink:0; }
+.action :is(button,select) { min-height:38px;font:inherit; }
+.action select { color:var(--text-primary);background:var(--bg-input);border:1px solid var(--border-color);border-radius:6px;padding:7px 10px; }
+.action button { white-space:nowrap; }
+.videoParameters { display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:start; }
+.videoParameters select { width:100%;min-width:0; }
+.destinationParameters { display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;margin-top:12px;align-items:start; }
+.projectField,.cardField { min-width:0; }
+.projectField > span { display:grid;width:100%;min-width:0;gap:8px; }
+.projectField > span > span { width:100%;flex-wrap:wrap; }
+.cardField select { width:100%;min-width:0; }
+.requestNotice { display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin:10px 0;color:var(--text-secondary);font-size:13px;line-height:1.7; }
+.requestNotice > span { flex:1 1 180px; }
+.retained { margin:10px 0;font-size:13px; }
+@media(max-width:480px) { .destinationParameters { grid-template-columns:minmax(0,1fr); }.videoParameters { gap:6px; } }
 .action .primary { width:100%;margin-top:8px;min-height:44px;background:var(--primary);color:#fff;font-weight:650; }
 .notice { color:var(--text-secondary);font-size:13px;line-height:1.7; }.notice:empty { display:none; }.price { font-size:14px;margin-top:18px; }
-.dialog { width:min(760px,calc(100vw - 24px));max-height:calc(100dvh - 40px);padding:24px;box-sizing:border-box;background:var(--bg-panel);color:var(--text-primary);border:1px solid var(--border-color);border-radius:12px; }
+.dialog { position:fixed;inset:0;margin:auto;width:min(760px,calc(100vw - 24px));max-height:calc(100dvh - 40px);overflow:auto;padding:24px;box-sizing:border-box;background:var(--bg-panel);color:var(--text-primary);border:1px solid var(--border-color);border-radius:12px; }
 .dialog::backdrop { background:#0008; }.dialog header { display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:16px; }.dialog h2 { margin:0;font-size:22px; }.dialog footer { display:flex;justify-content:flex-end;gap:12px;margin-top:20px; }.dialog button { min-height:36px; }.dialog textarea { min-height:45vh; }
 .videoResult { grid-column:1;min-width:0; }.videoResult video { display:block;width:100%;max-height:75vh;object-fit:contain;background:#111; }.taskId { display:flex;align-items:flex-start;gap:8px;font-size:12px;word-break:break-all;margin:12px 0; }.taskId code { white-space:normal; }.history { display:flex;gap:8px;flex-wrap:wrap;margin-top:16px; }.frozenText { white-space:pre-wrap;line-height:1.8; }.ruleLink { padding:3px 0 !important;border:0 !important;background:none !important;color:var(--primary) !important; }
 @media(max-width:800px) { .continuous { grid-template-columns:minmax(0,1fr);gap:22px; }.videoResult { grid-column:auto; }.compact { gap:6px; }.compact button { min-height:36px; }.action textarea { min-height:180px; }.dialog { padding:16px; }.dialog footer { position:sticky;bottom:-16px;background:var(--bg-panel);padding:12px 0; } }
