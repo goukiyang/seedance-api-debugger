@@ -14,6 +14,7 @@ import { WorkMedia } from './WorkMedia';
 import { WorkPreviewImage } from './WorkPreviewImage';
 import { matchesWorkImage, type PreparedWorkImage } from '@/lib/works/image-preview';
 import { invalidateImageReadSource } from '@/lib/media/image-read-session';
+import { authorizeTaskReuseHref } from '@/lib/navigation/task-reuse';
 import { WorkAuthor } from './WorkAuthor';
 import { WorkLearning } from './WorkLearning';
 import { WorkCompare } from './WorkCompare';
@@ -149,9 +150,18 @@ export function WorkDetail({ id, viewerId, preparation, revision, likesRevision,
     finally { groupBusy.current = false; if (alive.current) setGroupReading(''); }
   }
   async function applyMethod() {
-    if (!work || !context?.method || methodBusy.current) return;
+    if (!work || methodBusy.current) return;
     methodBusy.current = true; setMethodReading(true); setNotice('');
     try {
+      if (work.medium === 'video' && work.provenance?.videoReferenceHref) {
+        const target = new URL(work.provenance.videoReferenceHref, window.location.origin);
+        target.searchParams.set('return_to', `${window.location.pathname}${window.location.search}`);
+        const href = authorizeTaskReuseHref(`${target.pathname}${target.search}`, viewerId);
+        if (!href) { setNotice('复用入口准备失败，浏览器未能保存本次操作，请重试。'); return; }
+        window.location.assign(href);
+        return;
+      }
+      if (!context?.method) return;
       if (context.method.action.kind === 'reference') {
         const result = await operate(`work:${work.id}`, `/api/works/${work.id}/reference`, { expectedMediaVersion: work.mediaVersion, tabId: workWorkspaceTabId() });
         if (alive.current && result?.workspaceAssetId) setNotice('已加入生成工作区，可继续使用当前工作区。');
@@ -170,6 +180,7 @@ export function WorkDetail({ id, viewerId, preparation, revision, likesRevision,
     if (media && media.readyState >= 1) { media.currentTime = Math.min(timeSeconds, Number.isFinite(media.duration) ? media.duration : timeSeconds); seekTarget.current = null; }
   }
   const previewSource = work?.detailPreviewUrl || (work?.previewStatus === 'ready' ? work.previewUrl : null);
+  const videoReferenceHref = work?.medium === 'video' ? work.provenance?.videoReferenceHref : null;
   const blocked = busy || reading || Boolean(replacement), groups = context?.groups || [], firstGroup = groups.find(group => group.id === 'same-template' || group.id === 'same-submission'), remainingGroups = groups.filter(group => group !== firstGroup);
   const source = work?.provenance?.template || work?.provenance?.tool;
   const compareCandidates = (compareGroup ? groups.filter(group => group.id === compareGroup) : groups).flatMap(group => group.items).filter((item, index, all) => all.findIndex(other => other.id === item.id) === index);
@@ -187,7 +198,7 @@ export function WorkDetail({ id, viewerId, preparation, revision, likesRevision,
             <h1 ref={heading} tabIndex={-1} id="work-detail-title" className={styles.sourceTitle}>{source ? <a href={source.href}>{source.label}</a> : '作品详情'}</h1>
             <ExperienceActions label="继续使用作品" className={styles.detailSource}>
               {work.provenance?.template && <a href={work.provenance.tool.href}>{work.provenance.tool.label}</a>}
-              {work.provenance?.template && <button type="button" className={styles.primary} disabled={blocked || methodReading || context?.method?.action.kind !== 'template'} title={context?.method?.action.reason} onClick={() => void applyMethod()}>{methodReading ? '正在准备…' : '一键参考'}</button>}
+              {(videoReferenceHref || work.provenance?.template) && <button type="button" className={styles.primary} disabled={blocked || methodReading || !videoReferenceHref && context?.method?.action.kind !== 'template'} title={videoReferenceHref ? undefined : context?.method?.action.reason} onClick={() => void applyMethod()}>{methodReading ? '正在准备…' : '一键参考'}</button>}
             </ExperienceActions>
             {work.provenance?.template && <GuidedDemo kind="reuse" />}
             {notice && <OperationReceipt className={styles.notice} status={notice}
@@ -199,7 +210,7 @@ export function WorkDetail({ id, viewerId, preparation, revision, likesRevision,
               {work.project && <button type="button" onClick={() => onFilter('project', work.project!.id)}>{work.project.name}</button>}
               {context?.delivery && <p>{context.delivery.label}</p>}
               {context?.method?.settings.length ? <dl className={styles.methodSettings}>{context.method.settings.map(item => <div key={item.key}><dt>{item.label}</dt><dd>{typeof item.value === 'boolean' ? item.value ? '是' : '否' : String(item.value)}</dd></div>)}</dl> : null}
-              {context?.method?.action.reason && <p>{context.method.action.reason}</p>}
+              {!videoReferenceHref && context?.method?.action.reason && <p>{context.method.action.reason}</p>}
               {context?.method?.template && <p>原模板版本 {context.method.template.version}</p>}
               <div className={styles.detailControls}>
                 {!replacement && work.downloadUrl && <a href={work.downloadUrl} download className={styles.textAction}><Download size={16} />下载原件</a>}

@@ -52,7 +52,7 @@ async function readStored(db: Db, ownerId: string, sourceTaskId: string, request
   return value;
 }
 const sourceFields = ['id', 'project_id', 'owner_user_id', 'user_id', 'retention_status', 'source_metadata_json', 'params_json', 'snapshot_id',
-  'provider', 'prompt', 'generation_mode', 'model', 'ratio', 'duration', 'resolution', 'seed', 'generate_audio', 'return_last_frame', 'watermark',
+  'provider', 'prompt', 'generation_mode', 'model', 'ratio', 'duration', 'resolution', 'seed', 'generate_audio', 'return_last_frame', 'watermark', 'is_draft',
   'reference_image_ids', 'reference_image_urls', 'reference_video_urls', 'reference_audio_urls', 'first_frame_url', 'last_frame_url', 'frame_image_urls'];
 export const taskReuseSourceStamp = (value: object) => digest(JSON.stringify(sourceFields.map(field => (value as Record<string, unknown>)[field] ?? null)));
 async function assertSource(db: Db, user: SessionUser, sourceTaskId: string, stamp?: string) {

@@ -3,6 +3,7 @@ const DEFAULT_TASK_RETURN_TO = '/tasks';
 const ALLOWED_RETURN_PATHS = [
   '/tasks',
   '/assets',
+  '/works',
   '/generate',
   '/admin',
   '/admin/outputs',
@@ -45,6 +46,7 @@ export function taskReturnLabel(returnTo: string | null | undefined) {
   if (safeReturnTo.startsWith('/admin')) return '返回后台';
   if (withoutQueryOrHash(safeReturnTo) === '/usage') return '返回我的用量';
   if (withoutQueryOrHash(safeReturnTo) === '/assets') return '返回资产';
+  if (withoutQueryOrHash(safeReturnTo) === '/works') return '返回作品广场';
   if (safeReturnTo.startsWith('/generate')) return '返回生成页';
   if (/^\/projects\/[^/]+\/video-cards(\/|$)/.test(safeReturnTo)) return '返回视频卡';
   if (safeReturnTo.startsWith('/projects')) return '返回项目';

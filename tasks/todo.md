@@ -1371,3 +1371,8 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 <!-- FUSION-UX20-IMPLEMENTATION-TODO-20261111 -->
 - [x] 角色融合UX20三批已整合并部署 **v0.146.0**，待用户手动验收：主299b23305/3bx2WwtUhmnJqcUOd8sp8，同源9门保护432d73139/hef-UaX18nry02e07nlE0；26组隔离工程、双版完整类型/Next、54资源/10匿名401/7服务4timer与健康通过。保原卡片、多选和历史，持续/本批/单条共用引擎、批次身份、常驻聊天/撤销/长聊与词库接续已落地；无DDL/回填/真实LLM或浏览器验收。Review、恢复和A01–A13待手验边界见[原单最终交付](todo/2026-11-08-character-fusion.md#fusion-ux20-implementation)。本轮未新增范围外问题。
 <!-- /FUSION-UX20-IMPLEMENTATION-TODO-20261111 -->
+<!-- WORKS-VIDEOREF01-20261112 -->
+## WORKS-VIDEOREF01 视频详情一键参考（工程完成，待提交推送；未部署）
+
+作品广场打开视频后显示“一键参考”，直接进入对应视频生成页并沿原任务复用链恢复提示词、参考素材和设置；补齐样片开关及返回作品广场。普通/IP路由、原任务/素材权限、原号未知只查、草稿恢复与收费门保持。基线7bd03a42f，隔离分支`codex/works-video-reference-20261112`；遵守当前暂停后续上线指令，无浏览器/真实生成验收。[原作品单](todo/2026-11-02-team-works-implementation.md#works-videoref01-视频详情直接参考原输入2026-11-12)。
+<!-- /WORKS-VIDEOREF01-20261112 -->
