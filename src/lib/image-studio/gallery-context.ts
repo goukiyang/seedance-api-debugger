@@ -2,7 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { sharedDependencySettingKeys, sharedDependencyState, type SharedStudioClient } from './shared-contract';
 import { sharedCommandFingerprint } from './shared-command-storage';
 import { moduleCoverKey } from './module-cover';
-import { externalStudioPresetIds, isExternalImageStudioActor, type ImageStudioIdentity } from './access';
+import { externalStudioAllShared, externalStudioPresetIds, isExternalImageStudioActor, type ImageStudioIdentity } from './access';
 
 type Row = Record<string, unknown>;
 
@@ -33,7 +33,11 @@ export type GalleryPageSelection = { moduleIds: string[]; presetIds: string[] };
 export async function createGalleryReadContext(tx: Prisma.TransactionClient, ownerId: string, selection?: GalleryPageSelection, actor?: ImageStudioIdentity) {
   if (selection && selection.moduleIds.length + selection.presetIds.length > 120) throw new Error('gallery_page_exceeds_limit');
   const modules = await tx.imageStudioModule.findMany({ where: { owner_id: ownerId, ...(selection ? { id: { in: selection.moduleIds } } : {}) }, orderBy: [{ created_at: 'asc' }, { id: 'asc' }] });
-  const sources = await tx.imageStudioPreset.findMany({ where: actor && isExternalImageStudioActor(actor) ? { id: { in: [...externalStudioPresetIds(actor).filter(id => !selection || selection.presetIds.includes(id)), ...modules.flatMap(row => row.source_preset_id ? [row.source_preset_id] : [])] } }
+  const sources = await tx.imageStudioPreset.findMany({ where: actor && isExternalImageStudioActor(actor) ? { AND: [
+      { OR: [externalStudioAllShared(actor) ? { is_shared: true, scope: { in: ['admin', 'creator'] } } : { id: { in: externalStudioPresetIds(actor) } },
+        { id: { in: modules.flatMap(row => row.source_preset_id ? [row.source_preset_id] : []) } }] },
+      ...(selection ? [{ id: { in: [...selection.presetIds, ...modules.flatMap(row => row.source_preset_id ? [row.source_preset_id] : [])] } }] : []),
+    ] }
     : selection ? { id: { in: [...selection.presetIds, ...modules.flatMap(row => row.source_preset_id ? [row.source_preset_id] : [])] } } : { OR: [{ owner_id: ownerId }, { is_shared: true },
     { id: { in: modules.flatMap(row => row.source_preset_id ? [row.source_preset_id] : []) } }] }, orderBy: { id: 'asc' } });
   const settingPrefixes = ['studio_shared_binding_v1:', 'studio_shared_publisher_v1:', 'studio_fixed_references_v1:',

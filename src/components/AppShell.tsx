@@ -71,6 +71,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         {workspace && <WorkspaceSidebar accountId={user?.id || ''}
           internal={isNavItemVisible({ label: '创作', href: '/generate', externalHidden: true }, user)}
           images={isNavItemVisible({ label: '图片生成', href: '/image-studio', imageStudioOnly: true }, user)}
+          imageTemplates={isNavItemVisible({ label: '生图模板', href: '/template-studio?type=image&view=covers', imageTemplatesOnly: true }, user)}
           worksEnabled={user?.works_preview === true} activeView={workspace} />}
         {!workspace && !topbarOnlyShell && !imageStudioShell && !templateStudioShell && <SideNav isAdmin={user?.role === 'admin'} user={user} />}
         <main className={shellContentClass}>
