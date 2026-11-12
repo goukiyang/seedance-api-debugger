@@ -1,12 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '角色融合对话工作台',
+  title: '3D多视图生成预设读取提示修复',
   outline: [
-    '单条调整准确区分本次目标与保留要求',
-    '非战斗与不同岗位要求进入实际方案',
-    '新词确认后接续生成，取消状态清楚呈现',
-    '窄屏输入与反馈入口避让'
+    '已删除、失权或更新的预设显示具体原因',
+    '读取失败时可直接找到生成预设选择入口',
+    '更换预设时沿用原图片和个人输入'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
