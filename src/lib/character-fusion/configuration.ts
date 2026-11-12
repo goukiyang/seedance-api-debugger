@@ -10,7 +10,7 @@ export type FusionCardChoice = { id: string; use: FusionCardUse; values?: string
 export type FusionInlineChoice = { cardId?: string; title: string; titleEn: string; multi?: boolean; use?: Exclude<FusionCardUse, 'off'>;
   terms: Array<{ nameZh: string; nameEn: string; descriptionZh: string; descriptionEn: string }> };
 export type FusionConfiguration = { scope?: 'document' | 'batch'; cards?: FusionCardChoice[]; inlineCards?: FusionInlineChoice[];
-  count?: number; lang?: FusionSettings['lang']; role?: FusionSettings['role']; strict?: boolean; requirements?: { zh?: string; en?: string; enabled?: boolean } };
+  count?: number; lang?: FusionSettings['lang']; role?: FusionSettings['role']; generationMode?: 'append' | 'replace'; strict?: boolean; requirements?: { zh?: string; en?: string; enabled?: boolean } };
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 const strings = (value: unknown) => Array.isArray(value) && value.length <= 160 && value.every(item => typeof item === 'string' && item.length > 0 && item.length <= 300) && new Set(value).size === value.length;
@@ -20,7 +20,8 @@ export function parseFusionConfiguration(value: unknown): FusionConfiguration {
   if (!record(value) || value.scope !== undefined && !['document', 'batch'].includes(String(value.scope))
     || value.count !== undefined && !COUNTS.includes(Number(value.count)) || value.count !== undefined && typeof value.count !== 'number'
     || value.lang !== undefined && !['zh', 'en', 'both'].includes(String(value.lang)) || value.strict !== undefined && typeof value.strict !== 'boolean'
-    || value.role !== undefined && !['', '主角', '配角', '伙伴', '反派', 'Boss', '路人'].includes(String(value.role))) throw new Error('配置只支持当前数量、语言、定位与作用范围，请按注册格式重新配置。');
+    || value.role !== undefined && !['', '主角', '配角', '伙伴', '反派', 'Boss', '路人'].includes(String(value.role))
+    || value.generationMode !== undefined && !['append', 'replace'].includes(String(value.generationMode))) throw new Error('配置只支持当前数量、语言、定位、生成方式与作用范围，请按注册格式重新配置。');
   if (value.requirements !== undefined) {
     const requirement = value.requirements;
     if (!record(requirement) || requirement.enabled !== undefined && typeof requirement.enabled !== 'boolean'
@@ -97,6 +98,7 @@ export function configureFusionSettings(settings: FusionSettings, configuration:
   if (configuration.count !== undefined) next.count = configuration.count;
   if (configuration.lang !== undefined) next.lang = configuration.lang;
   if (configuration.role !== undefined) next.role = configuration.role;
+  if (configuration.generationMode !== undefined) next.generationMode = configuration.generationMode;
   if (configuration.strict !== undefined) next.diversity = configuration.strict ? 'strict' : 'prefer';
   if (configuration.requirements) {
     if (configuration.requirements.zh !== undefined) { next.requirements = configuration.requirements.zh; next.requirementsEn = configuration.requirements.en!; next.requirementsEnabled = configuration.requirements.enabled !== false; }

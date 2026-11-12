@@ -65,6 +65,7 @@ function valueFingerprint(value: unknown) {
 export const preparationFingerprint = (plan?: FusionGenerationPlan) => valueFingerprint(plan || null);
 const copy = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 const own = (value: object, key: string) => Object.prototype.hasOwnProperty.call(value, key);
+const settingField = (key: string) => key === 'generationMode' || own(defaults(), key);
 function text(value: unknown, max: number, label: string, empty = true): string {
   if (typeof value !== 'string' || value.length > max || (!empty && !value.trim())) throw new FusionError(`${label}无效。`);
   return value;
@@ -328,7 +329,7 @@ export function applyFusionCommands(current: FusionDocument, request: FusionOper
         if (command.target) {
           const row = next.rows.find(row => row.id === command.target!.rowId);
           if (!row || row.version !== command.target.version) throw new FusionError('目标方案已更新，请重新选择；未应用调整。', 409, 'FUSION_CONFLICT');
-          if (command.configuration.count !== undefined || command.configuration.strict !== undefined) throw new FusionError('当前只调整一条；数量或整批差异请清除单条目标后配置。');
+          if (command.configuration.count !== undefined || command.configuration.strict !== undefined || command.configuration.generationMode !== undefined) throw new FusionError('当前只调整一条；数量、整批差异或生成方式请清除单条目标后配置。');
           const original = settingsForRow(row.catalogueSnapshot?.settings || next.state.settings, row), pending = next.state.preparation?.row;
           if (pending && (pending.rowId !== row.id || pending.version !== row.version)) throw new FusionError('已有单条草稿绑定其它目标或旧版本，请先清除目标。', 409, 'FUSION_CONFLICT');
           const visible = applyFusionSettingChanges(original, pending?.changes || [], catalogue), configured = configureFusionSettings(visible, command.configuration, catalogue, request.opId);
@@ -372,7 +373,7 @@ export function applyFusionCommands(current: FusionDocument, request: FusionOper
         break;
       case 'patchSettings': {
         const changes: FusionFieldChange[] = [...(command.patch ? leaves(command.patch as Record<string, unknown>).map(change => ({ ...change, ...(getPath(command.expected, change.path) !== undefined ? { expected: getPath(command.expected, change.path) } : {}) })) : []), ...(command.changes || [])];
-        for (const change of changes) { if (!own(defaults(), change.path[0])) throw new FusionError('不支持的设置字段。'); compare(stale, ['settings', ...change.path], getPath(next.state.settings, change.path, stale), own(change, 'expected'), change.expected); setPath(next.state.settings, change.path, change.value); }
+        for (const change of changes) { if (!settingField(change.path[0])) throw new FusionError('不支持的设置字段。'); compare(stale, ['settings', ...change.path], getPath(next.state.settings, change.path, stale), own(change, 'expected'), change.expected); setPath(next.state.settings, change.path, change.value); }
         if (next.state.settings.catalogue?.dynamic) {
           bindFreshDynamicSnapshot(next.state.settings, catalogue);
           next.state.settings.catalogue = hydrateCatalogueSettings(next.state.settings.catalogue, catalogue, next.state.settings);
@@ -394,13 +395,14 @@ export function applyFusionCommands(current: FusionDocument, request: FusionOper
         const documentSettings = { ...next.state.settings, catalogue: hydrateCatalogueSettings(next.state.settings.catalogue || { details: {}, traits: {} }, catalogue, next.state.settings) };
         const batchSettings = copy(documentSettings);
         for (const change of plan?.overlay || []) {
-          if (!own(defaults(), change.path[0])) throw new FusionError('不支持的本批设置字段。');
+          if (!settingField(change.path[0])) throw new FusionError('不支持的本批设置字段。');
           compare(stale, ['settings', ...change.path], getPath(batchSettings, change.path, stale), own(change, 'expected'), change.expected);
           setPath(batchSettings, change.path, change.value);
         }
         if (plan?.count !== undefined) batchSettings.count = plan.count;
         bindFreshDynamicSnapshot(batchSettings, catalogue);
         const parsed = settingsWithIntent(parseFusionSettings(batchSettings), next.state.intent);
+        if (parsed.generationMode !== undefined && command.mode !== parsed.generationMode) throw new FusionError('生成方式与当前可见设置不一致，请重新核对后点击生成；原方案与输入保留。', 409, 'FUSION_CONFLICT');
         parsed.catalogue = hydrateCatalogueSettings(parsed.catalogue || { details: {}, traits: {} }, catalogue, parsed);
         const plannedAllocation = allocateFusionBatch(parsed, command.seed, { onceMust: plan?.onceMust, diversity: plan?.diversity || parsed.diversity, avoidSourceTermIds: context.recentSourceIds });
         const allocation = command.allocation ? { ...command.allocation, diversity: plannedAllocation.diversity } : plannedAllocation;

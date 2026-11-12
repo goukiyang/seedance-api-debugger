@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { defaults, textFor, settingsForRow, generateBatch, applyRowConfiguration, allocateFusionBatch } from '../src/lib/character-fusion/engine';
+import { defaults, parseSettings, textFor, settingsForRow, generateBatch, applyRowConfiguration, allocateFusionBatch } from '../src/lib/character-fusion/engine';
 import { builtinCatalogue } from '../src/lib/character-fusion/catalogue';
 import { BODY_CARDS } from '../src/lib/character-fusion/body-cards';
 import { emptyWorkspaceState, newCreationState, preparationFingerprint } from '../src/lib/character-fusion/actions';
@@ -8,6 +8,7 @@ import { effectiveFusionSettings, fusionSettingsChanges, applyFusionSettingChang
 import { bindFusionAgentCommands, proposeFusionAgent, validateFusionAgentExecution, fusionAgentScene, FUSION_CONFIGURATION_SYSTEM, FusionAgentError } from '../src/lib/character-fusion/agent-adapter.server';
 import type * as Workspace from '../src/lib/character-fusion/workspace.server';
 import type * as Library from '../src/lib/character-fusion/catalogue-repository';
+import { mergeWorkspaceRows, mergeWorkspaceState, stateCommands } from '../src/app/tools/character-fusion/workspace-client';
 
 /** Isolated SQLite and deterministic in-memory proposal cases; no network or browser acceptance. */
 export async function checkFusionUx22(input: { actor: { id: string }; repository: typeof Workspace; library: typeof Library }) {
@@ -246,5 +247,88 @@ export async function checkFusionUx22Fix01(input: { actor: { id: string }; repos
   catch (error) { assert(error instanceof FusionAgentError); largeFailure = error; }
   assert.equal(largeFailure?.diagnostic?.commandsOmitted, true); assert.equal(largeFailure?.diagnostic?.commands, undefined);
   checks.push('UX22拒绝私有诊断：六步末次原号保存机器reason/code和有界配置坏值，超限省略；人话与原查询不泄露诊断，文档仍1版0条/0业务写');
+  return checks;
+}
+
+/** Reproduce the replace-session/append-chat failure with real operation receipts. */
+export async function checkFusionUx22GenerationMode(input: { actor: { id: string }; repository: typeof Workspace }) {
+  const { actor, repository } = input, catalogue = builtinCatalogue(), checks: string[] = [];
+  const state = emptyWorkspaceState(); state.settings.count = 4; state.settings.generationMode = 'replace';
+  state.settings.requirementsEnabled = true; state.settings.requirements = '水墨造型'; state.settings.requirementsEn = 'Ink-wash character design';
+  const doc = await repository.createFusionWorkspace(actor, { opId: 'ux22-mode-create', state });
+  const original = await repository.executeWorkspaceOperation(actor, doc.workspace.id, { opId: 'ux22-mode-ink', baseVersion: 1, commands: [{ type: 'generate', mode: 'replace', seed: 148401 }] });
+  const oldRows = structuredClone(original.workspace.rows), base = structuredClone(original.workspace.state.settings);
+  const message = '追加4套剪纸风，仅用于这一批，不要替换已有方案';
+  let calls = 0;
+  const proposal = await proposeFusionAgent({ workspace: original.workspace, message, binding: { contract: 'configure', message }, complete: async messages => {
+    calls++; if (calls === 2) assert.match(JSON.parse(String(messages[messages.length - 1].content)).proposalError, /generationMode:"append"/);
+    return JSON.stringify({ reply: '已同步本批剪纸卡片，等待点击生成', commands: [{ type: 'configure', configuration: { scope: 'batch', ...(calls === 1 ? {} : { generationMode: 'append' }), requirements: { zh: '剪纸造型', en: 'Paper-cut character design' } } }] });
+  }, read: async () => ({}) });
+  assert.equal(proposal.iterations, 2);
+  const commands = bindFusionAgentCommands(proposal.proposal.commands, original.workspace, 148402, { contract: 'configure', message });
+  validateFusionAgentExecution(commands, original.workspace, catalogue, message);
+  const staged = await repository.executeWorkspaceOperation(actor, doc.workspace.id, { opId: 'ux22-mode-paper-config', baseVersion: original.workspace.version, commands });
+  assert.deepEqual(staged.workspace.rows, oldRows); assert.deepEqual(staged.workspace.state.settings, base);
+  const visible = effectiveFusionSettings(staged.workspace.state.settings, staged.workspace.state.preparation?.batch, catalogue);
+  assert.equal(visible.generationMode, 'append'); assert.equal(fusionAgentScene({ ...staged.workspace, state: { ...staged.workspace.state, settings: visible } }).settings.generationMode, 'append');
+  const copied = newCreationState(staged.workspace.state, 'inherit', catalogue), fresh = newCreationState(staged.workspace.state, 'fresh', catalogue);
+  assert.deepEqual(copied.settings, visible); assert.equal(copied.preparation, undefined); assert.deepEqual(copied.messages, []); assert.deepEqual(copied.selectedIds, []); assert.deepEqual(copied.retainedIds, []);
+  assert.equal(fresh.settings.generationMode, undefined); assert.equal(fresh.preparation, undefined);
+  await assert.rejects(() => repository.executeWorkspaceOperation(actor, doc.workspace.id, { opId: 'ux22-mode-stale-click', baseVersion: staged.workspace.version, commands: [{ type: 'generate', mode: 'replace', seed: 148402, preparationHash: preparationFingerprint(staged.workspace.state.preparation!.batch) }] }), /生成方式与当前可见设置不一致/);
+  const appended = await repository.executeWorkspaceOperation(actor, doc.workspace.id, { opId: 'ux22-mode-paper-click', baseVersion: staged.workspace.version, commands: [{ type: 'generate', mode: visible.generationMode!, seed: 148402, preparationHash: preparationFingerprint(staged.workspace.state.preparation!.batch) }] });
+  assert.equal(appended.rowsPage.total, 8); assert.deepEqual(appended.operation.effects!.removedIds, []); assert.equal(appended.operation.effects!.addedIds.length, 4);
+  assert.deepEqual(appended.workspace.rows.filter(row => oldRows.some(old => old.id === row.id)), oldRows); assert.deepEqual(appended.workspace.state.settings, base); assert.equal(appended.workspace.state.preparation, undefined);
+  const replay = await repository.executeWorkspaceOperation(actor, doc.workspace.id, { opId: 'ux22-mode-paper-click', baseVersion: staged.workspace.version, commands: [{ type: 'generate', mode: 'append', seed: 148402, preparationHash: preparationFingerprint(staged.workspace.state.preparation!.batch) }] });
+  assert.equal(replay.rowsPage.total, 8);
+  const undone = await repository.executeWorkspaceOperation(actor, doc.workspace.id, { opId: 'ux22-mode-paper-undo', baseVersion: appended.workspace.version, commands: [{ type: 'undo', operationId: 'ux22-mode-paper-click' }] });
+  assert.deepEqual(undone.workspace.rows.map(row => ({ ...row, version: oldRows.find(old => old.id === row.id)!.version })), oldRows);
+  assert.deepEqual(undone.workspace.state.settings, base); assert.equal(undone.workspace.state.preparation, undefined);
+  const retainedId = undone.workspace.rows[0].id;
+  const retained = await repository.executeWorkspaceOperation(actor, doc.workspace.id, { opId: 'ux22-mode-retain', baseVersion: undone.workspace.version, commands: [{ type: 'selection', retainedIds: [retainedId] }] });
+  const replaced = await repository.executeWorkspaceOperation(actor, doc.workspace.id, { opId: 'ux22-mode-replace-click', baseVersion: retained.workspace.version, commands: [{ type: 'generate', mode: 'replace', seed: 148403 }] });
+  assert.equal(replaced.rowsPage.total, 5); assert.equal(replaced.operation.effects!.removedIds.length, 3); assert(replaced.workspace.rows.some(row => row.id === retainedId));
+  const restored = await repository.executeWorkspaceOperation(actor, doc.workspace.id, { opId: 'ux22-mode-replace-undo', baseVersion: replaced.workspace.version, commands: [{ type: 'undo', operationId: 'ux22-mode-replace-click' }] });
+  assert.equal(restored.rowsPage.total, 4); assert.equal(restored.workspace.state.settings.generationMode, 'replace'); assert.equal(restored.workspace.state.preparation, undefined);
+  checks.push('UX22生成方式同源：replace底设→聊天仅本批追加纠错且0新增→点击真实8条/旧4与base不变；原号不双生、复制取可见值、新建追加、撤销不复活临时方式、替换保留项与撤销');
+
+  const legacyState = emptyWorkspaceState(); legacyState.settings.count = 4;
+  const legacyJson = JSON.stringify(legacyState.settings); assert.deepEqual(parseSettings(JSON.parse(legacyJson)), legacyState.settings);
+  const legacy = await repository.createFusionWorkspace(actor, { opId: 'ux22-mode-legacy-create', state: legacyState });
+  assert.equal((await repository.getWorkspace(actor, legacy.workspace.id)).workspace.state.settings.generationMode, undefined);
+  const legacyRows = await repository.executeWorkspaceOperation(actor, legacy.workspace.id, { opId: 'ux22-mode-legacy-click', baseVersion: 1, commands: [{ type: 'generate', mode: 'replace', seed: 148404 }] });
+  assert.equal(legacyRows.rowsPage.total, 4); assert.equal(legacyRows.workspace.state.settings.generationMode, undefined);
+  const appendConfiguration = { generationMode: 'append' as const };
+  const configured = await repository.executeWorkspaceOperation(actor, legacy.workspace.id, { opId: 'ux22-mode-document', baseVersion: legacyRows.workspace.version, commands: [{ type: 'configure', configuration: appendConfiguration }] });
+  assert.equal(configured.workspace.state.settings.generationMode, 'append');
+  const local = { ...configured.workspace.state, settings: { ...configured.workspace.state.settings, generationMode: 'replace' as const } };
+  const manual = await repository.executeWorkspaceOperation(actor, legacy.workspace.id, { opId: 'ux22-mode-manual', baseVersion: configured.workspace.version, commands: stateCommands(configured.workspace.state, local) });
+  assert.equal(manual.workspace.state.settings.generationMode, 'replace'); assert.deepEqual(manual.workspace.state.identity, configured.workspace.state.identity);
+  await assert.rejects(() => repository.executeWorkspaceOperation(actor, legacy.workspace.id, { opId: 'ux22-mode-stale-setting', baseVersion: configured.workspace.version, commands: [{ type: 'patchSettings', changes: [{ path: ['generationMode'], value: 'append', expected: 'append' }] }] }), /另一个操作|冲突|已更新/);
+  assert.equal((await repository.getWorkspace(actor, legacy.workspace.id)).workspace.state.settings.generationMode, 'replace');
+  const oldReplay = await repository.executeWorkspaceOperation(actor, legacy.workspace.id, { opId: 'ux22-mode-legacy-click', baseVersion: 1, commands: [{ type: 'generate', mode: 'replace', seed: 148404 }] }); assert.equal(oldReplay.rowsPage.total, 4);
+  assert.throws(() => parseFusionConfiguration({ generationMode: 'overwrite' }), /生成方式/);
+  await assert.rejects(() => repository.executeWorkspaceOperation(actor, legacy.workspace.id, { opId: 'ux22-mode-row-invalid', baseVersion: manual.workspace.version, commands: [{ type: 'configure', target: { rowId: manual.workspace.rows[0].id, version: manual.workspace.rows[0].version }, configuration: appendConfiguration }] }), /生成方式请清除单条目标/);
+  for (const text of ['不要替换已有方案，只追加4套', 'Append 4 proposals', '追加剪纸仅本批']) assert.throws(() => bindFusionAgentCommands([{ type: 'configure', configuration: {} }], manual.workspace, 148405, { contract: 'configure', message: text }), /generationMode:"append"/);
+  for (const text of ['替换未保留方案', '不要追加一批，替换现有方案', 'Replace the current batch']) assert.throws(() => bindFusionAgentCommands([{ type: 'configure', configuration: {} }], manual.workspace, 148405, { contract: 'configure', message: text }), /generationMode:"replace"/);
+  for (const text of ['不要替换已有方案', '只替换当前卡片的画风', '给临时卡片追加一个词条', '讨论追加4套是否合适', '撤销刚才追加4套']) assert.doesNotThrow(() => bindFusionAgentCommands([{ type: 'configure', configuration: {} }], manual.workspace, 148405, { contract: 'configure', message: text }));
+  checks.push('UX22生成方式兼容：旧JSON/只读不回填、旧replace原号可读；document与手动设置共用局部CAS，非法值/单条方式拒绝，明确追加替换与否定/讨论/改卡片反例');
+
+  const cached = appended.workspace.rows, authoritative = replaced.workspace.rows;
+  const complete = { ...replaced, workspace: { ...replaced.workspace, rows: authoritative }, rowChanges: undefined, rowsPage: { total: 5, nextCursor: null } };
+  assert.deepEqual(mergeWorkspaceRows(cached, complete), authoritative);
+  assert.deepEqual(mergeWorkspaceRows(cached, { ...complete, workspace: { ...complete.workspace, rows: [] }, rowsPage: { total: 0, nextCursor: null } }), []);
+  const orderReceipt = { ...replaced, workspace: { ...replaced.workspace, rows: authoritative.slice(0, 2) }, rowChanges: { upsert: authoritative, removedIds: [], order: authoritative.map(row => row.id) }, rowsPage: { total: 5, nextCursor: 'more' } };
+  assert.deepEqual(mergeWorkspaceRows(cached, orderReceipt), authoritative);
+  assert.deepEqual(mergeWorkspaceRows(cached, { ...orderReceipt, rowChanges: { upsert: [], removedIds: [], order: [] } }), []);
+  const first = { ...complete, workspace: { ...complete.workspace, rows: authoritative.slice(0, 2) }, rowsPage: { total: 5, nextCursor: 'more' } };
+  assert.deepEqual(mergeWorkspaceRows(cached, first, false, false, appended.workspace.version), authoritative.slice(0, 2));
+  assert.deepEqual(mergeWorkspaceRows(cached, { ...first, rowChanges: { upsert: [], removedIds: [] } }, false, false, appended.workspace.version), authoritative.slice(0, 2));
+  const last = { ...complete, workspace: { ...complete.workspace, rows: authoritative.slice(2) } };
+  assert.deepEqual(mergeWorkspaceRows(authoritative.slice(0, 2), last, false, true, replaced.workspace.version), authoritative);
+  assert.deepEqual(mergeWorkspaceRows(authoritative, { ...first, workspace: { ...first.workspace, version: replaced.workspace.version - 1 } }, false, false, replaced.workspace.version), authoritative);
+  assert.deepEqual(mergeWorkspaceRows(cached, first, true), authoritative.slice(0, 2));
+  const localDraft = { ...replaced.workspace.state, idea: '请求开始后仍在编辑的草稿' };
+  assert.equal(mergeWorkspaceState(replaced.workspace.state, localDraft, complete.workspace.state).idea, localDraft.idea);
+  checks.push('UX22服务器结果集合：真实替换回执/完整GET/空页/完整order清幽灵行，新版本首屏重建缓存、分页累加与旧版本拒绝，文档切换独立且草稿不被结果集合覆盖');
   return checks;
 }

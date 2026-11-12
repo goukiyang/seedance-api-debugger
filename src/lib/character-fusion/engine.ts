@@ -16,7 +16,7 @@ export type Categories = Record<Dimension, string>;
 export type FusionSettings = {
   rules: Record<Dimension, Tag[]>; requirements: string; count: number; lang: 'zh' | 'en' | 'both';
   boss: Categories; bossLocks: Record<Dimension, boolean>; bossDimensions: Dimension[];
-  requirementsEnabled: boolean; requirementsEn: string; cards: FusionCard[]; role: string; catalogue?: CatalogueSettings; diversity?: 'prefer' | 'strict';
+  requirementsEnabled: boolean; requirementsEn: string; cards: FusionCard[]; role: string; catalogue?: CatalogueSettings; diversity?: 'prefer' | 'strict'; generationMode?: 'append' | 'replace';
 };
 type Source = { name: string; shape: string; anchor: string; root: string; en?: string; shapeEn?: string; anchorEn?: string };
 type Concept = { name: string; prop: string; mood: string; suffix: string; en?: string; propEn?: string; moodEn?: string };
@@ -81,7 +81,8 @@ export function parseSettings(input: unknown): FusionSettings {
   if (s.requirementsEnabled !== undefined && typeof s.requirementsEnabled !== 'boolean'
     || s.requirementsEn !== undefined && (typeof s.requirementsEn !== 'string' || s.requirementsEn.length > 10000 || /[\u3400-\u9fff]/.test(s.requirementsEn))
     || s.role !== undefined && !['', '主角', '配角', '伙伴', '反派', 'Boss', '路人'].includes(s.role)
-    || s.cards !== undefined && (!Array.isArray(s.cards) || s.cards.length > 16) || s.diversity !== undefined && !['prefer', 'strict'].includes(s.diversity)) throw new Error('扩展卡片或英文设置无效。');
+    || s.cards !== undefined && (!Array.isArray(s.cards) || s.cards.length > 16) || s.diversity !== undefined && !['prefer', 'strict'].includes(s.diversity)
+    || s.generationMode !== undefined && !['append', 'replace'].includes(s.generationMode)) throw new Error('扩展卡片、生成方式或英文设置无效。');
   const cards = (s.cards || []).map(c => {
     const draft = parseCardDraft(c);
     if (!/^card-[a-zA-Z0-9-]{1,80}$/.test(c.id) || typeof c.joined !== 'boolean' || typeof c.locked !== 'boolean' || !draft.tags.some(t => t.label === c.value)) throw new Error('扩展卡片选择无效。');
@@ -91,7 +92,7 @@ export function parseSettings(input: unknown): FusionSettings {
   });
   if (new Set(cards.map(c => c.id)).size !== cards.length) throw new Error('扩展卡片重复。');
   return reconcile({ rules, boss, bossLocks, bossDimensions: [...s.bossDimensions], requirements: s.requirements, count: s.count, lang: s.lang,
-    requirementsEnabled: s.requirementsEnabled === true, requirementsEn: s.requirementsEn || '', role: s.role || '', cards, catalogue: parseCatalogue(s.catalogue), ...(s.diversity ? { diversity: s.diversity } : {}) });
+    requirementsEnabled: s.requirementsEnabled === true, requirementsEn: s.requirementsEn || '', role: s.role || '', cards, catalogue: parseCatalogue(s.catalogue), ...(s.diversity ? { diversity: s.diversity } : {}), ...(s.generationMode ? { generationMode: s.generationMode } : {}) });
 }
 export const allowed = (s: FusionSettings, id: Dimension) => s.rules[id].filter(t => t.status !== 'exclude').map(t => t.label);
 export const required = (s: FusionSettings, id: Dimension) => s.rules[id].filter(t => t.status === 'must').map(t => t.label);
