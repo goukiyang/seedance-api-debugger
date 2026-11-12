@@ -522,7 +522,7 @@ async function main() {
       await engine.prepareImageBillingQuote(owner, externalBody);
       assert.equal(JSON.stringify(specificationInputs[quoteAt]), JSON.parse(inherited.task.billing_contract_json).specification);
     } else {
-      const before = { tasks: created.length, specifications: specificationInputs.length };
+      const before: { tasks: number; specifications: number } = { tasks: created.length, specifications: specificationInputs.length };
       await assert.rejects(() => prepare(externalBody), /外部生图暂未开放/);
       await assert.rejects(() => engine.prepareImageBillingQuote(owner, externalBody), /外部生图暂未开放/);
       assert.deepEqual({ tasks: created.length, specifications: specificationInputs.length }, before);
