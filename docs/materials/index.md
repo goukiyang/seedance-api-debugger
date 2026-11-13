@@ -1,3 +1,8 @@
+<!-- RULES-REGRESSION01-EVIDENCE-20261113 -->
+RULES-REGRESSION01：同主题私有rules-regression01-20261113保存有效全局入口/三技能/项目规则的前后回档、差量和校验审查；仅规则维护，未新增运行/下载功能验收。来源、保护与结果沿[原溯源单](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-12-feedback-submit-rootcause.md#rules-regression01)。
+<!-- /RULES-REGRESSION01-EVIDENCE-20261113 -->
+
+
 <!-- VID-DL03-EVIDENCE-20261113 -->
 VID-DL03：原下载资料下私有delivery-natural-exit-20261113保存根因摘要、旧代码红例/新代码27本机与28Linux工程、候选及部署原件/审查；实际v14817与1.1.2新封存身份、原片3份SHA/inode、3旧未知及价格保护可核。此次没有在途下载，不冒真实功能通过；余项及原证见[下载原单](../../tasks/todo/2026-11-09-video-playback-start.md#vid-dl03)。
 <!-- /VID-DL03-EVIDENCE-20261113 -->

@@ -1,3 +1,8 @@
+<!-- RULES-REGRESSION01-20261113 -->
+RULES-REGRESSION01：仅规则/skills已补齐，3项技能格式、20项新链接与15个正反场景文本审查通过；两处过宽旧触发/扫描及收口证据冲突已修。按实际共享约定/控制关系与入口状态定向选择，不全盘触发。项目规则和两索引聚焦Git，局部全局入口/技能私有回档；未改业务/应用版、未访问或操作线上，无程序门禁新增。实际Git与边界沿[原溯源单](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-12-feedback-submit-rootcause.md#rules-regression01)。
+<!-- /RULES-REGRESSION01-20261113 -->
+
+
 <!-- VID-DL03-20261113 -->
 VID-DL03已无感部署v0.148.17（4b267512a/GBla51MbqposcfWI90nIR），默认发布器1.1.2已启用：先暂停下载timer，等活动保存及子进程自然退出再交接；等待时网站及其它三timer继续。28项Linux工程/完整构建、8阶段和双域产物通过，旧原片/未知/价格/2h保持，无旧生成重发/改账/DB恢复。本次切换无在途保存，真实跨发版效果待用户手验；源站慢、队列补位和反馈另批，详[原下载单VID-DL03](todo/2026-11-09-video-playback-start.md#vid-dl03)。
 <!-- /VID-DL03-20261113 -->
