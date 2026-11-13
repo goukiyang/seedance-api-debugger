@@ -41,12 +41,13 @@ export function MultiviewReferenceComposer(props: Props) {
   const workRef = useRef(work); workRef.current = work;
   const live = useRef(props); live.current = props;
   const identity = `${props.ownerId}:${props.authority}:${props.taskId}:${props.info.sourceVersion}`;
+  const mounted=useRef(true);useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
   const currentIdentity = useRef(identity); currentIdentity.current = identity;
   const numericGesture = useRef<MultiviewReferenceRecipe | null>(null);
   const lock = useRef(false), canvas = useRef<HTMLDivElement>(null), saved = useRef('');
   const drag = useRef<{ id: string; pointer: number; target: Element; x: number; y: number; rectWidth: number; rectHeight: number; start: MultiviewReferenceRecipe; synchronized: boolean; mode: 'move' | 'scale'; corner: ReferenceScaleCorner } | null>(null);
   const headers = useCallback(() => ({ 'Content-Type': 'application/json', 'x-app-session-user': props.ownerId }), [props.ownerId]);
-  const valid = (scope = identity) => currentIdentity.current === scope && !isClientSessionBlocked();
+  const valid = (scope = identity) => mounted.current && currentIdentity.current === scope && !isClientSessionBlocked();
   const signature = JSON.stringify(recipe);
   const ready = Boolean(work?.ready && work.ready.revision === work.draftRevision && saved.current === signature && work.status === 'ready');
   const collage = ready ? work?.ready?.files.find(file => file.role === 'collage') : null;

@@ -25,7 +25,7 @@ export type MultiviewActionInput={text:string;parameters:MultiviewActionParamete
 type Props = { inputError?:string; referenceChanged?:boolean; initialInput?:MultiviewActionInput; onChangeOriginal?:(input:MultiviewActionInput)=>void; hasReferenceDraft?:boolean; onResumeDraft?:()=>void; restored?: MultiviewActionRestore; onSelectVideo?: (id: string) => Promise<boolean>; active?: boolean; ownerId: string; authority: string; work: MultiviewWorkDto | null; videoDefaults?: {model:string;duration:number;resolution:string;projectId:string;videoCardId:string|null}; outputReady: boolean; snapshotKey: string; onPrepare(): Promise<MultiviewWorkDto>; ratio: '16:9'|'9:16'|'1:1'; activeView: 'reference'|'video'; onView(value: 'reference'|'video'): void };
 type Quote = { key: string; text: string; parameters: MultiviewActionParameters; points: number | null; pricingRevision: string | null; token?: string };
 type Original = { key: string; runId: string; taskId: string | null };
-type AiRequest = { requestId: string; runId?: string; edit: number; status?: string; model?: string; referenceImage?: boolean };
+type AiRequest = { videoId?:string; requestId: string; runId?: string; edit: number; status?: string; model?: string; referenceImage?: boolean };
 type AiJournal = { current: AiRequest | null; retained: AiRequest[] };
 const finished = new Set(['succeeded','failed','cancelled','canceled','completed','error']);
 function RuleDialog({ kind, ownerId, onClose, onSaved }: { kind: MultiviewActionContextKind; ownerId: string; onClose(): void; onSaved(): void }) {
@@ -66,6 +66,7 @@ export function MultiviewActionPanel(props: Props) {
   const aiPoll=useRef({key:'',count:0}),videoPoll=useRef({key:'',count:0});
   const modelController=useRef<AbortController|null>(null);
   const scope=`${props.ownerId}:${props.authority}:${props.work?.id||''}`;
+  const mounted=useRef(true);useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
   const liveScope=useRef(scope);liveScope.current=scope;
   const workRef=useRef(props.work);workRef.current=props.work;
   const input=useRef({text,parameters});input.current={text,parameters};
@@ -78,7 +79,7 @@ export function MultiviewActionPanel(props: Props) {
   const aiKey=`sd2:multiview-action-text-request:v2:${props.ownerId}:${props.work?.id||'pending'}`;
   const modelKey=`sd2:multiview-action-llm:v1:${props.ownerId}`;
   const projectCatalogRevision = useProjectCatalogRevision();
-  const active=useCallback((value=scope)=>liveScope.current===value&&!isClientSessionBlocked(),[scope]);
+  const active=useCallback((value=scope)=>mounted.current&&liveScope.current===value&&!isClientSessionBlocked(),[scope]);
   const headers=useCallback(()=>({'Content-Type':'application/json','x-app-session-user':props.ownerId}),[props.ownerId]);
   const api=useCallback(async<T,>(url:string,body?:unknown,method='POST',signal?:AbortSignal):Promise<T>=>{const response=await fetch(url,{method:body===undefined?'GET':method,cache:'no-store',headers:headers(),...(body===undefined?{}:{body:JSON.stringify(body)}),signal:signal||AbortSignal.timeout(45000)});const value=await response.json();if(!response.ok)throw Object.assign(new Error(value.error||value.message||'暂时无法完成，当前输入保留。'),{status:response.status,result:value});return value as T;},[headers]);
   const creation=useCreationContext({ownerId:props.ownerId,entry:'multiview',draftId:`action:${props.work?.id||'preparing'}`,projectId:parameters.project_id||null,legacyCardId:parameters.video_card_id,enabled:Boolean(hydrated&&parameters.project_id),onProjectChange:id=>setParameters(value=>({...value,project_id:id}))});
@@ -184,7 +185,7 @@ export function MultiviewActionPanel(props: Props) {
       if(withReference){setMessage('正在准备当前参考拼图…');preparedWork=await props.onPrepare();if(!active(captured))return;}
       const savedDraft=await saveDraft(preparedWork,frozen);if(!savedDraft||!active(captured))return;
       setMessage('');
-      const pending:AiRequest={requestId:crypto.randomUUID(),edit:sourceEdit,model:llmModel,referenceImage:withReference};
+      const pending:AiRequest={videoId:props.restored?.taskId,requestId:crypto.randomUUID(),edit:sourceEdit,model:llmModel,referenceImage:withReference};
       aiReferenceKeyRef.current=withReference?{requestId:pending.requestId,key:sourceReferenceKey}:null;
       const previous=aiJournalRef.current;
       keepAiJournal({current:pending,retained:previous.current?[...previous.retained,previous.current]:previous.retained});retained=true;
@@ -294,6 +295,7 @@ export function MultiviewActionPanel(props: Props) {
         {modelMessage&&<p className={styles.notice} role="status">{modelMessage}</p>}
         {!state?.capabilities.llmEnabled&&state?.capabilities.llmReason&&<p className={styles.notice}>{state.capabilities.llmReason}</p>}
         {state?.capabilities.billingLabel&&<p className={styles.notice}>{state.capabilities.billingLabel}</p>}
+        {aiPending?.videoId&&aiPending.videoId!==props.restored?.taskId&&<p className={styles.notice}>原文案来自另一版视频，当前输入保留。<button type="button" onClick={()=>void props.onSelectVideo?.(aiPending.videoId!)}>回到原视频</button></p>}
         {aiPending&&<div className={styles.requestNotice} role="status"><span>{aiPending.status==='uncertain'?`尚未收到整理结果${aiPending.model?'（'+aiPending.model+'）':''}，当前原文保留；原请求待确认，不会重发。`:aiPending.status==='queued'?'文案已排队，等待整理结果。':aiPending.runId?'正在查询原文案进度。':'文案提交结果待确认，原请求保留。'}</span><button type="button" onClick={()=>void queryAi()}>查询原文案</button></div>}
         {aiJournal.retained.length>0&&<details className={styles.retained}><summary>待核对的原文案（{aiJournal.retained.length}）</summary>{aiJournal.retained.map(item=><div className={styles.requestNotice} key={item.requestId}><span>{item.model||'原文案'} · 结果待确认</span><button type="button" onClick={()=>void queryAi(true,item)}>查询此原文案</button></div>)}</details>}
         {suggestion&&<div className={styles.notice}><p>新整理已就绪，当前动作保留。</p><button onClick={()=>{setBeforeAi(text);setAppliedRunId(suggestion.id);updateText(suggestion.text||'');setSuggestion(null);}}>使用此整理</button><button onClick={()=>setSuggestion(null)}>保留当前动作</button></div>}
