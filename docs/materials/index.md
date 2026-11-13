@@ -1,3 +1,7 @@
+<!-- RULES-EXEC-FIX01-EVIDENCE-20261113 -->
+RULES-EXEC-FIX01：原规则资料下implementation-20261113T165212Z私有保存源/字段备份、57项最终检查、原生前后/幂等/配置差量及当前真实写入入口证据；区分本机启用、云端未启用与自然Stop未观察。详[原单](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-12-feedback-submit-rootcause.md#rules-exec-fix01)。
+<!-- /RULES-EXEC-FIX01-EVIDENCE-20261113 -->
+
 <!-- RULES-EXEC-FIXPLAN01-EVIDENCE-20261113 -->
 RULES-EXEC-FIXPLAN01：原规则资料下minimal-repair-plan-20261113保存方案准备、当前原生协议字段、原静默意图来源及记录差量，证据分层，不冒实施或真实Jev验证；详[原单](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-12-feedback-submit-rootcause.md#rules-exec-fixplan01)。
 <!-- /RULES-EXEC-FIXPLAN01-EVIDENCE-20261113 -->

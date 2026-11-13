@@ -1,3 +1,7 @@
+<!-- RULES-EXEC-FIX01-20261113 -->
+RULES-EXEC-FIX01：W1/W2本机修复及启用验证完成，57项有效源检查、真实工具写入/范围复用、原生双工作区身份与幂等通过；W3按需Jev入口和未就绪回退已接好，真实云端未启用。业务与线上未动，旧会话自然收尾另观察。详[原单](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-12-feedback-submit-rootcause.md#rules-exec-fix01)。
+<!-- /RULES-EXEC-FIX01-20261113 -->
+
 <!-- RULES-EXEC-FIXPLAN01-20261113 -->
 RULES-EXEC-FIXPLAN01：最小修复设计完成，分W1当前判断跨工作区、W2按身份恢复注册意图、W3按需Jev建议；范围、风险、反例验证与回退沿[原单](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-12-feedback-submit-rootcause.md#rules-exec-fixplan01)。仅方案，未改运行机制/业务或线上，缺陷仍待修复，Jev真实启用另满足就绪条件。
 <!-- /RULES-EXEC-FIXPLAN01-20261113 -->
