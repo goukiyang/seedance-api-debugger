@@ -1,3 +1,7 @@
+<!-- RULES-EXEC-FIXPLAN01-20261113 -->
+RULES-EXEC-FIXPLAN01：最小修复设计完成，分W1当前判断跨工作区、W2按身份恢复注册意图、W3按需Jev建议；范围、风险、反例验证与回退沿[原单](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-12-feedback-submit-rootcause.md#rules-exec-fixplan01)。仅方案，未改运行机制/业务或线上，缺陷仍待修复，Jev真实启用另满足就绪条件。
+<!-- /RULES-EXEC-FIXPLAN01-20261113 -->
+
 <!-- RULES-EXEC-ROOTCAUSE01-20261113 -->
 RULES-EXEC-ROOTCAUSE01：有界执行链根因调查及隔离对照完成，新增确认问题已归全局发现入口；前次入口核验的适用范围已补正。详细原证与未核边界沿[原调查单](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-12-feedback-submit-rootcause.md#rules-exec-rootcause01)。本批仅调查/记录，未修复运行机制，业务与线上未动。
 <!-- /RULES-EXEC-ROOTCAUSE01-20261113 -->
