@@ -11,16 +11,20 @@ import { createMultiviewReferenceRecipe, referencePixelGeometry, resizeMultiview
   type ReferenceLayout, type ReferencePlacement, type ReferenceScaleCorner } from '@/lib/video/multiview-reference-layout';
 import { MULTIVIEW_REFERENCE_SAVE_PROTOCOL, parseMultiviewWorkRecipe, type MultiviewReferenceRecipe, type MultiviewWorkDto, type MultiviewSourceAccess } from '@/lib/video/multiview-work-contract';
 import type { MultiviewInfo, MultiviewSlot } from '@/lib/video/multiview-contract';
-import { MultiviewActionPanel } from './MultiviewActionPanel';
+import { MultiviewActionPanel, type MultiviewActionInput } from './MultiviewActionPanel';
+import type { MultiviewActionRestore } from '@/lib/video/multiview-action-restore-contract';
 import styles from './multiview-action.module.css';
 
-type Props = { active?: boolean; ownerId: string; authority: string; taskId: string; info: MultiviewInfo; slots: MultiviewSlot[];
-  mediaBase: string; initialWorkId?: string; videoDefaults?: {model:string;duration:number;resolution:string;projectId:string;videoCardId:string|null}; access?: MultiviewSourceAccess; onWorkBound(id:string):void; onBack(): void };
+type Props = { initialInput?:MultiviewActionInput; onChangeOriginal?:(input:MultiviewActionInput)=>void; restored?: MultiviewActionRestore; onSelectVideo?: (id:string)=>Promise<boolean>; replacementSlots?: {slots:MultiviewSlot[];token:number}; active?: boolean; ownerId: string; authority: string; taskId: string; info: MultiviewInfo; slots: MultiviewSlot[];
+  mediaBase: string; initialWorkId?: string; videoDefaults?: {model:string;duration:number;resolution:string;projectId:string;videoCardId:string|null}; access?: MultiviewSourceAccess; onWorkBound(id:string):void; onBack(slots:MultiviewSlot[]): void };
 type BackgroundState = { stage: string; message: string; priceMessage?: string; resultUrl?: string | null; foreground?: MultiviewReferenceRecipe['foregrounds'][number] | null };
 type Pending = { mutationId: string; workId: string | null; signature: string };
 const dimensions = { '16:9': [1920, 1080], '9:16': [1080, 1920], '1:1': [1536, 1536] } as const;
 export function MultiviewReferenceComposer(props: Props) {
-  const key = `sd2:multiview-reference:v3:${props.ownerId}:${props.taskId}:${props.info.sourceVersion}:${props.initialWorkId || props.slots.map(slot => slot.id).join(',')}`;
+  const legacyKey = `sd2:multiview-reference:v3:${props.ownerId}:${props.taskId}:${props.info.sourceVersion}:${props.initialWorkId || props.slots.map(slot => slot.id).join(',')}`;
+  const key = props.restored ? `sd2:multiview-reference-video:v1:${props.ownerId}:${props.restored.taskId}` : legacyKey;
+  const [hasReferenceDraft,setHasReferenceDraft]=useState(false);
+  const [missingRecipe,setMissingRecipe]=useState(Boolean(props.restored&&!props.restored.recipe));
   const [recipe, setRecipe] = useState<MultiviewReferenceRecipe>(() => createMultiviewReferenceRecipe(props.info, props.slots, { width: 1920, height: 1080, background: '#d6dbdf' }));
   const [referenceKey, setReferenceKey] = useState('');
   const [work, setWork] = useState<MultiviewWorkDto | null>(null);
@@ -32,17 +36,18 @@ export function MultiviewReferenceComposer(props: Props) {
   const [backgrounds, setBackgrounds] = useState<Record<string,BackgroundState>>({}), [backgroundBusy, setBackgroundBusy] = useState('');
   const [showStyle, setShowStyle] = useState(false), [precise, setPrecise] = useState(false);
   const [syncAdjust, setSyncAdjust] = useState(false), [dragging, setDragging] = useState(false);
-  const [activeView, setActiveView] = useState<'reference' | 'video'>('reference');
+  const [activeView, setActiveView] = useState<'reference' | 'video'>(props.restored?'video':'reference');
   const recipeRef = useRef(recipe); recipeRef.current = recipe;
   const workRef = useRef(work); workRef.current = work;
   const live = useRef(props); live.current = props;
   const identity = `${props.ownerId}:${props.authority}:${props.taskId}:${props.info.sourceVersion}`;
+  const mounted=useRef(true);useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
   const currentIdentity = useRef(identity); currentIdentity.current = identity;
   const numericGesture = useRef<MultiviewReferenceRecipe | null>(null);
   const lock = useRef(false), canvas = useRef<HTMLDivElement>(null), saved = useRef('');
   const drag = useRef<{ id: string; pointer: number; target: Element; x: number; y: number; rectWidth: number; rectHeight: number; start: MultiviewReferenceRecipe; synchronized: boolean; mode: 'move' | 'scale'; corner: ReferenceScaleCorner } | null>(null);
   const headers = useCallback(() => ({ 'Content-Type': 'application/json', 'x-app-session-user': props.ownerId }), [props.ownerId]);
-  const valid = (scope = identity) => currentIdentity.current === scope && !isClientSessionBlocked();
+  const valid = (scope = identity) => mounted.current && currentIdentity.current === scope && !isClientSessionBlocked();
   const signature = JSON.stringify(recipe);
   const ready = Boolean(work?.ready && work.ready.revision === work.draftRevision && saved.current === signature && work.status === 'ready');
   const collage = ready ? work?.ready?.files.find(file => file.role === 'collage') : null;
@@ -70,11 +75,13 @@ export function MultiviewReferenceComposer(props: Props) {
         const local = stored?.recipe ? parseMultiviewWorkRecipe(stored.recipe, props.info) : null;
         const next = id ? await readWork(id) : null;
         if (cancelled || !valid(scope)) return;
-        const restored = local?.schema === 3 ? local : next?.recipe?.schema === 3 ? next.recipe : recipeRef.current;
+        const restored = (props.initialInput&&props.restored&&local?.schema===3?local:null) || props.restored?.recipe || (props.restored ? createMultiviewReferenceRecipe(props.info,props.slots,{width:1920,height:1080,background:'#d6dbdf'}) : local?.schema === 3 ? local : next?.recipe?.schema === 3 ? next.recipe : recipeRef.current);
+        setHasReferenceDraft(Boolean(!props.initialInput&&props.restored&&local&&JSON.stringify(local)!==JSON.stringify(props.restored.recipe)));
+        if(props.restored?.warnings.length)setMessage(props.restored.warnings.join(' '));
         recipeRef.current = restored; setRecipe(restored); setSelected(restored.slots[0]?.id || '');
         setSyncAdjust(stored?.syncAdjust === true);
         setReferenceKey(typeof stored?.referenceKey === 'string' ? stored.referenceKey : crypto.randomUUID());
-        if (next) { setWork(next); saved.current = JSON.stringify(next.recipe); if(local && stored?.baseRevision !== undefined && stored.baseRevision !== next.revision && JSON.stringify(local)!==JSON.stringify(next.recipe)){setBlocked(true);setMessage('作品已在另一处更新，当前排版保留，请先核对最新版本。');} }
+        if (next) { setWork(next); saved.current = JSON.stringify(next.recipe); if(!props.restored && local && stored?.baseRevision !== undefined && stored.baseRevision !== next.revision && JSON.stringify(local)!==JSON.stringify(next.recipe)){setBlocked(true);setMessage('作品已在另一处更新，当前排版保留，请先核对最新版本。');} }
         if (stored?.pending) setPending(stored.pending);
         const preference = localStorage.getItem(`sd2:multiview-reference-style:${props.ownerId}`);
         if (!local && !next && preference) { const style = JSON.parse(preference); if (/^#[a-f0-9]{6}$/i.test(style.background)) restored.output.background = style.background; if (typeof style.divider === 'boolean') restored.divider.enabled = style.divider; setRecipe({ ...restored }); }
@@ -86,14 +93,14 @@ export function MultiviewReferenceComposer(props: Props) {
   }, [identity, key, readWork]);
   useEffect(()=>{if(!work?.id)return;live.current.onWorkBound(work.id);const url=new URL(window.location.href);url.searchParams.set('referenceWorkId',work.id);window.history.replaceState(window.history.state,'',url.pathname+url.search);},[work?.id]);
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || props.restored && (missingRecipe || JSON.stringify(recipe)===JSON.stringify(props.restored.recipe))) return;
     try {
       const retained=JSON.stringify({ recipe, referenceKey, workId: work?.id || null, baseRevision:work?.revision, pending, syncAdjust });
       localStorage.setItem(key, retained);
-      if(work?.id)localStorage.setItem(`sd2:multiview-reference:v3:${props.ownerId}:${props.taskId}:${props.info.sourceVersion}:${work.id}`,retained);
+      if(!props.restored&&work?.id)localStorage.setItem(`sd2:multiview-reference:v3:${props.ownerId}:${props.taskId}:${props.info.sourceVersion}:${work.id}`,retained);
       localStorage.setItem(`sd2:multiview-reference-style:${props.ownerId}`, JSON.stringify({ background: recipe.output.background, divider: recipe.divider.enabled }));
     } catch { setBlocked(true); setMessage('当前排版暂不能在本机保留，请保留页面。'); }
-  }, [hydrated, key, recipe, referenceKey, work?.id, pending, props.ownerId, syncAdjust]);
+  }, [hydrated, key, recipe, referenceKey, work?.id, pending, props.ownerId, syncAdjust,missingRecipe,props.restored,props.info.sourceVersion,props.taskId,work?.revision]);
   async function queryOriginal() {
     if (!pending || lock.current) return;
     const scope = identity; lock.current = true; setBusy(true);
@@ -135,6 +142,7 @@ export function MultiviewReferenceComposer(props: Props) {
   // Only this hidden source intent is automatic; edits never render or enter the works library.
   useEffect(() => { if (!hydrated || !referenceKey || work || busy || blocked || pending || drag.current) return; void prepare(true); });
   async function prepareForVideo() {
+    if(missingRecipe)throw new Error('这条历史视频没有完整选帧配方，请先重新选择参考帧；尚未生成。');
     const scope = identity;
     const accepted = await prepare();
     if (!accepted) throw new Error('请先核对拼图保存状态，尚未提交视频。');
@@ -273,12 +281,31 @@ export function MultiviewReferenceComposer(props: Props) {
     return () => { cancelled = true; };
   }, [work?.id]);
   useEffect(()=>{const waiting=Object.entries(backgrounds).find(([,value])=>value.stage==='accepted');if(!waiting||backgroundBusy)return;const timer=setTimeout(()=>void background(waiting[0]),4000);return()=>clearTimeout(timer);});
+  useEffect(()=>{
+    const replacement=props.replacementSlots;if(!replacement||!hydrated)return;
+    const before=recipeRef.current, slots=replacement.slots;
+    const fresh=createMultiviewReferenceRecipe(props.info,slots,before.output);
+    const remap=(id:string)=>slots[before.slots.findIndex(slot=>slot.id===id)]?.id;
+    edit({...fresh,divider:before.divider,
+      ...(slots.length===before.slots.length?{panels:before.panels.map(item=>({...item,slotId:remap(item.slotId)!})),placements:before.placements.map(item=>({...item,slotId:remap(item.slotId)!}))}:{}),
+      foregrounds:before.foregrounds.filter(item=>slots.some(slot=>slot.id===item.slotId&&before.slots.some(old=>old.id===slot.id&&old.frame===slot.frame)))});
+    setMissingRecipe(false);setActiveView('reference');setSelected(slots[0]?.id||'');
+    // The replacement token represents one explicit application from the picker.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[props.replacementSlots?.token,hydrated]);
+  function resumeReferenceDraft(){
+    try{const raw=localStorage.getItem(key);const restored=raw?parseMultiviewWorkRecipe(JSON.parse(raw).recipe,props.info):null;
+      if(restored?.schema!==3)throw new Error('上次拼图草稿暂不可读取，当前画面保留。');edit(restored);setHasReferenceDraft(false);setMissingRecipe(false);}
+    catch(cause){setMessage(cause instanceof Error?cause.message:'上次草稿暂不可读取。');}
+  }
   const placement = recipe.placements.find(item => item.slotId === selected);
   const layoutOptions: Array<[ReferenceLayout, string]> = recipe.slots.length === 2 ? [['horizontal', '左右分屏'], ['vertical', '上下分屏']] : recipe.slots.length === 3 ? [['large-left', '左一右二'], ['large-top', '上一下二'], ['equal', '均分']] : [['grid', '四宫格']];
   return <section className={styles.referenceWorkspace} aria-label="动作视频工作区">
-    {productDialog}<header className={styles.topbar}><button type="button" onClick={props.onBack}><ArrowLeft size={15} />返回选帧</button><div role="group" aria-label="当前画面"><button aria-pressed={activeView === 'reference'} onClick={() => setActiveView('reference')}>参考拼图</button><button aria-pressed={activeView === 'video'} onClick={() => setActiveView('video')}>视频</button></div></header>
+    {productDialog}<header className={styles.topbar}><button type="button" disabled={!hydrated||busy} onClick={()=>props.onBack(recipeRef.current.slots)}><ArrowLeft size={15} />换参考帧</button><div role="group" aria-label="当前画面"><button aria-pressed={activeView === 'reference'} onClick={() => setActiveView('reference')}>参考拼图</button><button aria-pressed={activeView === 'video'} onClick={() => setActiveView('video')}>视频</button></div></header>
     <div className={styles.continuous}>
       <div className={styles.visual} hidden={activeView === 'video'}>
+        {missingRecipe&&props.restored?.referenceImageUrl&&<img className={styles.originalReference} src={props.restored.referenceImageUrl} alt="这条视频生成时的参考拼图"/>}
+        {missingRecipe&&<p className={styles.notice}>原参考图可查看；完整选帧配方未记录，请先换参考帧。</p>}
         <div className={styles.compact}><span>{recipe.slots.length} 个镜头</span><label>画幅<select value={ratio} onChange={event => { const [width,height] = dimensions[event.target.value as keyof typeof dimensions]; edit(resizeMultiviewReference(recipe, props.info, { ...recipe.output, width, height })); }}><option>16:9</option><option>9:16</option><option>1:1</option></select></label><label>排版<select onChange={event => edit(resizeMultiviewReference(recipe, props.info, recipe.output, event.target.value as ReferenceLayout))} value={layoutOptions.find(([name])=>JSON.stringify(referencePanels(recipe.slots,name))===JSON.stringify(recipe.panels))?.[0]||layoutOptions[0][0]}>{layoutOptions.map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></label><label>背景<input type="color" value={recipe.output.background} onChange={event => edit({ ...recipe, output: { ...recipe.output, background: event.target.value } })} /></label><label><input type="checkbox" checked={recipe.divider.enabled} onChange={event => edit({ ...recipe, divider: { ...recipe.divider, enabled: event.target.checked } })} />分隔线</label>{recipe.divider.enabled && <button type="button" onClick={() => setShowStyle(value => !value)}>样式</button>}</div>
         {showStyle && recipe.divider.enabled && <div className={styles.compact}><label>线色<input type="color" value={recipe.divider.color} onChange={event => edit({ ...recipe, divider: { ...recipe.divider, color: event.target.value } })} /></label><label>线宽<input type="number" min={1} max={24} value={recipe.divider.widthPx} onChange={event => edit({ ...recipe, divider: { ...recipe.divider, widthPx: Number(event.target.value) } })} />px</label></div>}
         <div ref={canvas} className={styles.referenceCanvas} data-dragging={dragging || undefined} style={{ aspectRatio: `${geometry.width}/${geometry.height}`, background: recipe.output.background }}>
@@ -293,7 +320,7 @@ export function MultiviewReferenceComposer(props: Props) {
           </div>)}
         </div>
         <div className={styles.compact}><small>{geometry.width} × {geometry.height}</small><span className={styles.spacer} /><button type="button" disabled={dragging || !history.length} onClick={() => { const next=history[history.length-1]; setHistory(value=>value.slice(0,-1));setFuture(value=>[recipe,...value]);edit(next,false); }}><Undo2 size={14}/>撤销</button><button type="button" disabled={dragging || !future.length} onClick={() => { const next=future[0];setFuture(value=>value.slice(1));setHistory(value=>[...value,recipe]);edit(next,false); }}><Redo2 size={14}/>重做</button></div>
-        <div className={styles.compact}><button type="button" className={styles.syncAdjust} aria-pressed={syncAdjust} disabled={!hydrated || dragging} title={syncAdjust ? '一起移动和缩放所有镜头主体' : '只调整当前镜头主体'} onClick={()=>setSyncAdjust(value=>!value)}>{syncAdjust ? <LockKeyhole size={14}/> : <UnlockKeyhole size={14}/>}同步调整</button><span>镜头 {recipe.slots.findIndex(slot=>slot.id===selected)+1}</span>{placement && <><button onClick={()=>adjust({x:placement.x-2/geometry.width})} aria-label="向左微移">←</button><button onClick={()=>adjust({x:placement.x+2/geometry.width})} aria-label="向右微移">→</button><button onClick={()=>adjust({y:placement.y-2/geometry.height})} aria-label="向上微移">↑</button><button onClick={()=>adjust({y:placement.y+2/geometry.height})} aria-label="向下微移">↓</button><span>大小</span><button onClick={()=>adjust({width:placement.width*.95})}>−</button><button onClick={()=>adjust({width:placement.width*1.05})}>＋</button><button onClick={()=>setPrecise(value=>!value)}>精调</button><button onClick={resetPlacement}>{syncAdjust ? '全部复位' : '复位'}</button></>}</div>
+        <div className={styles.compact}><button type="button" className={styles.syncAdjust} aria-pressed={syncAdjust} disabled={!hydrated || dragging || missingRecipe} title={syncAdjust ? '一起移动和缩放所有镜头主体' : '只调整当前镜头主体'} onClick={()=>setSyncAdjust(value=>!value)}>{syncAdjust ? <LockKeyhole size={14}/> : <UnlockKeyhole size={14}/>}同步调整</button><span>镜头 {recipe.slots.findIndex(slot=>slot.id===selected)+1}</span>{placement && <><button onClick={()=>adjust({x:placement.x-2/geometry.width})} aria-label="向左微移">←</button><button onClick={()=>adjust({x:placement.x+2/geometry.width})} aria-label="向右微移">→</button><button onClick={()=>adjust({y:placement.y-2/geometry.height})} aria-label="向上微移">↑</button><button onClick={()=>adjust({y:placement.y+2/geometry.height})} aria-label="向下微移">↓</button><span>大小</span><button onClick={()=>adjust({width:placement.width*.95})}>−</button><button onClick={()=>adjust({width:placement.width*1.05})}>＋</button><button onClick={()=>setPrecise(value=>!value)}>精调</button><button onClick={resetPlacement}>{syncAdjust ? '全部复位' : '复位'}</button></>}</div>
         {precise && placement && <div className={styles.compact}>{(['x','y','width'] as const).map(field=><label key={field}>{field==='width'?'宽度':field.toUpperCase()}<input type="number" value={Math.round(placement[field]*(field==='y'?geometry.height:geometry.width))} onFocus={()=>{numericGesture.current=recipeRef.current;}} onChange={event=>adjust({[field]:Number(event.target.value)/(field==='y'?geometry.height:geometry.width)},false)} onBlur={finishNumericGesture} />px</label>)}</div>}
         <div className={styles.compact}>{recipe.slots.map((slot,index)=><button type="button" key={slot.id} aria-pressed={selected===slot.id} onClick={()=>setSelected(slot.id)}>镜头 {index+1}</button>)}<button type="button" onClick={()=>{ const fresh=createMultiviewReferenceRecipe(props.info,recipe.slots,recipe.output);edit({...fresh,divider:recipe.divider,foregrounds:recipe.foregrounds}); }}>恢复推荐排版</button></div>
         <div className={styles.compact}><button type="button" title="前移一层" aria-label="前移一层" disabled={!placement || placement.z===recipe.placements.length-1 || dragging} onClick={()=>layer(1)}><ArrowUpToLine size={16}/></button><button type="button" title="后移一层" aria-label="后移一层" disabled={!placement || placement.z===0 || dragging} onClick={()=>layer(-1)}><ArrowDownToLine size={16}/></button></div>
@@ -301,7 +328,7 @@ export function MultiviewReferenceComposer(props: Props) {
         <div className={styles.compact}><button disabled={!work || busy} onClick={()=>void output(true)}><Copy size={14}/>复制图片</button><button disabled={!work || busy} onClick={()=>void output(false)}><Download size={14}/>下载PNG</button><button disabled={!hydrated || busy || blocked || Boolean(pending)} onClick={async()=>{try{const next=await prepareForVideo();const response=await fetch(`/api/video/multiview/works/${next.id}/files/collage/asset`,{headers:headers(),cache:'no-store'});const value=await response.json();if(!response.ok)throw new Error(value.error);setMessage('已保存到我的素材。');}catch(cause){setMessage(cause instanceof Error?cause.message:'素材登记尚未完成。');}}}>保存素材</button></div>
         <div role="status" className={styles.notice}>{pending ? <>保存结果待确认 <button onClick={()=>void queryOriginal()}>查询原保存</button></> : busy || work && ['queued','rendering','waiting_source'].includes(work.status) ? '正在准备拼图…' : work?.status === 'failed' ? <>{work.lastError || '拼图准备失败'}<button onClick={()=>void prepare()}>重新准备</button></> : ''}{message}{blocked && <button onClick={async()=>{try{if(work){const latest=await readWork(work.id);if(!valid())return;setWork(latest);}setBlocked(false);setMessage('已核对最新版本，当前排版保留。');}catch(cause){setMessage(cause instanceof Error?cause.message:'最新版本暂不可读取。');}}}>核对最新并保留排版</button>}</div>
       </div>
-      <MultiviewActionPanel active={props.active} ownerId={props.ownerId} authority={props.authority} work={work} videoDefaults={props.videoDefaults} outputReady={ready} snapshotKey={signature} onPrepare={prepareForVideo} ratio={ratio} activeView={activeView} onView={setActiveView} />
+      <MultiviewActionPanel inputError={missingRecipe?'这条历史视频缺少完整选帧配方，请先换参考帧。':props.restored&&!props.restored.referenceImageUrl&&signature===JSON.stringify(props.restored.recipe)?'原参考图已不可用，请先换参考帧或调整拼图。':undefined} referenceChanged={Boolean(props.restored&&signature!==JSON.stringify(props.restored.recipe))} initialInput={props.initialInput} onChangeOriginal={props.onChangeOriginal} restored={props.restored} onSelectVideo={async id=>{try{if(props.restored&&JSON.stringify(recipeRef.current)!==JSON.stringify(props.restored.recipe))localStorage.setItem(key,JSON.stringify({recipe:recipeRef.current,referenceKey,workId:workRef.current?.id,baseRevision:workRef.current?.revision,pending,syncAdjust}));}catch{setMessage('当前拼图未能保留，请重试后再切换。');return false;}return props.onSelectVideo?props.onSelectVideo(id):true;}} hasReferenceDraft={hasReferenceDraft} onResumeDraft={resumeReferenceDraft} active={props.active} ownerId={props.ownerId} authority={props.authority} work={work} videoDefaults={props.videoDefaults} outputReady={ready} snapshotKey={signature} onPrepare={prepareForVideo} ratio={ratio} activeView={activeView} onView={setActiveView} />
     </div>
   </section>;
 }

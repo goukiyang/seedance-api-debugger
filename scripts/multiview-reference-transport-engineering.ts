@@ -6,6 +6,7 @@ import path from 'node:path';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import sharp from 'sharp';
+import { videoPendingStatusLabel } from '../src/components/generate/video-submission-state';
 import { seedanceLocalReferenceTransport } from '../src/lib/provider/reference-image-transport';
 import { buildSeedanceVideoPayload, redactInlineImageTransport } from '../src/lib/provider/jimeng';
 import { videoDeliveryStageForTask, videoPlayableAvailableForTask } from '../src/lib/video/delivery-status';
@@ -345,7 +346,7 @@ async function main() {
   const assetsAst = ts.createSourceFile('page.tsx', assetsSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const labelFunctions = assetsAst.statements.filter((node): node is ts.FunctionDeclaration => ts.isFunctionDeclaration(node) && node.name?.text === 'statusLabel');
   assert.equal(labelFunctions.length, 1);
-  const labels: Record<string, any> = {};
+  const labels: Record<string, any> = { videoPendingStatusLabel };
   runInNewContext(ts.transpileModule(labelFunctions[0].getText(assetsAst), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, labels);
   assert.equal(labels.statusLabel('submission_unknown'), '提交结果待确认');
   for (const [status, label] of Object.entries({ succeeded: '已完成', running: '生成中', submitted: '排队中', failed: '失败', cancelled: '已取消', active: '可用', hidden: '已隐藏', deleted: '已删除' })) {

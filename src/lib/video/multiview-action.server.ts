@@ -268,6 +268,8 @@ export async function finalizeMultiviewAction(user: SessionUser, input: unknown)
   const reference = await ensureMultiviewReferenceAsset(user, parsed.workId, parsed.workRevision);
   const [format, sync] = await Promise.all([readMultiviewActionContext('format'), readMultiviewActionContext('sync')]);
   if (!format.context.trim() || !sync.context.trim()) throw conflict('固定规则尚未配置');
+  const editableWork = await referenceDraftWork(user, parsed.workId);
+  if (editableWork.recipe?.schema !== 3 || multiviewWorkRecipeHash(editableWork.recipe) !== reference.recipeHash) throw conflict('参考拼图已变化，请重新准备');
   const output = reference.geometry.output;
   const ratio = parameters.ratio.split(':').map(Number);
   if (Math.abs(output.width / output.height - ratio[0] / ratio[1]) > 0.002) throw conflict('视频比例与参考拼图不同，请先调整画幅');
@@ -286,7 +288,7 @@ export async function finalizeMultiviewAction(user: SessionUser, input: unknown)
   const frozen = { ...reference, geometry: JSON.parse(JSON.stringify(reference.geometry)) as Record<string, StudioJsonValue>, parameters,
     actionText: text, formatRevision: format.revision, syncRevision: sync.revision, format: format.context, sync: sync.context, backgroundPolicy };
   const inputHash = makeFingerprint(frozen);
-  value.multiviewAction = { stage: 'final', attemptId: normalizedAttemptId, workId: parsed.workId, revision: parsed.workRevision, recipeHash: reference.recipeHash, outputHash: reference.outputHash,
+  value.multiviewAction = { editableRecipe: editableWork.recipe, stage: 'final', attemptId: normalizedAttemptId, workId: parsed.workId, revision: parsed.workRevision, recipeHash: reference.recipeHash, outputHash: reference.outputHash,
     sourceTaskId: reference.sourceTaskId, sourceVersion: reference.sourceVersion, geometry: frozen.geometry, assetId: reference.assetId,
     inputHash, formatRevision: format.revision, syncRevision: sync.revision, backgroundPolicy };
   const requestId = `mv-action-final:${makeFingerprint([inputHash, draft.id, normalizedAttemptId])}`;
