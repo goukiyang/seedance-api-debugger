@@ -1,0 +1,3 @@
+interface:
+  display_name: "反馈与飞书接收闭环"
+  short_description: "梳理反馈提交、飞书卡片、已收到回执、站内展示与修复回测的完整链路"
