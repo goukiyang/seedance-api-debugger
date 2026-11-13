@@ -59,7 +59,7 @@ export async function sd2ReleaseCli(argv = process.argv.slice(2)) {
   if (['release', 'resume-release', 'status-release'].includes(command) && args.length === 1) {
     const plan = rootJson(args[0], 64 * 1024 * 1024);
     assert.equal(plan.schema, 'sd2-seamless-plan.v1');
-    assert.match(plan.engineRoot, /^\/data\/video-api-debugger\/release-engines\/1\.1\.[01]-[a-f0-9]{64}$/);
+    assert.match(plan.engineRoot, /^\/data\/video-api-debugger\/release-engines\/1\.1\.[012]-[a-f0-9]{64}$/);
     const entry = path.join(plan.engineRoot, 'release-entry.mjs');
     const stat = fs.lstatSync(entry); assert.ok(stat.isFile() && stat.uid === 0 && !(stat.mode & 0o022));
     return command === 'status-release' ? forward(entry, [command, ...args]) : forwardSeamless(entry, [command, ...args]);

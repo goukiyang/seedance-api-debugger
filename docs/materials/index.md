@@ -12,6 +12,8 @@ CCCC-DEBATE01同目录新增私有`cccc-debate01/`：2卡/2份真实Claude意见
 CC-DISCUSS01同目录新增私有cc-discuss01/：两轮合作讨论的卡/真实CC意见/审计6份、2份结果JSON/2份wrapper日志共10份原件，另存summary与16源码指纹。两轮wrapper0、同HEAD同Git状态，原件SHA/0700/0600可核；推荐分阶段执行/发布隔离、暂不分库，普通/H3与Ark合同、原号/原图/权限/账务和回退边界详原单CC-DISCUSS01。运行事实仍待后续核，不冒称新线上故障；无代码、测试、生产或部署改动。
 
 STAB01最终原证沿同目录私有stab01/candidate与deployed：6份候选、4份部署原件和审查摘要0600/0700可核，实际55feb1a13/v14813/I3oEN、31工程、完整types/Next、8阶段complete及价格/权限/无DB恢复保护有证；源与源码/回调整合差异经复核。原单STAB01已收口“已部署，待用户手验”，本机旧client与离线输出权限原失败保留，不当生产故障；无新真实生成/浏览器功能验收。
+
+STAB02同目录私有stab02/新增根因只读摘要、12+31原工程、candidate与deployed原证/审查：真实829c8b013/v14815/xfnEu、完整types/Next进程0、外层旧清单1及限定接续0均保留；8阶段发布完成、双域目标JS和7角色、3旧未知整行及价格保护有证。runtime-isolation以实际loaded unit核finalize inactive/delivery timer active及2h、角色根同新源；执行隔离与响应后永久转圈剩余证据沿原单，不冒功能通过。无新生成/旧任务重发/账务或数据恢复，实际功能待用户手验。
 <!-- /FB-PULL-20261112-MATERIALS -->
 
 <!-- ARK-CHARACTER-ASSET01-MATERIALS-20261111 -->

@@ -1,11 +1,10 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '多视图视频与编辑输入同步恢复',
+  title: '更新时继续保存已有视频',
   outline: [
-    '切换预览视频时还原对应文案、规格和参考图',
-    '换帧后直接回到原动作方案，保留修改草稿',
-    '旧视频和原请求保留，确认后才生成新版本'
+    '正在保存的视频完成后再交接下载服务',
+    '保留原任务、原片与下载队列'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

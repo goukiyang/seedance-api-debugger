@@ -445,8 +445,17 @@ export function createNativeSeamlessDriver(planFile) {
       await until(() => acceptedConnectionCount(3302) === 0, 'Original SD2 upstream requests remain; candidate remains online');
       await until(() => classifySynchronousRows(readRuntimeRows(p), p).oldRunningImages === 0, 'Original synchronous images still running; candidate remains online');
       assert.deepEqual(privateRead(PRIVATE + '/policy-active.json'), bytes(p.privateFiles[PRIVATE + '/policy-active.json']));
-      for (const name of TIMERS) if (p.timers[name] === 'active') nativeCall('/usr/bin/systemctl', ['stop', name + '.timer']);
+      if (p.timers['sd2-video-delivery'] === 'active') nativeCall('/usr/bin/systemctl', ['stop', 'sd2-video-delivery.timer']);
       await targetReady('image'); await targetReady('main');
+      // Stopping a oneshot timer leaves its current bounded save batch running.
+      await until(() => {
+        const state = properties('sd2-video-delivery.service');
+        return state.MainPID === '0' && state.ControlPID === '0'
+          && ['inactive', 'failed'].includes(state.ActiveState)
+          && groupPids('/system.slice/sd2-video-delivery.service').length === 0;
+      }, 'Video saves are still running; candidate remains online and the original delivery service is retained');
+      for (const name of TIMERS.filter(name => name !== 'sd2-video-delivery'))
+        if (p.timers[name] === 'active') nativeCall('/usr/bin/systemctl', ['stop', name + '.timer']);
       for (const name of [...WEB_UNITS, ...AUX_UNITS]) {
         const file = '/run/systemd/system/' + name + '.service.d/zzzzzzzzzzzzzzzz-seamless-drain.conf'; mkdir(path.dirname(file), 0o755);
         ensure(file, '[Service]\nRestart=no\nSendSIGKILL=no\nTimeoutStopSec=infinity\nKillSignal=SIGTERM\n', 0o644);
