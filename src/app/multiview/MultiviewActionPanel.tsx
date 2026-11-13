@@ -167,13 +167,14 @@ export function MultiviewActionPanel(props: Props) {
       let preparedWork=workRef.current;
       if(withReference){setMessage('正在准备当前参考拼图…');preparedWork=await props.onPrepare();if(!active(captured))return;}
       const savedDraft=await saveDraft(preparedWork,frozen);if(!savedDraft||!active(captured))return;
+      setMessage('');
       const pending:AiRequest={requestId:crypto.randomUUID(),edit:sourceEdit,model:llmModel,referenceImage:withReference};
       aiReferenceKeyRef.current=withReference?{requestId:pending.requestId,key:sourceReferenceKey}:null;
       const previous=aiJournalRef.current;
       keepAiJournal({current:pending,retained:previous.current?[...previous.retained,previous.current]:previous.retained});retained=true;
       const value=await api<{run:MultiviewActionRun}>(withReference?'/api/video/multiview/actions/reference-runs':'/api/video/multiview/actions/runs',{draftId:savedDraft.id,revision:savedDraft.revision,requestId:pending.requestId,llmModel,referenceImage:withReference});if(active(captured))consumeAi(value.run,pending);
     }catch(cause){if(active(captured)){
-      if(!retained)setMessage(cause instanceof Error?cause.message:'参考拼图未能准备，尚未提交整理；当前输入保留。');
+      if(!retained)setMessage(cause instanceof Error?cause.message.replace('尚未提交视频','尚未提交整理'):'参考拼图未能准备，尚未提交整理；当前输入保留。');
       else if((cause as {result?:{details?:{notAccepted?:boolean}}})?.result?.details?.notAccepted===true){keepAiJournal({...aiJournalRef.current,current:null});setMessage(cause instanceof Error?cause.message:'本次整理未受理，原动作保留。');}
       else setMessage('文案提交结果待确认，请查询原请求。');
     }}
@@ -264,7 +265,7 @@ export function MultiviewActionPanel(props: Props) {
       {showVideo&&selectedRun?<><p className={styles.frozenText}>{selectedRun.text}</p><p className={styles.notice}>{seedanceVideoModelLabel(selectedRun.parameters.model)} · {selectedRun.parameters.duration} 秒 · {selectedRun.parameters.resolution}</p><button onClick={()=>{if(!newAttempt())return;updateText(selectedRun.text||'');setParameters(selectedRun.parameters);props.onView('reference');}}>修改动作再做</button></>:<>
         <textarea aria-label="动作" placeholder="例如：原地挥拳三次，从轻到重。" maxLength={12000} value={text} disabled={!hydrated} onChange={event=>updateText(event.target.value)}/>
         <label className={styles.aiReference}><input type="checkbox" checked={referenceImage} disabled={!hydrated||aiBusy} onChange={event=>setReferenceImage(event.target.checked)}/>让 GPT 参考当前拼图</label>
-        {referenceImage&&state&&!state.capabilities.referenceImageEnabled&&<p className={styles.notice}>当前服务暂不支持图片参考，可取消勾选继续文字整理。</p>}
+        {referenceImage&&state&&!state.capabilities.referenceImageEnabled&&<p className={styles.notice}>当前服务暂不支持图片参考；当前输入和原请求均保留。</p>}
         <div className={styles.aiControls}>
           <button type="button" disabled={!state?.capabilities.llmEnabled||referenceImage&&!state.capabilities.referenceImageEnabled||!llmReady||!text.trim()||aiBusy||Boolean(aiPending&&aiPending.status!=='uncertain')||saving||draftBlocked} onClick={()=>void organize()}>{aiBusy?'正在提交…':aiPending?.status==='uncertain'?'新建一次整理':aiPending?(aiPending.runId?'正在整理…':'提交结果待确认'):'AI整理动作'}</button>
           <div className={styles.modelPicker}><select aria-label="文案模型" value={llmReady?llmModel:''} onChange={event=>rememberModel(event.target.value)}><option value="" disabled>{modelsBusy&&!llmModels.length?'正在读取模型…':modelAvailabilityReason||'请选择可用文案模型'}</option>{modelOptions.map(model=><option key={model.id} value={model.id}>{model.label}</option>)}</select><button type="button" disabled={modelsBusy} aria-busy={modelsBusy} onClick={()=>{void loadModels(true);void refreshAvailability();}}><RefreshCw size={15}/>{modelsBusy?'更新中…':'更新'}</button></div>
