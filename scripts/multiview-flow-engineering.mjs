@@ -60,9 +60,16 @@ restored=await restoreHarness({imageMissing:true}).read('video');assert.equal(re
 
 // Execute the real frame-return handler with state adapters, then validate its real recipe.
 let frameDraft={schema:2,sourceVersion:info.sourceVersion,slots:[...slots,{id:'shot-c',frame:6,name:'背面',manual:false}],reserve:[],restoreOrder:[],layout:{columns:3,margin:0,gap:0,background:'#d6dbdf'}};
-const picker={draft:frameDraft,update:next=>{frameDraft=next;},setReferenceSelection:value=>{picker.selection=value;},setReferencePicking:value=>{picker.picking=value;}};
-vm.runInNewContext(functions('src/app/multiview/page.tsx',['chooseReferenceFrames']),picker);
+const originalFrameDraft=JSON.stringify(frameDraft);
+const picker={draft:frameDraft,visible:true,operation:{current:null},quickFrameLock:{current:null},referenceFrameBackup:{current:null},referenceReturnScroll:{current:null},draftRef:{current:frameDraft},draftEdited:true,saved:true,retainedDraft:'original',undo:null,viewRef:{current:{selected:'shot-c'}},window:{scrollX:0,scrollY:300},Date,
+  setReferenceNotice(){},setDraft:next=>{frameDraft=next;picker.draft=next;},setDraftEdited(){},setSaved(){},setRetainedDraft(){},setUndo(){},setView(){},
+  setReferenceReplacement:value=>{picker.replacement=value;},setReferenceSelection:value=>{picker.referenceSelection=value;picker.selection=value;},setReferencePicking:value=>{picker.picking=value;}};
+vm.runInNewContext(functions('src/app/multiview/page.tsx',['chooseReferenceFrames','finishReferenceFrames']),picker);
 picker.actual.chooseReferenceFrames(slots);assert.deepEqual(Array.from(picker.selection),['shot-a','shot-b']);assert.equal(picker.picking,true);assert.ok(contract.parseMultiviewWorkRecipe(frameDraft,info));checks.push('returning to frames starts with the original two selections and a valid editable frame set');
+picker.actual.finishReferenceFrames(false);assert.equal(JSON.stringify(frameDraft),originalFrameDraft);assert.equal(picker.picking,false);checks.push('canceling reference adjustment restores the original gallery draft and selection state');
+const eight={...frameDraft,slots:info.timestamps.map((_,frame)=>({id:'original-'+frame,frame,name:'',manual:false})),reserve:[]};picker.draft=eight;picker.draftRef.current=eight;
+picker.actual.chooseReferenceFrames(slots);picker.actual.finishReferenceFrames(true);assert.equal(picker.draft.slots.length,8);assert.equal(picker.draft.slots[7].id,'original-7');assert.equal(picker.replacement.slots.length,2);checks.push('applying new reference frames preserves all eight original gallery frames');
+
 
 // Execute the actual preview detail loader; display is committed after input restoration.
 const previewSource=fs.readFileSync('src/app/multiview/MultiviewVideoResults.tsx','utf8');
