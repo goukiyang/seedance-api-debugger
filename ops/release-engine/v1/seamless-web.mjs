@@ -8,6 +8,7 @@ import bridges from './seamless-bridges.mjs';
 import { DEFAULT_DELIVERY, SEAMLESS_CONTROL, SEAMLESS_STATIC, digest, assertSeamlessCompatible } from './seamless-policy.mjs';
 import { verifyFixedProgramEntry, PRICING_START_GUARD_SHA256 } from './pricing-start-pair.mjs';
 import { parseAllOwnerSynchronousRows } from './cutover-safety.mjs';
+import { privateDataBytes } from './seamless-shadow-start.mjs';
 
 export const PROJECT = '/data/video-api-debugger';
 export const WEB_UNITS = ['sd2-gray', 'sd2-image-studio', 'sd2-hd-derivatives', 'sd2-multiview-works',
@@ -31,20 +32,20 @@ function mkdir(file, mode = 0o700, gid = 0) {
   const s = fs.lstatSync(file); assert.ok(s.isDirectory() && s.uid === 0 && !(s.mode & 0o022));
   assert.equal(fs.realpathSync(file), file);
 }
-export function writeExclusive(file, bytes, mode = 0o600, gid = 0) {
+export function writeExclusive(file, bytes, mode = 0o600, gid = 0, uid = 0) {
   const fd = fs.openSync(file, 'wx', mode);
-  try { fs.writeFileSync(fd, bytes); fs.fchownSync(fd, 0, gid); fs.fchmodSync(fd, mode); fs.fsyncSync(fd); }
+  try { fs.writeFileSync(fd, bytes); fs.fchownSync(fd, uid, gid); fs.fchmodSync(fd, mode); fs.fsyncSync(fd); }
   finally { fs.closeSync(fd); }
   const d = fs.openSync(path.dirname(file), 'r'); try { fs.fsyncSync(d); } finally { fs.closeSync(d); }
 }
 function ensure(file, bytes, mode = 0o600, gid = 0) {
   if (fs.existsSync(file)) assert.deepEqual(rootBytes(file), Buffer.from(bytes)); else writeExclusive(file, bytes, mode, gid);
 }
-function replace(file, expected, bytes) {
-  assert.deepEqual(rootBytes(file), Buffer.from(expected), 'Configuration changed independently: ' + file);
+function replace(file, expected, bytes, read = rootBytes) {
+  assert.deepEqual(read(file), Buffer.from(expected), 'Configuration changed independently: ' + file);
   if (Buffer.from(expected).equals(Buffer.from(bytes))) return;
   const s = fs.lstatSync(file), temporary = file + '.seamless-' + randomUUID();
-  writeExclusive(temporary, bytes, s.mode & 0o777, s.gid); fs.renameSync(temporary, file);
+  writeExclusive(temporary, bytes, s.mode & 0o777, s.gid, s.uid); fs.renameSync(temporary, file);
   const d = fs.openSync(path.dirname(file), 'r'); try { fs.fsyncSync(d); } finally { fs.closeSync(d); }
 }
 const properties = unit => Object.fromEntries(nativeCall('/usr/bin/systemctl', ['show', unit,
@@ -252,7 +253,7 @@ export function prepareSeamlessPlan(capsuleFile) {
   const sites = SITES.map(file => ({ file, bytesBase64: rootBytes(file).toString('base64') }));
   for (const s of sites) assert.ok(renderRoute(Buffer.from(s.bytesBase64, 'base64').toString(), 3302).includes(':3302;'));
   const controls = Object.fromEntries(CONTROLS.map(name => [name, rootBytes(PROJECT + '/controls/' + name + '/allowed.json').toString('base64')]));
-  const privateFiles = Object.fromEntries(['policy-active.json', 'consumers-active.json', 'backup-proof.json'].map(n => [PRIVATE + '/' + n, rootBytes(PRIVATE + '/' + n).toString('base64')]));
+  const privateFiles = Object.fromEntries(['policy-active.json', 'consumers-active.json', 'backup-proof.json'].map(n => [PRIVATE + '/' + n, privateDataBytes(PRIVATE + '/' + n, previous.serviceUid).toString('base64')]));
   const db = PROJECT + '/var-lib/dev.db', s = fs.lstatSync(db); assert.ok(s.isFile()); assert.equal(fs.realpathSync(db), db);
   const runId = randomUUID(), stage = PROJECT + '/release-staging/' + runId; mkdir(stage);
   const plan = { schema: 'sd2-seamless-plan.v1', runId, stage, delivery: DEFAULT_DELIVERY, main, guard, previous,
@@ -270,6 +271,7 @@ export function createNativeSeamlessDriver(planFile) {
   assert.equal(p.stage, PROJECT + '/release-staging/' + p.runId); assert.equal(planFile, p.stage + '/seamless-plan.json');
   assert.equal(p.engineRoot, path.dirname(fileURLToPath(import.meta.url)));
   const bytes = v => Buffer.from(v, 'base64'), sleep = ms => new Promise(r => setTimeout(r, ms));
+  const privateRead = file => privateDataBytes(file, p.previous.serviceUid);
   const save = (name, value) => ensure(p.stage + '/' + name + '.json', JSON.stringify(value, null, 2) + '\n');
   const alive = name => properties(name + '.service').ActiveState === 'active';
   async function until(predicate, description, budget = 120000) {
@@ -321,20 +323,23 @@ export function createNativeSeamlessDriver(planFile) {
     if (kind === 'guard') {
       // Existing guard identity is already admitted by the live policy. Keep
       // reading that policy so permission revocations never depend on a copy.
-      privateFiles = Object.fromEntries([policyFile, PRIVATE + '/consumers-active.json'].map(f => [f, digest(rootBytes(f))]));
+      privateFiles = Object.fromEntries([policyFile, PRIVATE + '/consumers-active.json'].map(f => [f, digest(privateRead(f))]));
     } else {
-      assert.deepEqual(rootBytes(policyFile), bytes(p.privateFiles[policyFile]));
+      assert.deepEqual(privateRead(policyFile), bytes(p.privateFiles[policyFile]));
       policy.activation.attestationFile = prefix + '-consumers.json';
-      ensure(prefix + '-consumers.json', JSON.stringify(proof) + '\n', 0o440, gid);
-      ensure(prefix + '-policy.json', JSON.stringify(policy) + '\n', 0o440, gid);
+      for (const [file, value] of [[prefix + '-consumers.json', proof], [prefix + '-policy.json', policy]]) {
+        const data = Buffer.from(JSON.stringify(value) + '\n');
+        if (fs.existsSync(file)) assert.deepEqual(privateRead(file), data);
+        else writeExclusive(file, data, 0o600, gid, p.previous.serviceUid);
+      }
       policyFile = prefix + '-policy.json';
-      privateFiles = Object.fromEntries([prefix + '-consumers.json', policyFile].map(f => [f, digest(rootBytes(f))]));
+      privateFiles = Object.fromEntries([prefix + '-consumers.json', policyFile].map(f => [f, digest(privateRead(f))]));
     }
     const helperBytes = fs.readFileSync(new URL('./seamless-shadow-start.mjs', import.meta.url));
     const helper = SEAMLESS_CONTROL + '/start-' + digest(helperBytes) + '.mjs'; ensure(helper, helperBytes, 0o440, gid);
     const authority = `${SEAMLESS_CONTROL}/authority-${kind}-${p.runId}.json`, unit = `sd2-release-${kind}-${p.runId}.service`;
     const unitFile = '/run/systemd/system/' + unit;
-    const policySha = kind === 'guard' ? digest(rootBytes(policyFile)) : digest(bytes(p.privateFiles[PRIVATE + '/policy-active.json']));
+    const policySha = kind === 'guard' ? digest(privateRead(policyFile)) : digest(bytes(p.privateFiles[PRIVATE + '/policy-active.json']));
     const unitBytes = renderShadowUnit(p.units[source.slice(0, -8)].definition, { root: entry.root, guard: helper,
       authority, kind, runId: p.runId, policy: policyFile,
       policySha });
@@ -412,7 +417,7 @@ export function createNativeSeamlessDriver(planFile) {
         PROJECT + '/controls/pricing-writer-v1/writer-start-guard.mjs', 'sd2-gray.service'], { cwd: p.previous.releases[0].root }));
       assert.equal(legacy.barrierVerified, true); assert.equal(legacy.sourceAndBuildVerified, true);
       assert.equal(legacy.source, p.previous.releases[0].source); assert.equal(legacy.build, p.previous.releases[0].build);
-      for (const [file, b] of Object.entries(p.privateFiles)) assert.deepEqual(rootBytes(file), bytes(b));
+      for (const [file, b] of Object.entries(p.privateFiles)) assert.deepEqual(privateRead(file), bytes(b));
       for (const [name, u] of Object.entries(p.units)) {
         assert.deepEqual(rootBytes(u.file), bytes(u.bytesBase64)); assert.equal(properties(name + '.service').WorkingDirectory, p.previous.releases[0].root);
       }
@@ -429,7 +434,7 @@ export function createNativeSeamlessDriver(planFile) {
       const workers = json(p.stage + '/route-3303-old-workers.json');
       await until(() => workers.every(w => !stillSame(w)), 'Original nginx workers still own requests; candidate remains online');
       await until(() => classifySynchronousRows(readRuntimeRows(p), p).oldRunningImages === 0, 'Original synchronous images still running; candidate remains online');
-      assert.deepEqual(rootBytes(PRIVATE + '/policy-active.json'), bytes(p.privateFiles[PRIVATE + '/policy-active.json']));
+      assert.deepEqual(privateRead(PRIVATE + '/policy-active.json'), bytes(p.privateFiles[PRIVATE + '/policy-active.json']));
       for (const name of TIMERS) if (p.timers[name] === 'active') nativeCall('/usr/bin/systemctl', ['stop', name + '.timer']);
       await targetReady('image'); await targetReady('main');
       for (const name of [...WEB_UNITS, ...AUX_UNITS]) {
@@ -449,7 +454,7 @@ export function createNativeSeamlessDriver(planFile) {
     async publishCanonical() {
       assertOriginalUnitsStopped(); await targetReady('image'); await targetReady('main');
       verifyFixedProgramEntry(p.main); verifyFixedProgramEntry(p.guard);
-      assert.deepEqual(rootBytes(PRIVATE + '/policy-active.json'), bytes(p.privateFiles[PRIVATE + '/policy-active.json']));
+      assert.deepEqual(privateRead(PRIVATE + '/policy-active.json'), bytes(p.privateFiles[PRIVATE + '/policy-active.json']));
       for (const name of CONTROLS) {
         const file = PROJECT + '/controls/' + name + '/allowed.json', old = JSON.parse(bytes(p.controls[name]));
         const current = rootBytes(file); let next;
@@ -482,7 +487,7 @@ export function createNativeSeamlessDriver(planFile) {
       const consumerBytes = Buffer.from(JSON.stringify(proof, null, 2) + '\n');
       const backup = JSON.parse(bytes(p.privateFiles[backupFile])); backup.consumerDigest = digest(consumerBytes);
       for (const [file, wanted] of [[consumersFile, consumerBytes], [backupFile, Buffer.from(JSON.stringify(backup, null, 2) + '\n')]]) {
-        const current = rootBytes(file); assert.ok(current.equals(bytes(p.privateFiles[file])) || current.equals(wanted)); replace(file, current, wanted);
+        const current = privateRead(file); assert.ok(current.equals(bytes(p.privateFiles[file])) || current.equals(wanted)); replace(file, current, wanted, privateRead);
       }
       for (const name of [...WEB_UNITS, ...AUX_UNITS]) {
         const file = '/run/systemd/system/' + name + '.service.d/zzzzzzzzzzzzzzzz-seamless-drain.conf';
