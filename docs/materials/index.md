@@ -10,6 +10,8 @@ STABILITY-PLAN01同目录新增`stability-plan01-research.private.json`：22项�
 CCCC-DEBATE01同目录新增私有`cccc-debate01/`：2卡/2份真实Claude意见/2份审计日志与3份调用结果、摘要及10项源码指纹。两轮wrapper0/源与状态同值；原始意见不改写，Codex反驳及二轮撤回/边界保存在原单CCCC-DEBATE01，修订首批3包与异步仅评估明确。失败70/中止143不计有效意见，本机代理仅本次进程修正且不归视频根因；产物0700/0600、Git排除，无应用、生产数据或部署改动。
 
 CC-DISCUSS01同目录新增私有cc-discuss01/：两轮合作讨论的卡/真实CC意见/审计6份、2份结果JSON/2份wrapper日志共10份原件，另存summary与16源码指纹。两轮wrapper0、同HEAD同Git状态，原件SHA/0700/0600可核；推荐分阶段执行/发布隔离、暂不分库，普通/H3与Ark合同、原号/原图/权限/账务和回退边界详原单CC-DISCUSS01。运行事实仍待后续核，不冒称新线上故障；无代码、测试、生产或部署改动。
+
+STAB01新增同目录私有stab01/local-engineering.private.json，保31项工程、6项源码SHA及本机旧Prisma客户端类型缺口；代码已聚焦推送并交统一无感候选验证，尚未部署。执行/运行核查/保护边界维护同一原单STAB01，不把候选或工程当功能验收。
 <!-- /FB-PULL-20261112-MATERIALS -->
 
 <!-- ARK-CHARACTER-ASSET01-MATERIALS-20261111 -->
