@@ -75,8 +75,8 @@ export function MultiviewReferenceComposer(props: Props) {
         const local = stored?.recipe ? parseMultiviewWorkRecipe(stored.recipe, props.info) : null;
         const next = id ? await readWork(id) : null;
         if (cancelled || !valid(scope)) return;
-        const restored = props.restored?.recipe || (props.restored ? createMultiviewReferenceRecipe(props.info,props.slots,{width:1920,height:1080,background:'#d6dbdf'}) : local?.schema === 3 ? local : next?.recipe?.schema === 3 ? next.recipe : recipeRef.current);
-        setHasReferenceDraft(Boolean(props.restored&&local&&JSON.stringify(local)!==JSON.stringify(props.restored.recipe)));
+        const restored = (props.initialInput&&props.restored&&local?.schema===3?local:null) || props.restored?.recipe || (props.restored ? createMultiviewReferenceRecipe(props.info,props.slots,{width:1920,height:1080,background:'#d6dbdf'}) : local?.schema === 3 ? local : next?.recipe?.schema === 3 ? next.recipe : recipeRef.current);
+        setHasReferenceDraft(Boolean(!props.initialInput&&props.restored&&local&&JSON.stringify(local)!==JSON.stringify(props.restored.recipe)));
         if(props.restored?.warnings.length)setMessage(props.restored.warnings.join(' '));
         recipeRef.current = restored; setRecipe(restored); setSelected(restored.slots[0]?.id || '');
         setSyncAdjust(stored?.syncAdjust === true);

@@ -39,6 +39,7 @@ export type MultiviewGenerationPanelState = { phase: MultiviewGenerationPhase; b
 export type MultiviewGenerationReady = { taskId: string; requestKey: string; ownerId: string;
   startedFromSourceKey: string | null; explicitOpen: boolean };
 export type MultiviewGenerationPanelProps = {
+  imagePickerRequest?:number;
   incomingVideo?: Extract<import('@/lib/video/multiview-action-restore-contract').MultiviewVideoRestore,{kind:'rotation'}>|null;
   onIncomingVideoDone?: (ok:boolean)=>void;
   currentSourceKey: string | null; hasResult: boolean; expanded: boolean; onExpandedChange: (expanded: boolean) => void;
@@ -843,6 +844,8 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     finally { if (uploadLock.current === token) { uploadLock.current = null; setWorking(false); setProgress(null); } }
   }
   const handledIncoming = useRef(0);
+  const lastImagePickerRequest=useRef(0);
+  useEffect(()=>{if(!props.imagePickerRequest||!ready||!allowed||lastImagePickerRequest.current===props.imagePickerRequest)return;lastImagePickerRequest.current=props.imagePickerRequest;setPickerOpen(true);},[props.imagePickerRequest,ready,allowed]);
   const restoredVideo=useRef(''),restoredVideoBaseline=useRef('');
   const [savedVideoDraft,setSavedVideoDraft]=useState<MultiviewGenerationDraft|null>(null);
   const incomingVideoSeen=useRef<object|null>(null);

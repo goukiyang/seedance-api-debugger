@@ -130,7 +130,7 @@ export function MultiviewVideoResults({ owner, authority, active, currentTaskId,
   }, [identity, selectionKey]);
   useEffect(() => {
     if (loadedIdentity === identity && active) void loadList();
-    if (!active) { controllers.current.forEach(controller => controller.abort()); player.current?.pause(); }
+    if (!active) { controllers.current.forEach(controller => controller.abort()); player.current?.pause();setPlayRequest(''); }
   }, [active, identity, loadedIdentity, loadList]);
   useEffect(() => {
     currentSequence.current++; setCurrent(null); setCurrentError('');
