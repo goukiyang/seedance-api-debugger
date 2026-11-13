@@ -151,7 +151,7 @@ function MultiviewPageContent() {
   const [originalOpen, setOriginalOpen] = useState(false);
   const [actionDefaults, setActionDefaults] = useState<{ owner: string; model: string; duration: number; resolution: string; projectId: string; videoCardId: string | null } | null>(null);
   const [referenceSelection, setReferenceSelection] = useState<string[] | null>(null);
-  const [referenceEditor, setReferenceEditor] = useState<{ scope: string; slots: MultiviewSlot[]; workId?: string; info?: MultiviewInfo; restored?: MultiviewActionRestore; carry?:MultiviewActionInput } | null>(null);
+  const [referenceEditor, setReferenceEditor] = useState<{ scope: string; slots: MultiviewSlot[]; workId?: string; info?: MultiviewInfo; restored?: MultiviewActionRestore; selection?:number; carry?:MultiviewActionInput } | null>(null);
   const [referencePicking,setReferencePicking]=useState(false);
   const [referenceReplacement,setReferenceReplacement]=useState<{slots:MultiviewSlot[];token:number}>();
   const [carriedAction,setCarriedAction]=useState<{videoId:string;input:MultiviewActionInput}|null>(null);
@@ -276,7 +276,6 @@ function MultiviewPageContent() {
   }, [query,owner,authority,sessionReady]);
   async function openVideoInputs(id:string,resume=false):Promise<boolean>{
     if(!owner||!sessionReady||isClientSessionBlocked()||restoreLock.current)return false;
-    if(referenceEditor?.restored?.taskId===id&&!referencePicking&&!resume){setPreviewReadOnly(false);return true;}
     restoreLock.current=true;
     const sequence=++restoreSequence.current,capturedOwner=owner,capturedAuthority=authority;
     setRestoringVideo(true);setReferenceNotice('');
@@ -291,7 +290,7 @@ function MultiviewPageContent() {
       if(value.kind==='action'){
         const slots=value.recipe?.slots||candidateFrames(value.info.timestamps.length,4).slice(0,2).map((frame,index)=>({id:`restore-${index}`,frame,name:'',manual:false}));
         setLocation({owner,taskId:value.info.taskId});setEditorWork({owner,id:''});setPageView('editor');
-        setReferenceEditor({scope:`${authority}:${value.info.taskId}:${value.info.sourceVersion}`,slots,workId:value.workId,info:value.info,restored:value,...(resume&&carriedAction?.videoId===id?{carry:carriedAction.input}:{})});
+        setReferenceEditor({scope:`${authority}:${value.info.taskId}:${value.info.sourceVersion}`,slots,workId:value.workId,info:value.info,restored:value,selection:sequence,...(resume&&carriedAction?.videoId===id?{carry:carriedAction.input}:{})});
         setReferencePicking(false);setReferenceReplacement(undefined);setPreviewTaskId(id);
         const url=new URL(window.location.href);if(returnTarget)url.searchParams.set('returnTo',returnTarget);url.searchParams.set('videoTaskId',id);url.searchParams.set('referenceWorkId',value.workId);url.searchParams.set('taskId',value.info.taskId);url.searchParams.delete('view');window.history.replaceState(window.history.state,'',url.pathname+url.search);
         openedVideo.current=id;setPreviewReadOnly(false);return true;
@@ -1329,7 +1328,7 @@ function MultiviewPageContent() {
     {loading && <p className={styles.empty} role="status">正在核对原视频并读取候选图片…</p>}
     {error && <div className={styles.empty} role="status"><p>{error}</p><button type="button" onClick={() => void load()}>重新读取原视频</button><button type="button" onClick={() => setPickerOpen(true)}>使用已有视频</button></div>}
     {editingWorkId && !workState.work && <div className={styles.notice} role="status">{workState.loading ? '正在读取指定作品…' : workState.message || '指定作品尚未读取，当前生成设置保留。'}{!workState.loading && <button type="button" onClick={workState.retry}>重新读取作品</button>}</div>}
-    {referenceMounted && referenceEditor && referenceInfo && <div hidden={referencePicking}><MultiviewReferenceComposer active={pageView === 'editor' && sessionReady && !referencePicking} key={`${referenceEditor.scope}:${referenceEditor.workId || 'new'}:${referenceEditor.restored?.taskId||''}`} ownerId={owner} authority={authority} taskId={taskId} info={referenceInfo} slots={referenceEditor.slots} mediaBase={referenceEditor.workId ? `/api/video/multiview/works/${referenceEditor.workId}/source` : mediaBase} initialWorkId={referenceEditor.workId} initialInput={referenceEditor.carry||(!referenceEditor.restored?carriedAction?.input:undefined)} onChangeOriginal={input=>{setCarriedAction({videoId:referenceEditor.restored?.taskId||previewTaskId,input});void openVideoInputs(taskId);}} restored={referenceEditor.restored} replacementSlots={referenceReplacement} onSelectVideo={openVideoInputs} videoDefaults={actionDefaults?.owner === owner ? actionDefaults : undefined} access={shareId ? { kind: 'share', id: shareId } : editingWorkId ? { kind: 'work', id: editingWorkId } : undefined} onWorkBound={id => {currentReferenceWork.current=id;}} onBack={chooseReferenceFrames} /></div>}
+    {referenceMounted && referenceEditor && referenceInfo && <div hidden={referencePicking}><MultiviewReferenceComposer active={pageView === 'editor' && sessionReady && !referencePicking} key={`${referenceEditor.scope}:${referenceEditor.workId || 'new'}:${referenceEditor.restored?.taskId||''}:${referenceEditor.selection||0}`} ownerId={owner} authority={authority} taskId={taskId} info={referenceInfo} slots={referenceEditor.slots} mediaBase={referenceEditor.workId ? `/api/video/multiview/works/${referenceEditor.workId}/source` : mediaBase} initialWorkId={referenceEditor.workId} initialInput={referenceEditor.carry||(!referenceEditor.restored?carriedAction?.input:undefined)} onChangeOriginal={input=>{setCarriedAction({videoId:referenceEditor.restored?.taskId||previewTaskId,input});void openVideoInputs(taskId);}} restored={referenceEditor.restored} replacementSlots={referenceReplacement} onSelectVideo={openVideoInputs} videoDefaults={actionDefaults?.owner === owner ? actionDefaults : undefined} access={shareId ? { kind: 'share', id: shareId } : editingWorkId ? { kind: 'work', id: editingWorkId } : undefined} onWorkBound={id => {currentReferenceWork.current=id;}} onBack={chooseReferenceFrames} /></div>}
 
     {!referenceActive && !previewReadOnly && visible && info && draft && (!editingWorkId || workState.work?.id === editingWorkId && workState.work.sourceTaskId === taskId) && <section ref={bindResultArea} className={styles.result} style={{ '--export-height': `${dock?.height ?? 88}px`, '--tool-height': `${dock?.toolHeight ?? 600}px` } as CSSProperties} aria-label="3D多视图成品工作台">
       <header className={styles.resultHeader}><h2>{shared?.title || (workState.work ? workState.title || '未命名作品' : '3D多视图作品')}</h2>
