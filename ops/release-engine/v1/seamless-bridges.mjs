@@ -1,4 +1,4 @@
-// Exact source transitions reviewed for seamless compatibility.
+// Exact additive bridges admitted from reviewed source pairs.
 export default {
   "src/lib/image-studio/synchronous-admission.ts": {
     "previous": "67a1c53406516b0b90c7159d3447db9a80bd2aca16cac2efcb32ce59611a4012",
@@ -49,7 +49,27 @@ export default {
     "current": "316800206ed912b19889bb85fe0402acb5e5210465007ac2ca62652fa14f84ef"
   },
   "src/lib/template-studio/worker.ts": {
-    "previous": "8de1ad47b36d8e5151b71e53382f866ae61eee6972b9836295e9b9ae1728aeb6",
-    "current": "979db85e3fd75e6833ca0be1962ebff81063ef1fc0a1948b2bb194c646839681"
+    "previous": "979db85e3fd75e6833ca0be1962ebff81063ef1fc0a1948b2bb194c646839681",
+    "current": "e8405e4f42033710450f6f4d6c6d4dcaa031059c54ec2b80bf1d27feae01b1a6"
+  },
+  "src/lib/template-studio/assets.ts": {
+    "previous": "7adf93646006c92e776f3811ed1c4abc1c5d04cd1e51593fa44a379e3ae7d7e3",
+    "current": "318969b2ab61a4038b49d7a0706d1a9b741069b4b3d08961117ca5f5f04a71ed"
+  },
+  "src/lib/template-studio/private-migration.server.ts": {
+    "previous": "6609babd44bef102b18ab757383400a263098defcad8b9f790ef8186004252ea",
+    "current": "f600f9026a3ecc158930dc2f0b4e8ba47ea711054a11416c008f0061351349b2"
+  },
+  "src/lib/video/multiview-action-contract.ts": {
+    "previous": "55f081440894bf13d7347e5d55db29c7359a57f1e4f0edac4b7de86f408dc0ec",
+    "current": "e33d532c04e447b709e76699d30c40f7154083bc5db4458bebe3f8e9cb4456bb"
+  },
+  "src/lib/video/multiview-action.server.ts": {
+    "previous": "f3f422c55376edf3d56ab1ab3e96a75ebca62614c3b05386e78bf1f0aadf1448",
+    "current": "908ba7f4eea708a4aa49060cebc3b9d928317d61fbf6a70f67fe591e64b9aaf1"
+  },
+  "src/app/api/video/multiview/actions/reference-runs/route.ts": {
+    "previous": null,
+    "current": "ced158868a0076a1830747077e6b7d193a7ee8d0531ba94fa7411580cc04bf5d"
   }
 };

@@ -219,3 +219,14 @@ WORKS-VIDEOREF01接通视频详情到既有 `/generate` / `/generate/ip` 输入�
 
 v0.148.13部署后，sd2-server.youdoodesign.com对Python-urllib返回Cloudflare1010/403；同机现有普通curl对health/release、63份真实资源及匿名复用状态检查均正常。切换原探测备用18条403、主域名18条200、无502/HTTP0；不将403算作应用502，也不把全部探测冒200。属于客户端/既有防护适配线索，是否需要允许该校验客户端待后续核定；未改WAF、权限或其它项目。证据沿SEAMLESS01原单§7及catchup-20261113/public-deployed.json。
 <!-- /SEAMLESS-PYTHON-CF1010-20261113 -->
+
+
+<!-- D-20261112-SEAMLESS-WAIT-PROBES -->
+## D-20261112-SEAMLESS-WAIT-PROBES 旧连接等待期间的公网探测超时（待核线索）
+
+SEAMLESS01本次标准curl等待阶段1854条采样中有16次在8秒内没有HTTP响应（HTTP0）；不能据此断言应用502、数据损坏或根因已明。其余1838条200；实际项目隔离交接段218条均200/ok，最终两个正式入口及7角色健康。保留原日志于服务器seamless-default-20261112/attempt02/public-health-during-resume.ndjson；后续按该窗口核DNS/TLS/连接与应用日志，不先改超时、重发生成或扩大为性能大修。原单§6及正式材料public-deployed.json为入口，本轮未额外收费/浏览器复现。
+
+<!-- MV-REF-PROBE-20261113 -->
+2026-11-13追加：MV-ACTION-REF01 / v0.148.14 / run957b9930发布日志又记录一次15秒curl公网 `/api/release` 探测超时。源码ingressReady会沿原计划重试，最终8阶段complete，七服务、两域release/health及目标多视图JS SHA均正常；未记录具体命中的域名及DNS/TLS/连接阶段，根因仍待核，不能当成已证应用故障或全程零中断。原日志在服务器multiview-ai-reference-20261112/attempt03/release.log，最终回执同stage/public-deployed.json；本轮未顺带修改网络、WAF或生成链路。
+<!-- /MV-REF-PROBE-20261113 -->
+<!-- /D-20261112-SEAMLESS-WAIT-PROBES -->

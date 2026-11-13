@@ -21,7 +21,7 @@ export function assertSeamlessCompatible(previous, main, guard, read, bridges) {
   for (const file of files) {
     if (!contract(file) || file === provenance || file === 'src/lib/release.ts' || old.sourceFiles[file] === main.sourceFiles[file]) continue;
     const bridge = bridges[file];
-    if (bridge && old.sourceFiles[file] === bridge.previous && main.sourceFiles[file] === bridge.current) continue;
+    if (bridge && (old.sourceFiles[file] ?? null) === bridge.previous && main.sourceFiles[file] === bridge.current) continue;
     if (file === sync) {
       const normalize = bytes => bytes.toString()
         .replace("import { synchronousProcessProvenance } from './process-provenance';\n", '')

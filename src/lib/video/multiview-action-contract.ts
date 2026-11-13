@@ -1,6 +1,7 @@
 import type { StudioCapabilitiesResponse, StudioRunStatus } from '@/lib/template-studio/types';
 
 export const MULTIVIEW_ACTION_PURPOSE = 'multiview-action' as const;
+export const MULTIVIEW_ACTION_REFERENCE_PURPOSE = 'multiview-action-reference' as const;
 export type MultiviewActionBinding = { runId: string; workId: string; revision: number; recipeHash: string; inputHash: string };
 export type MultiviewActionParameters = {
   provider: 'seedance'; model: string; duration: number; resolution: '480p' | '720p' | '1080p'; ratio: '16:9' | '9:16' | '1:1';
@@ -17,6 +18,7 @@ export type MultiviewActionRun = {
   binding: MultiviewActionBinding | null; attemptId?: string; createdAt: string; tasks: MultiviewActionTask[];
 };
 export type MultiviewActionCapabilities = StudioCapabilitiesResponse & {
+  referenceImageEnabled?: boolean;
   actionReady: boolean; actionReason: string | null;
   rules: { format: { configured: boolean; revision: number; canEdit: boolean }; sync: { configured: boolean; revision: number; canEdit: boolean } };
 };

@@ -15,6 +15,7 @@ export async function checkPrivateWorkerFailures({ root, ts, db, crypto, task })
   }
   const forbidden = () => { throw new Error('Unexpected settlement or external operation'); };
   const otherCrypto = await import(pathToFileURL(path.join(root, 'src/lib/security/private-prompts.server.ts')).href);
+  const { MULTIVIEW_ACTION_REFERENCE_PURPOSE } = await import(pathToFileURL(path.join(root, 'src/lib/video/multiview-action-contract.ts')).href);
   const foreignError = new otherCrypto.PrivatePromptError();
   assert.equal(foreignError instanceof crypto.PrivatePromptError, false, 'Exercise a genuinely different module identity');
   assert.equal(crypto.isPrivatePromptError(foreignError), true);
@@ -78,11 +79,11 @@ export async function checkPrivateWorkerFailures({ root, ts, db, crypto, task })
 
   for (const phase of ['before-send', 'transport', 'output-filter']) {
     let calls = 0;
-    const run = { id: 'synthetic-run', owner_user_id: 'author', draft_id: 'synthetic-draft', snapshot_json: '{}',
+    const run = { id: 'synthetic-run', owner_user_id: 'author', purpose: 'studio', draft_id: 'synthetic-draft', snapshot_json: '{}',
       status: 'running', delivery_state: 'not_sent', lease_token: 'lease' };
     const original = { ...run };
     const process = actualFunction('src/lib/template-studio/worker.ts', 'processStudioPromptOnce', {
-      prisma: db, claimStudioRun: async () => ({ run, token: 'lease' }),
+      prisma: db, MULTIVIEW_ACTION_REFERENCE_PURPOSE, claimStudioRun: async () => ({ run, token: 'lease' }),
       projectWorkerSessionUser: owner => ({ ...owner, account_type: 'internal' }), requireStudioUser: () => {},
       parseWorkerSnapshot: () => ({ assets: [], input: { values: {}, draftPrompt: 'ordinary-input' }, parameters: {} }),
       ensureStudioSnapshotSourceStillUsable: async () => {}, authorizeStudioAssets: async () => {},

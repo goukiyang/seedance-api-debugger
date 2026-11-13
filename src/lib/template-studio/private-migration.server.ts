@@ -48,8 +48,8 @@ export async function prepareVideoStudioPrivateMigration(db: PrismaClient, selec
   for (const row of runs) {
     const value = JSON.parse(row.snapshot_json);
     const recipe = value.templateVersion?.templateSource === 'studio' ? videoTemplateOrigins(value.templateVersion.templateId) : [];
-    if ((row.purpose === 'multiview-action') !== (value.purpose === 'multiview-action')) throw new PrivatePromptError();
-    const action = row.purpose === 'multiview-action';
+    const action = ['multiview-action', 'multiview-action-reference'].includes(row.purpose);
+    if (action !== (value.purpose === 'multiview-action')) throw new PrivatePromptError();
     const moduleOrigin = action ? multiviewActionContextOrigins('sync') : one(privateOrigin('video-module-context', row.draft_id));
     const moduleOrigins = moduleOrigin.length ? moduleOrigin : recipe;
     if (value.templateVersion?.templateSource === 'studio' && !recipe.length && !isStoredPrivatePrompt(value.recipe?.instruction)

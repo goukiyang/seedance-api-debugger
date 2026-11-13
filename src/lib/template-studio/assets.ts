@@ -105,7 +105,7 @@ export async function getAuthorizedAssetRows(user: SessionUser, assets: StudioAs
   if (!assets.length) return [];
   const rows = await prisma.asset.findMany({
     where: { id: { in: assets.map((asset) => asset.assetId) } },
-    select: { id: true, type: true, original_url: true, thumbnail_url: true, created_at: true },
+    select: { id: true, type: true, status: true, mime_type: true, file_size: true, original_url: true, thumbnail_url: true, created_at: true },
   });
   const byId = new Map(rows.map((row) => [row.id, row]));
   return assets.map((asset) => ({ asset, row: byId.get(asset.assetId)! }));
