@@ -155,6 +155,7 @@ function MultiviewPageContent() {
   const [referencePicking,setReferencePicking]=useState(false);
   const [referenceReplacement,setReferenceReplacement]=useState<{slots:MultiviewSlot[];token:number}>();
   const [carriedAction,setCarriedAction]=useState<{videoId:string;input:MultiviewActionInput}|null>(null);
+  const [previewReadOnly,setPreviewReadOnly]=useState(false);
   const [previewTaskId,setPreviewTaskId]=useState('');
   const [restoringVideo,setRestoringVideo]=useState(false);
   const restoreLock=useRef(false);
@@ -162,7 +163,7 @@ function MultiviewPageContent() {
   const [videoReturnView,setVideoReturnView]=useState<'generations'|'works'|null>(null);
   const [incomingVideo,setIncomingVideo]=useState<Extract<MultiviewVideoRestore,{kind:'rotation'}>|null>(null);
   const incomingVideoDone=useRef<((ok:boolean)=>void)|null>(null);
-  useEffect(()=>{restoreSequence.current++;restoreLock.current=false;openedVideo.current='';incomingVideoDone.current?.(false);incomingVideoDone.current=null;setIncomingVideo(null);setCarriedAction(null);setVideoReturnView(null);setPreviewTaskId('');setRestoringVideo(false);setReferencePicking(false);setReferenceReplacement(undefined);},[owner,authority]);
+  useEffect(()=>{restoreSequence.current++;restoreLock.current=false;openedVideo.current='';incomingVideoDone.current?.(false);incomingVideoDone.current=null;setIncomingVideo(null);setCarriedAction(null);setVideoReturnView(null);setPreviewTaskId('');setPreviewReadOnly(false);setRestoringVideo(false);setReferencePicking(false);setReferenceReplacement(undefined);},[owner,authority]);
   const referenceScope = `${authority}:${taskId}:${info?.sourceVersion || ''}`;
   const referenceMounted = Boolean(referenceEditor && referenceEditor.scope.startsWith(`${authority}:${taskId}:`) && (referenceEditor.workId || referenceEditor.scope === referenceScope));
   const referenceActive=referenceMounted&&!referencePicking;
@@ -275,12 +276,13 @@ function MultiviewPageContent() {
   }, [query,owner,authority,sessionReady]);
   async function openVideoInputs(id:string,resume=false):Promise<boolean>{
     if(!owner||!sessionReady||isClientSessionBlocked()||restoreLock.current)return false;
-    if(referenceEditor?.restored?.taskId===id&&!referencePicking&&!resume)return true;
+    if(referenceEditor?.restored?.taskId===id&&!referencePicking&&!resume){setPreviewReadOnly(false);return true;}
     restoreLock.current=true;
     const sequence=++restoreSequence.current,capturedOwner=owner,capturedAuthority=authority;
     setRestoringVideo(true);setReferenceNotice('');
     try{
       const response=await fetch(`/api/video/multiview/actions/restore?taskId=${encodeURIComponent(id)}`,{cache:'no-store',headers:{'x-app-session-user':owner},signal:AbortSignal.timeout(30000)});
+      if(response.status===404)throw new Error('这条视频的输入暂不可恢复；当前草稿保留，也可以仅查看视频。');
       const value=await response.json() as MultiviewVideoRestore & {error?:string};
       if(sequence!==restoreSequence.current||ownerRef.current!==capturedOwner||authorityRef.current!==capturedAuthority||isClientSessionBlocked())return false;
       if(!response.ok||value.taskId!==id)throw new Error(value.error||'这条视频输入未能恢复，当前方案保留。');
@@ -291,13 +293,13 @@ function MultiviewPageContent() {
         setReferenceEditor({scope:`${authority}:${value.info.taskId}:${value.info.sourceVersion}`,slots,workId:value.workId,info:value.info,restored:value,...(resume&&carriedAction?.videoId===id?{carry:carriedAction.input}:{})});
         setReferencePicking(false);setReferenceReplacement(undefined);setPreviewTaskId(id);
         const url=new URL(window.location.href);url.searchParams.set('videoTaskId',id);url.searchParams.set('referenceWorkId',value.workId);url.searchParams.set('taskId',value.info.taskId);url.searchParams.delete('view');window.history.replaceState(window.history.state,'',url.pathname+url.search);
-        openedVideo.current=id;return true;
+        openedVideo.current=id;setPreviewReadOnly(false);return true;
       }
       incomingVideoDone.current?.(false);
       const applied=await new Promise<boolean>(resolve=>{incomingVideoDone.current=resolve;setIncomingVideo(value);});
       if(!applied||sequence!==restoreSequence.current||ownerRef.current!==capturedOwner||authorityRef.current!==capturedAuthority)return false;
       setReferenceEditor(null);setReferencePicking(false);setPreviewTaskId(id);openedVideo.current=id;
-      await selectTask(id);setExpanded(true);return true;
+      await selectTask(id);setExpanded(true);setPreviewReadOnly(false);return true;
     }catch(cause){if(sequence===restoreSequence.current&&ownerRef.current===capturedOwner)setReferenceNotice(cause instanceof Error?cause.message:'视频输入暂不可恢复，当前草稿保留。');return false;}
     finally{if(sequence===restoreSequence.current){restoreLock.current=false;setRestoringVideo(false);}}
   }
@@ -1306,10 +1308,11 @@ function MultiviewPageContent() {
       onNew={() => writeLocation('editor', editingWorkId)} onUseReference={applyWorkAsReference} />}
     {carriedAction&&!referenceMounted&&pageView==='editor'&&<button type="button" onClick={()=>void openVideoInputs(carriedAction.videoId,true)}>返回刚才的动作方案</button>}
     {videoReturnView&&pageView==='editor'&&<button type="button" onClick={()=>{setReferencePicking(false);writeLocation(videoReturnView);}}>返回{videoReturnView==='works'?'作品':'记录'}</button>}
+    {previewReadOnly&&<p role="status" className={styles.notice}>当前仅查看视频，未恢复对应输入。<button type="button" onClick={()=>setPreviewReadOnly(false)}>返回原编辑现场</button></p>}
     {restoringVideo&&<p role="status" className={styles.notice}>正在恢复这条视频的文本、规格与参考图…</p>}
     {referenceNotice && <div className={styles.notice} role="status">{referenceNotice}</div>}
     <div hidden={pageView !== 'editor'}>
-    {!shareId && <div ref={generationArea} hidden={referenceActive}><MultiviewGenerationPanel currentSourceKey={currentSourceKey} currentTaskId={visible ? taskId : undefined} hasResult={Boolean(visible)} expanded={expanded} onExpandedChange={changeExpanded}
+    {!shareId && <div ref={generationArea} hidden={referenceActive||previewReadOnly}><MultiviewGenerationPanel currentSourceKey={currentSourceKey} currentTaskId={visible ? taskId : undefined} hasResult={Boolean(visible)} expanded={expanded} onExpandedChange={changeExpanded}
       onActionSettings={value => setActionDefaults({owner,...value})} onUseExisting={() => setPickerOpen(true)} onReady={generationReady} onStateChange={setGeneration}
       initialProjectId={query.get('projectId') || undefined} initialVideoCardId={query.get('videoCardId') || undefined}
       incomingVideo={incomingVideo} onIncomingVideoDone={ok=>{incomingVideoDone.current?.(ok);incomingVideoDone.current=null;}} incomingMainAsset={incomingMainAsset} onIncomingMainAssetDone={result => setReferenceNotice(result.success ? '已把作品图片设为主图，未开始生成。' : result.message || '主图未替换，请重试。')} /></div>}
@@ -1317,7 +1320,7 @@ function MultiviewPageContent() {
       preparing={generation.taskId === taskId && (loading || previewState.loading)}
       previewReady={Boolean(generation.taskId === taskId && visible && validSlots.length > 0)} />}
     {!shareId && !referenceMounted && <MultiviewVideoResults key={`${owner}:${authority}`} owner={owner} authority={authority}
-      active={pageView === 'editor' && sessionReady} initialTaskId={previewTaskId||undefined} onSelect={openVideoInputs} currentTaskId={generation.taskId}
+      active={pageView === 'editor' && sessionReady} initialTaskId={previewTaskId||undefined} onViewOnly={()=>setPreviewReadOnly(true)} onSelect={openVideoInputs} currentTaskId={generation.taskId}
       pendingLabel={generation.phase === 'unknown' ? '提交结果待确认' : generation.phase === 'submitting' ? '正在提交视频任务…' : undefined} />}
     {!shareId && pendingResult && pendingResult.ownerId === owner && pendingResult.taskId !== taskId && <div className={styles.notice} role="status">新视频已就绪，当前选帧未被覆盖。<button type="button" onClick={() => void selectTask(pendingResult.taskId)}>打开新结果</button></div>}
     {!shareId && previousTask && previousTask !== taskId && <button type="button" className={styles.quiet} onClick={() => void selectTask(previousTask)}>返回上次结果</button>}
@@ -1326,7 +1329,7 @@ function MultiviewPageContent() {
     {editingWorkId && !workState.work && <div className={styles.notice} role="status">{workState.loading ? '正在读取指定作品…' : workState.message || '指定作品尚未读取，当前生成设置保留。'}{!workState.loading && <button type="button" onClick={workState.retry}>重新读取作品</button>}</div>}
     {referenceMounted && referenceEditor && referenceInfo && <div hidden={referencePicking}><MultiviewReferenceComposer active={pageView === 'editor' && sessionReady && !referencePicking} key={`${referenceEditor.scope}:${referenceEditor.workId || 'new'}:${referenceEditor.restored?.taskId||''}`} ownerId={owner} authority={authority} taskId={taskId} info={referenceInfo} slots={referenceEditor.slots} mediaBase={referenceEditor.workId ? `/api/video/multiview/works/${referenceEditor.workId}/source` : mediaBase} initialWorkId={referenceEditor.workId} initialInput={referenceEditor.carry||(!referenceEditor.restored?carriedAction?.input:undefined)} onChangeOriginal={input=>{setCarriedAction({videoId:referenceEditor.restored?.taskId||previewTaskId,input});void openVideoInputs(taskId);}} restored={referenceEditor.restored} replacementSlots={referenceReplacement} onSelectVideo={openVideoInputs} videoDefaults={actionDefaults?.owner === owner ? actionDefaults : undefined} access={shareId ? { kind: 'share', id: shareId } : editingWorkId ? { kind: 'work', id: editingWorkId } : undefined} onWorkBound={id => {currentReferenceWork.current=id;}} onBack={chooseReferenceFrames} /></div>}
 
-    {!referenceActive && visible && info && draft && (!editingWorkId || workState.work?.id === editingWorkId && workState.work.sourceTaskId === taskId) && <section ref={bindResultArea} className={styles.result} style={{ '--export-height': `${dock?.height ?? 88}px`, '--tool-height': `${dock?.toolHeight ?? 600}px` } as CSSProperties} aria-label="3D多视图成品工作台">
+    {!referenceActive && !previewReadOnly && visible && info && draft && (!editingWorkId || workState.work?.id === editingWorkId && workState.work.sourceTaskId === taskId) && <section ref={bindResultArea} className={styles.result} style={{ '--export-height': `${dock?.height ?? 88}px`, '--tool-height': `${dock?.toolHeight ?? 600}px` } as CSSProperties} aria-label="3D多视图成品工作台">
       <header className={styles.resultHeader}><h2>{shared?.title || (workState.work ? workState.title || '未命名作品' : '3D多视图作品')}</h2>
         {workState.work && <button type="button" title="修改作品名称" aria-label="修改作品名称" disabled={workState.busy || workState.pending || Boolean(quickFrame)} onClick={event => {
           const epoch = context.current; const id = workState.work!.id;

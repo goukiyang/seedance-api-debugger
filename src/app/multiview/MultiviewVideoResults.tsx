@@ -11,7 +11,7 @@ import { mergeMultiviewVideoResults, multiviewSettledPoints, multiviewVideoNeeds
 import styles from './multiview-video-results.module.css';
 
 type Props = {
-  owner: string; authority: string; active: boolean; currentTaskId?: string | null; pendingLabel?: string; initialTaskId?: string; onSelect?: (id: string) => Promise<boolean>;
+  owner: string; authority: string; active: boolean; currentTaskId?: string | null; pendingLabel?: string; initialTaskId?: string; onSelect?: (id: string) => Promise<boolean>; onViewOnly?: (id:string)=>void;
 };
 type Page = { items: MultiviewVideoResult[]; nextCursor: string | null; error?: string };
 const validId = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value);
@@ -20,9 +20,9 @@ const points = (item: MultiviewVideoResult) => {
   return value === null ? '实扣待结算' : `已扣 ${value.toFixed(2)} 点`;
 };
 
-export function MultiviewVideoResults({ owner, authority, active, currentTaskId, pendingLabel, initialTaskId, onSelect }: Props) {
+export function MultiviewVideoResults({ owner, authority, active, currentTaskId, pendingLabel, initialTaskId, onSelect, onViewOnly }: Props) {
   const selectionCallback = useRef(onSelect); selectionCallback.current = onSelect;
-  const deliveredSelection = useRef('');
+  const deliveredSelection = useRef(''),viewOnlySelection=useRef('');
   const positions = useRef(new Map<string, number>());
   const identity = `${owner}:${authority}`;
   const live = useRef({ identity, active }); live.current = { identity, active };
@@ -37,6 +37,7 @@ export function MultiviewVideoResults({ owner, authority, active, currentTaskId,
   const [selected, setSelected] = useState<MultiviewVideoResult | null>(null);
   const [loading, setLoading] = useState(false), [detailLoading, setDetailLoading] = useState(false);
   const [notice, setNotice] = useState(''), [detailError, setDetailError] = useState('');
+  const [viewOnlyCandidate,setViewOnlyCandidate]=useState<MultiviewVideoResult|null>(null);
   const [currentError, setCurrentError] = useState('');
   const [playRequest, setPlayRequest] = useState(''), [mediaError, setMediaError] = useState('');
   const positionKey = (id:string)=>`sd2:multiview-video-position:v1:${owner}:${id}`;
@@ -63,7 +64,7 @@ export function MultiviewVideoResults({ owner, authority, active, currentTaskId,
     if (![401, 403, 409].includes((error as { status?: number })?.status || 0)) return;
     controllers.current.forEach(controller => controller.abort());
     listSequence.current++; detailSequence.current++; currentSequence.current++;
-    player.current?.pause(); setItems([]); setCurrent(null); setSelected(null); setPlayRequest(''); setCursor(null);
+    player.current?.pause(); setViewOnlyCandidate(null);setItems([]); setCurrent(null); setSelected(null); setPlayRequest(''); setCursor(null);
     setLoading(false); setDetailLoading(false);
   }, []);
 
@@ -95,7 +96,8 @@ export function MultiviewVideoResults({ owner, authority, active, currentTaskId,
         if (deliveredSelection.current !== id && selectionCallback.current) {
           const applied = await selectionCallback.current(id);
           if (!alive() || sequence !== sequenceRef.current) return;
-          if(!applied){if(deliveredSelection.current)setSelectedId(deliveredSelection.current);return;}
+          if(!applied){setViewOnlyCandidate(item);setDetailError('这条视频的输入未恢复，原方案保留。');return;}
+          setViewOnlyCandidate(null);viewOnlySelection.current='';
         }
         deliveredSelection.current = id; setSelected(item);
       } else if (asCurrent && focusedRef.current === id && deliveredSelection.current === id) setSelected(item);
@@ -117,7 +119,7 @@ export function MultiviewVideoResults({ owner, authority, active, currentTaskId,
   useEffect(() => {
     controllers.current.forEach(controller => controller.abort());
     listSequence.current++; detailSequence.current++; currentSequence.current++;
-    setItems([]); setCursor(null); setCurrent(null); setSelected(null); setSelectedId(initialTaskId || ''); deliveredSelection.current = initialTaskId || '';
+    setViewOnlyCandidate(null);setItems([]); setCursor(null); setCurrent(null); setSelected(null); setSelectedId(initialTaskId || ''); deliveredSelection.current = initialTaskId || '';
     setNotice(''); setDetailError(''); setCurrentError(''); setMediaError(''); setPlayRequest(''); setLoadedIdentity(identity);
     if (!currentTaskId && !initialTaskId) {
       try { const saved = sessionStorage.getItem(selectionKey); if (validId(saved)) setSelectedId(saved); } catch { /* Playback does not require browser storage. */ }
@@ -167,7 +169,7 @@ export function MultiviewVideoResults({ owner, authority, active, currentTaskId,
     try { sessionStorage.setItem(selectionKey, id); } catch { /* The selected video remains usable in memory. */ }
     if (id === selected?.id) void player.current?.play().catch(() => setMediaError('视频已打开，请点击播放。'));
   };
-  const refresh = () => { void loadList(); if (currentTaskId) void loadTask(currentTaskId, true); if (focusedId) void loadTask(focusedId, false); };
+  const refresh = () => {if(viewOnlyCandidate||viewOnlySelection.current)deliveredSelection.current=''; void loadList(); if (currentTaskId) void loadTask(currentTaskId, true); if (focusedId) void loadTask(focusedId, false); };
   if (!active || !owner || loadedIdentity !== identity) return null;
   return <section className={styles.results} aria-label="视频结果与历史视频">
     <header className={styles.header}><h2>视频结果</h2>
@@ -189,11 +191,12 @@ export function MultiviewVideoResults({ owner, authority, active, currentTaskId,
           </div>
           {selected.error && <p className={styles.notice} role="status">{selected.error.message}</p>}
         </> : <div className={styles.placeholder}><Film size={28} /><span>{detailLoading || loading ? '正在恢复视频与输入…' : pendingLabel || (focusedId ? '视频暂不可用' : '暂无生成视频')}</span></div>}
+        {viewOnlyCandidate&&<p className={styles.notice}><button type="button" onClick={()=>{player.current?.pause();onViewOnly?.(viewOnlyCandidate.id);viewOnlySelection.current=viewOnlyCandidate.id;deliveredSelection.current=viewOnlyCandidate.id;setSelected(viewOnlyCandidate);setDetailError('当前仅查看视频，输入未恢复。');setViewOnlyCandidate(null);}}>仅查看这条视频</button></p>}
         {(detailError || mediaError) && <p className={styles.notice} role="status">{detailError || mediaError} <button type="button" onClick={refresh}>重新读取</button></p>}
       </div>
       <aside className={styles.history} aria-label="历史视频"><h3>历史视频</h3>
-        <div className={styles.historyList}>{items.map(item => <article key={item.id} className={styles.historyItem} data-selected={item.id === focusedId || undefined}>
-          <button type="button" className={styles.selectVideo} disabled={detailLoading} aria-pressed={item.id === focusedId} onClick={() => choose(item.id)} aria-label={`${item.playUrl ? '播放' : '查看'}${item.title || '3D多视图视频'}`}>
+        <div className={styles.historyList}>{items.map(item => <article key={item.id} className={styles.historyItem} data-selected={item.id === selected?.id || undefined}>
+          <button type="button" className={styles.selectVideo} disabled={detailLoading} aria-pressed={item.id === selected?.id} onClick={() => choose(item.id)} aria-label={`${item.playUrl ? '播放' : '查看'}${item.title || '3D多视图视频'}`}>
             <span className={styles.thumbnail}>{item.thumbnailUrl ? <img src={item.thumbnailUrl} alt="" loading="lazy" /> : <Film size={22} />}{item.playUrl && <Play className={styles.playIcon} size={18} />}</span>
             <span className={styles.recordText}><strong>{item.title || '3D多视图视频'}</strong><span>{multiviewVideoResultLabel(item)}</span><span>{points(item)}</span></span>
           </button>

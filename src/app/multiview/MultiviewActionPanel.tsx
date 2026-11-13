@@ -96,6 +96,7 @@ export function MultiviewActionPanel(props: Props) {
   function keepAiJournal(value:AiJournal){localStorage.setItem(aiKey,JSON.stringify(value));aiJournalRef.current=value;setAiJournal(value);}
   const modelOptions=llmModels.filter(model=>modelAvailable('text',model.id));
   const llmReady=modelOptions.some(model=>model.id===llmModel);
+  const [viewOnly,setViewOnly]=useState(false);
   const [videoDraft,setVideoDraft]=useState<{text:string;parameters:MultiviewActionParameters;referenceImage?:boolean}|null>(null);
   const videoInputKey=props.restored ? `sd2:multiview-action-video-input:v1:${props.ownerId}:${props.restored.taskId}` : requestKey+':input';
   const restoredInput=useRef('');
@@ -271,10 +272,12 @@ export function MultiviewActionPanel(props: Props) {
   const applyParameters=(patch:Partial<MultiviewActionParameters>)=>{editRevision.current++;setParameters(value=>({...value,...patch}));setConfirming(false);};
   const showVideo=props.activeView==='video';
   return <>
-    <div className={styles.resultRow} hidden={!showVideo}><MultiviewVideoResults key={scope} initialTaskId={props.restored?.taskId} onSelect={async id=>{if(props.restored&&id===props.restored.taskId)return true;try{if(props.restored&&(text!==props.restored.text||JSON.stringify(parameters)!==JSON.stringify(props.restored.parameters)))localStorage.setItem(videoInputKey,JSON.stringify({text,parameters,referenceImage}));}catch{setMessage('当前修改未能保留，请重试后再切换。');return false;}if(saveInFlight.current)await saveInFlight.current.catch(()=>undefined);await saveDraft();return props.onSelectVideo?props.onSelectVideo(id):true;}} owner={props.ownerId} authority={props.authority} active={props.active !== false && showVideo}
+    <div className={styles.resultRow} hidden={!showVideo}><MultiviewVideoResults key={scope} initialTaskId={props.restored?.taskId} onViewOnly={()=>setViewOnly(true)} onSelect={async id=>{if(props.restored&&id===props.restored.taskId){setViewOnly(false);return true;}try{if(props.restored&&(text!==props.restored.text||JSON.stringify(parameters)!==JSON.stringify(props.restored.parameters)))localStorage.setItem(videoInputKey,JSON.stringify({text,parameters,referenceImage}));}catch{setMessage('当前修改未能保留，请重试后再切换。');return false;}if(saveInFlight.current)await saveInFlight.current.catch(()=>undefined);await saveDraft();const restored=props.onSelectVideo?await props.onSelectVideo(id):true;if(restored)setViewOnly(false);return restored;}} owner={props.ownerId} authority={props.authority} active={props.active !== false && showVideo}
       currentTaskId={original ? original.taskId : state?.runs.find(run => run.tasks.length)?.tasks[0]?.taskId}
       pendingLabel={original && !original.taskId ? '提交结果待确认' : submitting ? '正在准备并提交视频任务…' : undefined} /></div>
     <aside className={styles.action} aria-label="同步动作视频">
+      {viewOnly&&<p role="status" className={styles.notice}>当前仅查看视频，未载入它的输入。请选择可恢复的视频继续修改。</p>}
+      <div hidden={viewOnly}>
       <div className={styles.actionHeading}><h3>动作与设置</h3>{props.onChangeOriginal&&<button type="button" onClick={()=>props.onChangeOriginal?.({text,parameters})}>更换原图</button>}</div>
       {props.restored && <div className={styles.inputSource}><span>{!props.referenceChanged&&text===props.restored.text&&JSON.stringify(parameters)===JSON.stringify(props.restored.parameters)?'当前视频的生成时输入':'基于当前视频的修改 · 未生成'}</span><small>{seedanceVideoModelLabel(props.restored.parameters.model)} · {props.restored.parameters.duration}秒 · {props.restored.parameters.resolution}</small></div>}
       {(videoDraft||props.hasReferenceDraft)&&<p className={styles.notice}>这条视频有上次修改。<button type="button" onClick={()=>{if(videoDraft){updateText(videoDraft.text);setParameters(videoDraft.parameters);setReferenceImage(videoDraft.referenceImage===true);setVideoDraft(null);}if(props.hasReferenceDraft)props.onResumeDraft?.();}}>继续上次修改</button></p>}
@@ -313,6 +316,7 @@ export function MultiviewActionPanel(props: Props) {
       {draftBlocked&&<button onClick={async()=>{try{await refresh();setDraftBlocked(false);const latest=await api<MultiviewActionState>(`/api/video/multiview/actions?workId=${props.work!.id}`);if(active()){setDraft(latest.draft);draftRef.current=latest.draft;setMessage('服务器版本已核对，当前文字保留，请继续保存。');}}catch(cause){setMessage(cause instanceof Error?cause.message:'暂不可读取。');}}}>核对最新并保留我的草稿</button>}
       {message&&<p className={styles.notice} role="status">{message}</p>}
       {<button type="button" className={styles.primary} disabled={!hydrated||!text.trim()||!parameters.project_id||!state?.capabilities.actionReady||Boolean(props.inputError)||submitting||saving||creation.loading||Boolean(original&&!original.taskId)||draftBlocked} onClick={()=>{if((original?.taskId||newAttemptRequired)&&!newAttempt())return;setConfirming(true);}}>{submitting?'正在准备并提交…':props.restored?'生成新版本':'制作动作视频'}</button>}
+      </div>
     </aside>
     {productDialog}
     {context&&<RuleDialog key={`${scope}:${context}`} kind={context} ownerId={props.ownerId} onClose={()=>setContext(null)} onSaved={()=>{setQuote(null);void refresh().catch(()=>undefined);}}/>}

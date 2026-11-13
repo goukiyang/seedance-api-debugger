@@ -69,9 +69,9 @@ const previewSource=fs.readFileSync('src/app/multiview/MultiviewVideoResults.tsx
 const previewAst=ts.createSourceFile('preview.tsx',previewSource,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let callback;
 function find(node){if(ts.isVariableDeclaration(node)&&node.name.getText(previewAst)==='loadTask')callback=node.initializer.arguments[0].getText(previewAst);ts.forEachChild(node,find);}find(previewAst);assert.ok(callback);
 const order=[], ref=()=>({current:0});
-const view={URLSearchParams,alive:()=>true,validId:()=>true,currentSequence:ref(),detailSequence:ref(),focusedRef:{current:'new'},deliveredSelection:{current:'old'},
+const view={URLSearchParams,alive:()=>true,validId:()=>true,currentSequence:ref(),detailSequence:ref(),focusedRef:{current:'new'},viewOnlySelection:{current:''},deliveredSelection:{current:'old'},
   selectionCallback:{current:async id=>{order.push('restore:'+id);return true;}},read:async()=>({items:[{id:'new'}]}),
-  setCurrentError(){},setDetailLoading(){},setDetailError(){},setSelected:item=>order.push('display:'+item.id),setItems(){},setCurrent(){},rejectAccess(){},setSelectedId(){},mergeMultiviewVideoResults(){}};
+  setViewOnlyCandidate(){},setCurrentError(){},setDetailLoading(){},setDetailError(){},setSelected:item=>order.push('display:'+item.id),setItems(){},setCurrent(){},rejectAccess(){},setSelectedId(){},mergeMultiviewVideoResults(){}};
 vm.runInNewContext(ts.transpileModule('globalThis.readDetail='+callback,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,view);
 await view.readDetail('new',false);assert.deepEqual(order,['restore:new','display:new']);checks.push('preview display follows successful matching input restoration');
 order.length=0;await view.readDetail('new',false);assert.deepEqual(order,['display:new']);checks.push('background status refresh does not reset edits');
@@ -96,4 +96,13 @@ input.restoreInput();assert.equal(input.text,'十二秒的新动作');assert.equ
 input.persistInput();assert.equal(stored.get('video-input'),JSON.stringify(previousDraft));checks.push('selecting a video restores original input while retaining its ungenerated draft for explicit resume');
 input.text='当前新修改';input.persistInput();assert.equal(JSON.parse(stored.get('video-input')).text,'当前新修改');checks.push('new edits are retained under this video only');
 assert.ok(restoreContract.parseMultiviewActionInput({text:'旧文案',parameters:{...parameters,model:'retired-model-id'}}));checks.push('historical unavailable model is preserved for display instead of silently replaced');
+let readOnlyHandler;
+function findReadOnly(node){if(ts.isJsxAttribute(node)&&node.name.getText(previewAst)==='onClick'&&node.initializer?.getText(previewAst).includes('onViewOnly?.'))readOnlyHandler=node.initializer.expression.getText(previewAst);ts.forEachChild(node,findReadOnly);}findReadOnly(previewAst);assert.ok(readOnlyHandler);
+const readOnlyOrder=[],readOnly={player:{current:{pause(){}}},viewOnlyCandidate:{id:'unrestorable'},viewOnlySelection:{current:''},deliveredSelection:{current:''},onViewOnly:id=>readOnlyOrder.push('read-only:'+id),setSelected:item=>readOnlyOrder.push('display:'+item.id),setDetailError(){},setViewOnlyCandidate(){}};
+vm.runInNewContext('globalThis.viewOnly='+readOnlyHandler,readOnly);readOnly.viewOnly();assert.deepEqual(readOnlyOrder,['read-only:unrestorable','display:unrestorable']);checks.push('unrestorable input still has a view-only video path without editable stale input');
+const pageSource=fs.readFileSync('src/app/multiview/page.tsx','utf8'),pageAst=ts.createSourceFile('page.tsx',pageSource,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let reset;
+function findReset(node){if(ts.isCallExpression(node)&&node.expression.getText(pageAst)==='useEffect'&&node.arguments[0]?.getText(pageAst).includes('setCarriedAction(null)'))reset=node.arguments[0].getText(pageAst);ts.forEachChild(node,findReset);}findReset(pageAst);assert.ok(reset);
+const resetEvents=[],session={restoreSequence:{current:2},restoreLock:{current:true},openedVideo:{current:'old'},incomingVideoDone:{current:()=>resetEvents.push('old-waiter-released')}};
+for(const key of ['setIncomingVideo','setCarriedAction','setVideoReturnView','setPreviewTaskId','setPreviewReadOnly','setRestoringVideo','setReferencePicking','setReferenceReplacement'])session[key]=value=>resetEvents.push([key,value]);
+vm.runInNewContext('globalThis.reset='+reset,session);session.reset();assert.ok(resetEvents.some(item=>Array.isArray(item)&&item[0]==='setCarriedAction'&&item[1]===null));assert.equal(session.restoreSequence.current,3);assert.equal(session.incomingVideoDone.current,null);checks.push('account or authority change clears carried inputs, preview state and pending selection');
 console.log(JSON.stringify({passed:true,checks,isolation:{realFetches:0,productionWrites:0,generationCalls:0,browserAcceptance:'manual-pending'}}));
