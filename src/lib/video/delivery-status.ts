@@ -1,5 +1,3 @@
-import { videoPendingStatusLabel } from './submission-state';
-
 export type VideoDeliveryStageTask = {
   local_status: string | null;
   public_video_url?: string | null;
@@ -52,7 +50,7 @@ export function videoDeliveryStageForTask(task: VideoDeliveryStageTask): VideoDe
   if (task.local_status !== 'succeeded') {
     return {
       key: 'generating',
-      label: videoPendingStatusLabel(task.local_status) || '生成中',
+      label: '生成中',
       stableDownloadReady: false,
       previewAvailable: hasPreview(task),
     };
