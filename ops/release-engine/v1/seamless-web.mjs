@@ -53,7 +53,7 @@ const properties = unit => Object.fromEntries(nativeCall('/usr/bin/systemctl', [
     'Restart', 'SendSIGKILL', 'TimeoutStopUSec', 'KillSignal', 'Delegate'].flatMap(f => ['-p', f])])
   .split('\n').map(line => { const i = line.indexOf('='); return [line.slice(0, i), line.slice(i + 1)]; }));
 export function processIdentity(pid) {
-  assert.ok(Number.isSafeInteger(Number(pid)) && Number(pid) > 1);
+  assert.ok(Number.isSafeInteger(Number(pid)) && Number(pid) > 0);
   const s = fs.readFileSync('/proc/' + pid + '/stat', 'utf8'), a = s.slice(s.lastIndexOf(')') + 2).split(/\s+/);
   assert.ok(!['Z', 'X', 'x'].includes(a[0]));
   return { pid: Number(pid), startTicks: a[19], parent: Number(a[1]),
