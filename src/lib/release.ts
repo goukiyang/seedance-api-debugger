@@ -1,11 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '动作整理可参考当前拼图',
+  title: '完善视频提交等待和原任务查看',
   outline: [
-    '勾选后将当前拼图与动作文字一起交给 GPT',
-    '不勾选时继续使用纯文字整理',
-    '保留手改文字、参考图与待确认原请求'
+    '长等待时显示已记录的原任务并提供查看入口',
+    '提交期间暂不能结束本次准备',
+    '保留原请求、当前输入与费用预留'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
