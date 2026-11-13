@@ -135,4 +135,33 @@ const preferenceStorage=new Map([['work-input',{referenceImage:true}]]),preferen
   setReferenceImage:value=>{preferences.referenceImage=value;},setReferencePreferenceReady:value=>{preferences.referencePreferenceReady=value;},setMessage(){}};
 vm.runInNewContext('globalThis.readPreference='+preferenceRead+';globalThis.writePreference='+preferenceWrite,preferences);
 preferences.writePreference();assert.equal(preferenceStorage.has('work-preference'),false);preferences.readPreference();preferences.writePreference();assert.equal(preferenceStorage.get('work-preference'),'true');checks.push('image-reference preference survives video restoration without editing text or overwriting it with an initial default');
+const composerFile='src/app/multiview/MultiviewReferenceComposer.tsx';
+const removal={exports:{},hydrated:true,busy:false,missingRecipe:false,drag:{current:null},props:{active:true},selected:slots[1].id,
+  recipeRef:{current:recipe},canvas:{current:{focus(){}}},recipe,history:[],future:[],syncAdjust:true,valid:()=>true,
+  setRecipe:next=>{removal.recipe=next;},setHistory:next=>{removal.history=next(removal.history);},setFuture:next=>{removal.future=typeof next==='function'?next(removal.future):next;},setSelected:next=>{removal.selected=next;},setMessage(){}};
+vm.runInNewContext(functions(composerFile,['edit','removeSelectedImage','onCanvasKeyDown']),removal);
+let prevented=0;const deletion={key:'Delete',repeat:false,ctrlKey:false,metaKey:false,altKey:false,target:{isContentEditable:false,closest:()=>({tagName:'INPUT'})},preventDefault(){prevented++;}};
+removal.actual.onCanvasKeyDown(deletion);assert.equal(removal.history.length,0);assert.equal(prevented,0);checks.push('Delete in text or select controls leaves the selected canvas image unchanged');
+deletion.target.closest=()=>null;removal.actual.onCanvasKeyDown(deletion);assert.equal(removal.history.length,1);assert.equal(removal.selected,'');
+assert.deepEqual(removal.recipe.placements[0],recipe.placements[0]);assert.deepEqual(removal.history[0],recipe);checks.push('Delete removes only the selected image and records one undo even with synchronized adjustment enabled');
+const removedRecipe=contract.parseMultiviewWorkRecipe(removal.recipe,info);assert.ok(removedRecipe);
+const pixels=layout.referencePixelGeometry(removedRecipe,info),removedImage=pixels.placements.find(item=>item.slotId===slots[1].id);
+assert.ok(removedImage.x+removedImage.width<=0&&removedImage.y+removedImage.height<=0);checks.push('removed image stays absent after the actual saved-recipe parser and pixel geometry roundtrip');
+const sharp=require('sharp'),frame=async color=>sharp({create:{width:16,height:16,channels:4,background:color}}).png().toBuffer();
+const render={exports:{},Buffer,sharp,referencePixelGeometry:layout.referencePixelGeometry};
+vm.runInNewContext(functions('src/lib/video/multiview.ts',['composeMultiviewReferencePng']),render);
+const png=await render.actual.composeMultiviewReferencePng({id:'owner'},'rotation',info,[await frame('#ff0000'),await frame('#0000ff')],removedRecipe);
+const sample=await sharp(png).extract({left:Math.floor(recipe.output.width*.75),top:Math.floor(recipe.output.height*.5),width:1,height:1}).raw().toBuffer();
+assert.deepEqual([...sample],[214,219,223,255]);checks.push('actual server PNG composition omits the deleted image instead of exporting a preview-only change');
+const composerAst=ts.createSourceFile(composerFile,fs.readFileSync(composerFile,'utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let undoClick;
+function findUndo(node){if(ts.isJsxElement(node)&&node.openingElement.tagName.getText(composerAst)==='button'&&node.getText(composerAst).includes('<Undo2'))undoClick=node.openingElement.attributes.properties.find(item=>item.name?.getText(composerAst)==='onClick').initializer.expression.getText(composerAst);ts.forEachChild(node,findUndo);}findUndo(composerAst);assert.ok(undoClick);
+removal.edit=removal.actual.edit;vm.runInNewContext('globalThis.undo='+undoClick,removal);removal.undo();assert.deepEqual(removal.recipe,recipe);assert.equal(removal.future.length,1);checks.push('existing undo restores the removed image and retains it for redo');
+removal.selected=slots[1].id;deletion.key='Backspace';removal.actual.onCanvasKeyDown(deletion);assert.equal(removal.recipe.placements[1].x,-8);checks.push('Mac Delete key reported as Backspace uses the same single-image removal');
+const empty={exports:{},missingRecipe:false,hasVisibleImages:false};vm.runInNewContext(functions(composerFile,['prepareForVideo']),empty);
+await assert.rejects(empty.actual.prepareForVideo(),error=>error.message.includes('拼图中没有图像'));checks.push('clearing every canvas image stops reference preparation before any save or generation call');
+const workFile='src/app/multiview/MultiviewWorks.tsx',workAst=ts.createSourceFile(workFile,fs.readFileSync(workFile,'utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let openWorkEffect;
+function findWorkEffect(node){if(ts.isCallExpression(node)&&node.expression.getText(workAst)==='useEffect'&&node.arguments[0]?.getText(workAst).includes('const id = initialWorkId'))openWorkEffect=node.arguments[0].getText(workAst);ts.forEachChild(node,findWorkEffect);}findWorkEffect(workAst);assert.ok(openWorkEffect);
+const opened=[],library={loadedIdentity:'owner',identity:'owner',initialWorkId:'',kind:'reference',preferences:{selected:'last-work'},setWork(){},fetchDetail:id=>opened.push(id)};
+vm.runInNewContext('globalThis.enter='+openWorkEffect,library);library.enter();assert.deepEqual(opened,[]);checks.push('action-works entry shows the thumbnail library despite a previously selected work');
+library.initialWorkId='explicit-work';library.enter();assert.equal(opened.at(-1),'explicit-work');library.initialWorkId='';library.kind=undefined;library.enter();assert.equal(opened.at(-1),'last-work');checks.push('explicit work links and ordinary work-library restoration keep their existing behavior');
 console.log(JSON.stringify({passed:true,checks,isolation:{realFetches:0,productionWrites:0,generationCalls:0,browserAcceptance:'manual-pending'}}));
