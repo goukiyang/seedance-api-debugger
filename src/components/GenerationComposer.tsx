@@ -418,6 +418,7 @@ interface Props {
     resolution?: VideoResolution | null;
   } | null;
   reuseDraft?: {
+    draft?: boolean;
     videoCardId?: string | null;
     model?: string | null;
     taskId: string;
@@ -1612,6 +1613,7 @@ export function GenerationComposer({
     setGenerateAudio(reuseDraft.generateAudio);
     setReturnLastFrame(reuseDraft.returnLastFrame);
     setWatermark(reuseDraft.watermark);
+    if (typeof reuseDraft.draft === 'boolean') setDraftMode(reuseDraft.draft);
     setResolutionApprovalConfirmed(
       require1080pApproval && reuseDraft.resolution === '1080p' ? Boolean(reuseDraft.resolutionApprovalConfirmed) : false,
     );
@@ -1630,11 +1632,12 @@ export function GenerationComposer({
     if (prompt !== reuseDraft.prompt || generationMode !== reuseDraft.generationMode || ratio !== reuseDraft.ratio
       || duration !== reuseDraft.duration || resolution !== reuseDraft.resolution || seed !== reuseDraft.seed
       || generateAudio !== reuseDraft.generateAudio || returnLastFrame !== reuseDraft.returnLastFrame
-      || watermark !== reuseDraft.watermark || (reuseDraft.model && selectedModel !== reuseDraft.model)) { reportedReuseAppliedRef.current = reuseKey; onReuseDraftApplied(reuseDraft.taskId, reuseDraft.reuseKey, 'context_changed', '服务器已完成复用，当前参数已有新编辑，未继续覆盖。'); return; }
+      || watermark !== reuseDraft.watermark || typeof reuseDraft.draft === 'boolean' && draftMode !== reuseDraft.draft
+      || (reuseDraft.model && selectedModel !== reuseDraft.model)) { reportedReuseAppliedRef.current = reuseKey; onReuseDraftApplied(reuseDraft.taskId, reuseDraft.reuseKey, 'context_changed', '服务器已完成复用，当前参数已有新编辑，未继续覆盖。'); return; }
     reportedReuseAppliedRef.current = reuseKey;
     onReuseDraftApplied(reuseDraft.taskId, reuseDraft.reuseKey, 'applied');
   }, [reuseDraft, reuseReadCompleteKey, onReuseDraftApplied, studioHandoff, workspace.loading, workspace.error,
-    prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, selectedModel]);
+    prompt, generationMode, ratio, duration, resolution, seed, generateAudio, returnLastFrame, watermark, draftMode, selectedModel]);
 
   useEffect(() => {
     if (imageResultHandoff) return;

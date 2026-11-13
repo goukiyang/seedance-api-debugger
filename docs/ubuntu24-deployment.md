@@ -1,15 +1,15 @@
 <!-- SEAMLESS01-DEFAULT-20261112 -->
-## 默认发布：无感切换（SEAMLESS01，源码已实现，本轮不上线）
+## 默认发布：无感切换与自动接续（SEAMLESS01）
 
-后续常规发布走 `ops/sd2-release.mjs` / profile 的 `delivery`，控制器版本1.1.0。禁止沿下方历史记录复制“先停Web/先装503”的常规cutover；旧控制器只读查看历史，当前共享引擎的冷切入口已拒绝执行。更新提示页保留作真实异常兜底。
+后续常规发布沿 `ops/sd2-release.mjs` / profile，要求 `policy` 显示引擎1.1.1、seamless及automatic-same-plan。旧分支先从 `codex/seamless-default-20261112` 聚焦合入；禁止复制历史“先停Web/先装503”的常规cutover，更新提示页仅作真实故障兜底。
 
-1. 沿当次实际候选构建链完成同源工程检查、完整Next/类型及计价准入，不启动旧release/cutover控制器。当前流水线使用 `main-build-success.json`、两份实际进程回执/日志、source manifest、pricing/native矩阵及 `prepared-pricing-writer-v1.json`；新入口逐项核对这些原证和完整源/构建文件，不依赖旧模板的固定权限假设。仍可接收共享候选构建器的 `main-immutable-success.json`，须保原始封存和输入字节；旧完成时间不重写成新鲜构建。
-2. 默认只接收与实际运行版相同Prisma/迁移、持久服务合同、依赖和任务协议的新版，保留原来的精确相容guard。收费运行凭据分源及同步请求进程元数据只接受引擎封存的六个明确增量（同步元数据、收费凭据、共享模板心跳及其最小接线）。涉及后台协议或依赖变更时先安排兼容化，不把不足的证据当兼容，不自动降级成停站发布。
-3. 在获准真实发布后，用已安装、root所有且哈希绑定的引擎生成当次计划：`node ops/sd2-release.mjs prepare-seamless ENGINE_INSTALL.json MAIN_BUILD_EVIDENCE.json`，再执行 `node ops/sd2-release.mjs release PLAN.json`；`status-release PLAN.json`只读状态，`resume-release PLAN.json`接续原计划。30分钟准入窗口只约束首次准备；在途请求未结束会保留服务并以pending退出（75），不能强杀或重建原业务请求。
-4. 新版网页3303和独立图片worker先通过源码/BUILD、原root+i屏障、同权限且主策略变更即失效的私密副本（guard直接读现行策略）、真实PID/cgroup及有效就绪凭据。保留旧/新/guard静态资源后，Nginx平滑接到新版；等原Nginx worker（含尚在缓冲上传）和原同步生成真正结束，再自然停旧后台及其同旧根进程。原主入口3302及后台就绪后切回，最后让临时请求自然结束，保留资源供旧页面继续使用。
-5. 只切程序及原有三个启动控制/消费者绑定；不执行DDL、不覆盖业务数据库、原号、账本或媒体。候选未就绪保留原站；中途仍可用则保留当前服务并记录未完成步骤，真正不可用时启动已固定的相容guard，不回滚业务数据。后台定时任务完成交接后恢复原启用状态。
+1. 复用原候选构建链及仍有效的工程证据：完整Next/类型、实际进程回执、原source manifest、fresh pricing/native矩阵和prepared pricing entry。相同Prisma、持久写协议与依赖准入；不相容则留原站，不冷切、不回业务数据。
+2. `prepare-seamless ENGINE_INSTALL.json MAIN_BUILD_EVIDENCE.json` 生成当次root封存计划，再 `release PLAN.json`。正常SD2连接/原请求排空由控制器自动等待和接续；`status-release`只读，`resume-release`用于异常中断后的原计划恢复。功能手验不阻断工程发布；真实准入、就绪或数据保护失败仍停止受影响动作。
+3. 候选Web3303/独立图片worker先通过原root+i屏障、真实源/BUILD、实际进程及就绪凭据。私密策略沿现有应用UID/0600，临时副本不改权限；启动授权仍root封存。保留旧/新/guard静态资源，再只将Nginx用户发往本机3302的新连接转给已就绪3303，原连接继续原去处，晚到旧地址请求也有可用入口。
+4. 排空只等SD2原3302后端连接、原同步请求及原角色自然退出，不等共享Nginx其它站点的长连接。确认旧writer/原根进程退出后，沿原三个启动控制、真正生效的CWD及私密消费者绑定交接；不覆盖DB、账本、原号、媒体或现价。
+5. 正式3302和后台真实就绪后，再将晚到3303连接导向3302，排空并自然退役临时进程，恢复原timer状态。保留的3303旧入口桥接在下一候选真正就绪时才切换；常规站点配置未变时不重复reload共享Nginx。实际故障沿固定相容guard3304，仅回程序/配置。
 
-实际执行必须沿[SEAMLESS01原单](../tasks/todo/2026-11-12-seamless-default-release.md)核对当次运行源、恢复入口及授权。本轮只做本地实现/离线工程检查和Git交付：没有安装服务器新引擎、reload、重启、切流、迁移或收费/浏览器验收；真实Linux服务交接和Next跨版本导航/草稿仍待后续发布检查及用户手验，不能把离线代理检查说成线上无感已验证。
+应用v0.148.11（源2c338614、BUILD F0nHdqbVfbkJgcJk-cptg）已于2026-11-13 03:12:14Z完成7角色交接，临时服务已退役。默认引擎1.1.1已安装，源码70871af64已推送。实际执行、失败原证、隔离内核/CLI检查、探测超时线索及用户手验边界见[原单§6](../tasks/todo/2026-11-12-seamless-default-release.md#6-r02-实际发布与默认流程固化)。
 <!-- /SEAMLESS01-DEFAULT-20261112 -->
 
 <!-- LEGACY-THUMB-1481-RELEASE-20261112 -->

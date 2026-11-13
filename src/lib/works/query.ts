@@ -75,7 +75,7 @@ export async function projectWorkCards(user: SessionUser, keys: PageKey[], db: P
   const [authors, projects, provenance, jobs] = await Promise.all([
     db.user.findMany({ where: { id: { in: Array.from(new Set(works.map(work => work.author_id))) } }, select: { id: true, name: true, avatar_url: true } }),
     db.project.findMany({ where: { id: { in: Array.from(new Set(works.flatMap(work => work.project_id ? [work.project_id] : []))) } }, select: { id: true, name: true } }),
-    projectWorkProvenance(user, works, db),
+    projectWorkProvenance(user, works, db, new Set(keys.filter(key => key.can_preview && key.native_preview).map(key => key.id))),
     pending.length ? db.workRegistrationJob.findMany({ where: { source_kind: 'media_preview', source_id: { in: pending },
       status: { in: ['pending', 'running'] } }, select: { source_id: true } }) : [],
   ]);

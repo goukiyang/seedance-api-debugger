@@ -1,4 +1,5 @@
 'use client';
+import { isVideoSubmissionUnconfirmed, videoPendingStatusLabel } from '@/components/generate/video-submission-state';
 import { projectDisplayName } from '@/lib/projects/display';
 import { ProjectSelector } from '@/components/ProjectSelector';
 import DraftUpgradeAction from '@/components/creation/DraftUpgradeAction';
@@ -78,6 +79,7 @@ import type { ReferenceImageInput } from '@/lib/character-assets/types';
 // ============================================================================
 
 interface CreateResponse {
+  local_status?: string;
   id: string;
   provider?: string;
   provider_task_id: string;
@@ -288,6 +290,7 @@ interface ProjectOption {
 }
 
 interface ReuseDraft {
+  draft?: boolean;
   referenceImageInputs?: ReferenceImageInput[];
   characterAssetReferences?: TaskReuseInputBackup['fields']['characterAssetReferences'];
   videoPromptGroups?: VideoPromptGroupRef[];
@@ -345,7 +348,7 @@ const RECENT_TASK_PAGE_SIZE = 12;
 const RECENT_TASK_INITIAL_PREFETCH_MAX_PAGES = 4;
 const RECENT_TASK_INITIAL_MIN_VISUALS = 6;
 const MAX_ACTIVE_POLLING_TASKS = 12;
-const POLLABLE_TASK_STATUSES = new Set(['submitted', 'running']);
+const POLLABLE_TASK_STATUSES = new Set(['submitted', 'running', 'retry_wait', 'retry_submitting']);
 
 type GenerateSurface = 'standard' | 'ip';
 
@@ -2064,6 +2067,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           generate_audio?: boolean;
           return_last_frame?: boolean;
           watermark?: boolean;
+          draft?: boolean;
           resolution_approval_confirmed?: boolean;
           project_id?: string | null;
           video_card_id?: string | null;
@@ -2153,6 +2157,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         || typeof draft.ratio !== 'string' || !draft.ratio || typeof draft.duration !== 'number' || !Number.isFinite(draft.duration) || draft.duration <= 0
         || typeof draft.resolution !== 'string' || !draft.resolution || typeof draft.seed !== 'number' || !Number.isFinite(draft.seed)
         || typeof draft.generate_audio !== 'boolean' || typeof draft.return_last_frame !== 'boolean' || typeof draft.watermark !== 'boolean'
+        || draft.draft !== undefined && typeof draft.draft !== 'boolean'
         || (!parameterOnly && (typeof data.skipped_references !== 'number' || data.skipped_references !== 0))) {
         if (parameterOnly) retainIntent('failed', '原任务参数读取不完整，当前输入与参考区未改动，请重试读取。');
         else markOutcomeUnknown('服务器已返回响应，但缺少可核对的任务数据。当前参数未替换，参考区可能已变化；请重新读取并核对。');
@@ -2193,6 +2198,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           ratio: data.draft.ratio || backup.fields.ratio, duration: data.draft.duration ?? backup.fields.duration, resolution: data.draft.resolution || backup.fields.resolution,
           seed: data.draft.seed ?? backup.fields.seed, generateAudio: data.draft.generate_audio ?? backup.fields.generateAudio,
           returnLastFrame: data.draft.return_last_frame ?? backup.fields.returnLastFrame, watermark: data.draft.watermark ?? backup.fields.watermark,
+          draftMode: data.draft.draft ?? backup.fields.draftMode,
           resolutionApprovalConfirmed: data.draft.resolution_approval_confirmed ?? false } } : null;
       pendingReuseApplicationRef.current = {
         taskId, reuseKey, accountId, bridgeKey: capturedContext.workspaceBridgeKey, tabId: capturedTabId,
@@ -2229,6 +2235,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         generateAudio: Boolean(data.draft.generate_audio),
         returnLastFrame: Boolean(data.draft.return_last_frame),
         watermark: Boolean(data.draft.watermark),
+        draft: data.draft.draft,
         resolutionApprovalConfirmed: asBoolean(data.draft.resolution_approval_confirmed, false),
         projectId: targetProjectId || null,
         videoCardId: targetCardId || null,
@@ -2783,7 +2790,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       if (!isCurrent()) return;
       if (!response.ok) throw new Error(data.message || data.error || '原请求暂时无法确认');
       if (!data.task?.id) { setUnconfirmedGenerationRequest(true); setGenerationNotice('提交结果待确认，请继续查询原请求；不会重新生成'); return; }
-      const unconfirmed = data.task.submission_unconfirmed === true || data.task.error_code === 'IP_SUBMISSION_UNCONFIRMED';
+      const unconfirmed = isVideoSubmissionUnconfirmed(data.task);
       await creation.acceptTask(pending.key, data.task.id);
       if (!isCurrent()) return;
       if (!unconfirmed) sessionStorage.removeItem(activeGenerationRequestStorageKey);
@@ -2830,7 +2837,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       if (!isCurrent()) return;
       await creation.acceptTask(key, task.id);
       if (!isCurrent()) return;
-      const unconfirmed = task.error_code === 'IP_SUBMISSION_UNCONFIRMED' || task.submission_unconfirmed === true;
+      const unconfirmed = isVideoSubmissionUnconfirmed(task);
       if (!unconfirmed) sessionStorage.removeItem(requestStorageKey);
       setUnconfirmedGenerationRequest(unconfirmed);
       unconfirmedGenerationParamsRef.current = unconfirmed ? params : null;
@@ -3004,7 +3011,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       if (res.ok && data.id) await creation.acceptTask(idempotencyKey, data.id);
       if (!isCurrent()) return;
 
-      if (res.ok && (data.error_code === 'IP_SUBMISSION_UNCONFIRMED' || data.submission_unconfirmed === true)) {
+      if (res.ok && isVideoSubmissionUnconfirmed(data)) {
         await acceptRecoveredTask(data, idempotencyKey);
         return;
       }
@@ -3838,12 +3845,13 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                               </span>
                             )}
                             <span className={`composer-task-card-status ${task.local_status}`}>
-                              {task.error_code === 'IP_SUBMISSION_UNCONFIRMED' ? '提交待确认' :
+                              {isVideoSubmissionUnconfirmed(task) ? '提交结果待确认' :
+                                videoPendingStatusLabel(task.local_status) ?? (
                                 task.error_code === 'IP_CANCEL_UNCONFIRMED' ? '取消待确认' :
                                 task.local_status === 'submitted' ? '排队中' :
                                 task.local_status === 'running' ? '生成中' :
                                 task.local_status === 'succeeded' ? (task.delivery_stage?.label || '已生成') :
-                                task.local_status === 'failed' ? '失败' : task.local_status}
+                                task.local_status === 'failed' ? '失败' : task.local_status)}
                             </span>
                           </div>
                           {(task.local_status === 'failed' || task.error_code?.startsWith('IP_')) && taskErrorMessage && (
@@ -3889,7 +3897,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                         <button
                           type="button"
                           className="composer-task-card-reuse"
-                          disabled={reuseUiLocked || task.error_code === 'IP_SUBMISSION_UNCONFIRMED' || task.error_code === 'IP_CANCEL_UNCONFIRMED'}
+                          disabled={reuseUiLocked || isVideoSubmissionUnconfirmed(task) || task.error_code === 'IP_CANCEL_UNCONFIRMED'}
                           onClick={() => loadReusableTask(task.id)}
                           title="复用原任务输入，不会自动生成"
                         >
