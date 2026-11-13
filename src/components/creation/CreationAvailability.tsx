@@ -5,7 +5,7 @@ import type { CreationContextController } from '@/lib/hooks/use-creation-context
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { RelativeTime } from '@/components/RelativeTime';
 import styles from './creation.module.css';
-export default function CreationAvailability({ controller, onBaselineChange, hideSummary = false }: { controller: CreationContextController; onBaselineChange?: (id: string) => void; hideSummary?: boolean }) {
+export default function CreationAvailability({ controller, onBaselineChange, hideSummary = false, submitting = false }: { controller: CreationContextController; submitting?: boolean; onBaselineChange?: (id: string) => void; hideSummary?: boolean }) {
   const { context, intent, loading, error } = controller;
   const resolved = isResolvedCreationIntent(intent);
   const viewKey = JSON.stringify([controller.contextKey, context?.project.id]);
@@ -94,8 +94,8 @@ export default function CreationAvailability({ controller, onBaselineChange, hid
       <label>预计用途 <input className="input" value={reason} onChange={event => setReason(event.target.value)} /></label>
       <div className={styles.actions}><button type="button" className="btn btn-primary" disabled={busy || !reason.trim() || !intent.spec?.baseline_task_id} onClick={() => void action('approval')}>申请高清</button><a href="/approvals">查看审批</a><button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void controller.queryIntent(intent.id)}>重新读取批准</button></div>
     </details>}
-    {intent && !resolved && !intent.accepted_task_id && !intent.batch_id && <button className={styles.textAction} type="button" disabled={busy} onClick={() => void action('close')}>核对并结束本次准备</button>}
-    {!intent && controller.unconfirmedRequestId && <button className={styles.textAction} type="button" disabled={busy || loading} onClick={() => void closeUnconfirmed()}>核对并结束本次准备</button>}
+    {intent && !resolved && !intent.accepted_task_id && !intent.batch_id && <button className={styles.textAction} type="button" disabled={busy || submitting} onClick={() => void action('close')}>核对并结束本次准备</button>}
+    {!intent && controller.unconfirmedRequestId && <button className={styles.textAction} type="button" disabled={busy || loading || submitting} onClick={() => void closeUnconfirmed()}>核对并结束本次准备</button>}
     {message && <p role="status">{message}</p>}
   </div>;
 }

@@ -1,4 +1,5 @@
 'use client';
+import { markVideoSubmission, observePendingVideoSubmission } from './video-submission-progress';
 import { isVideoSubmissionUnconfirmed, videoPendingStatusLabel } from '@/components/generate/video-submission-state';
 import { projectDisplayName } from '@/lib/projects/display';
 import { ProjectSelector } from '@/components/ProjectSelector';
@@ -643,7 +644,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const [imageResultPendingReceipt, setImageResultPendingReceipt] = useState('');
   const [unconfirmedGenerationRequest, setUnconfirmedGenerationRequest] = useState(false);
   const [generationNotice, setGenerationNotice] = useState('');
+  const [submissionProgress, setSubmissionProgress] = useState<{ scopeKey: string; taskId: string } | null>(null);
   const generationOperation = useRef<object | null>(null);
+  const submissionTraceRef = useRef<{ scopeKey: string; requestId: string } | null>(null);
   const studioHandoffRequestRef = useRef<string | null>(null);
   const unconfirmedGenerationParamsRef = useRef<GenerationSubmitParams | null>(null);
   const activeGenerationRequestStorageKey = `sd2-generation-request-v1:${currentUser?.id || 'session'}:${surface}:${imageResultHandoff?.receiptId || studioRunId || 'standard'}`;
@@ -833,6 +836,13 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
   const generationScope = useRef({ key: generationScopeKey });
   if (generationScope.current.key !== generationScopeKey) generationScope.current = { key: generationScopeKey };
   useEffect(() => { setGenerationNotice(''); }, [generationScopeKey]);
+  useEffect(() => {
+    const trace = submissionTraceRef.current;
+    if (!submitting && trace?.scopeKey === generationScopeKey) {
+      markVideoSubmission(trace.requestId, 'ui_idle');
+      submissionTraceRef.current = null;
+    }
+  }, [submitting, generationScopeKey]);
 
   selectedProjectIdRef.current = selectedProjectId;
   selectedVideoCardIdRef.current = selectedVideoCardId;
@@ -2813,6 +2823,9 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     const isCurrent = () => reuseMountedRef.current && generationScope.current === captured;
     generationOperation.current = operation;
     const finish = () => { if (generationOperation.current === operation) { generationOperation.current = null; setSubmitting(false); } };
+    let stopSubmissionObservation: (() => void) | undefined;
+    let tracedRequestId: string | undefined;
+    setSubmissionProgress(null);
     unconfirmedGenerationParamsRef.current = params;
     setSubmitting(true);
     setError(null);
@@ -2955,6 +2968,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       if (!creation.context?.v2Available) throw new Error(creation.error || '新的创作流程尚未开放，输入已保留');
       const previous = !isResolvedCreationIntent(creation.intent) ? creation.intent : null;
       let idempotencyKey = previous?.request_id || window.crypto.randomUUID();
+      tracedRequestId = idempotencyKey;
+      markVideoSubmission(tracedRequestId, 'preparing');
       creationDraftBodyRef.current = requestBody;
       const currentPricing = !isIpSurface && !params.templateStudioRunId;
       const prepared = await creation.prepare({ ...requestBody, ...(currentPricing ? { pricing_preparation: 'current' } : {}) }, idempotencyKey, previous);
@@ -2980,6 +2995,28 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         resolution_approval_id: prepared.approval_id || null, ...(prepared.quote?.pricing_quote_token ? { pricing_quote_token: prepared.quote.pricing_quote_token, pricing_fingerprint_version: 2 } : {}) };
       sessionStorage.setItem(requestStorageKey, JSON.stringify({ key: idempotencyKey, fingerprint: requestFingerprint, fingerprintVersion: 2 }));
 
+      tracedRequestId = idempotencyKey;
+      stopSubmissionObservation = observePendingVideoSubmission(async signal => {
+        if (signal.aborted || !isCurrent()) return;
+        markVideoSubmission(tracedRequestId, 'lookup_started');
+        const query = new URLSearchParams({ idempotency_key: idempotencyKey });
+        if (params.templateStudioRunId) query.set('template_studio_run_id', params.templateStudioRunId);
+        const endpoint = isIpSurface ? '/api/ip/tasks/request-status'
+          : params.templateStudioRunId ? '/api/template-studio-video-handoff' : '/api/tasks/request-status';
+        const response = await fetch(`${endpoint}?${query}`, { cache: 'no-store', signal,
+          headers: currentUser?.id ? { 'x-app-session-user': currentUser.id } : {} });
+        const payload = await readJsonResponse<{ task?: CreateTaskResponse | null }>(response);
+        if (signal.aborted || !isCurrent() || !response.ok || !payload.task?.id) return;
+        await creation.acceptTask(idempotencyKey, payload.task.id);
+        if (signal.aborted || !isCurrent()) return;
+        markVideoSubmission(tracedRequestId, 'task_observed');
+        setSubmissionProgress({ scopeKey: captured.key, taskId: payload.task.id });
+        setGenerationNotice(`已记录原任务，${videoPendingStatusLabel(payload.task.status) || '可查看原任务状态'}。当前输入保留，请勿重复提交。`);
+        setActivePollingTaskIds(current => [payload.task!.id, ...current.filter(id => id !== payload.task!.id)].slice(0, MAX_ACTIVE_POLLING_TASKS));
+        void loadRecentTasksPage(1, 'merge-head');
+      });
+      submissionTraceRef.current = { scopeKey: captured.key, requestId: idempotencyKey };
+      markVideoSubmission(tracedRequestId, 'request_sent');
       let res: Response;
       try {
         res = await fetch(createEndpoint, {
@@ -3006,9 +3043,12 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         throw new Error('网络中断，提交结果待确认。请求号已保留，请查询原任务；不会重新生成。');
       }
 
+      markVideoSubmission(tracedRequestId, 'response_received');
       const data = await readJsonResponse<CreateTaskResponse>(res);
+      markVideoSubmission(tracedRequestId, 'response_decoded');
       if (!isCurrent()) return;
       if (res.ok && data.id) await creation.acceptTask(idempotencyKey, data.id);
+      if (res.ok && data.id) markVideoSubmission(tracedRequestId, 'receipt_saved');
       if (!isCurrent()) return;
 
       if (res.ok && isVideoSubmissionUnconfirmed(data)) {
@@ -3122,6 +3162,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         setGenerationNotice(err instanceof Error ? err.message : '提交结果待确认，请查询原请求');
       } else if (err instanceof Error) setError(err.message);
     } finally {
+      stopSubmissionObservation?.();
+      markVideoSubmission(tracedRequestId, 'handler_finished');
       finish();
     }
 	  }, [
@@ -3299,7 +3341,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       : '展开后可切换或创建视频卡';
   const showRecentTaskSurface = recentTasksLoadingInitial || recentTasks.length > 0 || Boolean(recentTasksError || unconfirmedGenerationRequest || submitting);
   const normalVideoRedesign = !studioHandoff && !imageResultHandoff;
-  const creationAvailability = <CreationAvailability controller={creation} hideSummary={normalVideoRedesign} onBaselineChange={(id) => {
+  const creationAvailability = <CreationAvailability controller={creation} submitting={submitting} hideSummary={normalVideoRedesign} onBaselineChange={(id) => {
     setCreationBaselineId(id);
     if (creation.intent && creationDraftBodyRef.current) void creation.prepare({ ...creationDraftBodyRef.current, baseline_task_id: id }, creation.intent.request_id, creation.intent).catch(cause => setError(cause.message));
   }} />;
@@ -3759,8 +3801,10 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
               <div className="composer-recent-grid">
                 {(unconfirmedGenerationRequest || submitting) && <article className="composer-task-card" aria-busy={submitting}>
                   <div className="composer-task-card-preview sd2-result-handoff" role="status">
-                    {unconfirmedGenerationRequest ? '提交结果待确认' : '正在提交视频任务…'}
+                    {unconfirmedGenerationRequest ? '提交结果待确认' : submissionProgress?.scopeKey === generationScopeKey ? '已记录原任务，等待本次提交返回' : '正在提交视频任务…'}
                   </div>
+                  {submitting && submissionProgress?.scopeKey === generationScopeKey && <Link className="composer-task-card-reuse"
+                    href={taskDetailHref(submissionProgress.taskId, null)} target="_blank" rel="noopener noreferrer">查看原任务</Link>}
                   {unconfirmedGenerationRequest && <button type="button" className="composer-task-card-reuse" disabled={submitting}
                     onClick={() => void checkOriginalGenerationRequest()}>核对原请求</button>}
                 </article>}
