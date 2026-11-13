@@ -162,6 +162,7 @@ function MultiviewPageContent() {
   const [videoReturnView,setVideoReturnView]=useState<'generations'|'works'|null>(null);
   const [incomingVideo,setIncomingVideo]=useState<Extract<MultiviewVideoRestore,{kind:'rotation'}>|null>(null);
   const incomingVideoDone=useRef<((ok:boolean)=>void)|null>(null);
+  useEffect(()=>{restoreSequence.current++;restoreLock.current=false;openedVideo.current='';incomingVideoDone.current?.(false);incomingVideoDone.current=null;setIncomingVideo(null);setCarriedAction(null);setVideoReturnView(null);setPreviewTaskId('');setRestoringVideo(false);setReferencePicking(false);setReferenceReplacement(undefined);},[owner,authority]);
   const referenceScope = `${authority}:${taskId}:${info?.sourceVersion || ''}`;
   const referenceMounted = Boolean(referenceEditor && referenceEditor.scope.startsWith(`${authority}:${taskId}:`) && (referenceEditor.workId || referenceEditor.scope === referenceScope));
   const referenceActive=referenceMounted&&!referencePicking;
@@ -298,7 +299,7 @@ function MultiviewPageContent() {
       setReferenceEditor(null);setReferencePicking(false);setPreviewTaskId(id);openedVideo.current=id;
       await selectTask(id);setExpanded(true);return true;
     }catch(cause){if(sequence===restoreSequence.current&&ownerRef.current===capturedOwner)setReferenceNotice(cause instanceof Error?cause.message:'视频输入暂不可恢复，当前草稿保留。');return false;}
-    finally{restoreLock.current=false;if(sequence===restoreSequence.current)setRestoringVideo(false);}
+    finally{if(sequence===restoreSequence.current){restoreLock.current=false;setRestoringVideo(false);}}
   }
   useEffect(()=>{
     const id=query.get('videoTaskId');if(!id||openedVideo.current===id||!sessionReady||!owner)return;

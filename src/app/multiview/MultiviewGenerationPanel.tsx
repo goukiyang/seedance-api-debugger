@@ -846,6 +846,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   const restoredVideo=useRef(''),restoredVideoBaseline=useRef('');
   const [savedVideoDraft,setSavedVideoDraft]=useState<MultiviewGenerationDraft|null>(null);
   const incomingVideoSeen=useRef<object|null>(null);
+  useEffect(()=>{restoredVideo.current='';restoredVideoBaseline.current='';setSavedVideoDraft(null);incomingVideoSeen.current=null;},[owner,authorityKey]);
   useEffect(()=>{
     const incoming=props.incomingVideo;if(!incoming||!ready||!allowed||incomingVideoSeen.current===incoming)return;
     incomingVideoSeen.current=incoming;
