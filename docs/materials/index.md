@@ -665,3 +665,9 @@ v0.146.0已部署，待用户手动验收；原卡片与三批共用链、26组�
 
 正式原证：2026-11-12-multiview-ai-reference/。包含controls/admission/guard工程回执、原失败attempt01/02、源/构建与后续真实部署回执；真实模型/界面仍用户手验。照片像素不写记录，旧unknown保留。
 <!-- /MV-ACTION-REF01-20261113 -->
+
+<!-- MV-FLOW01-20261113 -->
+## MV-FLOW01 多视图输入还原与返回闭环（2026-11-13）
+
+正式私有原证：2026-11-13-multiview-flow/。含原候选输入失败、原生夹具漏依赖失败、25项实际函数工程、最终Linux类型/34原生关联/fresh计价/Next及attempt05发布回执；运行链接缺失的首次prepare原证保留publish-preflight01。v0.148.16 / 151c4be15 / S-WgZXLDvd8Pg_ozKTPMC，run952ab692-e865-4aa3-9673-2b21866e5fb8，双域和七服务/目标资源均已核，价格及三条unknown不变，无强杀/DB回退。实际功能与浏览器验收仍用户手动。
+<!-- /MV-FLOW01-20261113 -->
