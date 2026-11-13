@@ -198,3 +198,9 @@ UX17收口：v0.145.5按本轮用户授权完成实际新建A/B/C、A/B及C/B互
 
 最终补证：9eec/v0.145.9同源Linux完整类型exit0、改动lint与17组融合/完整Next通过；本机依赖缺失仍待独立维护，本轮不冒已修本机环境，也未新增范围外线上故障结论。
 <!-- /FUSION-UX18-DISCOVERIES-20261111 -->
+<!-- WORKS-INPUT-ATTRIBUTION-20261112 -->
+## D-20261112-WORKS-INPUT-ATTRIBUTION 普通视频输入参考的成功归因（已确认关联缺口，另行接续）
+
+WORKS-VIDEOREF01接通视频详情到既有 `/generate` / `/generate/ip` 输入复用。现有成功method归因只冻结模板方法新草稿及其template/run身份；普通任务输入复用没有这份模板凭据。新按钮不能凭点击、草稿或仅任务受理冒成功推荐，也不能伪造模板身份补分。后续应沿实际复用原回执和真实成功产物单独接通，保原号、费用、账号/原作品权限与去重；本轮没有扩大实现。证据：`src/lib/works/method-reference.ts`、`src/lib/works/recommendation-sources.ts`、`src/app/api/tasks/create/route.ts`及原作品单WORKS-VIDEOREF01。没有据此推断其它推荐链路失效。
+待核线索：按原锁文件安装检查依赖时，npm对既有Next 14.2.5输出安全更新告警。本轮只确认锁定版本与该告警，未核实本站适用条件或可利用性，不把提示当已发生攻击；没有顺带升级依赖或改变发布范围，后续沿依赖安全维护核查。
+<!-- /WORKS-INPUT-ATTRIBUTION-20261112 -->

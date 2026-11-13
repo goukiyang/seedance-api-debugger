@@ -288,6 +288,7 @@ interface ProjectOption {
 }
 
 interface ReuseDraft {
+  draft?: boolean;
   referenceImageInputs?: ReferenceImageInput[];
   characterAssetReferences?: TaskReuseInputBackup['fields']['characterAssetReferences'];
   videoPromptGroups?: VideoPromptGroupRef[];
@@ -2064,6 +2065,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           generate_audio?: boolean;
           return_last_frame?: boolean;
           watermark?: boolean;
+          draft?: boolean;
           resolution_approval_confirmed?: boolean;
           project_id?: string | null;
           video_card_id?: string | null;
@@ -2153,6 +2155,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         || typeof draft.ratio !== 'string' || !draft.ratio || typeof draft.duration !== 'number' || !Number.isFinite(draft.duration) || draft.duration <= 0
         || typeof draft.resolution !== 'string' || !draft.resolution || typeof draft.seed !== 'number' || !Number.isFinite(draft.seed)
         || typeof draft.generate_audio !== 'boolean' || typeof draft.return_last_frame !== 'boolean' || typeof draft.watermark !== 'boolean'
+        || draft.draft !== undefined && typeof draft.draft !== 'boolean'
         || (!parameterOnly && (typeof data.skipped_references !== 'number' || data.skipped_references !== 0))) {
         if (parameterOnly) retainIntent('failed', '原任务参数读取不完整，当前输入与参考区未改动，请重试读取。');
         else markOutcomeUnknown('服务器已返回响应，但缺少可核对的任务数据。当前参数未替换，参考区可能已变化；请重新读取并核对。');
@@ -2193,6 +2196,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           ratio: data.draft.ratio || backup.fields.ratio, duration: data.draft.duration ?? backup.fields.duration, resolution: data.draft.resolution || backup.fields.resolution,
           seed: data.draft.seed ?? backup.fields.seed, generateAudio: data.draft.generate_audio ?? backup.fields.generateAudio,
           returnLastFrame: data.draft.return_last_frame ?? backup.fields.returnLastFrame, watermark: data.draft.watermark ?? backup.fields.watermark,
+          draftMode: data.draft.draft ?? backup.fields.draftMode,
           resolutionApprovalConfirmed: data.draft.resolution_approval_confirmed ?? false } } : null;
       pendingReuseApplicationRef.current = {
         taskId, reuseKey, accountId, bridgeKey: capturedContext.workspaceBridgeKey, tabId: capturedTabId,
@@ -2229,6 +2233,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
         generateAudio: Boolean(data.draft.generate_audio),
         returnLastFrame: Boolean(data.draft.return_last_frame),
         watermark: Boolean(data.draft.watermark),
+        draft: data.draft.draft,
         resolutionApprovalConfirmed: asBoolean(data.draft.resolution_approval_confirmed, false),
         projectId: targetProjectId || null,
         videoCardId: targetCardId || null,

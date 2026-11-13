@@ -6,10 +6,11 @@ import { archivedPresetKey } from '@/lib/image-studio/preset-lifecycle';
 import { canReadTemplate } from '@/lib/template-studio/templates';
 import { isPrivateMultiviewTask, isPrivateMultiviewActionTask } from '@/lib/video/multiview-task-privacy';
 import { worksContextSchemaReady } from './context-index';
+import { taskReuseHref } from '@/lib/navigation/task-reuse';
 import type { WorkProvenance } from './types';
 
 /** Already-authorized output IDs only. Batch metadata, never recipes or per-card context requests. */
-export async function projectWorkProvenance(user: SessionUser, works: Work[], db: Prisma.TransactionClient) {
+export async function projectWorkProvenance(user: SessionUser, works: Work[], db: Prisma.TransactionClient, nativeWorkIds?: ReadonlySet<string>) {
   const result = new Map<string, WorkProvenance>();
   for (const work of works) result.set(work.id, { template: null, tool: work.source_kind === 'multiview_work'
     ? { label: '3D多视图', href: '/multiview' } : work.source_kind === 'upload_asset'
@@ -17,13 +18,19 @@ export async function projectWorkProvenance(user: SessionUser, works: Work[], db
         ? { label: '视频生成', href: '/generate' } : { label: '图片生成', href: '/template-studio?type=image' } });
   const videoIds = works.filter(work => work.source_kind === 'video_task').map(work => work.source_id);
   if (videoIds.length) {
-    const tasks = await db.videoTask.findMany({ where: { id: { in: videoIds } }, select: { id: true, source_metadata_json: true } });
+    const tasks = await db.videoTask.findMany({ where: { id: { in: videoIds } }, select: { id: true, source_metadata_json: true,
+      provider: true, generation_mode: true, project_id: true, video_card_id: true, video_branch_id: true } });
+    const taskById = new Map(tasks.map(task => [task.id, task]));
     const tools = new Map(tasks.flatMap(task => isPrivateMultiviewTask(task) ? [[task.id, {
       label: isPrivateMultiviewActionTask(task) ? '同步动作视频' : '3D多视图', href: '/multiview',
     }] as const] : []));
     for (const work of works) {
       const tool = work.source_kind === 'video_task' ? tools.get(work.source_id) : null;
       if (tool) result.get(work.id)!.tool = tool;
+      const task = work.source_kind === 'video_task' ? taskById.get(work.source_id) : null;
+      if (task && nativeWorkIds?.has(work.id) && !isPrivateMultiviewTask(task)) {
+        result.get(work.id)!.videoReferenceHref = taskReuseHref(task, `/works?work=${encodeURIComponent(work.id)}`);
+      }
     }
   }
   if (!await worksContextSchemaReady(db)) return result;
