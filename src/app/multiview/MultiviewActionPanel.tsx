@@ -17,10 +17,12 @@ import { SEEDANCE_VIDEO_MODEL_OPTIONS, DEFAULT_SEEDANCE_VIDEO_MODEL_ID, seedance
 import type { MultiviewWorkDto } from '@/lib/video/multiview-work-contract';
 import { parseMultiviewActionBinding, type MultiviewActionBinding, type MultiviewActionDraft, type MultiviewActionRun, type MultiviewActionState, type MultiviewActionParameters, type MultiviewActionContextKind } from '@/lib/video/multiview-action-contract';
 import type { VideoCreationIntentDTO } from '@/lib/creation/contract';
+import { parseMultiviewActionInput, type MultiviewActionRestore } from '@/lib/video/multiview-action-restore-contract';
 import styles from './multiview-action.module.css';
 import { MultiviewVideoResults } from './MultiviewVideoResults';
 
-type Props = { active?: boolean; ownerId: string; authority: string; work: MultiviewWorkDto | null; videoDefaults?: {model:string;duration:number;resolution:string;projectId:string;videoCardId:string|null}; outputReady: boolean; snapshotKey: string; onPrepare(): Promise<MultiviewWorkDto>; ratio: '16:9'|'9:16'|'1:1'; activeView: 'reference'|'video'; onView(value: 'reference'|'video'): void };
+export type MultiviewActionInput={text:string;parameters:MultiviewActionParameters};
+type Props = { initialInput?:MultiviewActionInput; onChangeOriginal?:(input:MultiviewActionInput)=>void; hasReferenceDraft?:boolean; onResumeDraft?:()=>void; restored?: MultiviewActionRestore; onSelectVideo?: (id: string) => Promise<boolean>; active?: boolean; ownerId: string; authority: string; work: MultiviewWorkDto | null; videoDefaults?: {model:string;duration:number;resolution:string;projectId:string;videoCardId:string|null}; outputReady: boolean; snapshotKey: string; onPrepare(): Promise<MultiviewWorkDto>; ratio: '16:9'|'9:16'|'1:1'; activeView: 'reference'|'video'; onView(value: 'reference'|'video'): void };
 type Quote = { key: string; text: string; parameters: MultiviewActionParameters; points: number | null; pricingRevision: string | null; token?: string };
 type Original = { key: string; runId: string; taskId: string | null };
 type AiRequest = { requestId: string; runId?: string; edit: number; status?: string; model?: string; referenceImage?: boolean };
@@ -68,6 +70,7 @@ export function MultiviewActionPanel(props: Props) {
   const workRef=useRef(props.work);workRef.current=props.work;
   const input=useRef({text,parameters});input.current={text,parameters};
   const editRevision=useRef(0), saved=useRef(''),draftRef=useRef(draft);draftRef.current=draft;
+  const saveInFlight=useRef<Promise<{draft:MultiviewActionDraft}>|null>(null);
   const saveLock=useRef(false),submitLock=useRef(false),aiLock=useRef(false);
   const requestKey=`sd2:multiview-action-request:v1:${props.ownerId}:${props.work?.id||'pending'}`;
   const attemptKey=requestKey+':attempt';
@@ -93,6 +96,18 @@ export function MultiviewActionPanel(props: Props) {
   function keepAiJournal(value:AiJournal){localStorage.setItem(aiKey,JSON.stringify(value));aiJournalRef.current=value;setAiJournal(value);}
   const modelOptions=llmModels.filter(model=>modelAvailable('text',model.id));
   const llmReady=modelOptions.some(model=>model.id===llmModel);
+  const [videoDraft,setVideoDraft]=useState<{text:string;parameters:MultiviewActionParameters;referenceImage?:boolean}|null>(null);
+  const videoInputKey=props.restored ? `sd2:multiview-action-video-input:v1:${props.ownerId}:${props.restored.taskId}` : requestKey+':input';
+  const restoredInput=useRef('');
+  const initialInputApplied=useRef(false);
+  useEffect(()=>{if(!hydrated||!props.initialInput||initialInputApplied.current)return;initialInputApplied.current=true;updateText(props.initialInput.text);setParameters({...props.initialInput.parameters,ratio:props.ratio});},[hydrated,props.initialInput,props.ratio]);
+  useEffect(()=>{
+    if(!hydrated||!props.restored||restoredInput.current===props.restored.taskId)return;
+    restoredInput.current=props.restored.taskId;
+    try { const raw=localStorage.getItem(videoInputKey); if(raw){const previous=JSON.parse(raw);if(parseMultiviewActionInput(previous)&&JSON.stringify([previous.text,previous.parameters])!==JSON.stringify([props.restored.text,props.restored.parameters]))setVideoDraft(previous);} }
+    catch {setDraftBlocked(true);setMessage('该版修改草稿暂不可读取，当前输入保留。');return;}
+    updateText(props.initialInput?.text??props.restored.text);setParameters(props.initialInput?{...props.initialInput.parameters,ratio:props.ratio}:props.restored.parameters);setAppliedRunId(undefined);setSuggestion(null);setBeforeAi(null);setReferenceImage(false);
+  },[hydrated,props.restored,videoInputKey]);
   const content=JSON.stringify([text,parameters,props.work?.draftRevision]);
   const quoteKey=JSON.stringify([scope,content,props.snapshotKey,state?.capabilities.rules.sync.revision,state?.capabilities.rules.format.revision,appliedRunId,attemptId]);
   const currentQuote=quote?.key===quoteKey?quote:null;
@@ -121,7 +136,7 @@ export function MultiviewActionPanel(props: Props) {
     const captured=scope;let cancelled=false;
     if(!props.work)return;
     setParameters(value=>({...value,ratio:props.ratio,project_id:props.videoDefaults?.projectId||props.work?.projectId||'',video_card_id:props.videoDefaults?.videoCardId||props.work?.videoCardId||null}));
-    void (async()=>{try{await refresh(true);if(cancelled||!active(captured))return;const local=localStorage.getItem(requestKey+':input');if(local){const value=JSON.parse(local);if(typeof value.text==='string'&&value.parameters&&typeof value.parameters==='object'){setText(value.text);setReferenceImage(value.referenceImage===true);setParameters({...value.parameters,ratio:props.ratio});}}const attempt=localStorage.getItem(attemptKey);if(attempt){const value=JSON.parse(attempt);if(value.id==='initial'||/^[a-f0-9-]{36}$/i.test(value.id)){setAttemptId(value.id);setNewAttemptRequired(value.needsNew===true);}}const old=localStorage.getItem(requestKey);if(old){const value=JSON.parse(old);if(typeof value.key!=='string'||typeof value.runId!=='string')throw new Error('原视频请求记录无法确认，请保留页面。');setOriginal(value);setSelectedRunId(value.runId);}const ai=localStorage.getItem(aiKey)||localStorage.getItem(legacyAiKey);if(ai){const value=JSON.parse(ai);const journal:AiJournal=typeof value.requestId==='string'?{current:value,retained:[]}:value;
+    void (async()=>{try{await refresh(true);if(cancelled||!active(captured))return;const local=localStorage.getItem(requestKey+':input');if(local&&!props.restored){const value=JSON.parse(local);if(typeof value.text==='string'&&value.parameters&&typeof value.parameters==='object'){setText(value.text);setReferenceImage(value.referenceImage===true);setParameters({...value.parameters,ratio:props.ratio});}}const attempt=localStorage.getItem(attemptKey);if(attempt){const value=JSON.parse(attempt);if(value.id==='initial'||/^[a-f0-9-]{36}$/i.test(value.id)){setAttemptId(value.id);setNewAttemptRequired(value.needsNew===true);}}const old=localStorage.getItem(requestKey);if(old){const value=JSON.parse(old);if(typeof value.key!=='string'||typeof value.runId!=='string')throw new Error('原视频请求记录无法确认，请保留页面。');setOriginal(value);setSelectedRunId(value.runId);}const ai=localStorage.getItem(aiKey)||localStorage.getItem(legacyAiKey);if(ai){const value=JSON.parse(ai);const journal:AiJournal=typeof value.requestId==='string'?{current:value,retained:[]}:value;
       if(!journal||!Array.isArray(journal.retained)||[journal.current,...journal.retained].some(item=>item!==null&&(!item||typeof item.requestId!=='string'||item.runId!==undefined&&typeof item.runId!=='string')))throw new Error('原文案请求记录无法确认。');
       const restored={current:journal.current?{...journal.current,edit:-1}:null,retained:journal.retained.map(item=>({...item,edit:-1}))};aiJournalRef.current=restored;setAiJournal(restored);}}catch(cause){if(active(captured)){setDraftBlocked(true);setMessage(cause instanceof Error?cause.message:'草稿暂不可恢复。');}}})();
     return()=>{cancelled=true;};
@@ -130,9 +145,9 @@ export function MultiviewActionPanel(props: Props) {
   useEffect(()=>{if(!hydrated)return;setParameters(value=>value.ratio===props.ratio?value:{...value,ratio:props.ratio});},[props.ratio,hydrated]);
   useEffect(()=>{
     if(!hydrated)return;
-    try{localStorage.setItem(requestKey+':input',JSON.stringify({text,parameters,referenceImage}));}
+    try{if(props.restored&&(restoredInput.current!==props.restored.taskId||text===props.restored.text&&JSON.stringify(parameters)===JSON.stringify(props.restored.parameters)))return;localStorage.setItem(videoInputKey,JSON.stringify({text,parameters,referenceImage}));}
     catch{setDraftBlocked(true);setMessage('当前动作暂不能在本机保留，请保留页面。');}
-  },[hydrated,requestKey,text,parameters,referenceImage]);
+  },[hydrated,videoInputKey,text,parameters,referenceImage,props.restored]);
   useEffect(()=>{const captured=scope;void api<{projects:Array<{id:string;name:string}>}>('/api/projects?lite=true').then(value=>{if(active(captured))setProjects(value.projects||[]);}).catch(()=>undefined);},[scope,api,active, projectCatalogRevision]);
   useEffect(()=>{setCards([]);if(!parameters.project_id)return;const captured=scope;void api<{cards?:Array<{id:string;title:string}>;videoCards?:Array<{id:string;title:string}>}>(`/api/projects/${encodeURIComponent(parameters.project_id)}/video-cards`).then(value=>{if(active(captured))setCards(value.cards||value.videoCards||[]);}).catch(()=>undefined);},[scope,parameters.project_id,api,active]);
   async function saveDraft(work=workRef.current,frozen=input.current){
@@ -140,9 +155,9 @@ export function MultiviewActionPanel(props: Props) {
     const captured=scope,revision=draftRef.current?.revision||0,signature=JSON.stringify([frozen.text,frozen.parameters,work.draftRevision]);
     if(saved.current===signature&&draftRef.current)return draftRef.current;
     saveLock.current=true;setSaving(true);
-    try{const result=await api<{draft:MultiviewActionDraft}>('/api/video/multiview/actions/drafts',{workId:work.id,draftId:draftRef.current?.id,revision,text:frozen.text,parameters:frozen.parameters});if(!active(captured))return null;setDraft(result.draft);draftRef.current=result.draft;saved.current=signature;return result.draft;}
+    try{const operation=api<{draft:MultiviewActionDraft}>('/api/video/multiview/actions/drafts',{workId:work.id,draftId:draftRef.current?.id,revision,text:frozen.text,parameters:frozen.parameters});saveInFlight.current=operation;const result=await operation;if(!active(captured))return null;setDraft(result.draft);draftRef.current=result.draft;saved.current=signature;return result.draft;}
     catch(cause){if(active(captured)){setDraftBlocked(true);setMessage(cause instanceof Error?cause.message:'动作保存未完成，当前输入保留。');}return null;}
-    finally{saveLock.current=false;if(active(captured))setSaving(false);}
+    finally{saveInFlight.current=null;saveLock.current=false;if(active(captured))setSaving(false);}
   }
   useEffect(()=>{if(!hydrated||draftBlocked||saving||submitting||aiBusy||saved.current===content)return;const timer=setTimeout(()=>void saveDraft(),550);return()=>clearTimeout(timer);});
   useEffect(()=>{
@@ -256,13 +271,14 @@ export function MultiviewActionPanel(props: Props) {
   const applyParameters=(patch:Partial<MultiviewActionParameters>)=>{editRevision.current++;setParameters(value=>({...value,...patch}));setConfirming(false);};
   const showVideo=props.activeView==='video';
   return <>
-    <div className={styles.resultRow}><MultiviewVideoResults key={scope} owner={props.ownerId} authority={props.authority} active={props.active !== false}
+    <div className={styles.resultRow} hidden={!showVideo}><MultiviewVideoResults key={scope} initialTaskId={props.restored?.taskId} onSelect={async id=>{if(props.restored&&id===props.restored.taskId)return true;try{if(props.restored&&(text!==props.restored.text||JSON.stringify(parameters)!==JSON.stringify(props.restored.parameters)))localStorage.setItem(videoInputKey,JSON.stringify({text,parameters,referenceImage}));}catch{setMessage('当前修改未能保留，请重试后再切换。');return false;}if(saveInFlight.current)await saveInFlight.current.catch(()=>undefined);await saveDraft();return props.onSelectVideo?props.onSelectVideo(id):true;}} owner={props.ownerId} authority={props.authority} active={props.active !== false && showVideo}
       currentTaskId={original ? original.taskId : state?.runs.find(run => run.tasks.length)?.tasks[0]?.taskId}
       pendingLabel={original && !original.taskId ? '提交结果待确认' : submitting ? '正在准备并提交视频任务…' : undefined} /></div>
-    <aside className={`${styles.action} ${showVideo ? styles.videoDetails : ''}`} aria-label="同步动作视频">
-      <h3>动作</h3>
-      {showVideo && <details><summary>动作生成记录</summary><div className={styles.history}>{state?.runs.filter(run => run.tasks.length).map(run => <button type="button" key={run.id} aria-pressed={selectedRunId === run.id} onClick={() => setSelectedRunId(run.id)}>{seedanceVideoModelLabel(run.parameters.model)} · <RelativeTime value={run.createdAt} /></button>)}{state?.nextCursor && <button type="button" onClick={() => void refresh(false, state.nextCursor!)}>加载更多</button>}</div></details>}
-      {showVideo&&selectedRun?<><p className={styles.frozenText}>{selectedRun.text}</p><p className={styles.notice}>{seedanceVideoModelLabel(selectedRun.parameters.model)} · {selectedRun.parameters.duration} 秒 · {selectedRun.parameters.resolution}</p><button onClick={()=>{if(!newAttempt())return;updateText(selectedRun.text||'');setParameters(selectedRun.parameters);props.onView('reference');}}>修改动作再做</button></>:<>
+    <aside className={styles.action} aria-label="同步动作视频">
+      <div className={styles.actionHeading}><h3>动作与设置</h3>{props.onChangeOriginal&&<button type="button" onClick={()=>props.onChangeOriginal?.({text,parameters})}>更换原图</button>}</div>
+      {props.restored && <div className={styles.inputSource}><span>{text===props.restored.text&&JSON.stringify(parameters)===JSON.stringify(props.restored.parameters)?'当前视频的生成时输入':'基于当前视频的修改 · 未生成'}</span><small>{seedanceVideoModelLabel(props.restored.parameters.model)} · {props.restored.parameters.duration}秒 · {props.restored.parameters.resolution}</small></div>}
+      {(videoDraft||props.hasReferenceDraft)&&<p className={styles.notice}>这条视频有上次修改。<button type="button" onClick={()=>{if(videoDraft){updateText(videoDraft.text);setParameters(videoDraft.parameters);setReferenceImage(videoDraft.referenceImage===true);setVideoDraft(null);}if(props.hasReferenceDraft)props.onResumeDraft?.();}}>继续上次修改</button></p>}
+      <>
         <textarea aria-label="动作" placeholder="例如：原地挥拳三次，从轻到重。" maxLength={12000} value={text} disabled={!hydrated} onChange={event=>updateText(event.target.value)}/>
         <label className={styles.aiReference}><input type="checkbox" checked={referenceImage} disabled={!hydrated||aiBusy} onChange={event=>setReferenceImage(event.target.checked)}/>让 GPT 参考当前拼图</label>
         {referenceImage&&state&&!state.capabilities.referenceImageEnabled&&<p className={styles.notice}>当前服务暂不支持图片参考；当前输入和原请求均保留。</p>}
@@ -281,7 +297,7 @@ export function MultiviewActionPanel(props: Props) {
         {state?.runs.find(run=>run.mode==='llm'&&run.status==='succeeded')&&<details><summary>原需求与整理记录</summary>{state.runs.filter(run=>run.mode==='llm').map(run=><div key={run.id}><p className={styles.frozenText}>{run.inputText}</p><button disabled={!run.text} onClick={()=>updateText(run.inputText)}>使用原需求</button><button disabled={!run.text} onClick={()=>updateText(run.text||'')}>使用整理</button></div>)}</details>}
         <div className={styles.compact}>{(['format','sync'] as const).map(kind=><button className={styles.ruleLink} key={kind} disabled={!state?.capabilities.rules[kind].canEdit} onClick={()=>setContext(kind)}>{kind==='format'?'动作格式':'镜头与同步'} · 编辑</button>)}</div>
         <div className={styles.params}>
-          <div className={styles.videoParameters}><select aria-label="视频型号" value={modelAvailable('video',parameters.model,{},'seedance') ? parameters.model : ''} onChange={event=>applyParameters({model:event.target.value})}><option value="" disabled>{modelAvailabilityReason || "请选择已开放模型"}</option>{SEEDANCE_VIDEO_MODEL_OPTIONS.filter(model=>modelAvailable('video',model.id,{},'seedance')).map(model=><option key={model.id} value={model.id}>{model.label}</option>)}</select><select aria-label="视频时长" value={parameters.duration} onChange={event=>applyParameters({duration:Number(event.target.value)})}>{seedanceVideoDurationOptions(parameters.model).map(duration=><option key={duration} value={duration}>{duration} 秒</option>)}</select><select aria-label="分辨率" value={parameters.resolution} onChange={event=>applyParameters({resolution:event.target.value as MultiviewActionParameters['resolution']})}>{['480p','720p','1080p'].map(value=><option key={value}>{value}</option>)}</select></div>
+          <div className={styles.videoParameters}><select aria-label="视频型号" value={parameters.model} onChange={event=>applyParameters({model:event.target.value})}><option value="" disabled>{modelAvailabilityReason || "请选择已开放模型"}</option>{parameters.model&&!modelAvailable('video',parameters.model,{},'seedance')&&<option value={parameters.model}>{seedanceVideoModelLabel(parameters.model)}（当前不可用）</option>}{SEEDANCE_VIDEO_MODEL_OPTIONS.filter(model=>modelAvailable('video',model.id,{},'seedance')).map(model=><option key={model.id} value={model.id}>{model.label}</option>)}</select><select aria-label="视频时长" value={parameters.duration} onChange={event=>applyParameters({duration:Number(event.target.value)})}>{!seedanceVideoDurationOptions(parameters.model).some(value=>value===parameters.duration)&&<option value={parameters.duration}>{parameters.duration} 秒（历史值）</option>}{seedanceVideoDurationOptions(parameters.model).map(duration=><option key={duration} value={duration}>{duration} 秒</option>)}</select><select aria-label="分辨率" value={parameters.resolution} onChange={event=>applyParameters({resolution:event.target.value as MultiviewActionParameters['resolution']})}>{['480p','720p','1080p'].map(value=><option key={value}>{value}</option>)}</select></div>
           <div className={styles.destinationParameters}><div className={styles.projectField}><ProjectSelector  aria-label="项目" name="project_id" value={parameters.project_id} onChange={event=>applyParameters({project_id:event.target.value,video_card_id:null})}><option value="">选择项目</option>{projects.map(project=><option key={project.id} value={project.id}>{project.name}</option>)}</ProjectSelector></div><div className={styles.cardField}><select aria-label="视频卡，可选" name="video_card_id" value={parameters.video_card_id||''} onChange={event=>applyParameters({video_card_id:event.target.value||null})}><option value="">视频卡（可选）</option>{cards.map(card=><option key={card.id} value={card.id}>{card.title}</option>)}</select></div></div>
         </div>
         <CreationAvailability controller={creation} onBaselineChange={setBaseline}/>
@@ -290,13 +306,13 @@ export function MultiviewActionPanel(props: Props) {
         <div className={styles.price}>{currentQuote?<>预计 <strong>{currentQuote.points} 点</strong></>:quoting?'视频费用获取中…':quoteError||'视频费用待准备'}</div>
         {newAttemptRequired&&<button onClick={newAttempt}>重新准备生成</button>}
         {quoteError&&<button onClick={()=>setQuoteRetry(value=>value+1)}>重新报价</button>}
-      </>}
+      </>
       {original&&!original.taskId&&<p className={styles.notice}>提交结果待确认 <button onClick={()=>void queryOriginal()}>查询原请求</button></p>}
       {original?.taskId&&<div className={styles.taskId}><code>{original.taskId}</code><button onClick={()=>void queryOriginal()}>查询原任务</button><button aria-label="复制完整任务编号" onClick={()=>void navigator.clipboard.writeText(original.taskId!).catch(()=>setMessage('复制未完成，请选择编号复制。'))}><Copy size={14}/></button></div>}
       {saving&&<p className={styles.notice}>正在保存动作…</p>}
       {draftBlocked&&<button onClick={async()=>{try{await refresh();setDraftBlocked(false);const latest=await api<MultiviewActionState>(`/api/video/multiview/actions?workId=${props.work!.id}`);if(active()){setDraft(latest.draft);draftRef.current=latest.draft;setMessage('服务器版本已核对，当前文字保留，请继续保存。');}}catch(cause){setMessage(cause instanceof Error?cause.message:'暂不可读取。');}}}>核对最新并保留我的草稿</button>}
       {message&&<p className={styles.notice} role="status">{message}</p>}
-      {!showVideo&&<button type="button" className={styles.primary} disabled={!hydrated||!text.trim()||!parameters.project_id||!state?.capabilities.actionReady||newAttemptRequired||submitting||saving||creation.loading||Boolean(original&&!original.taskId)||draftBlocked} onClick={()=>setConfirming(true)}>{submitting?'正在准备并提交…':'制作动作视频'}</button>}
+      {<button type="button" className={styles.primary} disabled={!hydrated||!text.trim()||!parameters.project_id||!state?.capabilities.actionReady||newAttemptRequired||submitting||saving||creation.loading||Boolean(original&&!original.taskId)||draftBlocked} onClick={()=>{if(original?.taskId&&!newAttempt())return;setConfirming(true);}}>{submitting?'正在准备并提交…':props.restored?'生成新版本':'制作动作视频'}</button>}
     </aside>
     {productDialog}
     {context&&<RuleDialog key={`${scope}:${context}`} kind={context} ownerId={props.ownerId} onClose={()=>setContext(null)} onSaved={()=>{setQuote(null);void refresh().catch(()=>undefined);}}/>}

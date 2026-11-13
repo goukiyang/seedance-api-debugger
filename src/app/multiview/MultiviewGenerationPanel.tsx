@@ -39,6 +39,8 @@ export type MultiviewGenerationPanelState = { phase: MultiviewGenerationPhase; b
 export type MultiviewGenerationReady = { taskId: string; requestKey: string; ownerId: string;
   startedFromSourceKey: string | null; explicitOpen: boolean };
 export type MultiviewGenerationPanelProps = {
+  incomingVideo?: Extract<import('@/lib/video/multiview-action-restore-contract').MultiviewVideoRestore,{kind:'rotation'}>|null;
+  onIncomingVideoDone?: (ok:boolean)=>void;
   currentSourceKey: string | null; hasResult: boolean; expanded: boolean; onExpandedChange: (expanded: boolean) => void;
   onUseExisting: () => void; onReady: (result: MultiviewGenerationReady) => void;
   onActionSettings?: (value: { model: string; duration: number; resolution: string; projectId: string; videoCardId: string | null }) => void;
@@ -841,6 +843,37 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
     finally { if (uploadLock.current === token) { uploadLock.current = null; setWorking(false); setProgress(null); } }
   }
   const handledIncoming = useRef(0);
+  const restoredVideo=useRef(''),restoredVideoBaseline=useRef('');
+  const [savedVideoDraft,setSavedVideoDraft]=useState<MultiviewGenerationDraft|null>(null);
+  const incomingVideoSeen=useRef<object|null>(null);
+  useEffect(()=>{
+    const incoming=props.incomingVideo;if(!incoming||!ready||!allowed||incomingVideoSeen.current===incoming)return;
+    incomingVideoSeen.current=incoming;
+    const scope=capture();
+    void (async()=>{
+      try{
+        if(submitLock.current||uploadLock.current||createLock.current||closeLock.current||recoveryBlocked)throw new Error('当前主图或原请求正在处理，请完成后再切换；当前输入保留。');
+        const previous=draftRef.current;if(!previous)throw new Error('当前草稿尚未读取。');
+        if(JSON.stringify(previous)!==restoredVideoBaseline.current)localStorage.setItem(keyFor(owner,`video-draft:${restoredVideo.current||'new'}`),JSON.stringify(previous));
+        const previousSaved=parseMultiviewGenerationDraft(localStorage.getItem(keyFor(owner,`video-draft:${incoming.taskId}`)));
+        const patch=incoming.patch;
+        const next=parseMultiviewGenerationDraft({...previous,...patch,projectId:patch.projectId||'',videoCardId:patch.videoCardId||'',settingsBinding:undefined,resolutionApprovalConfirmed:false,resolutionApprovalId:''});
+        if(!next)throw new Error('这条视频的原参数无法恢复，当前输入保留。');
+        if(patch.mainImage&&!pendingActive(receiptRef.current)&&!association){
+          const selected=await selectItem([{type:'image',assetId:patch.mainImage.assetId} as PickerItem]);
+          if(!selected.success)throw new Error(selected.message||'原主图恢复未完成。');
+          next.workspaceTabId=draftRef.current?.workspaceTabId||next.workspaceTabId;next.mainImage=draftRef.current?.mainImage||next.mainImage;
+        }else setImageReady(false);
+        if(!current(scope)){propsRef.current.onIncomingVideoDone?.(false);return;}
+        awaitingInitialPresetDefaults.current=false;persistDraft(owner,tabRef.current,next);draftRef.current=next;setDraft(next);setRetainedDraft(JSON.stringify(next));setSaved(true);setDraftEdited(true);
+        restoredVideo.current=incoming.taskId;restoredVideoBaseline.current=JSON.stringify(next);setSavedVideoDraft(previousSaved&&JSON.stringify(previousSaved)!==JSON.stringify(next)?previousSaved:null);
+        setPresetState(null);setPresetError('');setQuote(null);setError('');setStatus('已恢复这条视频的生成时输入，原请求记录保留；未生成新视频。');
+        propsRef.current.onIncomingVideoDone?.(true);
+      }catch(cause){if(current(scope))setError(message(cause,'视频输入暂不可恢复，当前草稿保留。'));propsRef.current.onIncomingVideoDone?.(false);}
+    })();
+    // One explicit selection is applied once; normal background updates never restore inputs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[props.incomingVideo,ready,allowed]);
   useEffect(() => {
     const incoming = props.incomingMainAsset;
     if (!incoming || handledIncoming.current === incoming.token || !ready || !allowed || !draft) return;
@@ -1206,7 +1239,7 @@ export function MultiviewGenerationPanel(props: MultiviewGenerationPanelProps) {
   }}>
     <header className={styles.summary}>
       {imageReady && draft.mainImage && <img src={`/api/reference-images/${encodeURIComponent(draft.mainImage.referenceImageId)}/content?variant=thumbnail`} alt="当前生成主图" onError={() => setImageReady(false)} />}
-      <div><h2>原图与生成设置</h2><p>{sameReady ? '当前视频已打开 · ' : ''}360°旋转模板 · {selectedModel?.label || draft.model} · {draft.duration}秒 · {draft.resolution}</p>{!props.expanded && working && <small role="status">主图正在准备，尚未生成视频…</small>}</div>
+      <div><h2>原图与生成设置</h2>{savedVideoDraft&&<p>这条视频有上次修改。<button type="button" onClick={()=>{const previous=savedVideoDraft;void(async()=>{if(previous.mainImage&&previous.mainImage.assetId!==draftRef.current?.mainImage?.assetId){const result=await selectItem([{type:'image',assetId:previous.mainImage.assetId} as PickerItem]);if(!result.success){setError(result.message||'草稿主图暂不可恢复。');return;}}change({...previous,workspaceTabId:draftRef.current?.workspaceTabId||previous.workspaceTabId,mainImage:draftRef.current?.mainImage||previous.mainImage,resolutionApprovalConfirmed:false,resolutionApprovalId:''});setSavedVideoDraft(null);setStatus('已恢复上次修改；未生成新视频。');})();}}>继续上次修改</button></p>}<p>{sameReady ? '当前视频已打开 · ' : ''}360°旋转模板 · {selectedModel?.label || draft.model} · {draft.duration}秒 · {draft.resolution}</p>{!props.expanded && working && <small role="status">主图正在准备，尚未生成视频…</small>}</div>
       <div className={styles.summaryActions}>{receipt && !blocksNewRequest(receipt) && <button type="button" className={styles.primary} data-tip="上一单继续在后台生成，这里开始新的一单" disabled={submitting || closing} onClick={startNew}><Plus size={16} />新建</button>}
         <button type="button" disabled={formDisabled || Boolean(association)} onClick={() => setPickerOpen(true)}><ImagePlus size={16} />更换图片</button>
         <button type="button" onClick={props.onUseExisting}><FolderOpen size={16} />使用已有视频</button>

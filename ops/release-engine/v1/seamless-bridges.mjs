@@ -65,11 +65,27 @@ export default {
     "current": "e33d532c04e447b709e76699d30c40f7154083bc5db4458bebe3f8e9cb4456bb"
   },
   "src/lib/video/multiview-action.server.ts": {
-    "previous": "f3f422c55376edf3d56ab1ab3e96a75ebca62614c3b05386e78bf1f0aadf1448",
-    "current": "908ba7f4eea708a4aa49060cebc3b9d928317d61fbf6a70f67fe591e64b9aaf1"
+    "previous": "908ba7f4eea708a4aa49060cebc3b9d928317d61fbf6a70f67fe591e64b9aaf1",
+    "current": "0376b323e599af1164fabfb061ed481bb774a7af2ac8e054a4b73b5cb511abf0"
   },
   "src/app/api/video/multiview/actions/reference-runs/route.ts": {
     "previous": null,
     "current": "ced158868a0076a1830747077e6b7d193a7ee8d0531ba94fa7411580cc04bf5d"
+  },
+  "src/lib/template-studio/types.ts": {
+    "previous": "4069178b69d76090e5c6b979f05eeb39356a252f907323cdded757e9897136ba",
+    "current": "22ec0832222b27821bbdb25a893ca1884f6a713af973cc3e023b3fcadc588f98"
+  },
+  "src/lib/video/multiview-action-restore-contract.ts": {
+    "previous": null,
+    "current": "18fdaea4167c9e21298179c53efa3e15d06d08a5ccf427bf9052f2554715a5ff"
+  },
+  "src/lib/video/multiview-action-restore.server.ts": {
+    "previous": null,
+    "current": "e8b535b98a96b41a8b4f8c0c05fc677b73fcaae4381b4aeaea436bad41f154e5"
+  },
+  "src/app/api/video/multiview/actions/restore/route.ts": {
+    "previous": null,
+    "current": "187a814ce5fd31995029018f54f6afe0e12b8e248c12c56c7cc361c7246aa957"
   }
 };
