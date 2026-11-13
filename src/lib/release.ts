@@ -1,10 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '模板参考图与封面操作更新',
+  title: '发布过程平滑切换',
   outline: [
-    '发送视频参考图默认使用全能参考',
-    '模板封面菜单支持删除本人条目'
+    '新版就绪后切换，更新时继续使用',
+    '保留进行中的请求和旧页面资源',
+    '保留图片、任务和当前工作现场'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

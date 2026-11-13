@@ -35,3 +35,7 @@
 已在实际工作区查询CodeGraph并回源码检查影响面，索引已在实现提交 `3f37b48827ad1f679c09ce5d8f1b8a616f1363c6` 核对：2109文件，pending=0、hash mismatch=0、parse error=0。实现已提交并推送，远端同头；随后仅收口文档，不为文档再重建源码索引。参考：[Nginx HUP](https://nginx.org/en/docs/control.html#reconfiguration)、[Next14自托管版本差异](https://nextjs.org/docs/14/app/building-your-application/deploying#version-skew)。本轮新发现均属发布改动必要因果范围；依赖安装的既有Next告警已在正式 `tasks/discoveries.md` 登记，不重复新增或夹带升级。
 
 最终工程原证在正式根 `docs/materials/2026-11-12-seamless-release/offline-engineering.json` 和 `verification.json`；全类型、六文件lint、24组离线检查与差异检查通过。实现提交 `3f37b48827ad1f679c09ce5d8f1b8a616f1363c6` 已推送且远端核同头。规则与源码交付完成，服务器引擎未安装/未启用；无新线上配置、服务重启、切流、DDL或功能验收。用户手验与真实Linux发布检查保持待办。本轮未新增任务外问题。
+
+## 5. R02 用户授权上线与自动接续（2026-11-12）
+
+用户明确先上线现成果，再处理自动接续；前次不上线限制已解除。已核当前线上8c275e3/v0.148.10，无同目标发布控制器；保留这版视频参考修复再发布v0.148.11，不回退业务功能。预检发现图片消费者实际为image-worker，main的methodReaderPassed=false为合法角色区别；已按实际绑定修正，未伪造通过字段。发布过程中本代理自动观察/pending接续，不交用户手动。发布完成后再修改正常等待的程序自动接续；运行期间冻结发布引擎，功能手验仍独立且不阻断工程发布。

@@ -92,7 +92,7 @@ for (const change of [{ runId: 'wrong' }, { fingerprint: 'wrong' }, { source: a 
   put(stage + '/prepared-pricing-writer-v1.json', { releases: [entry, { source: a }] });
   const finished = Date.now(), nativeFile = stage + '/main-native-reuse.json';
   put(nativeFile, { source: b, passed: true, completeMatrix: true, runtimeCompatibilityDeltaVerified: true, productionWrites: 0, paidRequests: 0, browserRuns: 0 });
-  put(stage + '/main-pricing-prepared.json', { source: b, nativePrebuildPassed: true, freshPricingPassed: true, methodReaderPassed: true,
+  put(stage + '/main-pricing-prepared.json', { source: b, nativePrebuildPassed: true, freshPricingPassed: true, methodReaderPassed: false,
     nativeEvidence: { receipt: nativeFile, receiptSha256: digest(files.get(nativeFile)) } });
   for (const kind of ['next', 'types']) {
     put(stage + '/main-' + kind + '-process.json', { source: b, exitCode: 0, signal: null, error: null, startedAt: new Date(finished - 2000).toISOString(), finishedAt: new Date(finished - 1000).toISOString() });

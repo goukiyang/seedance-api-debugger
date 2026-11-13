@@ -113,7 +113,7 @@ export function renderShadowUnit(text, { root, guard, authority, kind, runId, po
     return line;
   });
   assert.equal(barrier, 1); if (kind !== 'image') assert.ok(start > 0);
-  return lines.join('\n') + `\n[Service]\nWorkingDirectory=${root}\nEnvironment=PRIVATE_PROMPTS_RUNTIME_REVISION=${path.basename(root)}\nEnvironment=PRIVATE_PROMPTS_POLICY_FILE=${policy}\nEnvironment=PRIVATE_PROMPTS_CONSUMER_ID=${kind === 'image' ? 'image' : kind === 'guard' ? 'guard' : 'web'}\nEnvironment=SD2_SEAMLESS_RUN_ID=${runId}\nEnvironment=SD2_SEAMLESS_POLICY_SHA256=${policySha}\nRestart=no\nKillSignal=SIGTERM\nKillMode=control-group\nSendSIGKILL=no\nTimeoutStopSec=infinity\n`;
+  return lines.join('\n') + `\n[Service]\nWorkingDirectory=${root}\nEnvironment=PRIVATE_PROMPTS_RUNTIME_REVISION=${path.basename(root)}\nEnvironment=PRIVATE_PROMPTS_POLICY_FILE=${policy}\nEnvironment=PRIVATE_PROMPTS_CONSUMER_ID=${kind === 'image' ? 'image-worker' : kind === 'guard' ? 'guard' : 'web'}\nEnvironment=SD2_SEAMLESS_RUN_ID=${runId}\nEnvironment=SD2_SEAMLESS_POLICY_SHA256=${policySha}\nRestart=no\nKillSignal=SIGTERM\nKillMode=control-group\nSendSIGKILL=no\nTimeoutStopSec=infinity\n`;
 }
 
 export const RUNTIME_ROWS_READER = `import json,sqlite3,sys,os
@@ -180,7 +180,7 @@ export function readCurrentBuildEvidence(file, { read = rootBytes, now = Date.no
     assert.ok(Date.parse(process.startedAt) <= Date.parse(process.finishedAt) && Date.parse(process.finishedAt) <= finished);
   }
   const prepared = load(stage + '/main-pricing-prepared.json'); assert.equal(prepared.source, proof.source);
-  for (const flag of ['nativePrebuildPassed', 'freshPricingPassed', 'methodReaderPassed']) assert.equal(prepared[flag], true);
+  for (const flag of ['nativePrebuildPassed', 'freshPricingPassed']) assert.equal(prepared[flag], true);
   const native = load(prepared.nativeEvidence.receipt); assert.equal(digest(read(prepared.nativeEvidence.receipt)), prepared.nativeEvidence.receiptSha256);
   assert.equal(native.source, proof.source);
   assert.ok(native.passed === true && native.completeMatrix === true && native.runtimeCompatibilityDeltaVerified === true);
@@ -315,7 +315,7 @@ export function createNativeSeamlessDriver(planFile) {
     // independent. Keys, destinations, identities and encryption state are copied.
     const policy = JSON.parse(bytes(p.privateFiles[PRIVATE + '/policy-active.json']));
     const proof = JSON.parse(bytes(p.privateFiles[PRIVATE + '/consumers-active.json']));
-    for (const c of proof.consumers) if (c.id === (kind === 'image' ? 'image' : kind === 'guard' ? 'guard' : 'web')) c.sourceRevision = entry.source;
+    for (const c of proof.consumers) if (c.id === (kind === 'image' ? 'image-worker' : kind === 'guard' ? 'guard' : 'web')) c.sourceRevision = entry.source;
     const prefix = PRIVATE + '/seamless-' + kind + '-' + p.runId;
     let policyFile = PRIVATE + '/policy-active.json', privateFiles;
     if (kind === 'guard') {

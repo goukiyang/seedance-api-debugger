@@ -31,7 +31,7 @@ export function verifyShadowStart(file, unit, { io = fs, cwd = process.cwd(), ui
   assert.equal(env.PRIVATE_PROMPTS_RUNTIME_REVISION, a.entry.source);
   assert.equal(env.PRIVATE_PROMPTS_POLICY_FILE, a.policyFile);
   assert.equal(env.SD2_SEAMLESS_POLICY_SHA256, a.policySha);
-  assert.equal(env.PRIVATE_PROMPTS_CONSUMER_ID, a.kind === 'image' ? 'image' : a.kind === 'guard' ? 'guard' : 'web');
+  assert.equal(env.PRIVATE_PROMPTS_CONSUMER_ID, a.kind === 'image' ? 'image-worker' : a.kind === 'guard' ? 'guard' : 'web');
   assert.equal(io.existsSync(`${CONTROL}/revoked-${a.kind}-${a.runId}`), false);
   assert.equal(a.entry.root, '/data/video-api-debugger/managed-releases/' + a.entry.source);
   assert.equal(io.realpathSync(cwd), a.entry.root); assert.ok(uid === 0 || uid === a.serviceUid);
