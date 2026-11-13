@@ -159,6 +159,13 @@ check('malformed admission refuses drain', () => assert.throws(() => classifySyn
   const guard = { source: 'c', root: '/guard', sourceFiles: {} }, previous = { releases: [old, guard] };
   const read = file => file.endsWith('process-provenance.ts') ? fs.readFileSync(root + '/src/lib/image-studio/process-provenance.ts') : Buffer.from('{}');
   check('only exact reviewed additive bridge is admitted', () => assert.equal(assertSeamlessCompatible(previous, next, guard, read, bridges).sameSchema, true));
+  check('new server file requires an exact reviewed absent-to-current bridge', () => {
+    const file = 'src/app/api/fixture-reference/route.ts', added = { ...next, sourceFiles: { ...next.sourceFiles, [file]: 'new-route' } };
+    const reviewed = { ...bridges, [file]: { previous: null, current: 'new-route' } };
+    assert.equal(assertSeamlessCompatible(previous, added, guard, read, reviewed).sameSchema, true);
+    assert.throws(() => assertSeamlessCompatible(previous, added, guard, read, bridges));
+    assert.throws(() => assertSeamlessCompatible(previous, added, guard, read, { ...reviewed, [file]: { previous: null, current: 'wrong-route' } }));
+  });
   check('schema and persisted contract mismatch retain current site', () => assert.throws(() => assertSeamlessCompatible(previous, { ...next, sourceFiles: { ...next.sourceFiles, 'prisma/schema.prisma': 'new' } }, guard, read, bridges)));
   check('changed recovery artifact is refused', () => assert.throws(() => assertSeamlessCompatible(previous, next, { ...guard, source: 'other' }, read, bridges)));
 }
