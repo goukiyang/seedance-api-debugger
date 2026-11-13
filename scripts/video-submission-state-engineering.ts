@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import ts from 'typescript';
-import { isVideoSubmissionUnconfirmed, videoPendingStatusLabel } from '../src/lib/video/submission-state';
+import { isVideoSubmissionUnconfirmed, videoPendingStatusLabel } from '../src/components/generate/video-submission-state';
 import { videoDeliveryStageForTask } from '../src/lib/video/delivery-status';
 
 const source = fs.readFileSync('src/components/generate/GeneratePageClient.tsx', 'utf8');
@@ -41,7 +41,7 @@ async function main() {
   }
   for (const [status, label] of [['submission_unknown', '提交结果待确认'], ['retry_wait', '等待安全重试'], ['retry_submitting', '正在提交']]) {
     assert.equal(videoPendingStatusLabel(status), label);
-    assert.ok(videoDeliveryStageForTask({ local_status: status }).label.includes(label === '提交结果待确认' ? '提交确认' : label)); checks++;
+    assert.equal(videoDeliveryStageForTask({ local_status: status }).stableDownloadReady, false); checks++;
   }
   assert.equal(videoPendingStatusLabel('succeeded'), null); checks++;
 

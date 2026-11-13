@@ -1,5 +1,5 @@
 'use client';
-import { isVideoSubmissionUnconfirmed, videoPendingStatusLabel } from '@/lib/video/submission-state';
+import { isVideoSubmissionUnconfirmed, videoPendingStatusLabel } from '@/components/generate/video-submission-state';
 import { projectDisplayName } from '@/lib/projects/display';
 import { ProjectSelector } from '@/components/ProjectSelector';
 import DraftUpgradeAction from '@/components/creation/DraftUpgradeAction';

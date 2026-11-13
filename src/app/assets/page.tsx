@@ -1,6 +1,6 @@
 /* eslint-disable @next/next/no-img-element */
 'use client';
-import { videoPendingStatusLabel } from '@/lib/video/submission-state';
+import { videoPendingStatusLabel } from '@/components/generate/video-submission-state';
 import { ProjectSelector } from '@/components/ProjectSelector';
 import { useProjectCatalogRevision } from '@/lib/projects/selector-client';
 import { ExperienceEmpty, FilterSummary, OperationReceipt, SelectionBar, ExperienceActions } from '@/components/experience/ExperienceParts';
