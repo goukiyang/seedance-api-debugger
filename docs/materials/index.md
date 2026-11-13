@@ -673,3 +673,9 @@ v0.146.0已部署，待用户手动验收；原卡片与三批共用链、26组�
 
 正式私有原证：2026-11-13-multiview-flow/。含原候选输入失败、原生夹具漏依赖失败、25项实际函数工程、最终Linux类型/34原生关联/fresh计价/Next及attempt05发布回执；运行链接缺失的首次prepare原证保留publish-preflight01。v0.148.16 / 151c4be15 / S-WgZXLDvd8Pg_ozKTPMC，run952ab692-e865-4aa3-9673-2b21866e5fb8，双域和七服务/目标资源均已核，价格及三条unknown不变，无强杀/DB回退。实际功能与浏览器验收仍用户手动。
 <!-- /MV-FLOW01-20261113 -->
+
+<!-- MV-RECORDS02-20261113 -->
+## 多视图记录排版、作品首屏与 Delete（2026-11-13）
+
+正式私有原证：2026-11-13-multiview-records-layout/。包含v17现状长截图/DOM几何、用户Delete截图、34项实际函数及server PNG检查、最终Linux类型/原生关联/计价/Next、v18源/BUILD/八阶段发布/双域资源与数据保护回执；browser-after.json及两张after图仅为用户指定桌面排版和入口排查。source4954f122d / BUILD WEaHgvldNo3OtkJX5MvxD，runb209a5f5-ceca-44bd-bfd6-f35fe42df5f2；复用原封存1.1.2-f3ab30f5及46907保护版，无新DDL/模型生成/DB回退。功能验收仍用户手动。
+<!-- /MV-RECORDS02-20261113 -->
