@@ -1,3 +1,7 @@
+<!-- RULES-EXEC-ROOTCAUSE01-EVIDENCE-20261113 -->
+RULES-EXEC-ROOTCAUSE01：原规则资料下execution-rootcause-20261113私有归档桌面原生元数据、生命周期A/B、跨工作区反例与身份对照；原件/清单保留，诊断不冒实际修复。详[原单](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-12-feedback-submit-rootcause.md#rules-exec-rootcause01)。
+<!-- /RULES-EXEC-ROOTCAUSE01-EVIDENCE-20261113 -->
+
 <!-- RULES-REGRESSION01-ENTRY01-EVIDENCE-20261113 -->
 RULES-REGRESSION01-ENTRY01：原规则资料下entry-audit-20261113私有归档实际Codex目录RPC、12项现有hook隔离结果、上游两规则回档及核验。运行目录/文件scope证据与语义场景审查分开，不冒自动业务验收，详[原单](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-12-feedback-submit-rootcause.md#rules-regression01-entry)。
 <!-- /RULES-REGRESSION01-ENTRY01-EVIDENCE-20261113 -->
