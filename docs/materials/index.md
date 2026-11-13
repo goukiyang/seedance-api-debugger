@@ -678,4 +678,6 @@ v0.146.0已部署，待用户手动验收；原卡片与三批共用链、26组�
 ## 多视图记录排版、作品首屏与 Delete（2026-11-13）
 
 正式私有原证：2026-11-13-multiview-records-layout/。包含v17现状长截图/DOM几何、用户Delete截图、34项实际函数及server PNG检查、最终Linux类型/原生关联/计价/Next、v18源/BUILD/八阶段发布/双域资源与数据保护回执；browser-after.json及两张after图仅为用户指定桌面排版和入口排查。source4954f122d / BUILD WEaHgvldNo3OtkJX5MvxD，runb209a5f5-ceca-44bd-bfd6-f35fe42df5f2；复用原封存1.1.2-f3ab30f5及46907保护版，无新DDL/模型生成/DB回退。功能验收仍用户手动。
+
+最终v0.148.19 / 6766547cde553f7c07b40f705fd14764fa8a4168 / BUILD Nu4W4381UImPVWbQe9mgE，run f1bb7bbe-03c7-4817-967a-38f94229d89d；根目录收纳attempt03最终构建/八阶段发布、公网JS及history-css-public.json（双域CSS字节一致）、原unknown/价格与下载自然交接保护。attempt01保存v18原证，attempt02保存294d698d未部署候选的成功构建；原红/绿换帧复现及history-request.png保留。36项隔离工程零真实生成/生产写入，功能验收仍用户手动。
 <!-- /MV-RECORDS02-20261113 -->
