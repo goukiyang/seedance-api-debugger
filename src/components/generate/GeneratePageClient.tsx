@@ -1,4 +1,5 @@
 'use client';
+import { isVideoSubmissionUnconfirmed, videoPendingStatusLabel } from '@/lib/video/submission-state';
 import { projectDisplayName } from '@/lib/projects/display';
 import { ProjectSelector } from '@/components/ProjectSelector';
 import DraftUpgradeAction from '@/components/creation/DraftUpgradeAction';
@@ -78,6 +79,7 @@ import type { ReferenceImageInput } from '@/lib/character-assets/types';
 // ============================================================================
 
 interface CreateResponse {
+  local_status?: string;
   id: string;
   provider?: string;
   provider_task_id: string;
@@ -345,7 +347,7 @@ const RECENT_TASK_PAGE_SIZE = 12;
 const RECENT_TASK_INITIAL_PREFETCH_MAX_PAGES = 4;
 const RECENT_TASK_INITIAL_MIN_VISUALS = 6;
 const MAX_ACTIVE_POLLING_TASKS = 12;
-const POLLABLE_TASK_STATUSES = new Set(['submitted', 'running']);
+const POLLABLE_TASK_STATUSES = new Set(['submitted', 'running', 'retry_wait', 'retry_submitting']);
 
 type GenerateSurface = 'standard' | 'ip';
 
@@ -2783,7 +2785,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       if (!isCurrent()) return;
       if (!response.ok) throw new Error(data.message || data.error || '原请求暂时无法确认');
       if (!data.task?.id) { setUnconfirmedGenerationRequest(true); setGenerationNotice('提交结果待确认，请继续查询原请求；不会重新生成'); return; }
-      const unconfirmed = data.task.submission_unconfirmed === true || data.task.error_code === 'IP_SUBMISSION_UNCONFIRMED';
+      const unconfirmed = isVideoSubmissionUnconfirmed(data.task);
       await creation.acceptTask(pending.key, data.task.id);
       if (!isCurrent()) return;
       if (!unconfirmed) sessionStorage.removeItem(activeGenerationRequestStorageKey);
@@ -2830,7 +2832,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       if (!isCurrent()) return;
       await creation.acceptTask(key, task.id);
       if (!isCurrent()) return;
-      const unconfirmed = task.error_code === 'IP_SUBMISSION_UNCONFIRMED' || task.submission_unconfirmed === true;
+      const unconfirmed = isVideoSubmissionUnconfirmed(task);
       if (!unconfirmed) sessionStorage.removeItem(requestStorageKey);
       setUnconfirmedGenerationRequest(unconfirmed);
       unconfirmedGenerationParamsRef.current = unconfirmed ? params : null;
@@ -3004,7 +3006,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       if (res.ok && data.id) await creation.acceptTask(idempotencyKey, data.id);
       if (!isCurrent()) return;
 
-      if (res.ok && (data.error_code === 'IP_SUBMISSION_UNCONFIRMED' || data.submission_unconfirmed === true)) {
+      if (res.ok && isVideoSubmissionUnconfirmed(data)) {
         await acceptRecoveredTask(data, idempotencyKey);
         return;
       }
@@ -3838,12 +3840,13 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                               </span>
                             )}
                             <span className={`composer-task-card-status ${task.local_status}`}>
-                              {task.error_code === 'IP_SUBMISSION_UNCONFIRMED' ? '提交待确认' :
+                              {isVideoSubmissionUnconfirmed(task) ? '提交结果待确认' :
+                                videoPendingStatusLabel(task.local_status) ?? (
                                 task.error_code === 'IP_CANCEL_UNCONFIRMED' ? '取消待确认' :
                                 task.local_status === 'submitted' ? '排队中' :
                                 task.local_status === 'running' ? '生成中' :
                                 task.local_status === 'succeeded' ? (task.delivery_stage?.label || '已生成') :
-                                task.local_status === 'failed' ? '失败' : task.local_status}
+                                task.local_status === 'failed' ? '失败' : task.local_status)}
                             </span>
                           </div>
                           {(task.local_status === 'failed' || task.error_code?.startsWith('IP_')) && taskErrorMessage && (
@@ -3889,7 +3892,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                         <button
                           type="button"
                           className="composer-task-card-reuse"
-                          disabled={reuseUiLocked || task.error_code === 'IP_SUBMISSION_UNCONFIRMED' || task.error_code === 'IP_CANCEL_UNCONFIRMED'}
+                          disabled={reuseUiLocked || isVideoSubmissionUnconfirmed(task) || task.error_code === 'IP_CANCEL_UNCONFIRMED'}
                           onClick={() => loadReusableTask(task.id)}
                           title="复用原任务输入，不会自动生成"
                         >
