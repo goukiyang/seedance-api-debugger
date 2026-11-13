@@ -1,10 +1,10 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '历史视频更清楚，修改可继续',
+  title: '动作作品先看视频预览',
   outline: [
-    '历史视频用完整缩略图展示，规格与状态清楚排列',
-    '删除后重新选帧会恢复新图，保留其它镜头的位置'
+    '动作作品先展示已做过的视频，点开恢复对应设置',
+    '参考拼图保留独立入口，可从视频直接返回作品列表'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

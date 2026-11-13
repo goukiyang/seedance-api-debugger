@@ -49,6 +49,8 @@ export async function GET(request: NextRequest) {
     if (expectedOwner !== null && expectedOwner !== user.id) return json({ error: '账号已变化，请重新打开本人生成记录。' }, 409);
     const taskId = request.nextUrl.searchParams.get('taskId');
     if (taskId !== null && !/^[A-Za-z0-9_-]{1,160}$/.test(taskId)) return json({ error: '视频编号无效，请重新选择。' }, 400);
+    const kind = request.nextUrl.searchParams.get('kind');
+    if (kind !== null && kind !== 'action') return json({ error: '视频类型无效，请重新选择。' }, 400);
     const after = cursor(request.nextUrl.searchParams.get('cursor'));
     if (request.nextUrl.searchParams.has('cursor') && !after) return json({ error: '分页位置无效，请刷新生成记录。' }, 400);
     const pageWhere: Prisma.VideoTaskWhereInput = after ? { OR: [
@@ -59,6 +61,7 @@ export async function GET(request: NextRequest) {
       where: { AND: [
         { OR: [{ owner_user_id: user.id }, { owner_user_id: null, user_id: user.id }] },
         privateMultiviewTaskWhere(),
+        ...(kind === 'action' ? [{ source_metadata_json: { contains: '"kind":"multiview-action"' } }] : []),
         { retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] } },
         ...(taskId ? [{ id: taskId }] : []),
         pageWhere,

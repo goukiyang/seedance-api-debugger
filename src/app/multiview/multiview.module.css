@@ -5,8 +5,8 @@
 .page button:disabled { opacity: .48; cursor: not-allowed; }
 .page button:focus-visible, .page input:focus-visible, .page select:focus-visible, .page summary:focus-visible, .collageCell:focus-visible { outline: 2px solid var(--primary, #2563eb); outline-offset: 3px; }
 .page .primary { background: var(--primary, #2463eb); border-color: var(--primary, #2463eb); color: #fff; font-weight: 650; text-decoration: none; }
-/* Primary page sections: a segmented control, so the three areas read as places to go. */
-.pageTabs { display: flex; gap: 4px; width: fit-content; max-width: 100%; overflow-x: auto; margin: 18px 0; padding: 4px; border: 1px solid var(--border-color); border-radius: 10px; background: var(--bg-input); }
+/* Primary page sections: a segmented control, so the areas read as places to go. */
+.pageTabs { display: flex; flex-wrap: wrap; gap: 4px; width: fit-content; max-width: 100%; overflow-x: auto; margin: 18px 0; padding: 4px; border: 1px solid var(--border-color); border-radius: 10px; background: var(--bg-input); }
 .page .pageTabs button { min-height: 40px; padding: 8px 18px; border: 0; border-radius: 7px; background: transparent; color: var(--text-secondary); font-size: 15px; font-weight: 600; white-space: nowrap; }
 .page .pageTabs button:hover:not(:disabled) { color: var(--text-primary); background: var(--bg-panel); }
 .page .pageTabs button[aria-pressed=true] { background: var(--primary); color: #fff; }

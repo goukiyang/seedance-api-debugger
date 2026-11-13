@@ -105,14 +105,19 @@ function readView(raw: string | null, draft: MultiviewDraft): ViewPreferences {
   } catch { return emptyView(); }
 }
 
+type MultiviewPageView = 'editor' | 'generations' | 'works' | 'actions';
+function readPageView(query: Pick<URLSearchParams, 'get'>): MultiviewPageView {
+  const view = query.get('view');
+  return view === 'works' || view === 'generations' || view === 'actions' ? view : 'editor';
+}
+
 function MultiviewPageContent() {
   const query = useSearchParams();
   const explicitTask = query.get('taskId') || '';
   const shareId = query.get('shareId') || '';
   const [shared, setShared] = useState<{ id: string; title: string; revision: number; sourceTaskId: string; sourceVersion: string; generation: string; info: MultiviewInfo; recipe: MultiviewWorkRecipe } | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
-  const [pageView, setPageView] = useState<'editor' | 'generations' | 'works'>(() => query.get('view') === 'works'
-    ? 'works' : query.get('view') === 'generations' ? 'generations' : 'editor');
+  const [pageView, setPageView] = useState<MultiviewPageView>(() => readPageView(query));
   const [editorWork, setEditorWork] = useState({ owner: '', id: '' });
   const { user, hasLoadedUser, refreshUser, sessionChanged, userLoadError } = useAppSession();
   const owner = user?.id || '';
@@ -163,7 +168,9 @@ function MultiviewPageContent() {
   const [restoringVideo,setRestoringVideo]=useState(false);
   const restoreLock=useRef(false);
   const restoreSequence=useRef(0), openedVideo=useRef('');
-  const [videoReturnView,setVideoReturnView]=useState<'generations'|'works'|null>(null);
+  const [videoReturnView,setVideoReturnView]=useState<'generations'|'works'|'actions'|null>(null);
+  const returnToActions = backHref.startsWith('/multiview?') && new URLSearchParams(backHref.slice(backHref.indexOf('?') + 1)).get('view') === 'actions';
+  const videoReturnTarget = videoReturnView || (returnToActions ? 'actions' : null);
   const [incomingVideo,setIncomingVideo]=useState<Extract<MultiviewVideoRestore,{kind:'rotation'}>|null>(null);
   const incomingVideoDone=useRef<((ok:boolean)=>void)|null>(null);
   useEffect(()=>{restoreSequence.current++;restoreLock.current=false;openedVideo.current='';incomingVideoDone.current?.(false);incomingVideoDone.current=null;setIncomingVideo(null);setCarriedAction(null);setOriginalEditing(false);setImagePickerRequest(0);setVideoReturnView(null);setPreviewTaskId(query.get('videoTaskId')||explicitTask);setPreviewReadOnly(false);setRestoringVideo(false);setReferencePicking(false);setReferenceReplacement(undefined);},[owner,authority]);
@@ -261,7 +268,7 @@ function MultiviewPageContent() {
   const currentSourceKey = `${owner}:${taskId}:${loadedOwner === owner && info?.taskId === taskId ? info.sourceVersion : ''}:${activity}`;
   const sourceKeyRef = useRef(currentSourceKey); sourceKeyRef.current = currentSourceKey;
   useEffect(() => {
-    const view = query.get('view') === 'works' ? 'works' : query.get('view') === 'generations' ? 'generations' : 'editor'; setPageView(view);
+    const view = readPageView(query); setPageView(view);
     if (view === 'editor') setEditorWork({ owner, id: query.get('workId') || '' });
   }, [query, owner]);
   useEffect(() => {
@@ -296,7 +303,9 @@ function MultiviewPageContent() {
         setReferenceEditor({scope:`${authority}:${value.info.taskId}:${value.info.sourceVersion}`,slots,workId:value.workId,info:value.info,restored:value,selection:sequence,...(resume&&carriedAction?.videoId===id?{carry:carriedAction.input}:{})});
         setReferencePicking(false);setOriginalEditing(false);setReferenceReplacement(undefined);setPreviewTaskId(id);
         const url=new URL(window.location.href);if(returnTarget)url.searchParams.set('returnTo',returnTarget);url.searchParams.set('videoTaskId',id);url.searchParams.set('referenceWorkId',value.workId);url.searchParams.set('workId',value.workId);url.searchParams.set('taskId',value.info.taskId);url.searchParams.delete('view');window.history.replaceState(window.history.state,'',url.pathname+url.search);
-        openedVideo.current=id;setPreviewReadOnly(false);return true;
+        openedVideo.current=id;setPreviewReadOnly(false);
+        if(pageView==='actions')requestAnimationFrame(()=>window.scrollTo({top:0}));
+        return true;
       }
       incomingVideoDone.current?.(false);
       const applied=await new Promise<boolean>(resolve=>{incomingVideoDone.current=resolve;setIncomingVideo(value);});
@@ -349,10 +358,11 @@ function MultiviewPageContent() {
   }
   useEffect(()=>{referenceFrameBackup.current=null;referenceReturnScroll.current=null;setReferenceSelection(null);setReferencePicking(false);setOriginalEditing(false);},[owner,authority,taskId,referenceEditor?.scope,referenceEditor?.workId]);
   useEffect(()=>{if(referencePicking||!referenceReturnScroll.current)return;const point=referenceReturnScroll.current;referenceReturnScroll.current=null;const frame=requestAnimationFrame(()=>window.scrollTo(point.x,point.y));return()=>cancelAnimationFrame(frame);},[referencePicking]);
-  function writeLocation(view: 'editor' | 'generations' | 'works', workId = '', sourceTask = taskId) {
+  function writeLocation(view: MultiviewPageView, workId = '', sourceTask = taskId) {
     const url = new URL(window.location.href);
     url.searchParams.delete('shareId');
-    if (view === 'works' || view === 'generations') url.searchParams.set('view', view); else url.searchParams.delete('view');
+    if (view !== 'editor') url.searchParams.set('view', view); else url.searchParams.delete('view');
+    if (view === 'actions') url.searchParams.delete('returnTo');
     if (view !== 'works') { url.searchParams.delete('kind'); setReferenceLibrary(false); }
     url.searchParams.delete('referenceWorkId');url.searchParams.delete('videoTaskId');
     if (workId) url.searchParams.set('workId', workId); else url.searchParams.delete('workId');
@@ -1324,8 +1334,9 @@ function MultiviewPageContent() {
   }
 
   return <div className={`${styles.page} exp-editor`}>
-    <PageBanner title="3D多视图" description="旋转选帧、参考拼图与动作视频。" backHref={backHref} backLabel={taskId ? '返回原视频' : '返回创作首页'} />
-    <div className={styles.pageTabs} aria-label="3D多视图区域"><button type="button" aria-pressed={pageView === 'editor'} onClick={() => writeLocation('editor', editingWorkId)}><WandSparkles size={16} />工作台</button><button type="button" aria-pressed={pageView === 'generations' || (pageView === 'works' && !referenceLibrary)} disabled={exporting || workState.busy || Boolean(generation.leavingBusy)} onClick={() => { setReferenceLibrary(false); video.current?.pause(); writeLocation('generations'); }}><History size={16} />记录{['submitting', 'submitted', 'unknown'].includes(generation.phase) && <span className={styles.tabBadge}>进行中</span>}</button><button type="button" aria-pressed={pageView === 'works' && referenceLibrary} onClick={()=>{writeLocation('works');setReferenceLibrary(true);const url=new URL(window.location.href);url.searchParams.set('kind','reference');window.history.replaceState(window.history.state,'',url.pathname+url.search);}}>动作作品</button></div>
+    <PageBanner title="3D多视图" description="旋转选帧、参考拼图与动作视频。" backHref={backHref} backLabel={returnToActions ? '返回动作作品' : taskId ? '返回原视频' : '返回创作首页'} />
+    <div className={styles.pageTabs} aria-label="3D多视图区域"><button type="button" aria-pressed={pageView === 'editor'} onClick={() => writeLocation('editor', editingWorkId)}><WandSparkles size={16} />工作台</button><button type="button" aria-pressed={pageView === 'generations' || (pageView === 'works' && !referenceLibrary)} disabled={exporting || workState.busy || Boolean(generation.leavingBusy)} onClick={() => { setReferenceLibrary(false); video.current?.pause(); writeLocation('generations'); }}><History size={16} />记录{['submitting', 'submitted', 'unknown'].includes(generation.phase) && <span className={styles.tabBadge}>进行中</span>}</button><button type="button" aria-pressed={pageView === 'actions'} onClick={() => writeLocation('actions')}>动作作品</button><button type="button" aria-pressed={pageView === 'works' && referenceLibrary} onClick={()=>{writeLocation('works');setReferenceLibrary(true);const url=new URL(window.location.href);url.searchParams.set('kind','reference');window.history.replaceState(window.history.state,'',url.pathname+url.search);}}>参考拼图</button></div>
+    <MultiviewVideoResults key={`${owner}:${authority}:action-library`} galleryOnly owner={owner} authority={authority} active={pageView === 'actions' && sessionReady} onSelect={openVideoInputs} />
     <div hidden={pageView !== 'generations'}><MultiviewRecords key={`${owner}:${authority}`} owner={owner} authority={authority} active={pageView === 'generations' && sessionReady}
       onTask={id => void openVideoInputs(id)} onWork={(id, sourceTask) => void openSavedWork(id, sourceTask)} onManage={id => writeLocation('works', id)} onDraft={() => writeLocation('editor', editingWorkId)} onUseReference={applyWorkAsReference} /></div>
     {pageView === 'works' && <MultiviewWorks key={referenceLibrary?'reference':'ordinary'} kind={referenceLibrary?'reference':undefined} owner={owner} authority={authority} initialWorkId={query.get('workId') || undefined}
@@ -1339,7 +1350,7 @@ function MultiviewPageContent() {
       })(); }}
       onNew={() => writeLocation('editor', editingWorkId)} onUseReference={applyWorkAsReference} />}
     {carriedAction&&(originalEditing||!referenceMounted)&&pageView==='editor'&&<button type="button" onClick={returnToAction}>返回刚才的动作方案</button>}
-    {videoReturnView&&pageView==='editor'&&<button type="button" onClick={()=>{setReferencePicking(false);writeLocation(videoReturnView);}}>返回{videoReturnView==='works'?'作品':'记录'}</button>}
+    {videoReturnTarget&&pageView==='editor'&&<button type="button" onClick={()=>{setReferencePicking(false);writeLocation(videoReturnTarget);}}>返回{videoReturnTarget==='actions'?'动作作品':videoReturnTarget==='works'?'作品':'记录'}</button>}
     {previewReadOnly&&<p role="status" className={styles.notice}>当前仅查看视频，未恢复对应输入。<button type="button" onClick={()=>setPreviewReadOnly(false)}>返回原编辑现场</button></p>}
     {restoringVideo&&<p role="status" className={styles.notice}>正在恢复这条视频的文本、规格与参考图…</p>}
     {referenceNotice && <div className={styles.notice} role="status">{referenceNotice}</div>}

@@ -12,6 +12,7 @@ import styles from './multiview-video-results.module.css';
 
 type Props = {
   owner: string; authority: string; active: boolean; currentTaskId?: string | null; pendingLabel?: string; initialTaskId?: string; onSelect?: (id: string) => Promise<boolean>; onViewOnly?: (id:string)=>void;
+  galleryOnly?: boolean;
 };
 type Page = { items: MultiviewVideoResult[]; nextCursor: string | null; error?: string };
 const validId = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value);
@@ -20,7 +21,7 @@ const points = (item: MultiviewVideoResult) => {
   return value === null ? '实扣待结算' : `已扣 ${value.toFixed(2)} 点`;
 };
 
-export function MultiviewVideoResults({ owner, authority, active, currentTaskId, pendingLabel, initialTaskId, onSelect, onViewOnly }: Props) {
+export function MultiviewVideoResults({ owner, authority, active, currentTaskId, pendingLabel, initialTaskId, onSelect, onViewOnly, galleryOnly = false }: Props) {
   const selectionCallback = useRef(onSelect); selectionCallback.current = onSelect;
   const deliveredSelection = useRef(''),viewOnlySelection=useRef('');
   const positions = useRef(new Map<string, number>());
@@ -45,10 +46,11 @@ export function MultiviewVideoResults({ owner, authority, active, currentTaskId,
   const player = useRef<HTMLVideoElement>(null);
   const selectionKey = `sd2:multiview-video-result:v1:${owner}`;
   const alive = useCallback(() => live.current.identity === identity && live.current.active && !isClientSessionBlocked(), [identity]);
-  const focusedId = selectedId || currentTaskId || items[0]?.id || '';
+  const focusedId = selectedId || (galleryOnly ? '' : currentTaskId || items[0]?.id || '');
   const focusedRef = useRef(focusedId); focusedRef.current = focusedId;
 
   const read = useCallback(async (query: URLSearchParams): Promise<Page> => {
+    if (galleryOnly) query.set('kind', 'action');
     const controller = new AbortController(); controllers.current.add(controller);
     try {
       const response = await fetch(`/api/multiview/generations?${query}`, { cache: 'no-store', credentials: 'same-origin',
@@ -58,7 +60,7 @@ export function MultiviewVideoResults({ owner, authority, active, currentTaskId,
       if (!Array.isArray(value.items)) throw new Error('视频记录暂时无法读取。');
       return { ...value, items: value.items.filter(item => validId(item.id) && Object.hasOwn(multiviewVideoStatusLabels, item.status)) };
     } finally { controllers.current.delete(controller); }
-  }, [owner]);
+  }, [owner, galleryOnly]);
 
   const rejectAccess = useCallback((error: unknown) => {
     if (![401, 403, 409].includes((error as { status?: number })?.status || 0)) return;
@@ -121,17 +123,19 @@ export function MultiviewVideoResults({ owner, authority, active, currentTaskId,
     listSequence.current++; detailSequence.current++; currentSequence.current++;
     setViewOnlyCandidate(null);setItems([]); setCursor(null); setCurrent(null); setSelected(null); setSelectedId(initialTaskId || ''); deliveredSelection.current = initialTaskId || '';
     setNotice(''); setDetailError(''); setCurrentError(''); setMediaError(''); setPlayRequest(''); setLoadedIdentity(identity);
-    if (!currentTaskId && !initialTaskId) {
+    if (!galleryOnly && !currentTaskId && !initialTaskId) {
       try { const saved = sessionStorage.getItem(selectionKey); if (validId(saved)) setSelectedId(saved); } catch { /* Playback does not require browser storage. */ }
     }
     return () => { controllers.current.forEach(controller => controller.abort()); listSequence.current++; detailSequence.current++; currentSequence.current++; };
   // The current task has its own effect; a new task must not reset loaded history.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identity, selectionKey]);
+  }, [identity, selectionKey, galleryOnly]);
   useEffect(() => {
     if (loadedIdentity === identity && active) void loadList();
-    if (!active) { controllers.current.forEach(controller => controller.abort()); player.current?.pause();setPlayRequest(''); }
-  }, [active, identity, loadedIdentity, loadList]);
+    if (!active) { controllers.current.forEach(controller => controller.abort()); player.current?.pause();setPlayRequest('');
+      if (galleryOnly) { setSelectedId(''); setSelected(null); setViewOnlyCandidate(null); }
+    }
+  }, [active, identity, loadedIdentity, loadList, galleryOnly]);
   useEffect(() => {
     currentSequence.current++; setCurrent(null); setCurrentError('');
     if (!currentTaskId || !active || loadedIdentity !== identity) return;
@@ -165,21 +169,22 @@ export function MultiviewVideoResults({ owner, authority, active, currentTaskId,
 
   const choose = (id: string) => {
     if (selected && player.current) {positions.current.set(selected.id, player.current.currentTime);try{sessionStorage.setItem(positionKey(selected.id),String(player.current.currentTime));}catch{}}
-    player.current?.pause(); setSelectedId(id); setPlayRequest(id); setMediaError('');
-    try { sessionStorage.setItem(selectionKey, id); } catch { /* The selected video remains usable in memory. */ }
+    player.current?.pause(); setSelectedId(id); setPlayRequest(id); setMediaError(''); setViewOnlyCandidate(null);
+    if (!galleryOnly) try { sessionStorage.setItem(selectionKey, id); } catch { /* The selected video remains usable in memory. */ }
     if (id === selected?.id) void player.current?.play().catch(() => setMediaError('视频已打开，请点击播放。'));
   };
   const refresh = () => {if(viewOnlyCandidate||viewOnlySelection.current)deliveredSelection.current=''; void loadList(); if (currentTaskId) void loadTask(currentTaskId, true); if (focusedId) void loadTask(focusedId, false); };
   if (!active || !owner || loadedIdentity !== identity) return null;
-  return <section className={styles.results} aria-label="视频结果与历史视频">
-    <header className={styles.header}><h2>视频结果</h2>
-      <div className={styles.current} role="status">{pendingLabel || currentError || (current ? <><span>本次任务 · {multiviewVideoResultLabel(current)}</span><strong>{points(current)}</strong></> : currentTaskId ? '正在读取本次任务…' : null)}
+  return <section className={`${styles.results} ${galleryOnly ? styles.gallery : ''}`} aria-label={galleryOnly ? '动作作品' : '视频结果与历史视频'}>
+    <header className={styles.header}><h2>{galleryOnly ? '动作作品' : '视频结果'}</h2>
+      {galleryOnly ? <span className={styles.current}>已显示{items.length}条</span> : <div className={styles.current} role="status">{pendingLabel || currentError || (current ? <><span>本次任务 · {multiviewVideoResultLabel(current)}</span><strong>{points(current)}</strong></> : currentTaskId ? '正在读取本次任务…' : null)}
         {currentTaskId && focusedId !== currentTaskId && <button type="button" onClick={() => choose(currentTaskId)}>查看本次结果</button>}
-      </div><button type="button" disabled={loading} aria-label="刷新视频状态与历史" title="刷新视频状态与历史" onClick={refresh}><RefreshCw size={16} /></button>
+      </div>}<button type="button" disabled={loading} aria-label={galleryOnly ? '刷新动作作品' : '刷新视频状态与历史'} title={galleryOnly ? '刷新动作作品' : '刷新视频状态与历史'} onClick={refresh}><RefreshCw size={16} /></button>
     </header>
     {notice && <p className={styles.notice} role="status">{notice}</p>}
+    {galleryOnly && detailLoading && <p className={styles.notice} role="status">正在打开视频并恢复对应设置…</p>}
     <div className={styles.layout}>
-      <div className={styles.result}>
+      <div className={styles.result} hidden={galleryOnly && !selected && !viewOnlyCandidate && !detailError && !mediaError}>
         <div className={styles.resultMeta}>{selected && <><strong>{selected.title || '3D多视图视频'}</strong><span>{pendingLabel ? '上次视频' : selected.id === currentTaskId ? '本次视频' : '历史视频'} · {multiviewVideoResultLabel(selected)}</span><strong>{points(selected)}</strong></>}</div>
         {selected ? <>
           {selected.playUrl ? <video key={`${identity}:${selected.id}`} ref={player} src={selected.playUrl} poster={selected.thumbnailUrl || undefined} controls playsInline preload="metadata"
@@ -190,13 +195,13 @@ export function MultiviewVideoResults({ owner, authority, active, currentTaskId,
             <CopyTextButton key={`${identity}:${selected.id}`} text={selected.id} label="复制完整视频编号" iconOnly />
           </div>
           {selected.error && <p className={styles.notice} role="status">{selected.error.message}</p>}
-        </> : <div className={styles.placeholder}><Film size={28} /><span>{detailLoading || loading ? '正在恢复视频与输入…' : pendingLabel || (focusedId ? '视频暂不可用' : '暂无生成视频')}</span></div>}
+        </> : !galleryOnly && <div className={styles.placeholder}><Film size={28} /><span>{detailLoading || loading ? '正在恢复视频与输入…' : pendingLabel || (focusedId ? '视频暂不可用' : '暂无生成视频')}</span></div>}
         {viewOnlyCandidate&&<p className={styles.notice}><button type="button" onClick={()=>{player.current?.pause();onViewOnly?.(viewOnlyCandidate.id);viewOnlySelection.current=viewOnlyCandidate.id;deliveredSelection.current=viewOnlyCandidate.id;setSelected(viewOnlyCandidate);setDetailError('当前仅查看视频，输入未恢复。');setViewOnlyCandidate(null);}}>仅查看这条视频</button></p>}
         {(detailError || mediaError) && <p className={styles.notice} role="status">{detailError || mediaError} <button type="button" onClick={refresh}>重新读取</button></p>}
       </div>
-      <aside className={styles.history} aria-label="历史视频"><h3>历史视频</h3>
+      <aside className={styles.history} aria-label={galleryOnly ? '动作视频预览' : '历史视频'}>{!galleryOnly && <h3>历史视频</h3>}
         <div className={styles.historyList}>{items.map(item => <article key={item.id} className={styles.historyItem} data-selected={item.id === selected?.id || undefined}>
-          <button type="button" className={styles.selectVideo} disabled={detailLoading} aria-pressed={item.id === selected?.id} onClick={() => choose(item.id)} aria-label={`查看${item.title || '3D多视图视频'}`}>
+          <button type="button" className={styles.selectVideo} disabled={detailLoading} aria-pressed={item.id === selected?.id} onClick={() => choose(item.id)} aria-label={`${galleryOnly ? '打开视频与对应设置：' : '查看'}${item.title || '3D多视图视频'}`}>
             <span className={styles.thumbnail}>{item.thumbnailUrl ? <img src={item.thumbnailUrl} alt="" loading="lazy" /> : <Film size={22} />}{item.playUrl && <Play className={styles.playIcon} size={18} />}</span>
             <span className={styles.recordText}>
               <strong title={item.title || '3D多视图视频'}>{item.title || '3D多视图视频'}</strong>
@@ -206,8 +211,8 @@ export function MultiviewVideoResults({ owner, authority, active, currentTaskId,
           </button>
           {item.createdAt && <div className={styles.time}><RelativeTime value={item.createdAt} /></div>}
         </article>)}</div>
-        {!items.length && !loading && !notice && <p className={styles.notice}>暂无历史视频</p>}
-        {loading && <p className={styles.notice} role="status">正在读取记录…</p>}
+        {!items.length && !loading && !notice && <p className={styles.notice}>{galleryOnly ? '还没有动作视频，可在工作台制作。' : '暂无历史视频'}</p>}
+        {loading && <p className={styles.notice} role="status">{galleryOnly ? '正在读取动作作品…' : '正在读取记录…'}</p>}
         {cursor && <button type="button" className={styles.more} disabled={loading} onClick={() => void loadList(cursor)}>加载更多</button>}
       </aside>
     </div>
