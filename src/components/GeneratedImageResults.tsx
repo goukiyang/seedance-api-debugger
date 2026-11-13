@@ -134,8 +134,8 @@ function GeneratedImageResultCard<T extends GeneratedImageResult>({ item, scope,
     if (nextEnabled) menuItems.push(
       { id: 'cutout', label: '一键抠图', group: 'continue', icon: <Scissors size={15} />, disabled: !controller.canCutout,
         description: controller.cutoutDisabledReason || '打开抠图，费用在目标页确认', onSelect: () => void controller.open('cutout') },
-      { id: 'video', label: '用图生成视频', group: 'continue', icon: <Video size={15} />, disabled: !controller.canVideo,
-        description: controller.videoDisabledReason || '带入首帧，不立即生成', onSelect: () => void controller.open('video') },
+      { id: 'video', label: '发送视频参考图', group: 'continue', icon: <Video size={15} />, disabled: !controller.canVideo,
+        description: controller.videoDisabledReason || '带入全能参考，不立即生成', onSelect: () => void controller.open('video-reference') },
     );
     menuItems.push(...pageActions.filter(action => action.group !== 'continue'));
   }

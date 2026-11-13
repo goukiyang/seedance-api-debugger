@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { readTypedJson } from './release-engine/v1/typed-files.mjs';
+import { ENGINE_VERSION } from './release-engine/v1/engine-version.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[a-f0-9]{12}$/;
@@ -15,10 +16,11 @@ function rootJson(file, maximumBytes = 1024 * 1024) {
   return readTypedJson({ file, category: 'root_control', maximumBytes }).value;
 }
 
-function installedEntry(batchFile) {
+function installedEntry(batchFile, readOnly = false) {
   const batch = rootJson(batchFile);
   assert.equal(batch.schema, 'sd2-release-batch.v1'); assert.match(batch.taskId, UUID); assert.match(batch.attemptId, UUID);
   assert.equal(batch.runId, batch.attemptId); assert.equal(batch.engine?.schema, 'sd2-release-engine.v1');
+  if (!readOnly) assert.equal(batch.engine.version, ENGINE_VERSION, 'Historical cold engines are read-only; use the seamless delivery entry');
   assert.ok(path.isAbsolute(batch.projectRoot));
   assert.equal(batch.engine.root,
     `${batch.projectRoot}/release-engines/${batch.engine.version}-${batch.engine.controllerSetSha256}`);
@@ -36,11 +38,32 @@ function forward(entry, args) {
   if (result.error) throw result.error;
   if (result.signal) throw Object.assign(new Error(`Installed release entry ended by ${result.signal}`), { code: 'ECHILD', signal: result.signal });
   process.exitCode = result.status ?? 1;
-  return { status: result.status ?? null, signal: result.signal ?? null, error: null };
+  return { status: result.status ?? null, signal: result.signal ?? null, error: null, stdout: result.stdout };
 }
 
 export async function sd2ReleaseCli(argv = process.argv.slice(2)) {
   const [command, ...args] = argv;
+  if (command === 'policy' && args.length === 0) {
+    const { DEFAULT_DELIVERY } = await import('./release-engine/v1/seamless-policy.mjs');
+    process.stdout.write(JSON.stringify({ engineVersion: ENGINE_VERSION, delivery: DEFAULT_DELIVERY, continuation: 'automatic-same-plan',
+      prepare: 'prepare-seamless INSTALL.json MAIN-IMMUTABLE-SUCCESS.json',
+      release: 'release PLAN.json', resume: 'resume-release PLAN.json', status: 'status-release PLAN.json' }) + '\n');
+    return;
+  }
+  if (command === 'prepare-seamless' && args.length === 2) {
+    const module = await import('./release-engine/v1/release-entry.mjs');
+    const install = module.validateEngineInstall(rootJson(args[0]));
+    module.verifyInstalledEngine(install);
+    return forward(path.join(install.engine.root, 'release-entry.mjs'), [command, args[1]]);
+  }
+  if (['release', 'resume-release', 'status-release'].includes(command) && args.length === 1) {
+    const plan = rootJson(args[0], 64 * 1024 * 1024);
+    assert.equal(plan.schema, 'sd2-seamless-plan.v1');
+    assert.match(plan.engineRoot, /^\/data\/video-api-debugger\/release-engines\/1\.1\.[01]-[a-f0-9]{64}$/);
+    const entry = path.join(plan.engineRoot, 'release-entry.mjs');
+    const stat = fs.lstatSync(entry); assert.ok(stat.isFile() && stat.uid === 0 && !(stat.mode & 0o022));
+    return command === 'status-release' ? forward(entry, [command, ...args]) : forwardSeamless(entry, [command, ...args]);
+  }
   if (command === 'new-identity' && args.length <= 1) {
     const taskId = args[0] || randomUUID(); assert.match(taskId, UUID);
     const attemptId = randomUUID();
@@ -68,9 +91,24 @@ export async function sd2ReleaseCli(argv = process.argv.slice(2)) {
     process.stdout.write(JSON.stringify(await module.packageReleaseCandidates(args[0], args[1])) + '\n'); return;
   }
   const counts = { start: 2, status: 1, inspect: 1, resume: 2, 'continue-failed': 3 };
-  if (Object.hasOwn(counts, command) && args.length === counts[command]) return forward(installedEntry(args[0]), [command, ...args]);
+  if (Object.hasOwn(counts, command) && args.length === counts[command]) return forward(installedEntry(args[0], ['status', 'inspect'].includes(command)), [command, ...args]);
   if (command === 'run' && args.length >= 2 && args.length <= 4) return forward(installedEntry(args[0]), [command, ...args]);
-  throw new Error('Usage: sd2-release.mjs new-identity [TASK_UUID] | package CONTEXT.json REQUEST.json | plan-install INSTALL.json | install-engine INSTALL.json | start BATCH.json WINDOW.json | status BATCH.json | inspect BATCH.json | resume BATCH.json WINDOW.json | continue-failed BATCH.json WINDOW.json FAILURE.json | run BATCH.json WINDOW.json [PHASE [APPROVAL.json]]');
+  throw new Error('Default delivery: policy | prepare-seamless INSTALL.json MAIN-IMMUTABLE-SUCCESS.json | release PLAN.json | resume-release PLAN.json | status-release PLAN.json. Build/inspect: new-identity | package CONTEXT.json REQUEST.json | plan-install INSTALL.json | install-engine INSTALL.json | start BATCH.json WINDOW.json | status BATCH.json | inspect BATCH.json | resume BATCH.json WINDOW.json | continue-failed BATCH.json WINDOW.json FAILURE.json | run BATCH.json WINDOW.json [PHASE [APPROVAL.json]] (cold switch disabled).');
+}
+
+export async function forwardSeamless(entry, args) {
+  let command = args[0], cutRetryAvailable = true;
+  while (true) {
+    const result = forward(entry, [command, args[1]]);
+    if (result.status !== 75) {
+      const state = result.status === 1 && result.stdout ? JSON.parse(result.stdout) : null;
+      if (!cutRetryAvailable || state?.status !== 'failed' || state.publicHealthy !== true
+        || !['cutToCandidate', 'cutToCanonical'].includes(state.activeStep)) return result;
+      cutRetryAvailable = false;
+    }
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    command = 'resume-release';
+  }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

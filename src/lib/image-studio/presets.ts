@@ -13,7 +13,7 @@ import { DEFAULT_STUDIO_PRIMARY_MAX, MAX_REFERENCE_IMAGES } from './limits';
 import { IMAGE_STUDIO_MODELS, defaultImageResolution, normalizeImageStudioQuality, normalizeImageResolution } from './model-catalog';
 import { normalizeStudioRatio } from './ratios';
 import { studioModuleDTOForUser, StudioModuleError, validStudioModuleId } from './modules';
-import { canManageStudioPreset, canUseCompanyTemplates as canUseCompanyTemplatesForUser, canViewStudioPreset, externalStudioPresetIds, isExternalImageStudioActor, type ImageStudioIdentity } from './access';
+import { canManageStudioPreset, canUseCompanyTemplates as canUseCompanyTemplatesForUser, canViewStudioPreset, externalStudioAllShared, externalStudioPresetIds, isExternalImageStudioActor, type ImageStudioIdentity } from './access';
 import { studioTemplateAssetUrl } from './media';
 import { getStudioModuleFixedReferences, getStudioPresetsFixedReferences, getStudioPresetFixedReferences, parseStudioFixedReferences, setStudioModuleFixedReferences, setStudioPresetFixedReferences, type StudioFixedReference } from './fixed-references';
 import { studioVisibleAssetWhere } from './protected-assets';
@@ -129,7 +129,9 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
     quickIds = Array.from(new Set([...decodeQuickPresetIds(stored?.value_json, user.id), ...(workspace.source_preset_id ? [workspace.source_preset_id] : [])]));
   }
   const rows = await prisma.imageStudioPreset.findMany({
-    where: { OR: [{ owner_id: user.id }, { is_shared: true }], ...(isExternalImageStudioActor(user) ? { id: { in: externalStudioPresetIds(user) } } : {}), ...(quickIds ? { id: { in: quickIds }, owner_id: user.id } : {}) },
+    where: { OR: [{ owner_id: user.id }, { is_shared: true }], ...(isExternalImageStudioActor(user)
+      ? externalStudioAllShared(user) ? { is_shared: true, scope: { in: ['admin', 'creator'] } } : { id: { in: externalStudioPresetIds(user) } } : {}),
+      ...(quickIds ? { id: { in: quickIds }, owner_id: user.id } : {}) },
     orderBy: [{ scope: 'asc' }, { updated_at: 'desc' }],
   });
   const archived = await prisma.platformSetting.findMany({ where: { key: { in: rows.map(row => archivedPresetKey(row.id)) } }, select: { key: true } });
@@ -152,7 +154,10 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
   const bannerIds = privateRows.map(row => row.banner_asset_id).filter((id): id is string => Boolean(id));
   const assets = await prisma.asset.findMany({ where: { id: { in: Array.from(new Set([...assetIds, ...bannerIds])) }, status: 'active', type: 'image', AND: [await studioVisibleAssetWhere(user)] }, select: { id: true, owner_id: true, original_url: true, thumbnail_url: true, width: true, height: true } });
   const byId = new Map(assets.map(asset => [asset.id, asset]));
-  return Promise.all(visibleRows.map(async row => {
+  const results = [];
+  // Shared definitions use a bounded serial snapshot queue; a full directory must not fill it at once.
+  for (let offset = 0; offset < visibleRows.length; offset += 8) {
+    results.push(...await Promise.all(visibleRows.slice(offset, offset + 8).map(async row => {
     const deletion = studioSourceDeletionCapability(user, row);
     if (row.is_shared || isParameterCopyId(row.id)) {
       const templateRead = (await resolveStudioTemplateAuthor(user, { presetId: row.id })).templateRead;
@@ -163,6 +168,7 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
           moduleContextVersion: await resolveModuleContextVersion(publicDTO.context).catch(() => null), createdAt: row.created_at, updatedAt: row.updated_at };
       } catch (error) {
         if (!(error instanceof StudioSharingError) || ![403, 404, 409].includes(error.status)) throw error;
+        if (isExternalImageStudioActor(user)) return null;
         const state = projectSharedStudioCapabilities({ objectKind: row.owner_id === user.id ? 'publisher' : 'live', lifecycle: 'active', sharing: 'shared',
           dependency: error.reasonCode === 'dependency-invalid' ? 'invalid' : 'unknown', sourceRevision: row.updated_at.toISOString(), moduleRevision: null,
           definitionToken: error.intent?.definitionToken ?? null, actorAllowed: true, ownsWorkspace: false, canViewSource: true,
@@ -229,7 +235,9 @@ export async function listStudioPresets(user: ImageStudioIdentity, moduleId?: st
       fixedCover: await studioFixedCoverDTO(user, { kind: 'preset', id: row.id }), coverEditable: canManageStudioPreset(user, row),
       createdAt: row.created_at, updatedAt: row.updated_at,
     };
-  }));
+    })));
+  }
+  return results.filter((item): item is NonNullable<typeof item> => item !== null);
 }
 
 export async function saveStudioPreset(user: ImageStudioIdentity, body: PresetDraft, replace = false) {

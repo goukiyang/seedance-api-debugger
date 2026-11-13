@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { assertStudioRequestWritable } from './submit-receipts.server';
+import { synchronousProcessProvenance } from './process-provenance';
 
 const PREFIX = 'image_sync_request_v1:';
 type Client = Pick<Prisma.TransactionClient, 'platformSetting'>;
@@ -69,6 +70,11 @@ export async function createSynchronousImageAdmission(tx: Client & Pick<Prisma.T
   const record: SyncImageAdmission = { schema: 'image.sync-admission.v1', ...input, requestId,
     status: 'running', createdAt: new Date().toISOString(), finishedAt: null };
   await tx.platformSetting.create({ data: { key, value_json: JSON.stringify(record), updated_by: input.ownerId } });
+  const provenance = synchronousProcessProvenance();
+  if (provenance) await tx.platformSetting.create({ data: {
+    key: `image_sync_process_v1:${input.ownerId}:${requestId}`,
+    value_json: JSON.stringify({ ...provenance, fingerprint: input.fingerprint }), updated_by: input.ownerId,
+  } });
   return { key, requestId };
 }
 

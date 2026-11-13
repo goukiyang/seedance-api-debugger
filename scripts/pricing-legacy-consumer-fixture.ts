@@ -197,6 +197,7 @@ export async function runPricingLegacyConsumerFixture(input: PricingLegacyConsum
       'src/lib/pricing/charge.ts', 'src/lib/pricing/frozen-charge.ts', 'src/lib/pricing/math.ts', 'src/lib/credits/precision.ts', 'src/lib/costs/currency.ts',
       'src/lib/image-studio/pricing-state.ts', 'src/lib/image-studio/queue-capacity.ts',
       'src/lib/image-studio/catalog-revision.ts',
+      'src/lib/image-studio/process-provenance.ts',
       'src/lib/image-studio/synchronous-admission.ts', 'src/lib/image-studio/billing-contract.ts',
       'src/lib/image-studio/billing-quote.ts', 'src/lib/image-studio/batches.ts', 'src/lib/tools/toolflow-runtime.ts',
     ]);

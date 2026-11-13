@@ -1,3 +1,4 @@
+import { releaseWorkerKey } from './process-provenance';
 import { createHash, randomUUID } from 'node:crypto';
 import { parseStudioCurrentInputs } from './current-inputs';
 import { observeOperation } from '@/lib/performance/server-operations';
@@ -45,7 +46,7 @@ import { deferImageChannelVersionWrites, captureImageGenerationChannel, resolveI
 import { resolveImageGenerationRequestChannel, resolveImageGenerationRequestRoute } from '@/lib/integrations/image-generation-defaults';
 import { IMAGE_25_QUALITY_MODEL, parseImageQualityRouteSnapshot, assertImageQualityReferenceCount } from './quality-routing';
 import { defaultStudioModuleId, resolveStudioModuleGenerationConfig, validStudioModuleId } from './modules';
-import { canAccessImageTemplates, canViewStudioPreset, isExternalImageStudioActor, externalStudioPresetIds, type ImageStudioIdentity } from './access';
+import { canAccessImageTemplates, canViewStudioPreset, isExternalImageStudioActor, externalStudioCanUsePresetId, type ImageStudioIdentity } from './access';
 import { hydrateExternalStudioActor } from './external-access.server';
 import { EXTERNAL_IMAGE_ADMISSION_ENABLED } from './external-admission';
 import { ensureDefaultProjectForUser } from '@/lib/projects/permissions';
@@ -187,7 +188,7 @@ export function assertExternalStudioAdmission(user: ImageStudioIdentity, moduleI
   if (!isExternalImageStudioActor(user)) return;
   if (!EXTERNAL_IMAGE_ADMISSION_ENABLED) throw new StudioError('外部生图暂未开放新生成，本人原任务和结果仍可查看', 403);
   if (!moduleId || !shared || shared.binding.mode !== 'live' || shared.binding.ownerId !== user.id
-    || !externalStudioPresetIds(user).includes(shared.definition.intent.presetId)) {
+    || !externalStudioCanUsePresetId(user, shared.definition.intent.presetId)) {
     throw new StudioError('当前模板暂不可生成，请重新选择已开放的模板；本人输入和历史保留', 403);
   }
 }
@@ -306,6 +307,7 @@ export function normalizeSharedAuthorDraftForUse(actor: ImageStudioIdentity,
 }
 
 export const STUDIO_SHARED_WORKER_KEY = 'studio_shared_worker_v1';
+export const studioSharedWorkerKey = () => releaseWorkerKey(STUDIO_SHARED_WORKER_KEY);
 export const STUDIO_SHARED_WORKER_FILES = [
   'src/lib/image-studio/shared-contract.ts', 'src/lib/image-studio/shared-types.ts',
   'src/lib/image-studio/read-snapshot.ts',
@@ -317,7 +319,7 @@ export const STUDIO_SHARED_WORKER_FILES = [
 let sharedWorkerModuleHashes: Record<string, string> | undefined;
 
 export async function assertSharedStudioWorkerReady(tx: Prisma.TransactionClient) {
-  const row = await tx.platformSetting.findUnique({ where: { key: STUDIO_SHARED_WORKER_KEY } });
+  const row = await tx.platformSetting.findUnique({ where: { key: studioSharedWorkerKey() } });
   try {
     const receipt = JSON.parse(row?.value_json || 'null');
     if (!sharedWorkerModuleHashes) sharedWorkerModuleHashes = Object.fromEntries(STUDIO_SHARED_WORKER_FILES
@@ -692,7 +694,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     }
     const sharedDefinition = sharedUse?.definition;
     const savedSettingsSource = moduleId ? await readStudioWorkspaceSource(tx, ownerId, String(moduleId)) : null;
-    assertStudioTaskSettingsWrite(savedSettingsSource?.taskSettings ?? sharedDefinition?.reproduction?.taskSettings, input.taskSettings);
+    assertStudioTaskSettingsWrite(savedSettingsSource?.taskSettings ?? sharedDefinition?.reproduction?.taskSettings,
+      input.taskSettings ?? (isExternalImageStudioActor(identity) ? sharedDefinition?.reproduction?.taskSettings : undefined));
     const restored = await resolveStudioTaskRestoredSettings(identity, typeof moduleId === 'string' ? moduleId : undefined, input, sharedUse, tx);
     if (sharedUse && input.personalOverrides !== undefined && !preparation?.batchItem
       && input.count !== (input.personalOverrides.count ?? sharedUse.definition.generationDefaults.count)) {

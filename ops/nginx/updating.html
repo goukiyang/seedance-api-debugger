@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>正在更新 · SD2</title>
+  <style>
+    :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: oklch(0.16 0.006 160); color: oklch(0.93 0.006 160); }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; min-height: 100svh; display: grid; place-items: center; padding: 32px 24px; }
+    main { width: 100%; max-width: 420px; }
+    .brand { margin: 0 0 40px; color: oklch(0.75 0.01 160); font-size: 14px; font-weight: 600; letter-spacing: .08em; }
+    .state { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; color: oklch(0.82 0.08 160); font-size: 14px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+    h1 { margin: 0 0 16px; font-size: 28px; font-weight: 600; letter-spacing: -.02em; line-height: 1.35; }
+    p { margin: 0; color: oklch(0.75 0.01 160); font-size: 15px; line-height: 1.8; }
+    .button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 10px 18px; margin-top: 28px; border: 1px solid oklch(0.36 0.01 160); border-radius: 8px; background: oklch(0.21 0.007 160); color: inherit; font-size: 14px; text-decoration: none; }
+    .button:hover { background: oklch(0.27 0.008 160); }
+    .button:focus-visible { outline: 2px solid oklch(0.82 0.08 160); outline-offset: 4px; }
+    noscript p { margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="brand">SD2 创作工作台</p>
+    <div class="state"><span class="dot" aria-hidden="true"></span>暂时无法连接</div>
+    <h1>正在更新或恢复服务</h1>
+    <p>请稍候，恢复后会自动回到当前页面。</p>
+    <a class="button" href="">刷新页面</a>
+    <noscript><p>恢复后，请点击“刷新页面”继续。</p></noscript>
+  </main>
+  <script>
+    async function checkAvailability() {
+      try {
+        const response = await fetch('/api/health', {
+          cache: 'no-store',
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(5000)
+        });
+        if (response.ok && (await response.json()).ok === true) {
+          window.location.reload();
+          return;
+        }
+      } catch {
+        // A failed health read leaves this page in place; no business request is replayed.
+      }
+      window.setTimeout(checkAvailability, 10000);
+    }
+    window.setTimeout(checkAvailability, 10000);
+  </script>
+</body>
+</html>

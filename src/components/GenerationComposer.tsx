@@ -706,7 +706,7 @@ export function GenerationComposer({
   const orderedReferenceInputs = useMemo<ReferenceImageInput[]>(() => {
     const sites: ReferenceImageInput[] = workspace.assets.filter(asset => asset.type === 'image' && asset.referenceImageId
       && (!studioHandoff || studioRoleForAsset(asset.assetId, asset.role, studioHandoff) === 'reference'))
-      .sort((left, right) => imageResultHandoff ? Number(right.role === 'first_frame') - Number(left.role === 'first_frame') : 0)
+      .sort((left, right) => imageResultHandoff?.intent === 'video' ? Number(right.role === 'first_frame') - Number(left.role === 'first_frame') : 0)
       .map(asset => ({ kind: 'site_image', referenceImageId: asset.referenceImageId! }));
     if (!referenceImageInputs) return sites;
     const retained = referenceImageInputs;
@@ -1210,13 +1210,15 @@ export function GenerationComposer({
     if (videoSurface && !modelOptions.some(option => option.id === selectedModel)) return '当前型号不可用，原参数已保留，请明确选择可用型号。';
     if (imageResultHandoff) {
       if (!imageResultDraftReady || workspace.loading) return { message: '正在恢复这次图片接续草稿', tone: 'progress' as const };
-      if (generationMode !== 'first_last_frame') return '这张图已放在首帧。请选择首尾帧模式后生成；不会改放参考图。';
-      if (!modelOptions.some(option => option.id === selectedModel)) return '原视频模型目前不可用，请明确选择支持首帧的可用模型。';
-      if (!['seedance', 'h3'].includes(selectedProvider || '')) return '当前模型未确认支持首帧，请明确选择支持首帧的模型。';
-      const frames = workspace.assets.filter(asset => asset.type === 'image');
-      if (frames.filter(asset => asset.role === 'first_frame').length !== 1 || frames.filter(asset => asset.role === 'last_frame').length > 1
-        || frames.some(asset => !['first_frame', 'last_frame'].includes(asset.role || '')) || workspace.assets.some(asset => asset.type !== 'image')) {
-        return '首帧素材已改变，请保留一个首帧及至多一个尾帧，移除不适用参考后再生成。';
+      if (imageResultHandoff.intent === 'video') {
+        if (generationMode !== 'first_last_frame') return '这张图已放在首帧。请选择首尾帧模式后生成；不会改放参考图。';
+        if (!modelOptions.some(option => option.id === selectedModel)) return '原视频模型目前不可用，请明确选择支持首帧的可用模型。';
+        if (!['seedance', 'h3'].includes(selectedProvider || '')) return '当前模型未确认支持首帧，请明确选择支持首帧的模型。';
+        const frames = workspace.assets.filter(asset => asset.type === 'image');
+        if (frames.filter(asset => asset.role === 'first_frame').length !== 1 || frames.filter(asset => asset.role === 'last_frame').length > 1
+          || frames.some(asset => !['first_frame', 'last_frame'].includes(asset.role || '')) || workspace.assets.some(asset => asset.type !== 'image')) {
+          return '首帧素材已改变，请保留一个首帧及至多一个尾帧，移除不适用参考后再生成。';
+        }
       }
     }
     if (durationBlocker) return durationBlocker;
@@ -1303,7 +1305,7 @@ export function GenerationComposer({
         || studioFrames.filter((asset) => studioRoleForAsset(asset.assetId, asset.role, studioHandoff) === 'last').length > 1) {
         return '首尾帧素材角色不完整，请返回模板工作台修正';
       }
-    } else if (generationMode === 'first_last_frame' && !imageResultHandoff && imageReferenceAssets.length < 2) {
+    } else if (generationMode === 'first_last_frame' && imageResultHandoff?.intent !== 'video' && imageReferenceAssets.length < 2) {
       return `首尾帧模式至少需要 2 个图片参考，当前 ${imageReferenceAssets.length} 个`;
     }
     if (generationMode === 'smart_multi_frame' && imageReferenceAssets.length < 3) {
@@ -1356,7 +1358,7 @@ export function GenerationComposer({
         creation_contract_version: 2, entry: 'ordinary', prompt, generation_mode: generationMode, seed,
         generate_audio: generateAudio, return_last_frame: returnLastFrame, watermark, lora_id: selectedAuxiliary || undefined,
         reference_image_ids: workspace.assets.filter(a => a.type === 'image')
-          .sort((left, right) => imageResultHandoff ? Number(right.role === 'first_frame') - Number(left.role === 'first_frame') : 0)
+          .sort((left, right) => imageResultHandoff?.intent === 'video' ? Number(right.role === 'first_frame') - Number(left.role === 'first_frame') : 0)
           .map(a => a.referenceImageId).filter(Boolean),
         reference_audio_urls: workspace.assets.filter(a => a.type === 'audio').map(a => a.originalUrl) } : {}),
       draft: selectedProvider === 'seedance' && selectedModel === SEEDANCE_2_5_MODEL_ID && draftMode,
@@ -1658,7 +1660,7 @@ export function GenerationComposer({
     const draft = readImageResultVideoDraft(imageResultHandoff);
     const settings = draft?.settings || initialSettings;
     setPrompt(draft?.prompt || '');
-    setGenerationMode(draft?.settings.generationMode || 'first_last_frame');
+    setGenerationMode(draft?.settings.generationMode || (imageResultHandoff.intent === 'video-reference' ? 'all_in_one_reference' : 'first_last_frame'));
     if (settings) {
       setRatio(settings.ratio); setDuration(settings.duration); setResolution(settings.resolution);
       setGenerateAudio(settings.generateAudio); setReturnLastFrame(settings.returnLastFrame); setWatermark(settings.watermark);
@@ -1786,7 +1788,7 @@ export function GenerationComposer({
       ...(referenceImageInputs !== undefined ? { referenceImageInputs: orderedReferenceInputs } : {}),
       referenceImageIds: referenceImageInputs !== undefined ? orderedReferenceInputs.filter((input): input is Extract<ReferenceImageInput, {kind:'site_image'}> => input.kind === 'site_image').map(input => input.referenceImageId) : workspace.assets
         .filter((asset) => asset.type === 'image' && (!studioHandoff || studioRoleForAsset(asset.assetId, asset.role, studioHandoff) === 'reference'))
-        .sort((left, right) => imageResultHandoff ? Number(right.role === 'first_frame') - Number(left.role === 'first_frame') : 0)
+        .sort((left, right) => imageResultHandoff?.intent === 'video' ? Number(right.role === 'first_frame') - Number(left.role === 'first_frame') : 0)
         .map((asset) => asset.referenceImageId)
         .filter((id): id is string => Boolean(id)),
       referenceVideoUrls: workspace.assets
@@ -2380,7 +2382,7 @@ export function GenerationComposer({
         }}
         aria-busy={interactionLocked || Boolean(imageResultHandoff && !imageResultDraftReady) || workspace.loading || workspaceOperationCountRef.current > 0}
       >
-        {imageResultHandoff && <p className="composer-prefill-notice" role="status">这次图片已放在首帧，生成时请选择首尾帧模式；模型、时长和画面设置沿用有效个人偏好。请填写动作并确认费用后生成。{imageResultDraftMessage && <span>{imageResultDraftMessage}</span>}</p>}
+        {imageResultHandoff && <p className="composer-prefill-notice" role="status">{imageResultHandoff.intent === 'video-reference' ? '图片已加入视频参考图，默认全能参考。' : '这次图片已放在首帧，生成时请选择首尾帧模式。'}模型、时长和画面设置沿用有效个人偏好。请填写动作并确认费用后生成。{imageResultDraftMessage && <span>{imageResultDraftMessage}</span>}</p>}
         {templateEnabled && (
         <section className="template-workbench" aria-label="模板驱动生成">
           <div className="template-workbench-header">

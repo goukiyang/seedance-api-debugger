@@ -10,7 +10,7 @@ export type FusionCardChoice = { id: string; use: FusionCardUse; values?: string
 export type FusionInlineChoice = { cardId?: string; title: string; titleEn: string; multi?: boolean; use?: Exclude<FusionCardUse, 'off'>;
   terms: Array<{ nameZh: string; nameEn: string; descriptionZh: string; descriptionEn: string }> };
 export type FusionConfiguration = { scope?: 'document' | 'batch'; cards?: FusionCardChoice[]; inlineCards?: FusionInlineChoice[];
-  count?: number; lang?: FusionSettings['lang']; role?: FusionSettings['role']; strict?: boolean; requirements?: { zh?: string; en?: string; enabled?: boolean } };
+  count?: number; lang?: FusionSettings['lang']; role?: FusionSettings['role']; generationMode?: 'append' | 'replace'; strict?: boolean; requirements?: { zh?: string; en?: string; enabled?: boolean } };
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 const strings = (value: unknown) => Array.isArray(value) && value.length <= 160 && value.every(item => typeof item === 'string' && item.length > 0 && item.length <= 300) && new Set(value).size === value.length;
@@ -20,7 +20,8 @@ export function parseFusionConfiguration(value: unknown): FusionConfiguration {
   if (!record(value) || value.scope !== undefined && !['document', 'batch'].includes(String(value.scope))
     || value.count !== undefined && !COUNTS.includes(Number(value.count)) || value.count !== undefined && typeof value.count !== 'number'
     || value.lang !== undefined && !['zh', 'en', 'both'].includes(String(value.lang)) || value.strict !== undefined && typeof value.strict !== 'boolean'
-    || value.role !== undefined && !['', '主角', '配角', '伙伴', '反派', 'Boss', '路人'].includes(String(value.role))) throw new Error('配置只支持当前数量、语言、定位与作用范围，请按注册格式重新配置。');
+    || value.role !== undefined && !['', '主角', '配角', '伙伴', '反派', 'Boss', '路人'].includes(String(value.role))
+    || value.generationMode !== undefined && !['append', 'replace'].includes(String(value.generationMode))) throw new Error('配置只支持当前数量、语言、定位、生成方式与作用范围，请按注册格式重新配置。');
   if (value.requirements !== undefined) {
     const requirement = value.requirements;
     if (!record(requirement) || requirement.enabled !== undefined && typeof requirement.enabled !== 'boolean'
@@ -32,9 +33,10 @@ export function parseFusionConfiguration(value: unknown): FusionConfiguration {
     || card.replacePool !== undefined && typeof card.replacePool !== 'boolean'))) throw new Error('卡片配置须使用真实id和each/random/distribute/off，选项只能用已读中文或稳定词条ID。');
   if (value.inlineCards !== undefined) {
     if (!Array.isArray(value.inlineCards) || value.inlineCards.length > 8) throw new Error('一次最多新增8张本创作卡片。');
-    for (const card of value.inlineCards) {
-      if (!record(card) || card.cardId !== undefined && (typeof card.cardId !== 'string' || !/^card-[a-zA-Z0-9-]{1,80}$/.test(card.cardId))
-        || !Array.isArray(card.terms) || !card.terms.length || card.terms.length > 40 || card.use !== undefined && !['each', 'random', 'distribute'].includes(String(card.use))) throw new Error('新词卡片须有中英文名称、1–40个词条及完整中英文含义。');
+    for (const [index, card] of Object.entries(value.inlineCards)) {
+      if (!record(card)) throw new Error(`inlineCards[${index}]须为新词卡片对象。`);
+      if (card.cardId !== undefined && (typeof card.cardId !== 'string' || !/^card-[a-zA-Z0-9-]{1,80}$/.test(card.cardId))) throw new Error(`inlineCards[${index}].cardId无效：新建卡片请省略cardId；仅编辑controls中已有的本创作card-*卡片才填真实id。原生dimension:*和属性用cards配置现有选项，不能作inlineCards.cardId。`);
+      if (!Array.isArray(card.terms) || !card.terms.length || card.terms.length > 40 || card.use !== undefined && !['each', 'random', 'distribute'].includes(String(card.use))) throw new Error('新词卡片须有中英文名称、1–40个词条及完整中英文含义。');
       parseCardDraft({ title: card.title, titleEn: card.titleEn, multi: card.multi, tags: card.terms.map(term => {
         if (!record(term) || typeof term.descriptionZh !== 'string' || !term.descriptionZh.trim() || typeof term.descriptionEn !== 'string' || !term.descriptionEn.trim()) throw new Error('新词须保留完整中英文含义，不只给名称。');
         return { label: term.nameZh, en: term.nameEn, descriptionZh: term.descriptionZh, descriptionEn: term.descriptionEn };
@@ -96,6 +98,7 @@ export function configureFusionSettings(settings: FusionSettings, configuration:
   if (configuration.count !== undefined) next.count = configuration.count;
   if (configuration.lang !== undefined) next.lang = configuration.lang;
   if (configuration.role !== undefined) next.role = configuration.role;
+  if (configuration.generationMode !== undefined) next.generationMode = configuration.generationMode;
   if (configuration.strict !== undefined) next.diversity = configuration.strict ? 'strict' : 'prefer';
   if (configuration.requirements) {
     if (configuration.requirements.zh !== undefined) { next.requirements = configuration.requirements.zh; next.requirementsEn = configuration.requirements.en!; next.requirementsEnabled = configuration.requirements.enabled !== false; }

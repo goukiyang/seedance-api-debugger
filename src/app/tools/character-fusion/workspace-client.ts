@@ -18,6 +18,7 @@ export class FusionRequestError extends Error {
 }
 export async function fusionRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { cache: 'no-store', ...init });
+  if (!response.headers.get('content-type')?.includes('json')) throw Object.assign(new Error('暂时无法确认服务器返回的结果，原操作编号、输入和已有方案均已保留。请稍后按原编号继续核对。'), { status: response.status });
   const data = await response.json();
   if (!response.ok) throw new FusionRequestError(data.error || '操作未确认，当前草稿已保留。', response.status, data.code, data.details, data.submitted);
   return data as T;
@@ -57,12 +58,16 @@ export function mergeWorkspaceState(base: FusionWorkspaceState, local: FusionWor
   return { ...merge(base, local, compatibleRemote) as FusionWorkspaceState, messages: remote.messages, formatVersion: compatibleRemote.formatVersion, summaryMeta: compatibleRemote.summaryMeta, identity: compatibleRemote.identity };
 }
 
-export function mergeWorkspaceRows(current: FusionRow[], receipt: Pick<WorkspaceReceipt, 'workspace' | 'rowChanges'>, replace = false, appendPage = false): FusionWorkspaceRow[] {
+export function mergeWorkspaceRows(current: FusionRow[], receipt: Pick<WorkspaceReceipt, 'workspace' | 'rowChanges' | 'rowsPage'>, replace = false, appendPage = false, previousVersion?: number): FusionWorkspaceRow[] {
+  if (!replace && previousVersion !== undefined && receipt.workspace.version < previousVersion) return current as FusionWorkspaceRow[];
   if (replace) return receipt.workspace.rows;
+  const complete = !appendPage && receipt.rowsPage?.nextCursor === null && receipt.workspace.rows.length === receipt.rowsPage.total;
+  const freshPage = !appendPage && !receipt.rowChanges?.order && !receipt.rowChanges?.upsert.length && !receipt.rowChanges?.removedIds.length && previousVersion !== undefined && receipt.workspace.version > previousVersion;
+  if (complete || freshPage) return receipt.workspace.rows;
   const removed = new Set(receipt.rowChanges?.removedIds || []), updates = new Map([...(receipt.workspace.rows || []), ...(receipt.rowChanges?.upsert || [])].map(row => [row.id, row]));
   const existing = new Map(current.filter(row => !removed.has(row.id)).map(row => [row.id, row as FusionWorkspaceRow]));
   updates.forEach((next, id) => { if (!existing.has(id) || next.version >= existing.get(id)!.version) existing.set(id, next); });
-  const prefix = appendPage ? [] : receipt.workspace.rows.map(row => row.id), order = Array.from(new Set([...(receipt.rowChanges?.order || []), ...prefix, ...current.map(row => row.id), ...Array.from(updates.keys())]));
+  const prefix = appendPage ? [] : receipt.workspace.rows.map(row => row.id), order = receipt.rowChanges?.order ?? Array.from(new Set([...prefix, ...current.map(row => row.id), ...Array.from(updates.keys())]));
   return order.flatMap(id => { const row = existing.get(id); return row ? [row] : []; });
 }
 

@@ -7,7 +7,7 @@ import { createMuskChatCompletion, getMuskApiSettings, isMuskApiReady, resolveMu
 import { assertCharacterFusionWritesEnabled } from '@/lib/character-fusion/build-mode';
 import { FusionError, isRecord, parseOperationId, type FusionCommand } from '@/lib/character-fusion/actions';
 import { readFusionCatalogue } from '@/lib/character-fusion/catalogue-repository';
-import { executeWorkspaceOperation, getWorkspace, reserveAssistantOperation, finishAssistantOperation, cancelAssistantOperation, readAssistantOperationStatus, readWorkspaceHistory, listUndoableWorkspaceOperations } from '@/lib/character-fusion/workspace.server';
+import { executeWorkspaceOperation, getWorkspace, queryWorkspaceOperation, reserveAssistantOperation, finishAssistantOperation, cancelAssistantOperation, readAssistantOperationStatus, readWorkspaceHistory, listUndoableWorkspaceOperations } from '@/lib/character-fusion/workspace.server';
 import { bindFusionAgentCommands, fusionAgentCataloguePage, readFusionAgentControls, validateFusionAgentExecution, FusionAgentError, proposeFusionAgent, type FusionAgentProposal, type FusionAgentTarget } from '@/lib/character-fusion/agent-adapter.server';
 import { confirmFusionAgentContinuation, pageFusionAgentCatalogue, prepareFusionAgentContinuation, previewFusionAgentContinuation, queryFusionAgentContinuation } from '@/lib/character-fusion/agent-continuation.server';
 import type { FusionCatalogue } from '@/lib/character-fusion/catalogue-model';
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
     if (body.action === 'confirmCatalogue') return json(await confirmFusionAgentContinuation(user, workspaceId, opId, { entries: body.entries, previewVersion: body.previewVersion }));
     if (body.action === 'saveInline') {
       if (typeof body.cardId !== 'string' || !Number.isSafeInteger(body.baseVersion) || Number(body.baseVersion) < 1) throw new FusionAgentError('请先保存当前卡片，再存入个人词库。');
-      const prior = await queryFusionAgentContinuation(user, workspaceId, opId); if (prior.status !== 'unknown') return json(prior);
+      const prior = await queryWorkspaceOperation(user, workspaceId, opId); if (prior.status !== 'unknown') return json(prior);
       const page = await getWorkspace(user, workspaceId, { limit: 20 }), current = page.workspace;
       if (current.version !== Number(body.baseVersion)) throw new FusionAgentError('当前卡片已更新，请保留输入并重新预览。', 409, 'fusion_agent_scene_changed');
       const catalogue = (await readFusionCatalogue(user)).catalogue;
@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
     if (workspace.version !== Number(body.baseVersion)) throw new FusionAgentError('创作现场在请求后已更新，原输入已保留，尚未应用提案。', 409, 'fusion_agent_scene_changed');
     if (body.scopeChoice === 'document') target = undefined;
     if (target) {
-      const page = await getWorkspace(user, workspaceId, { rowId: target.rowId, limit: 1 });
+      const page = await getWorkspace(user, workspaceId, { rowId: target.rowId, limit: 1 }, { resolveSelectedRow: true });
       const row = page.workspace.rows.find(row => row.id === target!.rowId);
       if (page.workspace.version !== workspace.version || !row || row.version !== target.version) throw new FusionAgentError('目标方案版本已变，原输入已保留，请重新选择目标。', 409, 'fusion_agent_target_changed');
       workspace.rows = [...workspace.rows.filter(item => item.id !== row.id), row];
@@ -166,10 +166,10 @@ export async function POST(request: NextRequest) {
           return page;
         }
         if (read.kind === 'results') {
-          const page = await getWorkspace(user, workspaceId, { cursor: read.cursor, limit: read.limit || 20, rowId: read.rowId, batchId: read.batchId, displayNo: read.displayNo });
+          const page = await getWorkspace(user, workspaceId, { cursor: read.cursor, limit: read.limit || 20, rowId: read.rowId, batchId: read.batchId, displayNo: read.displayNo }, { resolveSelectedRow: true });
           if (page.workspace.version !== workspace.version) throw new FusionAgentError('创作现场已变，保留原输入和提案，尚未应用。', 409, 'fusion_agent_scene_changed');
           const rows = new Map(workspace.rows.map(row => [row.id, row]));
-          for (const row of page.workspace.rows) rows.set(row.id, row);
+          for (const row of page.workspace.rows) if (!rows.get(row.id)?.catalogueSnapshot?.settings) rows.set(row.id, row);
           workspace.rows = Array.from(rows.values());
           return { results: page.workspace.rows.map(row => ({ id: row.id, displayNo: row.displayNo, originBatchId: row.originBatchId, name: row.name, version: row.version, category: row.category, traits: row.design?.traits, requirements: row.design?.requirements })), ...page.rowsPage };
         }

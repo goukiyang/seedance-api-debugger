@@ -17,7 +17,7 @@ import { CURRENT_STUDIO_SIZE_POLICY_VERSION } from '../src/lib/image-studio/rati
 import { normalizeImageFeishuChoice } from '../src/lib/image-studio/feishu-contract';
 import { historicalStudioStyles } from '../src/lib/image-studio/style-history';
 import { freezeImageWorkMethodUse } from '../src/lib/works/method-reference';
-import { canAccessImageTemplates, isExternalImageStudioActor, externalStudioPresetIds } from '../src/lib/image-studio/access';
+import { canAccessImageTemplates, isExternalImageStudioActor, externalStudioCanUsePresetId } from '../src/lib/image-studio/access';
 import { EXTERNAL_IMAGE_ADMISSION_ENABLED } from '../src/lib/image-studio/external-admission';
 
 // This fixture evaluates selected production declarations with synthetic dependencies.
@@ -83,6 +83,7 @@ async function main() {
   const created: Record<string, unknown>[] = [];
   const specificationInputs: Record<string, unknown>[] = [];
   const user = { id: owner, role: 'admin', account_type: 'internal', status: 'active' };
+  let externalStudioEnabled = false;
   const workspace = { id: moduleId, owner_id: owner, name: 'Synthetic workspace', source_preset_id: presetId,
     revision: 7, model: 'gpt-image-1', quality: 'medium', resolution: '1K', prompt: 'must-not-use-current-template-prompt', context: 'must-not-use-current-context' };
   const settings = { revision: 1, model: 'gpt-image-1', quality: 'medium', resolution: '1K', context: 'must-not-use-current-global', prices: { 'gpt-image-1': 0 } };
@@ -114,6 +115,8 @@ async function main() {
       : where.id === 'synthetic-prior-preset' ? { owner_id: priorPresetOwner, scope: 'creator', is_shared: true } : null },
     asset: { count: async ({ where }: { where: Parameters<typeof assetRows>[0] }) => assetRows(where).length,
       findMany: async ({ where }: { where: Parameters<typeof assetRows>[0] }) => assetRows(where) },
+    project: { findFirst: async ({ where }: { where: { id: string; owner_user_id: string } }) =>
+      where.id === 'synthetic-external-project' && where.owner_user_id === owner ? { id: where.id } : null },
     platformSetting: { findUnique: async () => null },
   };
   const prisma = { ...tx, $transaction: async (run: (client: typeof tx) => unknown) => run(tx) };
@@ -182,9 +185,9 @@ async function main() {
     defaultStudioModuleId: () => 'synthetic-default-module', validStudioModuleId: (id: string) => id === moduleId,
     getImageStudioSettings: async () => settings, withContextVersionRetry: (run: () => unknown) => run(),
     assertNoSynchronousImageAdmission: async () => {}, assertUsageProject: async () => {},
-    canAccessImageTemplates, isExternalImageStudioActor, externalStudioPresetIds, EXTERNAL_IMAGE_ADMISSION_ENABLED,
+    canAccessImageTemplates, isExternalImageStudioActor, externalStudioCanUsePresetId, EXTERNAL_IMAGE_ADMISSION_ENABLED,
     hydrateExternalStudioActor: async (actor: typeof user) => isExternalImageStudioActor(actor)
-      ? { ...actor, externalStudioAccess: { enabled: false, revision: 0, presetIds: [] } } : actor,
+      ? { ...actor, externalStudioAccess: { enabled: externalStudioEnabled, revision: 1, presetIds: [], allShared: externalStudioEnabled } } : actor,
     ensureDefaultProjectForUser: async () => { forbiddenCalls++; throw new Error('Internal restoration must not repair an external project'); },
     canViewStudioPreset: (_actor: unknown, preset: { owner_id: string; is_shared: boolean }) => preset.owner_id === owner || preset.is_shared,
     resolveStudioTaskSharedUse: async (_actor: unknown, _module: unknown, supplied: unknown) => { assert.deepEqual(plain(supplied), intent); return shared; },
@@ -502,6 +505,39 @@ async function main() {
   historyPreset = 'another-template'; await assert.rejects(() => readEditor(user, moduleId, marker.sourceTaskId)); historyPreset = presetId;
   originalTextAllowed = false; await assert.rejects(() => readEditor(user, moduleId, marker.sourceTaskId), /original text denied/);
   checks.push('historical_editor_checks_real_preset_relation_and_original_text_permission');
+
+  // Real external clients never receive an author's sourceTaskId. Inherit the resolved recipe on the server.
+  user.account_type = 'external'; user.role = 'user'; externalStudioEnabled = true; shared.binding.mode = 'live';
+  const externalBody = { ...old, projectId: 'synthetic-external-project',
+    personalOverrides: { count: 1 }, draft: { referencePolicy: policy } };
+  for (const mode of ['current', 'historical'] as const) {
+    Reflect.set(shared.definition, 'reproduction', { version: 2, sourceOwnerId: owner, sourceTaskId: 'private-author-task',
+      moduleContext: shared.definition.context, globalContext: 'synthetic-author-global',
+      taskSettings: { protocol: 'task-settings-v2', mode, sourceTaskId: 'private-author-task' } });
+    if (EXTERNAL_IMAGE_ADMISSION_ENABLED) {
+      const inherited = await prepare(externalBody);
+      assert.equal(inherited.snapshot.globalContext, mode === 'current' ? settings.context : 'synthetic-author-global');
+      assert.equal(inherited.snapshot.moduleContext, shared.definition.context);
+      const quoteAt = specificationInputs.length;
+      await engine.prepareImageBillingQuote(owner, externalBody);
+      assert.equal(JSON.stringify(specificationInputs[quoteAt]), JSON.parse(inherited.task.billing_contract_json).specification);
+    } else {
+      const before: { tasks: number; specifications: number } = { tasks: created.length, specifications: specificationInputs.length };
+      await assert.rejects(() => prepare(externalBody), /外部生图暂未开放/);
+      await assert.rejects(() => engine.prepareImageBillingQuote(owner, externalBody), /外部生图暂未开放/);
+      assert.deepEqual({ tasks: created.length, specifications: specificationInputs.length }, before);
+    }
+    await assert.rejects(() => prepare({ ...externalBody,
+      taskSettings: { protocol: 'task-settings-v2', mode, sourceTaskId: 'another-users-task' } }));
+  }
+  externalStudioEnabled = false; await assert.rejects(() => prepare(externalBody));
+  user.account_type = 'internal'; user.role = 'admin'; shared.binding.mode = 'publisher';
+  await assert.rejects(() => prepare(externalBody), /新的设置模式/);
+  Reflect.deleteProperty(shared.definition, 'reproduction');
+  checks.push(EXTERNAL_IMAGE_ADMISSION_ENABLED
+    ? 'external_v2_current_and_historical_recipes_inherit_server_settings_with_matching_quotes'
+    : 'external_v2_guard_rejects_current_and_historical_generation_and_quotes_without_writes',
+    'external_source_task_injection_and_closed_access_rejected_internal_settings_guard_preserved');
 
   assert.equal(forbiddenCalls, 0);
   writeFileSync(destination, JSON.stringify({ schema: 'studio-restored-settings-engineering.v1', synthetic: true, completed: true,

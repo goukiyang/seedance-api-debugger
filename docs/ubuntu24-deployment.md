@@ -1,3 +1,17 @@
+<!-- SEAMLESS01-DEFAULT-20261112 -->
+## 默认发布：无感切换与自动接续（SEAMLESS01）
+
+后续常规发布沿 `ops/sd2-release.mjs` / profile，要求 `policy` 显示引擎1.1.1、seamless及automatic-same-plan。旧分支先从 `codex/seamless-default-20261112` 聚焦合入；禁止复制历史“先停Web/先装503”的常规cutover，更新提示页仅作真实故障兜底。
+
+1. 复用原候选构建链及仍有效的工程证据：完整Next/类型、实际进程回执、原source manifest、fresh pricing/native矩阵和prepared pricing entry。相同Prisma、持久写协议与依赖准入；不相容则留原站，不冷切、不回业务数据。
+2. `prepare-seamless ENGINE_INSTALL.json MAIN_BUILD_EVIDENCE.json` 生成当次root封存计划，再 `release PLAN.json`。正常SD2连接/原请求排空由控制器自动等待和接续；`status-release`只读，`resume-release`用于异常中断后的原计划恢复。功能手验不阻断工程发布；真实准入、就绪或数据保护失败仍停止受影响动作。
+3. 候选Web3303/独立图片worker先通过原root+i屏障、真实源/BUILD、实际进程及就绪凭据。私密策略沿现有应用UID/0600，临时副本不改权限；启动授权仍root封存。保留旧/新/guard静态资源，再只将Nginx用户发往本机3302的新连接转给已就绪3303，原连接继续原去处，晚到旧地址请求也有可用入口。
+4. 排空只等SD2原3302后端连接、原同步请求及原角色自然退出，不等共享Nginx其它站点的长连接。确认旧writer/原根进程退出后，沿原三个启动控制、真正生效的CWD及私密消费者绑定交接；不覆盖DB、账本、原号、媒体或现价。
+5. 正式3302和后台真实就绪后，再将晚到3303连接导向3302，排空并自然退役临时进程，恢复原timer状态。保留的3303旧入口桥接在下一候选真正就绪时才切换；常规站点配置未变时不重复reload共享Nginx。实际故障沿固定相容guard3304，仅回程序/配置。
+
+应用v0.148.11（源2c338614、BUILD F0nHdqbVfbkJgcJk-cptg）已于2026-11-13 03:12:14Z完成7角色交接，临时服务已退役。默认引擎1.1.1已安装，源码70871af64已推送。实际执行、失败原证、隔离内核/CLI检查、探测超时线索及用户手验边界见[原单§6](../tasks/todo/2026-11-12-seamless-default-release.md#6-r02-实际发布与默认流程固化)。
+<!-- /SEAMLESS01-DEFAULT-20261112 -->
+
 <!-- ARK-REFERENCE-TRANSPORT-1484-RELEASE-20261112 -->
 ## 2026-11-12 火山受控传图与安全错误留存 v0.148.4
 

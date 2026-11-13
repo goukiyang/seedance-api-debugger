@@ -2,6 +2,7 @@ import 'server-only';
 import { constants, closeSync, fstatSync, openSync, readFileSync, realpathSync } from 'node:fs';
 import { createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
+import { releasePrivatePolicyFresh } from '../image-studio/process-provenance';
 
 export const PRIVATE_PROMPT_FORMAT = 'private-prompt.v1' as const;
 export const PRIVATE_PROMPT_READER = 1;
@@ -95,6 +96,7 @@ export function privatePromptPolicy(): PrivatePromptPolicy | null {
   const file = process.env.PRIVATE_PROMPTS_POLICY_FILE;
   if (!file) return minimum === 'legacy-read' ? null : fail();
   try {
+    if (!releasePrivatePolicyFresh()) return fail();
     const policy = JSON.parse(controlledFile(file, 256 * 1024).toString('utf8')) as PrivatePromptPolicy;
     if (policy.schema !== 'private-prompt-policy.v1' || !identifier(policy.revision)
       || !PRIVATE_PROMPT_STATES.includes(policy.state) || policy.minimumReader !== PRIVATE_PROMPT_READER

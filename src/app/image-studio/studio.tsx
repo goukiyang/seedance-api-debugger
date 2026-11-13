@@ -1572,6 +1572,7 @@ function ImageStudioWorkspace({ isAdmin, externalActor = false, userId, template
       const pageItem = coverPageCompatible
         ? pool.data?.items.find(item => item.key === entry.key) : undefined;
       const onReadError = () => setGalleryReadErrors(current => new Set(Array.from(current).concat(entry.key)));
+      const deleteTarget = entry.deletion;
       return { key: entry.key, id: entry.id, name: entry.name, groupName: entry.groupName, mine: entry.mine, shared: entry.shared,
         lastOpenedAt: galleryLastUsed[entry.key], unread: attention.unread.has(entry.id),
         sharingControl: pageItem?.sharing && <TemplateSharingSwitch name={entry.name}
@@ -1594,6 +1595,9 @@ function ImageStudioWorkspace({ isAdmin, externalActor = false, userId, template
         visual: pageItem?.fixedCover ? <FixedCoverVisual key={coverRetry} cover={pageItem.fixedCover} name={entry.name} onReadError={onReadError} />
           : <span className={styles.coverVisual} data-cover-source="模板素材">
             {pageItem?.cover?.thumbnailUrl || pageItem?.banner?.thumbnailUrl ? <img decoding="async" src={pageItem.cover?.thumbnailUrl || pageItem.banner!.thumbnailUrl} loading="lazy" alt={`${entry.name}封面`} onError={onReadError} /> : <span>{entry.available ? '暂无代表图' : '仅历史，来源暂不可用'}</span>}</span>,
+        onDelete: deleteTarget?.allowed && deleteTarget.actorId === userId ? (anchor: HTMLElement) => { void deletion.request(deleteTarget, entry.name, anchor); } : undefined,
+        deleteDisabled: Boolean(deletion.busyId),
+        deletePending: deletion.pending.some(command => command.objectKind === deleteTarget?.objectKind && command.id === deleteTarget.id),
         canEditCover: entry.coverEditable === true, onOpen: () => navigateToEntry(entry, { explicitSelection: true }), onEditCover: () => editGalleryCover(entry, pageItem?.fixedCover) };
     })} />}
     <div hidden={coverView || !viewRestored || !directoryReady || Boolean(routeQuery && resolvedRoute !== `${userId}:${routeQuery.startsWith("?") ? routeQuery : `?${routeQuery}`}`)}>
@@ -4573,7 +4577,7 @@ function ImageStudioBlock({ isAdmin, externalActor, userId, module, hidden, onSh
     {bannerCrop && <BannerCropDialog source={bannerCrop} onCancel={closeBannerCrop} onCropped={file => { closeBannerCrop(); void uploadBanner(file); }} />}
     <div className={styles.workspace}>
       <section className={styles.inputs} aria-label="生成参数">
-        {globalContextMode === 'historical' && <p role="status" className={styles.appliedSource}>使用历史设置
+        {!externalActor && globalContextMode === 'historical' && <p role="status" className={styles.appliedSource}>使用历史设置
           <button type="button" disabled={submitting || Boolean(pendingSubmission) || Boolean(batch.pending) || moduleSaving || draftRestoring}
             onClick={useCurrentGlobalSettings}>改用当前通用设置</button>
         </p>}
