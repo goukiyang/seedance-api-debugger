@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { spawn, spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { runSeamlessDelivery, SEAMLESS_STEPS } from './seamless-release.mjs';
-import { classifySynchronousRows, renderRoute, renderShadowUnit, renderRetainedStaticLocation, readCurrentBuildEvidence, RUNTIME_ROWS_READER, findOldRootProcesses } from './seamless-web.mjs';
+import { classifySynchronousRows, renderRoute, renderShadowUnit, renderRetainedStaticLocation, readCurrentBuildEvidence, RUNTIME_ROWS_READER, findOldRootProcesses, processIdentity } from './seamless-web.mjs';
 import { privateDataBytes, verifyShadowStart } from './seamless-shadow-start.mjs';
 import { assertSeamlessCompatible, digest } from './seamless-policy.mjs';
 import bridges from './seamless-bridges.mjs';
@@ -23,6 +23,7 @@ check('private policy data retains app ownership and mode0600; group-readable co
 });
 const root = process.argv[4] || path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../..');
 const a = 'a'.repeat(40), b = 'b'.repeat(40), runId = '12345678-1234-4234-8234-123456789abc';
+if (process.platform === 'linux' && process.getuid() === 0) check('actual systemd PID1 is a valid worker parent identity', () => assert.equal(processIdentity(1).pid, 1));
 const plan = { runId, main: { source: b, root: '/data/video-api-debugger/managed-releases/' + b } };
 check('whole old-root process scan catches extra writers and never treats unreadable processes as zero', () => {
   const io = { readdirSync: () => ['100', '101', '102', 'self'], realpathSync: file => {
