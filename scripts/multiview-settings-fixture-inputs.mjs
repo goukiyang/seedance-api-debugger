@@ -7,6 +7,8 @@ export const MULTIVIEW_SETTINGS_FIXTURE_SOURCES = [
   "scripts/multiview-preview-engineering.ts",
   "scripts/multiview-work-identity-engineering.ts",
   "scripts/multiview-reference-transport-engineering.ts",
+  "src/app/assets/page.tsx",
+  "src/components/generate/video-submission-state.ts",
   "src/lib/provider/reference-image-transport.ts",
   "src/lib/video/multiview-recipe-storage.server.ts",
   "src/lib/video/multiview-private-create.server.ts",
