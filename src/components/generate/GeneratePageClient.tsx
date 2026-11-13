@@ -662,8 +662,8 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     setImageResultLoading(true);
     readImageResultHandoff(id, controller.signal).then(value => {
       if (controller.signal.aborted || activeAccountIdRef.current !== ownerId) return;
-      if (value.intent !== 'video' || !value.workspaceTabId) throw new Error('这次原图尚未准备为视频首帧，请返回原结果');
-      if (!value.ready) { setImageResultPendingReceipt(value.receiptId); throw new Error('原导入已经记录，首帧准备尚未完成。可继续准备同一次导入，不会生成视频。'); }
+      if (!['video', 'video-reference'].includes(value.intent) || !value.workspaceTabId) throw new Error('这次原图尚未准备为视频素材，请返回原结果');
+      if (!value.ready) { setImageResultPendingReceipt(value.receiptId); throw new Error('原导入已经记录，图片准备尚未完成。可继续准备同一次导入，不会生成视频。'); }
       sessionStorage.setItem('workspace_tab_id', value.workspaceTabId);
       setStudioWorkspaceTabId(value.workspaceTabId);
       setImageResultHandoff({ ...value, ownerId });
@@ -3663,7 +3663,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
               setImageResultHandoff({ ...value, ownerId }); setImageResultPendingReceipt('');
             }).catch(cause => { if (activeAccountIdRef.current === ownerId) setImageResultError(cause instanceof Error ? cause.message : '原导入尚未确认'); })
               .finally(() => { if (activeAccountIdRef.current === ownerId) setImageResultLoading(false); });
-          }}>继续准备原首帧</button>}
+          }}>继续准备原图片</button>}
         </p>}
         {(imageResultRequested === false || Boolean(imageResultHandoff)) && <GenerationComposer
           videoRedesign={normalVideoRedesign}

@@ -62,11 +62,11 @@ async function readStored(user: SessionUser, id: string) {
   if (!row) throw new ImageResultNextError('没有找到这次导入，请返回原结果重新打开', 404);
   let record: Stored;
   try { record = JSON.parse(row.value_json); } catch { throw new ImageResultNextError('导入记录暂不可读，原任务保留', 409); }
-  if (record.version !== 1 || record.receiptId !== id || record.ownerId !== user.id || !['cutout', 'video'].includes(record.intent)) throw new ImageResultNextError('无权打开这次导入', 403);
+  if (record.version !== 1 || record.receiptId !== id || record.ownerId !== user.id || !['cutout', 'video', 'video-reference'].includes(record.intent)) throw new ImageResultNextError('无权打开这次导入', 403);
   const source = await authorizedSource(user, record.sourceKey);
   if (source.version !== record.sourceVersion) throw new ImageResultNextError('原图片记录已改变，未使用其他图片替代，请返回原结果', 409);
   if (record.intent === 'cutout' && (!canUseCutout(user) || !cutoutBusinessCredential(process.env, user.id))) throw new ImageResultNextError('当前账户没有抠图业务授权，请联系管理员；没有提交任务', 403);
-  if (record.intent === 'video' && record.stage === 'accepted') {
+  if (record.intent !== 'cutout' && record.stage === 'accepted') {
     const workspace = await prisma.workspace.findUnique({ where: { id: `image_next_${id}` }, select: { owner_id: true, status: true, name: true } });
     if (!workspace || workspace.owner_id !== user.id || workspace.status !== 'active' || workspace.name !== `默认工作台:${record.workspaceTabId}`) throw new ImageResultNextError('原独立视频草稿已不可用，未创建空白草稿或覆盖其他内容', 409);
   }
@@ -92,9 +92,9 @@ export async function createImageResultNext(user: SessionUser, sourceKey: Conten
   const record: Stored = { version: 1, receiptId: id, ownerId: user.id, sourceKey, sourceVersion: source.version, intent, returnPath,
     createdAt: now, phaseAt: now, stage: 'import-ready', asset: null, job: null,
     message: intent === 'cutout' ? CUTOUT_READY_MESSAGE : '正在准备独立视频草稿；不会生成视频。',
-    ...(intent === 'video' ? { workspaceTabId: `image-next-${id.slice(0, 48)}` } : {}) };
+    ...(intent !== 'cutout' ? { workspaceTabId: `image-next-${id.slice(0, 48)}` } : {}) };
   await prisma.platformSetting.upsert({ where: { key }, update: {}, create: { key, value_json: JSON.stringify(record), updated_by: user.id } });
-  if (intent === 'video') await prepareVideoWorkspace(user, id);
+  if (intent !== 'cutout') await prepareVideoWorkspace(user, id);
   return getImageResultNext(user, id);
 }
 export async function findImageResultNext(user: SessionUser, source: ContentKey, intent: ImageResultNextIntent) {
@@ -112,7 +112,7 @@ export async function imageResultOriginal(request: Request, user: SessionUser, i
 }
 export async function prepareVideoWorkspace(user: SessionUser, id: string) {
   const { record, raw, key, source } = await readStored(user, id);
-  if (record.intent !== 'video' || !record.workspaceTabId) throw new ImageResultNextError('导入目标无效');
+  if (record.intent === 'cutout' || !record.workspaceTabId) throw new ImageResultNextError('导入目标无效');
   if (record.stage === 'accepted') return;
   // Deterministic ids and one transaction protect initialization from parallel tabs.
   await prisma.$transaction(async db => {
@@ -122,9 +122,9 @@ export async function prepareVideoWorkspace(user: SessionUser, id: string) {
     const existing = await db.workspace.findUnique({ where: { id: workspaceId } });
     if (existing && (existing.owner_id !== user.id || existing.status !== 'active')) throw new ImageResultNextError('原独立视频草稿不可用，未覆盖其他草稿', 409);
     if (!existing) await db.workspace.create({ data: { id: workspaceId, owner_id: user.id, name: `默认工作台:${record.workspaceTabId}` } });
-    await attachAssetToSiteReferenceImage({ user, workspaceId, sourceRequestId: id, sourceLabel: '生成图片继续创作', role: 'first_frame',
-      albumName: '生成工作台参考图', albumDescription: '生成图片导入视频首帧', metadataSource: 'image_result_next', allowSharedAsset: true, db }, source.asset.id);
-    await db.platformSetting.updateMany({ where: { key, value_json: raw }, data: { value_json: JSON.stringify({ ...record, stage: 'accepted', message: '图片已带入首帧，填写想让画面怎么动；点击生成后才会创建视频。' }), updated_by: user.id } });
+    await attachAssetToSiteReferenceImage({ user, workspaceId, sourceRequestId: id, sourceLabel: '生成图片继续创作', role: record.intent === 'video-reference' ? 'reference_image' : 'first_frame',
+      albumName: '生成工作台参考图', albumDescription: record.intent === 'video-reference' ? '生成图片导入视频参考图' : '生成图片导入视频首帧', metadataSource: 'image_result_next', allowSharedAsset: true, db }, source.asset.id);
+    await db.platformSetting.updateMany({ where: { key, value_json: raw }, data: { value_json: JSON.stringify({ ...record, stage: 'accepted', message: record.intent === 'video-reference' ? '图片已加入视频参考图，默认全能参考；点击生成后才会创建视频。' : '图片已带入首帧，填写想让画面怎么动；点击生成后才会创建视频。' }), updated_by: user.id } });
   });
 }
 async function cutoutCall(request: Request, user: SessionUser, path: string[], method = 'GET', body?: BodyInit, headers?: Record<string, string>) {

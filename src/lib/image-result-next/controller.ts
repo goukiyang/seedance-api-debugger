@@ -41,7 +41,7 @@ export function createImageResultNextController(deps: Dependencies) {
     synchronize();
     const context = { ...deps.context() };
     const permissions = imageResultNextCapabilities(context, deps.blocked());
-    if (!alive || locked || !context.sourceKey || (intent !== 'cutout' && intent !== 'video')
+    if (!alive || locked || !context.sourceKey || (intent !== 'cutout' && intent !== 'video' && intent !== 'video-reference')
       || (intent === 'cutout' ? !permissions.canCutout : !permissions.canVideo)) return;
     locked = true;
     const expectedIdentity = identity(), request = ++generation;

@@ -14,7 +14,7 @@ function deferred<T>() {
 const sourceKey: ContentKey = 'asset:fixture-original';
 function receipt(source: ContentKey = sourceKey, intent: ImageResultNextIntent = 'video'): ImageResultNextReceipt {
   return { receiptId: 'a'.repeat(64), intent, sourceKey: source, source: { label: 'fixture', originalUrl: '/fixture-original', fileName: 'fixture.png' },
-    returnPath: '/template-studio?type=image', destination: intent === 'video' ? `/generate?image_result_handoff=${'a'.repeat(64)}` : `/cutout?handoff=${'a'.repeat(64)}`,
+    returnPath: '/template-studio?type=image', destination: intent !== 'cutout' ? `/generate?image_result_handoff=${'a'.repeat(64)}` : `/cutout?handoff=${'a'.repeat(64)}`,
     message: '原图已带入，尚未生成', ready: true };
 }
 function fixture(initial: Partial<ImageResultNextContext> = {}) {
@@ -22,6 +22,7 @@ function fixture(initial: Partial<ImageResultNextContext> = {}) {
   let blocked = false, popupBlocked = false;
   const events: string[] = [], posts: Array<{ source: ContentKey; intent: ImageResultNextIntent; returnPath: string }> = [];
   const queries: ContentKey[] = [];
+  const queryIntents: ImageResultNextIntent[] = [];
   const reads: Array<() => Promise<ImageResultNextReceipt | null>> = [];
   const writes: Array<() => Promise<ImageResultNextReceipt>> = [];
   const targets: Array<{ closed: boolean; url: string; closes: number }> = [];
@@ -33,10 +34,10 @@ function fixture(initial: Partial<ImageResultNextContext> = {}) {
       const target = { closed: false, url: '', closes: 0 }; targets.push(target);
       return { close: () => { target.closed = true; target.closes++; }, closed: () => target.closed, replace: url => { target.url = url; } };
     },
-    find: source => { events.push('get'); queries.push(source); const next = reads.shift(); assert.ok(next, 'unexpected GET'); return next(); },
+    find: (source, intent) => { events.push('get'); queries.push(source); queryIntents.push(intent); const next = reads.shift(); assert.ok(next, 'unexpected GET'); return next(); },
     create: (source, intent, returnPath) => { events.push('post'); posts.push({ source, intent, returnPath }); const next = writes.shift(); assert.ok(next, 'unexpected POST'); return next(); },
   });
-  return { controller, events, posts, queries, reads, writes, targets,
+  return { controller, events, posts, queries, queryIntents, reads, writes, targets,
     change: (next: Partial<ImageResultNextContext>) => { context = { ...context, ...next }; },
     block: () => { blocked = true; }, blockPopup: () => { popupBlocked = true; } };
 }
@@ -126,6 +127,20 @@ async function run() {
   const wrongDestination = fixture(); wrongDestination.reads.push(() => Promise.resolve({ ...receipt(), destination: 'https://other.invalid/' }));
   await wrongDestination.controller.open('video'); assert.equal(wrongDestination.controller.getSnapshot().destination, '');
   assert.equal(wrongDestination.targets[0].closed, true); wrongDestination.controller.dispose();
+
+  // Template reference handoffs retain their own durable intent through unknown recovery.
+  const reference = fixture(); reference.reads.push(() => Promise.resolve(null));
+  reference.writes.push(() => Promise.reject(new Error('reference POST unknown')));
+  await reference.controller.open('video-reference');
+  assert.equal(reference.posts[0].intent, 'video-reference');
+  reference.reads.push(() => Promise.resolve(receipt(sourceKey, 'video-reference')));
+  await reference.controller.open('video-reference');
+  assert.deepEqual(reference.queryIntents, ['video-reference', 'video-reference']);
+  assert.equal(reference.posts.length, 1); assert.equal(reference.targets[1].url, receipt().destination); reference.controller.dispose();
+  const legacyMismatch = fixture(); legacyMismatch.reads.push(() => Promise.resolve(receipt()));
+  await legacyMismatch.controller.open('video-reference');
+  assert.equal(legacyMismatch.posts.length, 0); assert.equal(legacyMismatch.targets[0].closed, true);
+  assert.equal(legacyMismatch.controller.getSnapshot().destination, ''); legacyMismatch.controller.dispose();
 
   console.log('Image result handoff controller fixture cases complete');
 }

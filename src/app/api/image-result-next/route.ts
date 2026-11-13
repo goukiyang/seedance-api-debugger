@@ -1,7 +1,7 @@
 import { createImageResultNext, findImageResultNext, prepareCutoutImageHandoff, safeImageResultReturnPath, validImageResultSource, ImageResultNextError } from '@/lib/image-result-next/server';
 import { imageNextBody, imageNextError, imageNextJson, imageNextUser } from '@/lib/image-result-next/http';
 export const dynamic = 'force-dynamic';
-function intent(value: unknown) { if (value !== 'cutout' && value !== 'video') throw new ImageResultNextError('导入目标无效'); return value; }
+function intent(value: unknown) { if (value !== 'cutout' && value !== 'video' && value !== 'video-reference') throw new ImageResultNextError('导入目标无效'); return value; }
 export async function POST(request: Request) {
   try {
     const user = await imageNextUser(request), body = await imageNextBody(request);
