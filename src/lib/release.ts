@@ -4,7 +4,8 @@ const notice = {
   title: '整理多视图记录与作品浏览',
   outline: [
     '记录封面统一排列，加载失败不再打乱网格',
-    '动作作品先看预览列表，点选后打开大图'
+    '动作作品先看预览列表，点选后打开大图',
+    '拼图选中图像后可按Delete移除，并支持撤销'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
