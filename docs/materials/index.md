@@ -642,3 +642,17 @@ v0.146.0已部署，待用户手动验收；原卡片与三批共用链、26组�
 
 正式根私有证据：[源层工程](2026-11-08-character-fusion-prototype/implementation/ux20/source-engineering.private.json)、[ES5/CSS](2026-11-08-character-fusion-prototype/implementation/ux20/source-types.private.json)、[两版构建/源绑定/启动/数据保护及公网健康批准JSON](2026-11-08-character-fusion-prototype/implementation/ux20/evidence/)。仅15份安全JSON，未复制生产DB、env或配置备份；包SHA已核。部署 `functionalAcceptance=false`，无浏览器/真实LLM/媒体调用，不冒A01–A13效果通过。
 <!-- /FUSION-UX20-MATERIALS-20261111 -->
+
+
+<!-- MV-ACTION-LLM02-20261112 -->
+## MV-ACTION-LLM02 修改动作后 AI 整理（2026-11-12）
+
+私有原证：[调查与22项工程检查](2026-11-12-multiview-ai-organize-fix/investigation.json)。以同目录后续发布回执记录实际部署，真实模型效果仍待手验；旧unknown不重发。
+<!-- /MV-ACTION-LLM02-20261112 -->
+
+
+<!-- MV-ACTION-REF01-20261113 -->
+## MV-ACTION-REF01 GPT参考当前拼图（2026-11-13）
+
+正式原证：2026-11-12-multiview-ai-reference/。包含controls/admission/guard工程回执、原失败attempt01/02、源/构建与后续真实部署回执；真实模型/界面仍用户手验。照片像素不写记录，旧unknown保留。
+<!-- /MV-ACTION-REF01-20261113 -->

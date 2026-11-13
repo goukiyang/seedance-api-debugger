@@ -204,3 +204,14 @@ UX17收口：v0.145.5按本轮用户授权完成实际新建A/B/C、A/B及C/B互
 WORKS-VIDEOREF01接通视频详情到既有 `/generate` / `/generate/ip` 输入复用。现有成功method归因只冻结模板方法新草稿及其template/run身份；普通任务输入复用没有这份模板凭据。新按钮不能凭点击、草稿或仅任务受理冒成功推荐，也不能伪造模板身份补分。后续应沿实际复用原回执和真实成功产物单独接通，保原号、费用、账号/原作品权限与去重；本轮没有扩大实现。证据：`src/lib/works/method-reference.ts`、`src/lib/works/recommendation-sources.ts`、`src/app/api/tasks/create/route.ts`及原作品单WORKS-VIDEOREF01。没有据此推断其它推荐链路失效。
 待核线索：按原锁文件安装检查依赖时，npm对既有Next 14.2.5输出安全更新告警。本轮只确认锁定版本与该告警，未核实本站适用条件或可利用性，不把提示当已发生攻击；没有顺带升级依赖或改变发布范围，后续沿依赖安全维护核查。
 <!-- /WORKS-INPUT-ATTRIBUTION-20261112 -->
+
+
+<!-- D-20261112-SEAMLESS-WAIT-PROBES -->
+## D-20261112-SEAMLESS-WAIT-PROBES 旧连接等待期间的公网探测超时（待核线索）
+
+SEAMLESS01本次标准curl等待阶段1854条采样中有16次在8秒内没有HTTP响应（HTTP0）；不能据此断言应用502、数据损坏或根因已明。其余1838条200；实际项目隔离交接段218条均200/ok，最终两个正式入口及7角色健康。保留原日志于服务器seamless-default-20261112/attempt02/public-health-during-resume.ndjson；后续按该窗口核DNS/TLS/连接与应用日志，不先改超时、重发生成或扩大为性能大修。原单§6及正式材料public-deployed.json为入口，本轮未额外收费/浏览器复现。
+
+<!-- MV-REF-PROBE-20261113 -->
+2026-11-13追加：MV-ACTION-REF01 / v0.148.14 / run957b9930发布日志又记录一次15秒curl公网 `/api/release` 探测超时。源码ingressReady会沿原计划重试，最终8阶段complete，七服务、两域release/health及目标多视图JS SHA均正常；未记录具体命中的域名及DNS/TLS/连接阶段，根因仍待核，不能当成已证应用故障或全程零中断。原日志在服务器multiview-ai-reference-20261112/attempt03/release.log，最终回执同stage/public-deployed.json；本轮未顺带修改网络、WAF或生成链路。
+<!-- /MV-REF-PROBE-20261113 -->
+<!-- /D-20261112-SEAMLESS-WAIT-PROBES -->
