@@ -198,7 +198,11 @@ export function MultiviewVideoResults({ owner, authority, active, currentTaskId,
         <div className={styles.historyList}>{items.map(item => <article key={item.id} className={styles.historyItem} data-selected={item.id === selected?.id || undefined}>
           <button type="button" className={styles.selectVideo} disabled={detailLoading} aria-pressed={item.id === selected?.id} onClick={() => choose(item.id)} aria-label={`查看${item.title || '3D多视图视频'}`}>
             <span className={styles.thumbnail}>{item.thumbnailUrl ? <img src={item.thumbnailUrl} alt="" loading="lazy" /> : <Film size={22} />}{item.playUrl && <Play className={styles.playIcon} size={18} />}</span>
-            <span className={styles.recordText}><strong>{item.title || '3D多视图视频'}</strong><span>{multiviewVideoResultLabel(item)}</span><span>{points(item)}</span></span>
+            <span className={styles.recordText}>
+              <strong title={item.title || '3D多视图视频'}>{item.title || '3D多视图视频'}</strong>
+              <span>{[item.duration !== null ? `${item.duration}秒` : null, item.resolution].filter(Boolean).join(' · ')}</span>
+              <span className={styles.recordFacts}><span>{multiviewVideoResultLabel(item)}</span><span>{points(item)}</span></span>
+            </span>
           </button>
           {item.createdAt && <div className={styles.time}><RelativeTime value={item.createdAt} /></div>}
         </article>)}</div>

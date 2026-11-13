@@ -1,10 +1,10 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '删除后换参考帧可继续制作',
+  title: '历史视频更清楚，修改可继续',
   outline: [
-    '重新选帧会恢复新图，保留其它镜头的位置',
-    '保留删除撤销、历史记录和原有生成设置'
+    '历史视频用完整缩略图展示，规格与状态清楚排列',
+    '删除后重新选帧会恢复新图，保留其它镜头的位置'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
