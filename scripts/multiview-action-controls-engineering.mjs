@@ -73,7 +73,8 @@ const original = { requestId: 'original-request', runId: 'original-run', model: 
 function actionHarness(journal, result, error) {
   const calls = [], storage = new Map(), writes = [], suggestions = [];
   const env = { aiLock: { current: false }, aiPending: journal.current, aiJournalRef: { current: journal },
-    referenceImage: false, props: { work: { id: 'work' } }, workRef: { current: { id: 'work' } }, scope: 'owner:work',
+    referenceImage: false, props: { work: { id: 'work' }, snapshotKey: 'current-image' }, workRef: { current: { id: 'work' } }, scope: 'owner:work',
+    referenceKeyRef: { current: 'current-image' }, aiReferenceKeyRef: { current: null },
     state: { capabilities: { llmEnabled: true, referenceImageEnabled: true } }, llmReady: true, text: '保留人工动作', llmModel: 'gpt-6.1-sol', aiKey: 'owner:work', modelKey: 'owner:model',
     input: { current: { text: '保留人工动作' } }, editRevision: { current: 4 }, aiPoll: { current: { key: '', count: 0 } },
     finished: new Set(['succeeded', 'failed', 'cancelled']), crypto: { randomUUID: () => 'new-request' },
@@ -239,6 +240,27 @@ for (let tick = 0; tick < 35 && action.env.aiJournalRef.current.current; tick++)
 assert.deepEqual(action.writes, ['修改后整理的新动作'], 'polling must still receive a successful result after 48 seconds');
 assert.equal(action.env.aiJournalRef.current.current, null);
 checks.push('the actual action poll effect receives and applies a 60-second result after editing');
+action = actionHarness({ current: { ...newPending }, retained: [] }); elapsed = 0;
+action.env.setTimeout = (callback, ms) => { scheduled = { callback, ms }; return 1; }; action.env.clearTimeout = () => {};
+action.env.api = async () => ({ run: { id: 'new-run', status: elapsed >= 180000 ? 'succeeded' : elapsed >= 90000 ? 'running' : 'queued', text: elapsed >= 180000 ? '排队后完成的整理' : null, tasks: [] } });
+vm.runInNewContext(ts.transpileModule('globalThis.pollEffect=' + pollEffect, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, action.env);
+for (let tick = 0; tick < 60 && action.env.aiJournalRef.current.current; tick++) {
+  scheduled = null; action.env.aiPending = action.env.aiJournalRef.current.current; action.env.pollEffect(); if (!scheduled) break;
+  elapsed += scheduled.ms; scheduled.callback(); await flush();
+}
+assert.deepEqual(action.writes, ['排队后完成的整理']);
+checks.push('authoritatively accepted queued/running work continues original queries past two minutes and applies its result');
+action = actionHarness({ current: { ...newPending }, retained: [] }, null);
+action.env.setTimeout = (callback, ms) => { scheduled = { callback, ms }; return 1; }; action.env.clearTimeout = () => {};
+vm.runInNewContext(ts.transpileModule('globalThis.pollEffect=' + pollEffect, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, action.env);
+for (let tick = 0; tick < 50; tick++) {
+  scheduled = null; action.env.aiPending = action.env.aiJournalRef.current.current; action.env.pollEffect(); if (!scheduled) break;
+  scheduled.callback(); await flush();
+}
+assert.ok(action.calls.length > 0 && action.calls.length < 50);
+assert.equal(action.env.aiJournalRef.current.current.requestId, newPending.requestId);
+assert.equal(action.calls.every(call => call.body === undefined), true); assert.equal(action.writes.length, 0);
+checks.push('empty original lookups remain bounded and preserve identity without resubmitting');
 action = actionHarness({ current: null, retained: [] }, queued);
 action.env.props.onPrepare = async () => { throw new Error('Unchecked must not prepare an image'); };
 await action.env.handlers.organize();
@@ -271,4 +293,17 @@ action = actionHarness({ current: null, retained: [] }, queued);
 action.env.referenceImage = true; action.env.state.capabilities.referenceImageEnabled = false;
 await action.env.handlers.organize(); assert.equal(action.calls.length, 0);
 checks.push('an older service without image capability cannot silently accept a checked image request');
+action = actionHarness({ current: null, retained: [] }, queued);
+action.env.referenceImage = true; action.env.props.onPrepare = async () => ({ id: 'current-work', draftRevision: 7 });
+await action.env.handlers.organize();
+action.env.referenceKeyRef.current = 'changed-image';
+action.env.handlers.consumeAi({ id: 'new-run', status: 'succeeded', text: '原参考图对应的整理', tasks: [] }, action.env.aiJournalRef.current.current);
+assert.equal(action.writes.length, 0); assert.equal(action.suggestions.length, 1);
+checks.push('changing the reference while organization runs offers the original-image result instead of overwriting current text');
+action = actionHarness({ current: null, retained: [] }, queued);
+action.env.referenceImage = true; action.env.props.onPrepare = async () => ({ id: 'current-work', draftRevision: 7 });
+await action.env.handlers.organize();
+action.env.handlers.consumeAi({ id: 'new-run', status: 'succeeded', text: '当前参考图对应的整理', tasks: [] }, action.env.aiJournalRef.current.current);
+assert.deepEqual(action.writes, ['当前参考图对应的整理']);
+checks.push('unchanged text and reference receive the checked-image result directly');
 console.log(JSON.stringify({ passed: true, checks, isolation: { realFetches: 0, realGeneration: 0, browserRuns: 0, productionWrites: 0, productionDatabaseOpened: false } }));

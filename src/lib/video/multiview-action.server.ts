@@ -35,7 +35,7 @@ const invalid = (message: string) => new StudioError(message, 400, 'INVALID');
 const conflict = (message: string) => new StudioError(message, 409, 'CONFLICT');
 const notFound = () => new StudioError('动作记录不存在或无权访问', 404, 'NOT_FOUND');
 const purpose = MULTIVIEW_ACTION_PURPOSE;
-const runPurposes = [purpose, MULTIVIEW_ACTION_REFERENCE_PURPOSE];
+const runPurposes: string[] = [purpose, MULTIVIEW_ACTION_REFERENCE_PURPOSE];
 const identifier = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(value);
 function object(value: unknown): value is Record<string, unknown> { return Boolean(value && typeof value === 'object' && !Array.isArray(value)); }
 function actionText(value: unknown, required = false) {

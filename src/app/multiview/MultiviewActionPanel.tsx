@@ -23,7 +23,7 @@ import { MultiviewVideoResults } from './MultiviewVideoResults';
 type Props = { active?: boolean; ownerId: string; authority: string; work: MultiviewWorkDto | null; videoDefaults?: {model:string;duration:number;resolution:string;projectId:string;videoCardId:string|null}; outputReady: boolean; snapshotKey: string; onPrepare(): Promise<MultiviewWorkDto>; ratio: '16:9'|'9:16'|'1:1'; activeView: 'reference'|'video'; onView(value: 'reference'|'video'): void };
 type Quote = { key: string; text: string; parameters: MultiviewActionParameters; points: number | null; pricingRevision: string | null; token?: string };
 type Original = { key: string; runId: string; taskId: string | null };
-type AiRequest = { requestId: string; runId?: string; edit: number; status?: string; model?: string };
+type AiRequest = { requestId: string; runId?: string; edit: number; status?: string; model?: string; referenceImage?: boolean };
 type AiJournal = { current: AiRequest | null; retained: AiRequest[] };
 const finished = new Set(['succeeded','failed','cancelled','canceled','completed','error']);
 function RuleDialog({ kind, ownerId, onClose, onSaved }: { kind: MultiviewActionContextKind; ownerId: string; onClose(): void; onSaved(): void }) {
@@ -55,6 +55,7 @@ export function MultiviewActionPanel(props: Props) {
   const [llmModel,setLlmModel]=useState(''),[llmModels,setLlmModels]=useState<Array<{id:string;label:string}>>([]),[modelsBusy,setModelsBusy]=useState(false),[modelMessage,setModelMessage]=useState('');
   const [aiJournal,setAiJournal]=useState<AiJournal>({current:null,retained:[]}),[aiBusy,setAiBusy]=useState(false),[suggestion,setSuggestion]=useState<MultiviewActionRun|null>(null),[beforeAi,setBeforeAi]=useState<string|null>(null);
   const aiPending=aiJournal.current,aiJournalRef=useRef(aiJournal);
+  const referenceKeyRef=useRef(props.snapshotKey),aiReferenceKeyRef=useRef<{requestId:string;key:string}|null>(null);referenceKeyRef.current=props.snapshotKey;
   const [context,setContext]=useState<MultiviewActionContextKind|null>(null),[confirming,setConfirming]=useState(false),[submitting,setSubmitting]=useState(false);
   const [original,setOriginal]=useState<Original|null>(null),[selectedRunId,setSelectedRunId]=useState(''),[baseline,setBaseline]=useState<string|null>(null);
   const [quoteRetry,setQuoteRetry]=useState(0);
@@ -159,14 +160,15 @@ export function MultiviewActionPanel(props: Props) {
     if(aiLock.current||aiPending&&aiPending.status!=='uncertain'||!state?.capabilities.llmEnabled||referenceImage&&!state.capabilities.referenceImageEnabled||!llmReady||!text.trim())return;
     if(aiPending&&!await confirm('原文案结果仍未确认，原记录会保留，不会重发。继续将用当前所选模型新建一次整理，上游文字费用由平台承担。', {title:'新建一次动作整理',confirmLabel:'新建整理'}))return;
     rememberModel(llmModel);
-    const sourceEdit=editRevision.current,frozen=input.current,withReference=referenceImage,captured=scope;
+    const sourceEdit=editRevision.current,frozen=input.current,withReference=referenceImage,sourceReferenceKey=props.snapshotKey,captured=scope;
     aiLock.current=true;setAiBusy(true);setMessage('');
     let retained=false;
     try{
       let preparedWork=workRef.current;
       if(withReference){setMessage('正在准备当前参考拼图…');preparedWork=await props.onPrepare();if(!active(captured))return;}
       const savedDraft=await saveDraft(preparedWork,frozen);if(!savedDraft||!active(captured))return;
-      const pending:AiRequest={requestId:crypto.randomUUID(),edit:sourceEdit,model:llmModel};
+      const pending:AiRequest={requestId:crypto.randomUUID(),edit:sourceEdit,model:llmModel,referenceImage:withReference};
+      aiReferenceKeyRef.current=withReference?{requestId:pending.requestId,key:sourceReferenceKey}:null;
       const previous=aiJournalRef.current;
       keepAiJournal({current:pending,retained:previous.current?[...previous.retained,previous.current]:previous.retained});retained=true;
       const value=await api<{run:MultiviewActionRun}>(withReference?'/api/video/multiview/actions/reference-runs':'/api/video/multiview/actions/runs',{draftId:savedDraft.id,revision:savedDraft.revision,requestId:pending.requestId,llmModel,referenceImage:withReference});if(active(captured))consumeAi(value.run,pending);
@@ -183,8 +185,8 @@ export function MultiviewActionPanel(props: Props) {
     const done=finished.has(run.status);
     keepAiJournal({current:isCurrent?(done?null:next):journal.current,retained:journal.retained.flatMap(item=>item.requestId===pending.requestId?(done?[]:[next]):[item])});
     setState(value=>value?{...value,runs:[run,...value.runs.filter(item=>item.id!==run.id)]}:value);
-    if(!done&&run.status!=='uncertain')return;
-    if(run.status==='succeeded'&&run.text){if(isCurrent&&editRevision.current===pending.edit){setBeforeAi(input.current.text);setAppliedRunId(run.id);setText(run.text);editRevision.current++;setMessage('动作已整理。');}else setSuggestion(run);}
+    if(!done&&run.status!=='uncertain'){if(isCurrent)aiPoll.current.count=0;return;}
+    if(run.status==='succeeded'&&run.text){if(isCurrent&&editRevision.current===pending.edit&&(!pending.referenceImage||aiReferenceKeyRef.current?.requestId===pending.requestId&&aiReferenceKeyRef.current?.key===referenceKeyRef.current)){setBeforeAi(input.current.text);setAppliedRunId(run.id);setText(run.text);editRevision.current++;setMessage('动作已整理。');}else setSuggestion(run);}
     else setMessage(run.error|| (run.status==='uncertain'?'文案发送结果待确认，请保留原请求，不会自动重试。':'文案未完成，原动作保留。'));
   }
   async function queryAi(manual=true,pending=aiJournalRef.current.current){if(!pending)return;if(manual)aiPoll.current={key:pending.requestId,count:0};try{const value=await api<{run:MultiviewActionRun|null}>(pending.runId?`/api/video/multiview/actions/runs/${pending.runId}`:`/api/video/multiview/actions/runs?requestId=${encodeURIComponent(pending.requestId)}`);if(!active())return;if(value.run)consumeAi(value.run,pending);else setMessage('原文案尚未查到，继续保留原号。');}catch(cause){if(active())setMessage(cause instanceof Error?cause.message:'原文案暂不可查询。');}}
