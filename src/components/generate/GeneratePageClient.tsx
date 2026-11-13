@@ -2834,12 +2834,12 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     setResult(null);
 
     const requestStorageKey = `sd2-generation-request-v1:${currentUser?.id || 'session'}:${surface}:${params.imageResultReceiptId || params.templateStudioRunId || 'standard'}`;
-    const recoverAcceptedRequest = async (key: string) => {
+    const recoverAcceptedRequest = async (key: string, signal?: AbortSignal) => {
       const query = new URLSearchParams({ idempotency_key: key });
       if (params.templateStudioRunId) query.set('template_studio_run_id', params.templateStudioRunId);
       const endpoint = isIpSurface ? '/api/ip/tasks/request-status'
         : params.templateStudioRunId ? '/api/template-studio-video-handoff' : '/api/tasks/request-status';
-      const response = await fetch(`${endpoint}?${query}`, { cache: 'no-store',
+      const response = await fetch(`${endpoint}?${query}`, { cache: 'no-store', signal,
         headers: currentUser?.id ? { 'x-app-session-user': currentUser.id } : {} });
       const payload = await readJsonResponse<{ task?: CreateTaskResponse | null; error?: string; message?: string }>(response);
       if (!isCurrent()) throw new Error('账号或工作现场已变化，请回原位置查询原请求');
@@ -2999,20 +2999,14 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       stopSubmissionObservation = observePendingVideoSubmission(async signal => {
         if (signal.aborted || !isCurrent()) return;
         markVideoSubmission(tracedRequestId, 'lookup_started');
-        const query = new URLSearchParams({ idempotency_key: idempotencyKey });
-        if (params.templateStudioRunId) query.set('template_studio_run_id', params.templateStudioRunId);
-        const endpoint = isIpSurface ? '/api/ip/tasks/request-status'
-          : params.templateStudioRunId ? '/api/template-studio-video-handoff' : '/api/tasks/request-status';
-        const response = await fetch(`${endpoint}?${query}`, { cache: 'no-store', signal,
-          headers: currentUser?.id ? { 'x-app-session-user': currentUser.id } : {} });
-        const payload = await readJsonResponse<{ task?: CreateTaskResponse | null }>(response);
-        if (signal.aborted || !isCurrent() || !response.ok || !payload.task?.id) return;
-        await creation.acceptTask(idempotencyKey, payload.task.id);
+        const task = await recoverAcceptedRequest(idempotencyKey, signal);
+        if (signal.aborted || !isCurrent() || !task?.id) return;
+        await creation.acceptTask(idempotencyKey, task.id);
         if (signal.aborted || !isCurrent()) return;
         markVideoSubmission(tracedRequestId, 'task_observed');
-        setSubmissionProgress({ scopeKey: captured.key, taskId: payload.task.id });
-        setGenerationNotice(`已记录原任务，${videoPendingStatusLabel(payload.task.status) || '可查看原任务状态'}。当前输入保留，请勿重复提交。`);
-        setActivePollingTaskIds(current => [payload.task!.id, ...current.filter(id => id !== payload.task!.id)].slice(0, MAX_ACTIVE_POLLING_TASKS));
+        setSubmissionProgress({ scopeKey: captured.key, taskId: task.id });
+        setGenerationNotice(`已记录原任务，${videoPendingStatusLabel(task.status) || '可查看原任务状态'}。当前输入保留，请勿重复提交。`);
+        setActivePollingTaskIds(current => [task!.id, ...current.filter(id => id !== task!.id)].slice(0, MAX_ACTIVE_POLLING_TASKS));
         void loadRecentTasksPage(1, 'merge-head');
       });
       submissionTraceRef.current = { scopeKey: captured.key, requestId: idempotencyKey };

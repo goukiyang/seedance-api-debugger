@@ -12,14 +12,16 @@ async function main() {
   const source = fs.readFileSync('src/components/generate/GeneratePageClient.tsx', 'utf8');
   const file = ts.createSourceFile('page.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   let probe: ts.Expression | undefined;
+  let lookup: ts.Expression | undefined;
   function visit(node: ts.Node) {
     if (ts.isCallExpression(node) && node.expression.getText(file) === 'observePendingVideoSubmission') {
       assert.equal(probe, undefined); probe = node.arguments[0];
     }
+    if (ts.isVariableDeclaration(node) && node.name.getText(file) === 'recoverAcceptedRequest') lookup = node.initializer;
     ts.forEachChild(node, visit);
   }
-  visit(file); assert.ok(probe);
-  const code = ts.transpileModule(`module.exports = ${probe.getText(file)}`, {
+  visit(file); assert.ok(probe); assert.ok(lookup);
+  const code = ts.transpileModule(`const recoverAcceptedRequest = ${lookup.getText(file)}; module.exports = ${probe.getText(file)}`, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText;
   for (const kind of ['ordinary', 'ip', 'template', 'missing', 'error', 'aborted', 'changed']) {
@@ -39,7 +41,9 @@ async function main() {
       setSubmissionProgress: (value: unknown) => { progress.push(value); }, setGenerationNotice() {}, setActivePollingTaskIds() {}, loadRecentTasksPage: async () => {},
     };
     vm.runInNewContext(code, context);
-    await (context.module.exports as (signal: AbortSignal) => Promise<void>)(controller.signal);
+    const run = context.module.exports as (signal: AbortSignal) => Promise<void>;
+    if (kind === 'error') await assert.rejects(() => run(controller.signal));
+    else await run(controller.signal);
     assert.equal(reads.length, ['aborted', 'changed'].includes(kind) ? 0 : 1);
     if (reads.length) {
       const url = new URL(reads[0], 'https://offline.invalid'); assert.equal(url.searchParams.get('idempotency_key'), 'original-request');
