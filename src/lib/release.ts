@@ -1,10 +1,10 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '素材选择器翻页修复',
+  title: '收藏模板名称显示修复',
   outline: [
-    '素材目录更新后可以继续翻页',
-    '重新读取保留筛选和已选素材'
+    '收藏模板名称独占一行，长名称最多显示两行',
+    '类型和使用次数移到名称下方'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
