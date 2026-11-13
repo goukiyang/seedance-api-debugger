@@ -1,3 +1,7 @@
+<!-- RULES-REGRESSION01-ENTRY01-EVIDENCE-20261113 -->
+RULES-REGRESSION01-ENTRY01：原规则资料下entry-audit-20261113私有归档实际Codex目录RPC、12项现有hook隔离结果、上游两规则回档及核验。运行目录/文件scope证据与语义场景审查分开，不冒自动业务验收，详[原单](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-12-feedback-submit-rootcause.md#rules-regression01-entry)。
+<!-- /RULES-REGRESSION01-ENTRY01-EVIDENCE-20261113 -->
+
 <!-- RULES-REGRESSION01-EVIDENCE-20261113 -->
 RULES-REGRESSION01：同主题私有rules-regression01-20261113保存有效全局入口/三技能/项目规则的前后回档、差量和校验审查；仅规则维护，未新增运行/下载功能验收。来源、保护与结果沿[原溯源单](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-12-feedback-submit-rootcause.md#rules-regression01)。
 <!-- /RULES-REGRESSION01-EVIDENCE-20261113 -->

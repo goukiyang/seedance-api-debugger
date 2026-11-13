@@ -1,3 +1,7 @@
+<!-- RULES-REGRESSION01-ENTRY01-20261113 -->
+RULES-REGRESSION01-ENTRY01：实际skills/list在正式根/修复worktree的新读与缓存均载入新版三技能；现有hook12个隔离用例通过，无应用补丁执行。补齐工具/规划两条上游入口的“改A坏B”条件，普通查漏/文案/单值费率不全盘。hook仅约束判断/scope，不冒业务语义自动门禁；本轮未动业务、hook实现/配置或线上。结果及Git沿[原单入口核验](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-12-feedback-submit-rootcause.md#rules-regression01-entry)。
+<!-- /RULES-REGRESSION01-ENTRY01-20261113 -->
+
 <!-- RULES-REGRESSION01-20261113 -->
 RULES-REGRESSION01：仅规则/skills已补齐，3项技能格式、20项新链接与15个正反场景文本审查通过；两处过宽旧触发/扫描及收口证据冲突已修。按实际共享约定/控制关系与入口状态定向选择，不全盘触发。项目规则和两索引聚焦Git，局部全局入口/技能私有回档；未改业务/应用版、未访问或操作线上，无程序门禁新增。实际Git与边界沿[原溯源单](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-12-feedback-submit-rootcause.md#rules-regression01)。
 <!-- /RULES-REGRESSION01-20261113 -->
