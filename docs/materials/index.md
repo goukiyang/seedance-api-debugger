@@ -1,3 +1,7 @@
+<!-- VID-DL03-EVIDENCE-20261113 -->
+VID-DL03：原下载资料下私有delivery-natural-exit-20261113保存根因摘要、旧代码红例/新代码27本机与28Linux工程、候选及部署原件/审查；实际v14817与1.1.2新封存身份、原片3份SHA/inode、3旧未知及价格保护可核。此次没有在途下载，不冒真实功能通过；余项及原证见[下载原单](../../tasks/todo/2026-11-09-video-playback-start.md#vid-dl03)。
+<!-- /VID-DL03-EVIDENCE-20261113 -->
+
 <!-- FB-PULL-20261112-MATERIALS -->
 ## 2026-11-12 后台提交反馈与Ark受控传图修复（v0.148.4已部署待手验）
 
