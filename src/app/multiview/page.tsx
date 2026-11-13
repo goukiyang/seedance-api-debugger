@@ -287,28 +287,30 @@ function MultiviewPageContent() {
       if(sequence!==restoreSequence.current||ownerRef.current!==capturedOwner||authorityRef.current!==capturedAuthority||isClientSessionBlocked())return false;
       if(!response.ok||value.taskId!==id)throw new Error(value.error||'这条视频输入未能恢复，当前方案保留。');
       if(pageView!=='editor')setVideoReturnView(pageView);
+      const returnTarget=pageView!=='editor'?window.location.pathname+window.location.search:query.get('returnTo')||(!query.get('videoTaskId')&&explicitTask===id?`/tasks/${encodeURIComponent(id)}`:'');
       if(value.kind==='action'){
         const slots=value.recipe?.slots||candidateFrames(value.info.timestamps.length,4).slice(0,2).map((frame,index)=>({id:`restore-${index}`,frame,name:'',manual:false}));
         setLocation({owner,taskId:value.info.taskId});setEditorWork({owner,id:''});setPageView('editor');
         setReferenceEditor({scope:`${authority}:${value.info.taskId}:${value.info.sourceVersion}`,slots,workId:value.workId,info:value.info,restored:value,...(resume&&carriedAction?.videoId===id?{carry:carriedAction.input}:{})});
         setReferencePicking(false);setReferenceReplacement(undefined);setPreviewTaskId(id);
-        const url=new URL(window.location.href);url.searchParams.set('videoTaskId',id);url.searchParams.set('referenceWorkId',value.workId);url.searchParams.set('taskId',value.info.taskId);url.searchParams.delete('view');window.history.replaceState(window.history.state,'',url.pathname+url.search);
+        const url=new URL(window.location.href);if(returnTarget)url.searchParams.set('returnTo',returnTarget);url.searchParams.set('videoTaskId',id);url.searchParams.set('referenceWorkId',value.workId);url.searchParams.set('taskId',value.info.taskId);url.searchParams.delete('view');window.history.replaceState(window.history.state,'',url.pathname+url.search);
         openedVideo.current=id;setPreviewReadOnly(false);return true;
       }
       incomingVideoDone.current?.(false);
       const applied=await new Promise<boolean>(resolve=>{incomingVideoDone.current=resolve;setIncomingVideo(value);});
       if(!applied||sequence!==restoreSequence.current||ownerRef.current!==capturedOwner||authorityRef.current!==capturedAuthority)return false;
       setReferenceEditor(null);setReferencePicking(false);setPreviewTaskId(id);openedVideo.current=id;
+      if(returnTarget){const url=new URL(window.location.href);url.searchParams.set('returnTo',returnTarget);window.history.replaceState(window.history.state,'',url.pathname+url.search);}
       await selectTask(id);setExpanded(true);setPreviewReadOnly(false);return true;
     }catch(cause){if(sequence===restoreSequence.current&&ownerRef.current===capturedOwner)setReferenceNotice(cause instanceof Error?cause.message:'视频输入暂不可恢复，当前草稿保留。');return false;}
     finally{if(sequence===restoreSequence.current){restoreLock.current=false;setRestoringVideo(false);}}
   }
   useEffect(()=>{
-    const id=query.get('videoTaskId');if(!id||openedVideo.current===id||!sessionReady||!owner)return;
+    const id=query.get('videoTaskId')||(!query.get('workId')&&!query.get('referenceWorkId')?explicitTask:'');if(!id||shareId||openedVideo.current===id||!sessionReady||!owner)return;
     openedVideo.current=id;void openVideoInputs(id);
     // Explicit video links take precedence over the last opened work.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[query.get('videoTaskId'),owner,authority,sessionReady]);
+  },[query.get('videoTaskId'),explicitTask,shareId,owner,authority,sessionReady]);
   function chooseReferenceFrames(slots:MultiviewSlot[]){
     if(!draft)return;
     const available=[...slots,...draft.slots.filter(item=>!slots.some(slot=>slot.id===item.id))];
