@@ -391,7 +391,14 @@ const pickerSource = fs.readFileSync(pickerPath, 'utf8');
 const pickerAst = ts.createSourceFile('picker.tsx', pickerSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 let uploadArrow: ts.ArrowFunction | undefined;
 let directoryEffect: ts.ArrowFunction | undefined;
+let pickerFetchPage: ts.ArrowFunction | undefined, pickerLoadMore: ts.ArrowFunction | undefined, pickerDirectoryRetry: ts.ArrowFunction | undefined;
 function visit(node: ts.Node) {
+  if (ts.isJsxAttribute(node) && node.name.getText(pickerAst) === 'onClick' && node.initializer && ts.isJsxExpression(node.initializer)) {
+    const callback = node.initializer.expression;
+    if (callback && ts.isArrowFunction(callback) && callback.getText(pickerAst).includes("setDirectoryError('')") && callback.getText(pickerAst).includes('resultPages.retry()')) pickerDirectoryRetry = callback;
+  }
+  if (ts.isVariableDeclaration(node) && node.name.getText(pickerAst) === 'fetchPage' && node.initializer && ts.isCallExpression(node.initializer) && ts.isArrowFunction(node.initializer.arguments[0])) pickerFetchPage = node.initializer.arguments[0];
+  if (ts.isVariableDeclaration(node) && node.name.getText(pickerAst) === 'loadMore' && node.initializer && ts.isArrowFunction(node.initializer)) pickerLoadMore = node.initializer;
   if (ts.isVariableDeclaration(node) && node.name.getText(pickerAst) === 'upload' && node.initializer && ts.isArrowFunction(node.initializer)) uploadArrow = node.initializer;
   if (ts.isCallExpression(node) && node.expression.getText(pickerAst) === 'useEffect' && node.arguments[0]?.getText(pickerAst).includes('setDirectoryError')) {
     const candidate = node.arguments[0];
@@ -592,7 +599,77 @@ assert.equal(concurrentWorkspace.uploadCalls(), 1, 'Concurrent clicks cannot cre
 releaseUpload(); await firstUpload;
 assert.deepEqual(Object.keys(concurrentWorkspace.state[3]), []); assert.equal(concurrentWorkspace.state[4], null);
 
+// Execute the actual picker request and loadMore callbacks; only the HTTP boundary is synthetic.
+assert.ok(pickerFetchPage && pickerLoadMore);
+async function paginationHarness(loaded = 72, failure = 0, cancelFresh = false) {
+  const oldItems = Array.from({ length: loaded }, (_, i) => ({ identity: `old-${i}` }));
+  const freshPages = Array.from({ length: 7 }, (_, page) => Array.from({ length: page === 6 ? 1 : 24 }, (_, i) => ({ identity: `fresh-${page * 24 + i}` })));
+  const state = { items: oldItems, selected: [{ identity: 'selected-original' }], page: loaded / 24, total: 145, hasMore: true, loading: false, error: '', prefs: { ...pickerHelpers.defaults, source: 'template-image', template: 'fixture-template', query: '骑士' } };
+  const sequence = { current: 1 }, readingMore = { current: false }, readCursor = { current: `old-${loaded - 1}` }, directoryRevision = { current: { scope: '', revision: '' } };
+  const requests: URLSearchParams[] = [];
+  let seeded = false, failFresh = false;
+  const apply = (previous: any, next: any) => typeof next === 'function' ? next(previous) : next;
+  const source = `export const fetchPage = ${pickerFetchPage!.getText(pickerAst)};\nexport const loadMore = ${pickerLoadMore!.getText(pickerAst)};`;
+  const callbacks = evaluate(source, {
+    sequence, readingMore, readCursor, directoryRevision, loading: false, loadedFilter: 'scope', filterKey: 'scope', hasMore: true, page: state.page,
+    prefs: state.prefs, sessionOwner: 'fixture-owner', typesKey: 'image', target: 'image-studio', recentKey: 'fixture-recent',
+    setLoading: (value: boolean) => { state.loading = value; }, setDirectoryError: (value: string) => { state.error = value; },
+    setItems: (value: any) => { state.items = apply(state.items, value); }, setPage: (value: number) => { state.page = value; },
+    setHasMore: (value: boolean) => { state.hasMore = value; }, setTotal: (value: number) => { state.total = value; }, setPrefs: (value: any) => { state.prefs = apply(state.prefs, value); },
+    setAlbums: () => {}, setTemplates: () => {}, setDirectoryNotice: () => {}, readJsonResponse: async (response: Response) => response.json(),
+    fetch: async (url: string) => {
+      const query = new URL(url, 'https://fixture.invalid').searchParams;
+      if (!seeded) { seeded = true; return Response.json({ protocol: 'catalog-paged-v2', directoryRevision: 'old', items: oldItems.slice(0, 24) }); }
+      requests.push(query);
+      assert.equal(query.get('template'), 'fixture-template'); assert.equal(query.get('q'), '骑士'); assert.equal(query.get('target'), 'image-studio');
+      if (query.get('directory_revision') === 'old') return Response.json({ error: '素材目录已变化，请重新读取' }, { status: failure || 409 });
+      const page = Number(query.get('page'));
+      if (failFresh && page === 2) return Response.json({ error: '素材目录再次变化' }, { status: 409 });
+      assert.equal(query.get('directory_revision'), page > 1 ? 'new' : null);
+      assert.equal(query.get('after'), page > 1 ? `fresh-${(page - 1) * 24 - 1}` : null);
+      if (cancelFresh && page === 1) sequence.current++;
+      return Response.json({ protocol: 'catalog-paged-v2', directoryRevision: 'new', items: freshPages[page - 1],
+        page, total: 145, hasMore: page < 7, nextCursor: page < 7 ? `fresh-${page * 24 - 1}` : null, albums: [], templates: [] });
+    },
+  }, {}, 'picker-pagination.engineering.ts');
+  await callbacks.fetchPage(1);
+  return { state, callbacks, requests, oldItems, readCursor, directoryRevision, sequence, readingMore, failDuringRefresh: () => { failFresh = true; }, allowRefresh: () => { failFresh = false; } };
+}
+assert.ok(pickerDirectoryRetry);
+for (const directoryError of ['', '素材目录已变化，请重新读取']) {
+  let epochs = 0, retries = 0;
+  const retry = evaluate(`export const retry = ${pickerDirectoryRetry.getText(pickerAst)};`, {
+    directoryError, hasMore: true, setDirectoryError: () => {}, setEpoch: (update: (value: number) => number) => { epochs = update(epochs); },
+    resultPages: { restoring: true, retry: () => { retries++; } },
+  }, {}, 'picker-directory-retry.engineering.ts');
+  retry.retry(); assert.equal(retries, 1); assert.equal(epochs, directoryError ? 1 : 0, 'a failed directory restoration must request a fresh catalogue');
+}
+const changedDirectory = await paginationHarness();
+await changedDirectory.callbacks.loadMore();
+assert.deepEqual(changedDirectory.requests.map(q => q.get('page')), ['4', '1', '2', '3', '4']);
+assert.equal(changedDirectory.state.items.length, 96); assert.equal(changedDirectory.state.items[0].identity, 'fresh-0');
+assert.equal(changedDirectory.state.items[72].identity, 'fresh-72', 'the requested next page has actual fresh rows');
+assert.equal(changedDirectory.readCursor.current, 'fresh-95'); assert.equal(changedDirectory.directoryRevision.current.revision, 'new');
+assert.equal(changedDirectory.state.loading, false); assert.equal(changedDirectory.state.error, '');
+assert.equal(changedDirectory.state.selected[0].identity, 'selected-original'); assert.equal(changedDirectory.state.prefs.template, 'fixture-template');
+const lastDirectory = await paginationHarness(144); await lastDirectory.callbacks.loadMore();
+assert.equal(lastDirectory.state.items.length, 145); assert.equal(lastDirectory.state.hasMore, false); assert.equal(lastDirectory.state.items[144].identity, 'fresh-144');
+const movingDirectory = await paginationHarness(); movingDirectory.failDuringRefresh();
+await assert.rejects(movingDirectory.callbacks.loadMore(), /再次变化/);
+assert.equal(movingDirectory.requests.length, 3, 'automatic rebase is bounded to one attempt');
+assert.equal(movingDirectory.state.items, movingDirectory.oldItems); assert.equal(movingDirectory.readCursor.current, 'old-71');
+assert.equal(movingDirectory.directoryRevision.current.revision, 'old'); assert.equal(movingDirectory.state.loading, false); assert.equal(movingDirectory.readingMore.current, false);
+movingDirectory.allowRefresh(); await movingDirectory.callbacks.loadMore(); assert.equal(movingDirectory.state.items[72].identity, 'fresh-72', 'explicit retry can resume after repeated catalogue changes');
+for (const status of [403, 503]) {
+  const denied = await paginationHarness(72, status); await assert.rejects(denied.callbacks.loadMore());
+  assert.equal(denied.requests.length, 1, 'permission/network failures do not trigger catalogue retries'); assert.equal(denied.state.items, denied.oldItems);
+}
+const changedSession = await paginationHarness(72, 0, true); await changedSession.callbacks.loadMore();
+assert.equal(changedSession.requests.length, 2); assert.equal(changedSession.state.items, changedSession.oldItems); assert.equal(changedSession.readCursor.current, 'old-71');
+
 const checks = [
+  'picker catalogue conflict rebuilds a single coherent directory through the requested page without clearing selections or filters',
+  'picker repeated conflict preserves the original cache and cursor for explicit retry; permission failures and stale sessions do not continue',
   'v1 and v2 retired markers recover only the verified original receipt without a ticket or file resend',
   'identity-invalid recovered asset preserves the original marker and query-only action',
   'failed history upload and confirmed reference deletion leave no orphaned status; unknown association remains guarded',

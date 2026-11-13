@@ -1,10 +1,10 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '动作作品先看视频预览',
+  title: '素材选择器翻页修复',
   outline: [
-    '动作作品先展示已做过的视频，点开恢复对应设置',
-    '参考拼图保留独立入口，可从视频直接返回作品列表'
+    '素材目录更新后可以继续翻页',
+    '重新读取保留筛选和已选素材'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

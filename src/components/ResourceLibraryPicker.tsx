@@ -292,7 +292,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     if ((after || nextPage > 1) && directoryRevision.current.scope === scope && directoryRevision.current.revision) params.set('directory_revision', directoryRevision.current.revision);
     const response = await fetch(`/api/assets/picker?${params}`, { cache: 'no-store' });
     const data = await readJsonResponse<PickerResponse & { error?: string }>(response, { invalidJsonMessage: '素材库服务返回了无效内容，请刷新或重新登录' });
-    if (!response.ok) throw new Error(data.error || '素材库读取失败');
+    if (!response.ok) throw Object.assign(new Error(data.error || '素材库读取失败'), { status: response.status });
     directoryRevision.current = { scope, revision: data.protocol === 'catalog-paged-v2' ? data.directoryRevision || '' : '' };
     return data;
   }, [prefs.scope, prefs.source, prefs.template, prefs.type, prefs.query, prefs.view, prefs.sort, prefs.album, prefs.project, typesKey, target, recentKey, sessionOwner]);
@@ -386,10 +386,37 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     finally { if (removalSession === session.current) { locked.current = false; setBusy(false); } }
   };
   const loadMore = async () => {
-    if (loading || readingMore.current || loadedFilter !== filterKey || !hasMore) return; const token = sequence.current; readingMore.current = true; setLoading(true); setDirectoryError('');
-    try { const data = await fetchPage(page + 1, readCursor.current); if (token !== sequence.current) return; readCursor.current = data.nextCursor || null; setItems(old => Array.from(new Map([...old, ...data.items].map(item => [item.identity, item])).values())); setPage(data.page); setHasMore(data.hasMore); setTotal(data.total); setPrefs(p => ({ ...p, pages: data.page })); }
-    catch (e) { if (token === sequence.current) { setDirectoryError(e instanceof Error ? e.message : '读取失败'); throw e; } }
-    finally { if (token === sequence.current) { readingMore.current = false; setLoading(false); } }
+    if (loading || readingMore.current || loadedFilter !== filterKey || !hasMore) return;
+    const token = sequence.current, previousRevision = directoryRevision.current;
+    let refreshing = false;
+    readingMore.current = true; setLoading(true); setDirectoryError('');
+    try {
+      let data: PickerResponse, refreshed: PickerItem[] | null = null;
+      try { data = await fetchPage(page + 1, readCursor.current); }
+      catch (cause) {
+        if (!(cause instanceof Error) || !('status' in cause) || cause.status !== 409) throw cause;
+        refreshing = true;
+        // A fresh cursor cannot be appended to rows from the previous directory revision.
+        data = await fetchPage(1);
+        if (token !== sequence.current) return;
+        refreshed = data.items;
+        for (let nextPage = 2; nextPage <= page + 1 && data.hasMore; nextPage++) {
+          data = await fetchPage(nextPage, data.nextCursor || null);
+          if (token !== sequence.current) return;
+          refreshed = Array.from(new Map([...refreshed, ...data.items].map(item => [item.identity, item])).values());
+        }
+      }
+      if (token !== sequence.current) return;
+      readCursor.current = data.nextCursor || null;
+      setItems(old => refreshed ?? Array.from(new Map([...old, ...data.items].map(item => [item.identity, item])).values()));
+      setPage(data.page); setHasMore(data.hasMore); setTotal(data.total); setPrefs(p => ({ ...p, pages: data.page }));
+      if (refreshed) { setAlbums(data.albums); setTemplates(data.templates || []); setDirectoryNotice(data.notice || ''); }
+    } catch (e) {
+      if (token === sequence.current) {
+        if (refreshing) directoryRevision.current = previousRevision;
+        setDirectoryError(e instanceof Error ? e.message : '读取失败'); throw e;
+      }
+    } finally { if (token === sequence.current) { readingMore.current = false; setLoading(false); } }
   };
   const pageStorageKey = `${positionScope}:page:v2:${filterKey}`;
   const resultPages = useResultPages({
@@ -699,7 +726,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
         {removedItem && <div role={removedInSession ? 'status' : undefined} className={styles.notice}>{removedInSession ? '已从我的素材库移出，文件和已有引用保留。' : `上次移出：${removedItem.fileName}`}<button type="button" disabled={busy} onClick={() => void removeItem(removedItem, true)}>{removedInSession ? '撤销移出' : '撤销上次移出素材库'}</button></div>}
         {removedUploads.map(item => <div key={item.identity} role="status" className={`${styles.notice} ${styles.removedUpload}`}><span>{item.fileName}{restoredUploadIds.includes(item.identity) ? '已撤销移出，等待核对。' : '已从素材库移出。'}</span><button type="button" disabled={busy} onClick={() => void removeItem(item, true)}><RotateCcw size={14} />{restoredUploadIds.includes(item.identity) ? '重新核对并选择' : '撤销移出并选择'}</button></div>)}
         {error && <div role="alert" className={styles.error}>{error}</div>}
-        {(directoryError || resultPages.navigationIssue) && <div role="alert" className={styles.error}>{directoryError || resultPages.navigationIssue}<button type="button" disabled={busy || loading} onClick={() => { setDirectoryError(''); resultPages.retry(); if (!resultPages.restoring || !hasMore) setEpoch(v => v + 1); }}>{!directoryError && resultPages.restoring && hasMore ? '继续翻页' : '重新读取'}</button>{resultPages.restoring && directoryError && <button type="button" disabled={busy || loading} onClick={() => { resultPages.retry(); setEpoch(v => v + 1); }}>刷新目录</button>}</div>}
+        {(directoryError || resultPages.navigationIssue) && <div role="alert" className={styles.error}>{directoryError || resultPages.navigationIssue}<button type="button" disabled={busy || loading} onClick={() => { setDirectoryError(''); resultPages.retry(); if (directoryError || !resultPages.restoring || !hasMore) setEpoch(v => v + 1); }}>{!directoryError && resultPages.restoring && hasMore ? '继续翻页' : '重新读取'}</button>{resultPages.restoring && directoryError && <button type="button" disabled={busy || loading} onClick={() => { resultPages.retry(); setEpoch(v => v + 1); }}>刷新目录</button>}</div>}
         {!!failedUploads.length && <div role="alert" className={styles.uploadFailures}>{failedUploads.map(failure => <div key={failure.id} className={styles.uploadFailure}>
           <span><strong>{failure.file.name}</strong><small>{failure.message}</small></span>
           <span className={styles.uploadFailureActions}>{failure.recovery !== 'none' && <button type="button" disabled={busy} aria-label={`${failure.recovery === 'query' ? '核对原上传' : failure.recovery === 'resume' || failure.code === 'RAW_UPLOAD_NOT_ACCEPTED' ? '继续上传' : '重试上传'}：${failure.file.name}`} onClick={() => void upload([failure.file])}>{failure.recovery === 'query' ? '核对原上传' : failure.recovery === 'resume' || failure.code === 'RAW_UPLOAD_NOT_ACCEPTED' ? '继续上传' : '重试上传'}</button>}<button type="button" disabled={busy} aria-label={`移除失败文件：${failure.file.name}`} onClick={() => setFailedUploads(old => removeUploadFailure(old, failure.id))}>移除</button></span>
