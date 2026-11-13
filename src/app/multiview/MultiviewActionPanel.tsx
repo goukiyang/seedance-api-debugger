@@ -22,7 +22,7 @@ import styles from './multiview-action.module.css';
 import { MultiviewVideoResults } from './MultiviewVideoResults';
 
 export type MultiviewActionInput={text:string;parameters:MultiviewActionParameters};
-type Props = { initialInput?:MultiviewActionInput; onChangeOriginal?:(input:MultiviewActionInput)=>void; hasReferenceDraft?:boolean; onResumeDraft?:()=>void; restored?: MultiviewActionRestore; onSelectVideo?: (id: string) => Promise<boolean>; active?: boolean; ownerId: string; authority: string; work: MultiviewWorkDto | null; videoDefaults?: {model:string;duration:number;resolution:string;projectId:string;videoCardId:string|null}; outputReady: boolean; snapshotKey: string; onPrepare(): Promise<MultiviewWorkDto>; ratio: '16:9'|'9:16'|'1:1'; activeView: 'reference'|'video'; onView(value: 'reference'|'video'): void };
+type Props = { inputError?:string; referenceChanged?:boolean; initialInput?:MultiviewActionInput; onChangeOriginal?:(input:MultiviewActionInput)=>void; hasReferenceDraft?:boolean; onResumeDraft?:()=>void; restored?: MultiviewActionRestore; onSelectVideo?: (id: string) => Promise<boolean>; active?: boolean; ownerId: string; authority: string; work: MultiviewWorkDto | null; videoDefaults?: {model:string;duration:number;resolution:string;projectId:string;videoCardId:string|null}; outputReady: boolean; snapshotKey: string; onPrepare(): Promise<MultiviewWorkDto>; ratio: '16:9'|'9:16'|'1:1'; activeView: 'reference'|'video'; onView(value: 'reference'|'video'): void };
 type Quote = { key: string; text: string; parameters: MultiviewActionParameters; points: number | null; pricingRevision: string | null; token?: string };
 type Original = { key: string; runId: string; taskId: string | null };
 type AiRequest = { requestId: string; runId?: string; edit: number; status?: string; model?: string; referenceImage?: boolean };
@@ -172,7 +172,7 @@ export function MultiviewActionPanel(props: Props) {
     return()=>{cancelled=true;clearTimeout(timer);};
   },[quoteKey,quoteRetry,hydrated,content,text,parameters,state?.capabilities.actionReady,newAttemptRequired,original?.key,original?.taskId,scope,active,api]);
   async function organize(){
-    if(aiLock.current||aiPending&&aiPending.status!=='uncertain'||!state?.capabilities.llmEnabled||referenceImage&&!state.capabilities.referenceImageEnabled||!llmReady||!text.trim())return;
+    if(aiLock.current||aiPending&&aiPending.status!=='uncertain'||!state?.capabilities.llmEnabled||referenceImage&&(!state.capabilities.referenceImageEnabled||Boolean(props.inputError))||!llmReady||!text.trim())return;
     if(aiPending&&!await confirm('原文案结果仍未确认，原记录会保留，不会重发。继续将用当前所选模型新建一次整理，上游文字费用由平台承担。', {title:'新建一次动作整理',confirmLabel:'新建整理'}))return;
     rememberModel(llmModel);
     const sourceEdit=editRevision.current,frozen=input.current,withReference=referenceImage,sourceReferenceKey=props.snapshotKey,captured=scope;
@@ -276,14 +276,14 @@ export function MultiviewActionPanel(props: Props) {
       pendingLabel={original && !original.taskId ? '提交结果待确认' : submitting ? '正在准备并提交视频任务…' : undefined} /></div>
     <aside className={styles.action} aria-label="同步动作视频">
       <div className={styles.actionHeading}><h3>动作与设置</h3>{props.onChangeOriginal&&<button type="button" onClick={()=>props.onChangeOriginal?.({text,parameters})}>更换原图</button>}</div>
-      {props.restored && <div className={styles.inputSource}><span>{text===props.restored.text&&JSON.stringify(parameters)===JSON.stringify(props.restored.parameters)?'当前视频的生成时输入':'基于当前视频的修改 · 未生成'}</span><small>{seedanceVideoModelLabel(props.restored.parameters.model)} · {props.restored.parameters.duration}秒 · {props.restored.parameters.resolution}</small></div>}
+      {props.restored && <div className={styles.inputSource}><span>{!props.referenceChanged&&text===props.restored.text&&JSON.stringify(parameters)===JSON.stringify(props.restored.parameters)?'当前视频的生成时输入':'基于当前视频的修改 · 未生成'}</span><small>{seedanceVideoModelLabel(props.restored.parameters.model)} · {props.restored.parameters.duration}秒 · {props.restored.parameters.resolution}</small></div>}
       {(videoDraft||props.hasReferenceDraft)&&<p className={styles.notice}>这条视频有上次修改。<button type="button" onClick={()=>{if(videoDraft){updateText(videoDraft.text);setParameters(videoDraft.parameters);setReferenceImage(videoDraft.referenceImage===true);setVideoDraft(null);}if(props.hasReferenceDraft)props.onResumeDraft?.();}}>继续上次修改</button></p>}
       <>
         <textarea aria-label="动作" placeholder="例如：原地挥拳三次，从轻到重。" maxLength={12000} value={text} disabled={!hydrated} onChange={event=>updateText(event.target.value)}/>
         <label className={styles.aiReference}><input type="checkbox" checked={referenceImage} disabled={!hydrated||aiBusy} onChange={event=>setReferenceImage(event.target.checked)}/>让 GPT 参考当前拼图</label>
         {referenceImage&&state&&!state.capabilities.referenceImageEnabled&&<p className={styles.notice}>当前服务暂不支持图片参考；当前输入和原请求均保留。</p>}
         <div className={styles.aiControls}>
-          <button type="button" disabled={!state?.capabilities.llmEnabled||referenceImage&&!state.capabilities.referenceImageEnabled||!llmReady||!text.trim()||aiBusy||Boolean(aiPending&&aiPending.status!=='uncertain')||saving||draftBlocked} onClick={()=>void organize()}>{aiBusy?'正在提交…':aiPending?.status==='uncertain'?'新建一次整理':aiPending?(aiPending.status==='queued'?'等待整理…':aiPending.runId?'正在整理…':'提交结果待确认'):'AI整理动作'}</button>
+          <button type="button" disabled={!state?.capabilities.llmEnabled||referenceImage&&(!state.capabilities.referenceImageEnabled||Boolean(props.inputError))||!llmReady||!text.trim()||aiBusy||Boolean(aiPending&&aiPending.status!=='uncertain')||saving||draftBlocked} onClick={()=>void organize()}>{aiBusy?'正在提交…':aiPending?.status==='uncertain'?'新建一次整理':aiPending?(aiPending.status==='queued'?'等待整理…':aiPending.runId?'正在整理…':'提交结果待确认'):'AI整理动作'}</button>
           <div className={styles.modelPicker}><select aria-label="文案模型" value={llmReady?llmModel:''} onChange={event=>rememberModel(event.target.value)}><option value="" disabled>{modelsBusy&&!llmModels.length?'正在读取模型…':modelAvailabilityReason||'请选择可用文案模型'}</option>{modelOptions.map(model=><option key={model.id} value={model.id}>{model.label}</option>)}</select><button type="button" disabled={modelsBusy} aria-busy={modelsBusy} onClick={()=>{void loadModels(true);void refreshAvailability();}}><RefreshCw size={15}/>{modelsBusy?'更新中…':'更新'}</button></div>
           {beforeAi!==null&&<button onClick={()=>{updateText(beforeAi);setAppliedRunId(undefined);setBeforeAi(null);}}>撤销整理</button>}
         </div>
@@ -304,7 +304,7 @@ export function MultiviewActionPanel(props: Props) {
         {state&&!state.capabilities.actionReady&&<p className={styles.notice}>{state.capabilities.actionReason}</p>}
         {props.work && ['queued','rendering'].includes(props.work.status)&&<p className={styles.notice}>拼图准备中…</p>}
         <div className={styles.price}>{currentQuote?<>预计 <strong>{currentQuote.points} 点</strong></>:quoting?'视频费用获取中…':quoteError||'视频费用待准备'}</div>
-        {newAttemptRequired&&<button onClick={newAttempt}>重新准备生成</button>}
+        {props.inputError&&<p className={styles.notice} role="status">{props.inputError}</p>}
         {quoteError&&<button onClick={()=>setQuoteRetry(value=>value+1)}>重新报价</button>}
       </>
       {original&&!original.taskId&&<p className={styles.notice}>提交结果待确认 <button onClick={()=>void queryOriginal()}>查询原请求</button></p>}
@@ -312,7 +312,7 @@ export function MultiviewActionPanel(props: Props) {
       {saving&&<p className={styles.notice}>正在保存动作…</p>}
       {draftBlocked&&<button onClick={async()=>{try{await refresh();setDraftBlocked(false);const latest=await api<MultiviewActionState>(`/api/video/multiview/actions?workId=${props.work!.id}`);if(active()){setDraft(latest.draft);draftRef.current=latest.draft;setMessage('服务器版本已核对，当前文字保留，请继续保存。');}}catch(cause){setMessage(cause instanceof Error?cause.message:'暂不可读取。');}}}>核对最新并保留我的草稿</button>}
       {message&&<p className={styles.notice} role="status">{message}</p>}
-      {<button type="button" className={styles.primary} disabled={!hydrated||!text.trim()||!parameters.project_id||!state?.capabilities.actionReady||newAttemptRequired||submitting||saving||creation.loading||Boolean(original&&!original.taskId)||draftBlocked} onClick={()=>{if(original?.taskId&&!newAttempt())return;setConfirming(true);}}>{submitting?'正在准备并提交…':props.restored?'生成新版本':'制作动作视频'}</button>}
+      {<button type="button" className={styles.primary} disabled={!hydrated||!text.trim()||!parameters.project_id||!state?.capabilities.actionReady||Boolean(props.inputError)||submitting||saving||creation.loading||Boolean(original&&!original.taskId)||draftBlocked} onClick={()=>{if((original?.taskId||newAttemptRequired)&&!newAttempt())return;setConfirming(true);}}>{submitting?'正在准备并提交…':props.restored?'生成新版本':'制作动作视频'}</button>}
     </aside>
     {productDialog}
     {context&&<RuleDialog key={`${scope}:${context}`} kind={context} ownerId={props.ownerId} onClose={()=>setContext(null)} onSaved={()=>{setQuote(null);void refresh().catch(()=>undefined);}}/>}
