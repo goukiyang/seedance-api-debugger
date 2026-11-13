@@ -192,6 +192,52 @@ function loadTs(file, replacements, fakeProcess = process) {
   return module.exports;
 }
 {
+  const source = ts.createSourceFile('seamless-web.mjs', fs.readFileSync(new URL('./seamless-web.mjs', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  let method;
+  function visit(node) {
+    if (ts.isMethodDeclaration(node) && node.name.getText(source) === 'drainOriginal') { assert.equal(method, undefined); method = node; }
+    ts.forEachChild(node, visit);
+  }
+  visit(source); assert.ok(method);
+  const code = `globalThis.drain = ({${method.getText(source)}}).drainOriginal;`;
+  for (const state of [
+    { name: 'active-save', MainPID: '123', ControlPID: '0', ActiveState: 'activating', children: [123] },
+    { name: 'remaining-child', MainPID: '0', ControlPID: '0', ActiveState: 'inactive', children: [124] },
+    { name: 'control-process', MainPID: '0', ControlPID: '124', ActiveState: 'deactivating', children: [] },
+    { name: 'starting-empty', MainPID: '0', ControlPID: '0', ActiveState: 'activating', children: [] },
+    { name: 'unreadable-state', unreadable: true },
+    { name: 'finished-save', MainPID: '0', ControlPID: '0', ActiveState: 'inactive', children: [] },
+    { name: 'failed-attempt-exited', MainPID: '0', ControlPID: '0', ActiveState: 'failed', children: [] },
+  ]) {
+    const calls = [], policy = Buffer.from('unchanged live policy');
+    const finished = ['finished-save', 'failed-attempt-exited'].includes(state.name);
+    const context = { assert, Buffer, path, TIMERS: ['sd2-video-delivery', 'sd2-credit-delivery', 'sd2-feedback-delivery', 'sd2-backup'], WEB_UNITS: ['sd2-gray'], AUX_UNITS: ['sd2-video-delivery'], PRIVATE: '/private',
+      p: { timers: { 'sd2-video-delivery': 'active', 'sd2-credit-delivery': 'active', 'sd2-feedback-delivery': 'active', 'sd2-backup': 'active' }, privateFiles: { '/private/policy-active.json': policy.toString('base64') } },
+      acceptedConnectionCount: () => 0, classifySynchronousRows: () => ({ oldRunningImages: 0 }), readRuntimeRows: () => [],
+      privateRead: () => policy, bytes: value => Buffer.from(value, 'base64'), targetReady: async () => {},
+      until: async predicate => { if (!await predicate()) throw Object.assign(new Error('waiting'), { code: 'SEAMLESS_PENDING' }); },
+      properties: unit => {
+        assert.ok(calls.some(call => call.includes('sd2-video-delivery.timer')), 'Pause future starts before inspecting an active save');
+        if (unit === 'sd2-video-delivery.service' && state.unreadable) throw new Error('state unavailable');
+        return { ...state, Restart: 'no', SendSIGKILL: 'no', TimeoutStopUSec: 'infinity', KillSignal: '15', Delegate: 'no' };
+      },
+      groupPids: () => state.children, mkdir() {}, ensure() {}, assertOriginalUnitsStopped() {},
+      nativeCall: (bin, args) => {
+        calls.push(args.join(' '));
+        if (args.includes('stop') && args.some(value => /^sd2-(credit-delivery|feedback-delivery|backup)\.timer$/.test(value))) assert.equal(finished, true, 'Unrelated timers keep running while delivery drains');
+        if (args.includes('stop') && args.includes('sd2-video-delivery.service')) assert.equal(finished, true, 'Never signal a live save or its remaining child');
+      },
+    };
+    vm.runInNewContext(code, context);
+    if (finished) { const result = await context.drain(); assert.equal(result.forcedKill, false); }
+    else if (state.unreadable) await assert.rejects(() => context.drain(), /state unavailable/);
+    else await assert.rejects(() => context.drain(), error => error.code === 'SEAMLESS_PENDING');
+    assert.equal(calls.some(call => call.includes('stop') && call.includes('sd2-video-delivery.service')), finished);
+    assert.equal(calls.some(call => call.includes('sd2-video-delivery.timer')), true);
+  }
+  checks.push('actual drain pauses future delivery starts and waits for live saves, control processes and remaining children without signaling; unknown state refuses and natural success/failure exits retain normal handoff');
+}
+{
   let live = Buffer.from('current live permission policy');
   const env = { SD2_SEAMLESS_RUN_ID: runId, PRIVATE_PROMPTS_POLICY_FILE: '/etc/video-api-debugger/private-prompts/copied-policy.json', SD2_SEAMLESS_POLICY_SHA256: digest(live) };
   const module = loadTs('src/lib/image-studio/process-provenance.ts', { 'node:fs': { readFileSync: () => live } }, { env });
