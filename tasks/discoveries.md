@@ -206,3 +206,16 @@ UX17收口：v0.145.5按本轮用户授权完成实际新建A/B/C、A/B及C/B互
 - **D-20261112-PRIVATE-MEDIA-CONSUMERS｜已证源码合同残留，实际新事故待匹配。** 001524/v1470正确收紧普通原件匿名访问，旧`isPubliclyReachable`仍只按本地存在/URL形态判断。a4/v1484图片修复没有适配H3匿名首尾帧读取及视频/音频裸URL传输。只读聚合有79本站active视频，一份原件存在且匿名HEAD404；未逐个核参考规格/启用线路或匹配新失败任务，不能称79次失败。普通未知尺寸/缩放准备也残留匿名读，但1906本站图均无该条件。8项前后真实函数合成重放和限界见[原单REGRESSION-ORIGIN01](todo/2026-11-12-feedback-submit-rootcause.md)及本机私有regression-origin01；本轮没有源码/业务修改或收费。后续按现有授权与各供应商协议收口消费者，不全局放开原图、不盲套图片data URI、不重发旧任务；不扩为全站重构或新存储平台。
 
 - **D-20261112-ORDINARY-UNKNOWN-UI｜已确认状态合同消费者漏接，未实施。** 3e36f4bf2（10/31）为普通创建新增HTTP202、本地id和submission_unknown，但生成页仍只认10/1的IP错误码/布尔待确认标志，普通响应可走普通成功分支，最近卡显示原始状态。v1481已修资产页/交付标签，生成页此判断仍留。真实源码AST返回对象/条件表达式离线回放及12项运行源哈希有证；不是完整React或浏览器验收，不据此证明永久转圈、实际重复提交或费用已结。后续沿普通创建/原号恢复/最近卡/详情对齐，保预留和未知只查原则，不强判失败或解锁重发。详[原单REGRESSION-ORIGIN02](todo/2026-11-12-feedback-submit-rootcause.md)；本轮仅审计记录。
+
+<!-- WORKS-INPUT-ATTRIBUTION-20261112 -->
+## D-20261112-WORKS-INPUT-ATTRIBUTION 普通视频输入参考的成功归因（已确认关联缺口，另行接续）
+
+WORKS-VIDEOREF01接通视频详情到既有 `/generate` / `/generate/ip` 输入复用。现有成功method归因只冻结模板方法新草稿及其template/run身份；普通任务输入复用没有这份模板凭据。新按钮不能凭点击、草稿或仅任务受理冒成功推荐，也不能伪造模板身份补分。后续应沿实际复用原回执和真实成功产物单独接通，保原号、费用、账号/原作品权限与去重；本轮没有扩大实现。证据：`src/lib/works/method-reference.ts`、`src/lib/works/recommendation-sources.ts`、`src/app/api/tasks/create/route.ts`及原作品单WORKS-VIDEOREF01。没有据此推断其它推荐链路失效。
+待核线索：按原锁文件安装检查依赖时，npm对既有Next 14.2.5输出安全更新告警。本轮只确认锁定版本与该告警，未核实本站适用条件或可利用性，不把提示当已发生攻击；没有顺带升级依赖或改变发布范围，后续沿依赖安全维护核查。
+<!-- /WORKS-INPUT-ATTRIBUTION-20261112 -->
+
+<!-- SEAMLESS-PYTHON-CF1010-20261113 -->
+## 待核线索：备用域名拒绝Python校验客户端（2026-11-13）
+
+v0.148.13部署后，sd2-server.youdoodesign.com对Python-urllib返回Cloudflare1010/403；同机现有普通curl对health/release、63份真实资源及匿名复用状态检查均正常。切换原探测备用18条403、主域名18条200、无502/HTTP0；不将403算作应用502，也不把全部探测冒200。属于客户端/既有防护适配线索，是否需要允许该校验客户端待后续核定；未改WAF、权限或其它项目。证据沿SEAMLESS01原单§7及catchup-20261113/public-deployed.json。
+<!-- /SEAMLESS-PYTHON-CF1010-20261113 -->

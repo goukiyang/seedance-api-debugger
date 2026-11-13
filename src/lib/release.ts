@@ -1,11 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '修复视频提交待确认与原请求恢复',
+  title: '视频参考与提交恢复更新',
   outline: [
-    '普通视频待确认时保留原请求查询入口',
-    '区分提交待确认、等待安全重试和正在提交',
-    '统一生成页、任务详情和素材列表的状态提示'
+    '作品广场视频可一键恢复原生成设置',
+    '普通视频提交待确认时保留原请求并查询恢复',
+    '保留多视图 AI 整理等待修复'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
