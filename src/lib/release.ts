@@ -1,11 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '发布过程平滑切换',
+  title: '修复多视图动作 AI 整理等待',
   outline: [
-    '新版就绪后切换，更新时继续使用',
-    '保留进行中的请求和旧页面资源',
-    '保留图片、任务和当前工作现场'
+    '延长动作整理等待，接收较慢返回的新文案',
+    '未收到结果时明确提示，保留当前文字',
+    '保留待确认的原请求，不会自动重发'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

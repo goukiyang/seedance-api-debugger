@@ -127,4 +127,92 @@ await organizing;
 assert.equal(action.calls[0].body.llmModel, 'gpt-6.1-sol');
 assert.equal(action.storage.get('owner:model'), 'gpt-6-luna');
 checks.push('a model chosen during draft saving remains the next preference while the submitted model stays frozen');
+// Exercise the real worker and SDK with a virtual clock and delayed HTTP responses.
+const workerSource = fs.readFileSync(path.join(root, 'src/lib/template-studio/worker.ts'), 'utf8');
+const workerAst = ts.createSourceFile('worker.ts', workerSource, ts.ScriptTarget.Latest, true);
+const workerParts = workerAst.statements.filter(node =>
+  ts.isFunctionDeclaration(node) && ['outputPrompt', 'markTerminal', 'processStudioPromptOnce', 'textFeatureEnabled'].includes(node.name?.text)
+  || ts.isVariableStatement(node) && node.declarationList.declarations.some(item => ['LEASE_MS', 'MUSK_TIMEOUT_MS'].includes(item.name.getText(workerAst))));
+const workerCode = ts.transpileModule(workerParts.map(node => node.getText(workerAst)).join('\n'), {
+  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+}).outputText;
+const flush = () => new Promise(resolve => setImmediate(resolve));
+async function delayedOrganization(purpose, responseAt) {
+  let now = 0, serial = 0, fetches = 0;
+  const timers = new Map(), updates = [], requests = [];
+  class ClockDate extends Date { constructor(...args) { super(...(args.length ? args : [now])); } static now() { return now; } }
+  const schedule = (callback, ms) => { const id = ++serial; timers.set(id, { at: now + ms, callback }); return id; };
+  const cancel = id => timers.delete(id);
+  Object.assign(context, { Date: ClockDate, setTimeout: schedule, clearTimeout: cancel });
+  const snapshot = { purpose, llmModel: 'gpt-6.1-terra', input: { values: {}, draftPrompt: '修改后的原动作' },
+    parameters: { duration: 12 }, multiviewAction: { geometry: { panels: 2 } }, assets: [] };
+  const workerEnv = { exports: {}, Date: ClockDate, MuskApiError: musk.MuskApiError, StudioError: class extends Error {},
+    claimStudioRun: async () => ({ run: { id: 'same-original-run', purpose, owner_user_id: 'owner' }, token: 'lease' }),
+    prisma: { user: { findUnique: async () => ({ account_type: 'internal' }) }, platformSetting: { findUnique: async () => ({ value_json: 'true' }) } },
+    projectWorkerSessionUser: user => user, requireStudioUser() {}, parseWorkerSnapshot: () => snapshot,
+    ensureMultiviewActionSnapshot: async () => {}, ensureStudioSnapshotSourceStillUsable: async () => {}, authorizeStudioAssets: async () => {},
+    TEMPLATE_STUDIO_TEXT_ENABLED_KEY: 'fixture', getMuskApiSettings: async () => settings, isMuskApiReady: musk.isMuskApiReady,
+    resolveMuskChatModels: async () => ['gpt-6.1-terra'], isStudioTextModel: () => true,
+    privateVideoRunOrigins: () => [], assertPrivateMuskSend() {}, containsPrivateContext: () => false,
+    TEMPLATE_STUDIO_LIMITS: { llmOutput: 20000, prompt: 12000 }, workerSafeUsage: value => value, isPrivatePromptError: () => false,
+    updateRun: async (id, token, where, data) => { updates.push({ id, token, where, ...data }); return { count: 1 }; },
+    createMuskChatCompletion: parameters => {
+      requests.push(parameters);
+      return musk.createMuskChatCompletion({ ...parameters, fetchImpl: async (_url, options) => {
+        fetches++;
+        return new Promise((resolve, reject) => {
+          const timer = schedule(() => resolve(Response.json({ choices: [{ message: { content: JSON.stringify({ prompt: '整理后的新动作' }) } }], model: 'gpt-6.1-terra' })), responseAt);
+          options.signal.addEventListener('abort', () => { cancel(timer); reject(options.signal.reason); }, { once: true });
+        });
+      } });
+    },
+  };
+  vm.runInNewContext(workerCode, workerEnv);
+  const processing = workerEnv.exports.processStudioPromptOnce();
+  await flush();
+  while (timers.size) {
+    const [id, timer] = [...timers].sort((left, right) => left[1].at - right[1].at)[0];
+    timers.delete(id); now = timer.at; timer.callback(); await flush();
+  }
+  await processing;
+  Object.assign(context, { Date, setTimeout, clearTimeout });
+  return { updates, requests, fetches, elapsed: now };
+}
+let delayed = await delayedOrganization('multiview-action', 60000);
+assert.equal(delayed.updates.at(-1).status, 'succeeded', 'a 60-second edited-action response must reach the original run');
+assert.equal(delayed.updates.at(-1).prompt, '整理后的新动作');
+assert.equal(delayed.requests[0].timeoutMs, 90000); assert.equal(delayed.updates[0].lease_expires_at.getTime(), 135000);
+assert.equal(delayed.fetches, 1); assert.equal(delayed.updates.every(update => update.id === 'same-original-run'), true);
+checks.push('edited action receives a 60-second result through the real worker and SDK with a lease beyond its deadline');
+delayed = await delayedOrganization('multiview-action', 100000);
+assert.equal(delayed.elapsed, 90000); assert.equal(delayed.updates.at(-1).status, 'uncertain');
+assert.equal(delayed.updates.at(-1).delivery_state, 'unknown'); assert.match(delayed.updates.at(-1).error_message, /超时.*原文保留/);
+assert.equal(delayed.fetches, 1); assert.equal(delayed.updates.some(update => update.prompt), false);
+checks.push('a genuine 90-second timeout preserves the original uncertain request without replay or invented output');
+delayed = await delayedOrganization('studio', 60000);
+assert.equal(delayed.elapsed, 45000); assert.equal(delayed.requests[0].timeoutMs, 45000);
+assert.equal(delayed.updates[0].lease_expires_at.getTime(), 90000); assert.equal(delayed.updates.at(-1).status, 'uncertain');
+checks.push('ordinary Studio retains its 45-second deadline and 90-second lease');
+
+let pollEffect;
+function findPoll(node) {
+  if (ts.isCallExpression(node) && node.expression.getText(ast) === 'useEffect'
+    && node.arguments[0]?.getText(ast).includes('aiPoll.current.count>=')) pollEffect = node.arguments[0].getText(ast);
+  ts.forEachChild(node, findPoll);
+}
+findPoll(ast); assert.ok(pollEffect);
+action = actionHarness({ current: { ...newPending }, retained: [] });
+let elapsed = 0, scheduled;
+action.env.setTimeout = (callback, ms) => { scheduled = { callback, ms }; return 1; };
+action.env.clearTimeout = () => {};
+action.env.api = async () => ({ run: { id: 'new-run', status: elapsed >= 60000 ? 'succeeded' : 'running', text: elapsed >= 60000 ? '修改后整理的新动作' : null, tasks: [] } });
+vm.runInNewContext(ts.transpileModule('globalThis.pollEffect=' + pollEffect, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, action.env);
+for (let tick = 0; tick < 35 && action.env.aiJournalRef.current.current; tick++) {
+  scheduled = null; action.env.aiPending = action.env.aiJournalRef.current.current; action.env.pollEffect();
+  if (!scheduled) break;
+  elapsed += scheduled.ms; scheduled.callback(); await flush();
+}
+assert.deepEqual(action.writes, ['修改后整理的新动作'], 'polling must still receive a successful result after 48 seconds');
+assert.equal(action.env.aiJournalRef.current.current, null);
+checks.push('the actual action poll effect receives and applies a 60-second result after editing');
 console.log(JSON.stringify({ passed: true, checks, isolation: { realFetches: 0, realGeneration: 0, browserRuns: 0, productionWrites: 0, productionDatabaseOpened: false } }));
