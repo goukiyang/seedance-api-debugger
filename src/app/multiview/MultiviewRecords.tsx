@@ -88,18 +88,18 @@ function RecordCard({ item, owner, enabled, readCover, onLayoutChange, onUnautho
   };
   const hasMedia = enabled && coverLease.current === cover && cover.phase === 'ready' && cover.url;
   const phase = enabled ? cover.phase : 'signed-out';
-  const compact = !hasMedia && phase !== 'loading';
-  return <article ref={article} data-record-id={item.id} className={`${styles.card} ${compact ? styles.textRow : ''}`}>
-    {!compact && <div className={styles.media}>{hasMedia ? <img src={cover.url} alt={cover.kind === 'input' ? '参考封面' : cover.kind === 'result' ? '已保存成品' : '原视频画面'} onError={() => { onLayoutChange(); coverLease.current?.release?.(); coverLease.current = null; setCover({ phase: 'retryable' }); }} /> : <span role="status">正在读取封面…</span>}
-      {hasMedia && cover.kind === 'input' && <span className={styles.coverLabel}>参考封面</span>}</div>}
+  return <article ref={article} data-record-id={item.id} className={styles.card}>
+    <div className={styles.media}>{hasMedia ? <img src={cover.url} alt={cover.kind === 'input' ? '参考封面' : cover.kind === 'result' ? '已保存成品' : '原视频画面'} onError={() => { onLayoutChange(); coverLease.current?.release?.(); coverLease.current = null; setCover({ phase: 'retryable' }); }} /> : <div className={styles.mediaMessage} role="status">
+      <span>{phase === 'loading' ? '正在读取封面…' : phase === 'retryable' ? '封面暂不可读取' : phase === 'refresh' ? '封面版本已变化' : phase === 'signed-out' ? '登录状态需重新确认' : phase === 'denied' ? '暂无可查看封面' : '暂无可用媒体'}</span>
+      {!['loading', 'missing', 'signed-out'].includes(phase) && <button type="button" onClick={() => { onLayoutChange(); if (phase === 'refresh') onRefresh(); else setCoverAttempt(value => value + 1); }}>{phase === 'refresh' ? '刷新封面' : '重试封面'}</button>}
+    </div>}
+      {hasMedia && cover.kind === 'input' && <span className={styles.coverLabel}>参考封面</span>}
+      {hasMedia && (cover.retryable || cover.refresh) && <button type="button" className={styles.coverRetry} aria-label="重试成品封面" title="重试成品封面" onClick={() => { if (cover.refresh) onRefresh(); else setCoverAttempt(value => value + 1); }}><RefreshCw size={15} /></button>}
+    </div>
     <div className={styles.body}>
       <div className={styles.titleRow}><strong>{item.title}</strong></div>
       <div className={styles.creator}>{item.creator ? <UserIdentityBadge user={item.creator} size="sm" /> : <span>作者信息不可用</span>}<RelativeTime value={item.createdAt} /></div>
       <p>{item.sourceId ? '独立副本' : item.projectTitle || ''}{(item.sourceId || item.projectTitle) && ' · '}{labels[item.status] || '状态待确认'}</p>
-      {hasMedia && (cover.retryable || cover.refresh) && <p><button type="button" onClick={() => { if (cover.refresh) onRefresh(); else setCoverAttempt(value => value + 1); }}>重试成品封面</button></p>}
-      {compact && <p role="status">{phase === 'retryable' ? '封面暂不可读取' : phase === 'refresh' ? '封面版本已变化' : phase === 'signed-out' ? '登录状态需重新确认' : phase === 'denied' ? '暂无可查看封面' : '暂无可用媒体'}
-        {phase !== 'missing' && phase !== 'signed-out' && <button type="button" onClick={() => { onLayoutChange(); if (phase === 'refresh') onRefresh(); else setCoverAttempt(value => value + 1); }}>{phase === 'refresh' ? '刷新封面' : '重试封面'}</button>}
-      </p>}
       {item.schemeCount > 0 && <details className={styles.schemes}><summary>方案{item.schemeCount > 1 ? ` · ${item.schemeCount}` : ''}</summary><div className={styles.actions}>
         <select aria-label="选择保存方案" value={selected} onFocus={() => { if (!loaded) void load(); }} onChange={event => { chosen.current = true; setSelected(event.target.value); }}>
           {!works.some(work => work.id === item.workId) && item.workId && <option value={item.workId}>{item.title}</option>}

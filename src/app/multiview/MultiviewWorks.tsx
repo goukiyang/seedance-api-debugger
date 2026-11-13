@@ -158,12 +158,12 @@ export function MultiviewWorks({ owner, authority, initialWorkId = '', onEdit, o
   }, [loadedIdentity, identity, preferences.projectId, preferences.q, preferences.removed]);
   useEffect(() => {
     if (loadedIdentity !== identity) return;
-    const id = initialWorkId || preferences.selected;
+    const id = initialWorkId || (kind === 'reference' ? '' : preferences.selected);
     if (id) { setWork(null); void fetchDetail(id); }
     else setWork(null);
   // Opening a card is controlled by the URL; filter changes do not replace the current work.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadedIdentity, identity, initialWorkId]);
+  }, [loadedIdentity, identity, initialWorkId, kind]);
   useEffect(() => {
     if (loadedIdentity !== identity || !work || !['queued', 'rendering', 'waiting_source'].includes(work.status)) return;
     let tries = 0;

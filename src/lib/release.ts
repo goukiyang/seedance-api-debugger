@@ -1,10 +1,10 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '更新时继续保存已有视频',
+  title: '整理多视图记录与作品浏览',
   outline: [
-    '正在保存的视频完成后再交接下载服务',
-    '保留原任务、原片与下载队列'
+    '记录封面统一排列，加载失败不再打乱网格',
+    '动作作品先看预览列表，点选后打开大图'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
