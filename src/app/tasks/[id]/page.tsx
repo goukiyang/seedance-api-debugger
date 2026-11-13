@@ -1,4 +1,5 @@
 'use client';
+import { isVideoSubmissionUnconfirmed, videoPendingStatusLabel } from '@/lib/video/submission-state';
 import SafeRetryStatus from '@/components/generation-retry/SafeRetryStatus';
 import { ProjectSelector } from '@/components/ProjectSelector';
 import DraftUpgradeAction from '@/components/creation/DraftUpgradeAction';
@@ -442,7 +443,7 @@ function getStatusText(status: string) {
     failed: '失败',
     cancelled: '已取消',
   };
-  return textMap[status] || status;
+  return videoPendingStatusLabel(status) || textMap[status] || status;
 }
 
 function getRetentionClass(status: string) {
@@ -1746,11 +1747,11 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
       : (enhanceSourceLoadError || '源视频不可用，暂时只显示超分结果。')
     : '';
   const canUseVideoActions = hasPlayableVideo && !isPublicVideoPreparing;
-  const isSubmissionUnknown = Boolean(task.error_code?.includes('SUBMISSION_UNCONFIRMED') || task.error_code?.includes('SUBMIT_UNCONFIRMED') || task.local_status === 'unknown');
+  const isSubmissionUnknown = isVideoSubmissionUnconfirmed(task) || Boolean(task.error_code?.includes('SUBMISSION_UNCONFIRMED') || task.error_code?.includes('SUBMIT_UNCONFIRMED') || task.local_status === 'unknown');
   const isProcessing = !isSubmissionUnknown && ['submitted', 'running'].includes(task.local_status);
   const modeLabel = TASK_GENERATION_MODE_LABELS[task.generation_mode] || task.generation_mode;
   const resolvedModeLabel = resolvedMode && resolvedMode !== task.generation_mode ? resolvedMode : null;
-  const resultStateTitle = isSubmissionUnknown ? '提交结果待确认' : task.local_status === 'failed'
+  const resultStateTitle = isSubmissionUnknown ? '提交结果待确认' : videoPendingStatusLabel(task.local_status) || (task.local_status === 'failed'
     ? (isEnhanceTask ? '超分失败' : '生成失败')
     : isProcessing
       ? (isEnhanceTask ? '超分处理中' : '生成中')
@@ -1758,8 +1759,10 @@ function TaskDetailContent({ ownerId, isAdmin }: { ownerId: string; isAdmin: boo
         ? '视频准备中'
         : hasResultVideo
           ? (isEnhanceTask ? '超分结果' : '生成结果')
-          : '暂无结果';
-  const resultDecisionBody = isSubmissionUnknown ? '尚未确认原请求是否受理，请查询原请求。不会自动重新生成。' : task.local_status === 'failed'
+          : '暂无结果');
+  const resultDecisionBody = isSubmissionUnknown ? '尚未确认原请求是否受理，请查询原请求。不会自动重新生成。' : task.local_status === 'retry_wait'
+    ? '后台等待安全重试，原费用预留和请求保持，可刷新原任务查看进度。'
+    : task.local_status === 'retry_submitting' ? '后台正在提交原任务，请刷新状态查看进度。' : task.local_status === 'failed'
     ? (isEnhanceTask ? '这次没有产出可用增强视频，可以回到源任务重新发起。' : '这次没有产出可用视频，可以复用输入重新生成。')
     : isProcessing
       ? (isEnhanceTask ? '超分任务还在处理中，可以刷新状态或开启自动轮询。' : '任务还在生成中，可以刷新状态或开启自动轮询。')

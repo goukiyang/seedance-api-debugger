@@ -1,5 +1,6 @@
 /* eslint-disable @next/next/no-img-element */
 'use client';
+import { videoPendingStatusLabel } from '@/lib/video/submission-state';
 import { ProjectSelector } from '@/components/ProjectSelector';
 import { useProjectCatalogRevision } from '@/lib/projects/selector-client';
 import { ExperienceEmpty, FilterSummary, OperationReceipt, SelectionBar, ExperienceActions } from '@/components/experience/ExperienceParts';
@@ -416,7 +417,8 @@ function getOrCreateWorkspaceTabId() {
 
 function statusLabel(status: string) {
   if (status === 'succeeded') return '已完成';
-  if (status === 'submission_unknown') return '提交结果待确认';
+  const pendingLabel = videoPendingStatusLabel(status);
+  if (pendingLabel) return pendingLabel;
   if (status === 'running') return '生成中';
   if (status === 'submitted') return '排队中';
   if (status === 'failed') return '失败';
