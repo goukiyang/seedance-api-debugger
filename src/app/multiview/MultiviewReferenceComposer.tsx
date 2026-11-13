@@ -304,7 +304,13 @@ export function MultiviewReferenceComposer(props: Props) {
     const fresh=createMultiviewReferenceRecipe(props.info,slots,before.output);
     const remap=(id:string)=>slots[before.slots.findIndex(slot=>slot.id===id)]?.id;
     edit({...fresh,divider:before.divider,
-      ...(slots.length===before.slots.length?{panels:before.panels.map(item=>({...item,slotId:remap(item.slotId)!})),placements:before.placements.map(item=>({...item,slotId:remap(item.slotId)!}))}:{}),
+      ...(slots.length===before.slots.length?{panels:before.panels.map(item=>({...item,slotId:remap(item.slotId)!})),placements:before.placements.map(item=>{
+        const slotId=remap(item.slotId)!;
+        if(item.x!==-8||item.y!==-8)return {...item,slotId};
+        const panel=before.panels.find(value=>value.slotId===item.slotId)!,ratio=props.info.width/props.info.height*before.output.height/before.output.width;
+        const width=Math.min(panel.width,panel.height*ratio)*.94,height=width/ratio;
+        return {...item,slotId,width,height,x:panel.x+(panel.width-width)/2,y:panel.y+(panel.height-height)/2};
+      })}:{}),
       foregrounds:before.foregrounds.filter(item=>slots.some(slot=>slot.id===item.slotId&&before.slots.some(old=>old.id===slot.id&&old.frame===slot.frame)))});
     setMissingRecipe(false);setActiveView('reference');setSelected(slots[0]?.id||'');
     // The replacement token represents one explicit application from the picker.

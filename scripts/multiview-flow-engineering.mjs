@@ -164,4 +164,15 @@ function findWorkEffect(node){if(ts.isCallExpression(node)&&node.expression.getT
 const opened=[],library={loadedIdentity:'owner',identity:'owner',initialWorkId:'',kind:'reference',preferences:{selected:'last-work'},setWork(){},fetchDetail:id=>opened.push(id)};
 vm.runInNewContext('globalThis.enter='+openWorkEffect,library);library.enter();assert.deepEqual(opened,[]);checks.push('action-works entry shows the thumbnail library despite a previously selected work');
 library.initialWorkId='explicit-work';library.enter();assert.equal(opened.at(-1),'explicit-work');library.initialWorkId='';library.kind=undefined;library.enter();assert.equal(opened.at(-1),'last-work');checks.push('explicit work links and ordinary work-library restoration keep their existing behavior');
+let replaceFramesEffect;
+function findReplaceFrames(node){if(ts.isCallExpression(node)&&node.expression.getText(composerAst)==='useEffect'&&node.arguments[0]?.getText(composerAst).includes('const replacement=props.replacementSlots'))replaceFramesEffect=node.arguments[0].getText(composerAst);ts.forEachChild(node,findReplaceFrames);}findReplaceFrames(composerAst);assert.ok(replaceFramesEffect);
+const vertical=layout.createMultiviewReferenceRecipe(info,slots,{...recipe.output,layout:'vertical'});vertical.placements[0].x+=.1;
+const replacementSlots=slots.map((slot,index)=>({...slot,id:'new-'+index,frame:slot.frame+1}));
+const replacing={hydrated:true,props:{info,replacementSlots:{slots:replacementSlots,token:1}},recipeRef:{current:{...vertical,placements:vertical.placements.map((item,index)=>index?{...item,x:-8,y:-8}:item)}},
+  createMultiviewReferenceRecipe:layout.createMultiviewReferenceRecipe,edit:next=>{replacing.next=next;},setMissingRecipe(){},setActiveView(){},setSelected(){}};
+vm.runInNewContext(ts.transpileModule('globalThis.replaceFrames='+replaceFramesEffect,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,replacing);replacing.replaceFrames();
+assert.ok(replacing.next.placements[1].x>=0&&replacing.next.placements[1].y>=.5,'new reference frame remains deleted');
+assert.equal(hash(replacing.next.placements[0]),hash({...vertical.placements[0],slotId:replacementSlots[0].id}));assert.ok(contract.parseMultiviewWorkRecipe(replacing.next,info));checks.push('replacing frames restores a deleted image inside its original vertical panel while preserving the other placement');
+replacing.recipeRef.current={...vertical,placements:vertical.placements.map(item=>({...item,x:-8,y:-8}))};replacing.replaceFrames();
+assert.ok(layout.referencePixelGeometry(replacing.next,info).placements.every(item=>item.x>=0&&item.y>=0));checks.push('reselecting reference frames recovers a completely cleared canvas');
 console.log(JSON.stringify({passed:true,checks,isolation:{realFetches:0,productionWrites:0,generationCalls:0,browserAcceptance:'manual-pending'}}));

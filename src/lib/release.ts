@@ -1,11 +1,10 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '整理多视图记录与作品浏览',
+  title: '删除后换参考帧可继续制作',
   outline: [
-    '记录封面统一排列，加载失败不再打乱网格',
-    '动作作品先看预览列表，点选后打开大图',
-    '拼图选中图像后可按Delete移除，并支持撤销'
+    '重新选帧会恢复新图，保留其它镜头的位置',
+    '保留删除撤销、历史记录和原有生成设置'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
