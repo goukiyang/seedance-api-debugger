@@ -1,4 +1,4 @@
-// Exact additive bridges admitted from the pre-seamless baseline.
+// Exact additive bridges admitted from reviewed source pairs.
 export default {
   "src/lib/image-studio/synchronous-admission.ts": {
     "previous": "67a1c53406516b0b90c7159d3447db9a80bd2aca16cac2efcb32ce59611a4012",
@@ -23,5 +23,9 @@ export default {
   "src/lib/security/private-prompts.server.ts": {
     "previous": "ae549459c929465abbe7afdebc302a19f81a0ab2af2e8569f76c382db755d246",
     "current": "c86f5f0701c819612402ead0f23ada2255cf308dfdd6df70e736383b9ab64db2"
+  },
+  "src/lib/template-studio/worker.ts": {
+    "previous": "8de1ad47b36d8e5151b71e53382f866ae61eee6972b9836295e9b9ae1728aeb6",
+    "current": "979db85e3fd75e6833ca0be1962ebff81063ef1fc0a1948b2bb194c646839681"
   }
 };
