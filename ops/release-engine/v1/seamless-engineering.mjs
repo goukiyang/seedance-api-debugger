@@ -35,21 +35,26 @@ check('whole old-root process scan catches extra writers and never treats unread
 });
 
 for (const failure of [null, ...SEAMLESS_STEPS]) {
-  let state = null, fail = failure, publicAlive = true; const calls = [];
+  let state = null, fail = failure, publicAlive = true, waits = 0; const calls = [];
+  const automatic = ['drainOriginal', 'retireCandidate'].includes(failure);
   const driver = { plan, publicHealthy: async () => publicAlive, recoverGuard: async () => { calls.push('guard'); return { recovered: true }; } };
-  for (const step of SEAMLESS_STEPS) driver[step] = async () => { calls.push(step); if (step === fail) throw Object.assign(new Error('pending'), { code: 'SEAMLESS_PENDING' }); return { okay: true }; };
+  for (const step of SEAMLESS_STEPS) driver[step] = async () => { calls.push(step); if (step === fail) { if (automatic) fail = null; throw Object.assign(new Error('pending'), { code: 'SEAMLESS_PENDING' }); } return { okay: true }; };
   const store = { read: () => state, write: v => { state = JSON.parse(JSON.stringify(v)); } };
-  const result = await runSeamlessDelivery(driver, store);
+  const result = await runSeamlessDelivery(driver, store, { wait: async () => { assert.equal(state.status, 'pending'); waits++; } });
   if (!failure) assert.equal(result.status, 'complete');
+  else if (automatic) {
+    assert.equal(result.status, 'complete'); assert.equal(result.error, null); assert.equal(waits, 1);
+    assert.deepEqual(calls, [...SEAMLESS_STEPS.slice(0, SEAMLESS_STEPS.indexOf(failure) + 1), ...SEAMLESS_STEPS.slice(SEAMLESS_STEPS.indexOf(failure))]);
+  }
   else {
-    assert.equal(result.status, 'pending'); assert.equal(calls.includes('guard'), false);
+    assert.equal(result.status, 'failed'); assert.equal(waits, 0); assert.equal(calls.includes('guard'), false);
     assert.deepEqual(result.completed, SEAMLESS_STEPS.slice(0, SEAMLESS_STEPS.indexOf(failure)));
     fail = null; const completed = [...result.completed]; calls.length = 0;
-    assert.equal((await runSeamlessDelivery(driver, store)).status, 'complete');
+    const resumed = await runSeamlessDelivery(driver, store); assert.equal(resumed.status, 'complete'); assert.equal(resumed.error, null);
     assert.deepEqual(calls, SEAMLESS_STEPS.slice(completed.length));
   }
 }
-checks.push('actual controller order and resume at all 8 boundaries; no forced old rollback');
+checks.push('actual controller automatically continues normal drains; genuine failures stay resumable at all8 boundaries without forced rollback');
 {
   let state = null; const driver = { plan, publicHealthy: async () => false, recoverGuard: async () => ({ recovered: true, source: a }) };
   for (const step of SEAMLESS_STEPS) driver[step] = async () => { if (step === 'drainOriginal') throw new Error('public failed'); return {}; };

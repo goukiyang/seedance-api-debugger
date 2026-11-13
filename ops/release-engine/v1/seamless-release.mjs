@@ -13,14 +13,15 @@ export const SEAMLESS_STEPS = Object.freeze(['preflight', 'prepare', 'cutToCandi
 
 // Actual order is shared by production and offline engineering fixtures.
 // Every native operation is idempotent/CAS checked; write intent before effects.
-export async function runSeamlessDelivery(driver, store) {
+export async function runSeamlessDelivery(driver, store, { wait = () => new Promise(resolve => setTimeout(resolve, 1000)) } = {}) {
   let state = store.read() || { schema: 'sd2-seamless-state.v1', runId: driver.plan.runId,
     completed: [], status: 'running', databaseRestored: false };
   assert.equal(state.runId, driver.plan.runId); assert.equal(state.schema, 'sd2-seamless-state.v1');
   assert.deepEqual(state.completed, SEAMLESS_STEPS.slice(0, state.completed.length));
   if (state.status === 'recovered') return state;
-  for (const step of SEAMLESS_STEPS.slice(state.completed.length)) {
-    state = { ...state, status: 'running', activeStep: step }; store.write(state);
+  while (state.completed.length < SEAMLESS_STEPS.length) {
+    const step = SEAMLESS_STEPS[state.completed.length];
+    state = { ...state, status: 'running', activeStep: step, error: null }; store.write(state);
     try {
       const result = await driver[step]();
       state = { ...state, completed: [...state.completed, step], activeStep: null,
@@ -30,9 +31,10 @@ export async function runSeamlessDelivery(driver, store) {
       const live = await driver.publicHealthy();
       // Long requests are a pending retirement, never permission to kill them.
       // An available public target remains serving even if this controller exits.
-      state = { ...state, status: error.code === 'SEAMLESS_PENDING' && live ? 'pending' : 'failed',
+      state = { ...state, status: error.code === 'SEAMLESS_PENDING' && live && ['drainOriginal', 'retireCandidate'].includes(step) ? 'pending' : 'failed',
         activeStep: step, error: String(error.message || error), publicHealthy: live, databaseRestored: false };
       store.write(state);
+      if (state.status === 'pending') { await wait(); continue; }
       if (!live && state.completed.includes('prepare')) {
         try { state = { ...state, status: 'recovered', recovery: await driver.recoverGuard() }; store.write(state); }
         catch (recovery) { state = { ...state, recoveryError: String(recovery.message || recovery) }; store.write(state); }

@@ -9,6 +9,7 @@ import { DEFAULT_DELIVERY, SEAMLESS_CONTROL, SEAMLESS_STATIC, digest, assertSeam
 import { verifyFixedProgramEntry, PRICING_START_GUARD_SHA256 } from './pricing-start-pair.mjs';
 import { parseAllOwnerSynchronousRows } from './cutover-safety.mjs';
 import { privateDataBytes } from './seamless-shadow-start.mjs';
+import { switchLoopback, clearLoopback, acceptedConnectionCount } from './seamless-loopback.mjs';
 
 export const PROJECT = '/data/video-api-debugger';
 export const WEB_UNITS = ['sd2-gray', 'sd2-image-studio', 'sd2-hd-derivatives', 'sd2-multiview-works',
@@ -58,10 +59,6 @@ export function processIdentity(pid) {
   assert.ok(!['Z', 'X', 'x'].includes(a[0]));
   return { pid: Number(pid), startTicks: a[19], parent: Number(a[1]),
     root: fs.realpathSync('/proc/' + pid + '/cwd'), cgroup: /^0::([^\n]+)$/m.exec(fs.readFileSync('/proc/' + pid + '/cgroup', 'utf8'))?.[1] };
-}
-function stillSame(p) {
-  try { return processIdentity(p.pid).startTicks === p.startTicks; }
-  catch (e) { if (e.code === 'ENOENT' || e.code === 'ESRCH') return false; throw e; }
 }
 function groupPids(group) {
   assert.ok(group.startsWith('/system.slice/') && !group.split('/').includes('..'));
@@ -255,12 +252,14 @@ export function prepareSeamlessPlan(capsuleFile) {
   const controls = Object.fromEntries(CONTROLS.map(name => [name, rootBytes(PROJECT + '/controls/' + name + '/allowed.json').toString('base64')]));
   const privateFiles = Object.fromEntries(['policy-active.json', 'consumers-active.json', 'backup-proof.json'].map(n => [PRIVATE + '/' + n, privateDataBytes(PRIVATE + '/' + n, previous.serviceUid).toString('base64')]));
   const db = PROJECT + '/var-lib/dev.db', s = fs.lstatSync(db); assert.ok(s.isFile()); assert.equal(fs.realpathSync(db), db);
+  const nginxUids = [...new Set(nginxWorkers().map(worker => fs.statSync('/proc/' + worker.pid).uid))];
+  assert.equal(nginxUids.length, 1); assert.ok(nginxUids[0] > 0);
   const runId = randomUUID(), stage = PROJECT + '/release-staging/' + runId; mkdir(stage);
   const plan = { schema: 'sd2-seamless-plan.v1', runId, stage, delivery: DEFAULT_DELIVERY, main, guard, previous,
     admission, units, sites, controls, privateFiles, marker: { file: markerFile, sha256: digest(rootBytes(markerFile)) },
     database: { file: db, identity: [String(s.dev), String(s.ino)] }, pricingSha256: digest(allowedBytes),
     capsuleFile, capsuleSha256: digest(rootBytes(capsuleFile)), timers: Object.fromEntries(TIMERS.map(n => [n, properties(n + '.timer').ActiveState])),
-    engineRoot: path.dirname(fileURLToPath(import.meta.url)), createdAt: Date.now() };
+    nginxUid: nginxUids[0], engineRoot: path.dirname(fileURLToPath(import.meta.url)), createdAt: Date.now() };
   ensure(stage + '/seamless-plan.json', JSON.stringify(plan, null, 2) + '\n');
   return { file: stage + '/seamless-plan.json', runId, source: main.source, build: main.build, delivery: DEFAULT_DELIVERY };
 }
@@ -286,6 +285,17 @@ export function createNativeSeamlessDriver(planFile) {
     const asset = 'static/' + entry.build + '/_buildManifest.js'; assert.ok(entry.buildFiles[asset]);
     const a = await fetch('http://127.0.0.1:' + port + '/_next/' + asset, { signal: AbortSignal.timeout(5000) });
     assert.equal(a.status, 200); assert.equal(digest(Buffer.from(await a.arrayBuffer())), entry.buildFiles[asset]);
+  }
+  async function ingressReady(port, entry) {
+    await until(async () => {
+      try {
+        for (const host of ['sd2.youdooart.com', 'sd2-server.youdoodesign.com']) {
+          const response = nativeCall('/usr/bin/curl', ['--fail', '--silent', '--show-error', '--max-time', '15', 'https://' + host + '/api/release']);
+          assert.equal(JSON.parse(response).version, entry.version); await endpoint(port, entry);
+        }
+        return true;
+      } catch { return false; }
+    }, 'Ingress has not converged to the ready version; preserve serving processes');
   }
   function workerReady(temporary) {
     const row = readRuntimeRows(p).find(r => r.key === 'pricing_worker_capability_v1:image' + (temporary ? ':' + p.main.source : ''));
@@ -362,18 +372,12 @@ export function createNativeSeamlessDriver(planFile) {
         assert.ok([3302, 3303, 3304].some(value => Buffer.from(renderRoute(bytes(site.bytesBase64).toString(), value)).equals(current)), 'Unknown ingress change');
         if (!current.equals(wanted)) { replace(site.file, current, wanted); changed.push({ file: site.file, current, wanted }); }
       }
-      nativeCall('/usr/sbin/nginx', ['-t']); nativeCall('/usr/bin/systemctl', ['reload', 'nginx']);
+      if (changed.length) { nativeCall('/usr/sbin/nginx', ['-t']); nativeCall('/usr/bin/systemctl', ['reload', 'nginx']); }
     } catch (error) {
       for (const item of changed.reverse()) replace(item.file, item.wanted, item.current);
       nativeCall('/usr/sbin/nginx', ['-t']); nativeCall('/usr/bin/systemctl', ['reload', 'nginx']); throw error;
     }
-    // Actual public TLS responses and retained build asset bytes on both hosts.
-    for (const host of ['sd2.youdooart.com', 'sd2-server.youdoodesign.com']) {
-      const entry = port === 3304 ? p.guard : p.main;
-      const response = nativeCall('/usr/bin/curl', ['--fail', '--silent', '--show-error', '--max-time', '15', 'https://' + host + '/api/release']);
-      assert.equal(JSON.parse(response).version, entry.version);
-      await endpoint(port, entry);
-    }
+    await ingressReady(port, port === 3304 ? p.guard : p.main);
     return { port, workers: json(file) };
   }
   function retainAssets() {
@@ -408,6 +412,7 @@ export function createNativeSeamlessDriver(planFile) {
   }
   return { plan: p, save, json, rootBytes, writeExclusive,
     async preflight() {
+      nativeCall('/usr/sbin/iptables', ['-w', '5', '-t', 'nat', '-S', 'OUTPUT']);
       assert.ok(Date.now() - p.createdAt < 30 * 60 * 1000, 'Prepare a fresh delivery plan');
       assert.equal(digest(rootBytes(p.capsuleFile)), p.capsuleSha256); mainEntryFromCapsule(p.capsuleFile);
       verifyFixedProgramEntry(p.guard);
@@ -429,10 +434,15 @@ export function createNativeSeamlessDriver(planFile) {
       return p.admission;
     },
     async prepare() { retainAssets(); await prepareTarget('image'); await prepareTarget('main'); return { ready: true, source: p.main.source, build: p.main.build }; },
-    async cutToCandidate() { await targetReady('image'); await targetReady('main'); return route(3303); },
+    async cutToCandidate() {
+      await targetReady('image'); await targetReady('main');
+      const bridge = switchLoopback(3302, 3303, p.nginxUid); clearLoopback(3303, p.nginxUid);
+      // Existing upstream connections keep their original kernel binding; late
+      // buffered requests now reach the ready candidate without waiting on other sites.
+      await ingressReady(3303, p.main); return { ...bridge, ready: true };
+    },
     async drainOriginal() {
-      const workers = json(p.stage + '/route-3303-old-workers.json');
-      await until(() => workers.every(w => !stillSame(w)), 'Original nginx workers still own requests; candidate remains online');
+      await until(() => acceptedConnectionCount(3302) === 0, 'Original SD2 upstream requests remain; candidate remains online');
       await until(() => classifySynchronousRows(readRuntimeRows(p), p).oldRunningImages === 0, 'Original synchronous images still running; candidate remains online');
       assert.deepEqual(privateRead(PRIVATE + '/policy-active.json'), bytes(p.privateFiles[PRIVATE + '/policy-active.json']));
       for (const name of TIMERS) if (p.timers[name] === 'active') nativeCall('/usr/bin/systemctl', ['stop', name + '.timer']);
@@ -509,9 +519,13 @@ export function createNativeSeamlessDriver(planFile) {
       }, 'Canonical services not ready; temporary new pair remains online');
       return { ready: true, source: p.main.source, build: p.main.build };
     },
-    async cutToCanonical() { workerReady(false); await endpoint(3302, p.main); return route(3302); },
+    async cutToCanonical() {
+      workerReady(false); await endpoint(3302, p.main);
+      switchLoopback(3303, 3302, p.nginxUid); clearLoopback(3302, p.nginxUid);
+      return route(3302);
+    },
     async retireCandidate() {
-      await until(() => json(p.stage + '/route-3302-old-workers.json').every(w => !stillSame(w)), 'Temporary nginx requests remain; keep temporary pair');
+      await until(() => acceptedConnectionCount(3303) === 0, 'Temporary SD2 upstream requests remain; keep temporary pair');
       await until(() => { const v = classifySynchronousRows(readRuntimeRows(p), p);
         return v.candidateRunningImages === 0 && v.unconfirmedCandidateRunningImages === 0;
       }, 'Temporary synchronous requests remain or are unknown; keep temporary pair');
@@ -531,6 +545,10 @@ export function createNativeSeamlessDriver(planFile) {
       }
       catch { return false; }
     },
-    async recoverGuard() { await prepareTarget('guard'); await route(3304); return { recovered: true, guardSource: p.guard.source, databaseRestored: false }; },
+    async recoverGuard() {
+      await prepareTarget('guard');
+      switchLoopback(3302, 3304, p.nginxUid); switchLoopback(3303, 3304, p.nginxUid);
+      await route(3304); return { recovered: true, guardSource: p.guard.source, databaseRestored: false };
+    },
   };
 }
