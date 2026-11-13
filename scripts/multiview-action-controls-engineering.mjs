@@ -73,7 +73,8 @@ const original = { requestId: 'original-request', runId: 'original-run', model: 
 function actionHarness(journal, result, error) {
   const calls = [], storage = new Map(), writes = [], suggestions = [];
   const env = { aiLock: { current: false }, aiPending: journal.current, aiJournalRef: { current: journal },
-    state: { capabilities: { llmEnabled: true } }, llmReady: true, text: '保留人工动作', llmModel: 'gpt-6.1-sol', aiKey: 'owner:work', modelKey: 'owner:model',
+    referenceImage: false, props: { work: { id: 'work' } }, workRef: { current: { id: 'work' } }, scope: 'owner:work',
+    state: { capabilities: { llmEnabled: true, referenceImageEnabled: true } }, llmReady: true, text: '保留人工动作', llmModel: 'gpt-6.1-sol', aiKey: 'owner:work', modelKey: 'owner:model',
     input: { current: { text: '保留人工动作' } }, editRevision: { current: 4 }, aiPoll: { current: { key: '', count: 0 } },
     finished: new Set(['succeeded', 'failed', 'cancelled']), crypto: { randomUUID: () => 'new-request' },
     confirm: async () => true, saveDraft: async () => ({ id: 'draft', revision: 1 }), active: () => true,
@@ -131,13 +132,13 @@ checks.push('a model chosen during draft saving remains the next preference whil
 const workerSource = fs.readFileSync(path.join(root, 'src/lib/template-studio/worker.ts'), 'utf8');
 const workerAst = ts.createSourceFile('worker.ts', workerSource, ts.ScriptTarget.Latest, true);
 const workerParts = workerAst.statements.filter(node =>
-  ts.isFunctionDeclaration(node) && ['outputPrompt', 'markTerminal', 'processStudioPromptOnce', 'textFeatureEnabled'].includes(node.name?.text)
+  ts.isFunctionDeclaration(node) && ['outputPrompt', 'markTerminal', 'processStudioPromptOnce', 'textFeatureEnabled', 'multiviewActionReferenceImage'].includes(node.name?.text)
   || ts.isVariableStatement(node) && node.declarationList.declarations.some(item => ['LEASE_MS', 'MUSK_TIMEOUT_MS'].includes(item.name.getText(workerAst))));
 const workerCode = ts.transpileModule(workerParts.map(node => node.getText(workerAst)).join('\n'), {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
 }).outputText;
 const flush = () => new Promise(resolve => setImmediate(resolve));
-async function delayedOrganization(purpose, responseAt) {
+async function delayedOrganization(purpose, responseAt, withImage = false, imageDenied = false) {
   let now = 0, serial = 0, fetches = 0;
   const timers = new Map(), updates = [], requests = [];
   class ClockDate extends Date { constructor(...args) { super(...(args.length ? args : [now])); } static now() { return now; } }
@@ -145,12 +146,17 @@ async function delayedOrganization(purpose, responseAt) {
   const cancel = id => timers.delete(id);
   Object.assign(context, { Date: ClockDate, setTimeout: schedule, clearTimeout: cancel });
   const snapshot = { purpose, llmModel: 'gpt-6.1-terra', input: { values: {}, draftPrompt: '修改后的原动作' },
-    parameters: { duration: 12 }, multiviewAction: { geometry: { panels: 2 } }, assets: [] };
+    parameters: { duration: 12 }, multiviewAction: { geometry: { panels: 2 }, assetId: withImage ? 'current-collage' : '' }, assets: withImage ? [{ assetId: 'current-collage', type: 'image', role: 'reference' }] : [] };
+  const sharp = require(path.join(root, 'node_modules/sharp'));
+  const imageBytes = await sharp({ create: { width: 4, height: 2, channels: 3, background: '#ff8800' } }).png().toBuffer();
   const workerEnv = { exports: {}, Date: ClockDate, MuskApiError: musk.MuskApiError, StudioError: class extends Error {},
-    claimStudioRun: async () => ({ run: { id: 'same-original-run', purpose, owner_user_id: 'owner' }, token: 'lease' }),
+    MULTIVIEW_ACTION_REFERENCE_PURPOSE: 'multiview-action-reference',
+    claimStudioRun: async () => ({ run: { id: 'same-original-run', purpose: withImage ? 'multiview-action-reference' : purpose, owner_user_id: 'owner' }, token: 'lease' }),
     prisma: { user: { findUnique: async () => ({ account_type: 'internal' }) }, platformSetting: { findUnique: async () => ({ value_json: 'true' }) } },
     projectWorkerSessionUser: user => user, requireStudioUser() {}, parseWorkerSnapshot: () => snapshot,
     ensureMultiviewActionSnapshot: async () => {}, ensureStudioSnapshotSourceStillUsable: async () => {}, authorizeStudioAssets: async () => {},
+    getAuthorizedAssetRows: async () => { if (imageDenied) throw new Error('Image no longer authorized'); return [{ asset: { assetId: 'current-collage' }, row: { original_url: '/uploads/current-collage.png' } }]; },
+    readAuthorizedLocalReferenceOriginal: async url => { assert.equal(url, '/uploads/current-collage.png'); return imageBytes; }, sharp,
     TEMPLATE_STUDIO_TEXT_ENABLED_KEY: 'fixture', getMuskApiSettings: async () => settings, isMuskApiReady: musk.isMuskApiReady,
     resolveMuskChatModels: async () => ['gpt-6.1-terra'], isStudioTextModel: () => true,
     privateVideoRunOrigins: () => [], assertPrivateMuskSend() {}, containsPrivateContext: () => false,
@@ -160,6 +166,7 @@ async function delayedOrganization(purpose, responseAt) {
       requests.push(parameters);
       return musk.createMuskChatCompletion({ ...parameters, fetchImpl: async (_url, options) => {
         fetches++;
+        parameters.wire = JSON.parse(options.body);
         return new Promise((resolve, reject) => {
           const timer = schedule(() => resolve(Response.json({ choices: [{ message: { content: JSON.stringify({ prompt: '整理后的新动作' }) } }], model: 'gpt-6.1-terra' })), responseAt);
           options.signal.addEventListener('abort', () => { cancel(timer); reject(options.signal.reason); }, { once: true });
@@ -168,9 +175,12 @@ async function delayedOrganization(purpose, responseAt) {
     },
   };
   vm.runInNewContext(workerCode, workerEnv);
-  const processing = workerEnv.exports.processStudioPromptOnce();
-  await flush();
-  while (timers.size) {
+  let settled = false;
+  const processing = workerEnv.exports.processStudioPromptOnce().finally(() => { settled = true; });
+  for (let steps = 0; !settled; steps++) {
+    assert.ok(steps < 50000, 'worker must settle with bounded virtual time');
+    await flush();
+    if (!timers.size) continue;
     const [id, timer] = [...timers].sort((left, right) => left[1].at - right[1].at)[0];
     timers.delete(id); now = timer.at; timer.callback(); await flush();
   }
@@ -193,6 +203,20 @@ delayed = await delayedOrganization('studio', 60000);
 assert.equal(delayed.elapsed, 45000); assert.equal(delayed.requests[0].timeoutMs, 45000);
 assert.equal(delayed.updates[0].lease_expires_at.getTime(), 90000); assert.equal(delayed.updates.at(-1).status, 'uncertain');
 checks.push('ordinary Studio retains its 45-second deadline and 90-second lease');
+delayed = await delayedOrganization('multiview-action', 1000, true);
+const imageMessage = delayed.requests[0].wire.messages.at(-1).content;
+assert.equal(Array.isArray(imageMessage), true, 'checked reference image must be a real multimodal request');
+assert.equal(imageMessage[0].type, 'text'); assert.equal(JSON.parse(imageMessage[0].text).userPrompt, '修改后的原动作');
+assert.equal(imageMessage[1].type, 'image_url'); assert.match(imageMessage[1].image_url.url, /^data:image\/png;base64,/);
+assert.equal(delayed.updates.at(-1).status, 'succeeded'); assert.equal(delayed.fetches, 1);
+checks.push('checked action sends the authorized current collage pixels with the edited text in one real SDK request');
+delayed = await delayedOrganization('multiview-action', 1000);
+assert.equal(typeof delayed.requests[0].messages.at(-1).content, 'string');
+checks.push('unchecked action remains text-only');
+delayed = await delayedOrganization('multiview-action', 1000, true, true);
+assert.equal(delayed.requests.length, 0); assert.equal(delayed.fetches, 0);
+assert.equal(delayed.updates.at(-1).status, 'failed'); assert.equal(delayed.updates.at(-1).delivery_state, 'not_sent');
+checks.push('image permission loss fails before any model request');
 
 let pollEffect;
 function findPoll(node) {
@@ -215,4 +239,36 @@ for (let tick = 0; tick < 35 && action.env.aiJournalRef.current.current; tick++)
 assert.deepEqual(action.writes, ['修改后整理的新动作'], 'polling must still receive a successful result after 48 seconds');
 assert.equal(action.env.aiJournalRef.current.current, null);
 checks.push('the actual action poll effect receives and applies a 60-second result after editing');
+action = actionHarness({ current: null, retained: [] }, queued);
+action.env.props.onPrepare = async () => { throw new Error('Unchecked must not prepare an image'); };
+await action.env.handlers.organize();
+assert.equal(action.calls[0].body.referenceImage, false);
+assert.equal(action.calls[0].url, '/api/video/multiview/actions/runs');
+checks.push('unchecked action does not prepare or attach a collage');
+action = actionHarness({ current: null, retained: [] }, queued);
+action.env.referenceImage = true;
+let releaseImage, frozenDraft;
+action.env.props.onPrepare = () => new Promise(resolve => { releaseImage = resolve; });
+action.env.saveDraft = async (work, frozen) => { frozenDraft = { work, frozen }; return { id: 'draft', revision: 7 }; };
+const withImage = action.env.handlers.organize();
+await action.env.handlers.organize();
+action.env.input.current = { text: '等待期间另改的动作' }; action.env.editRevision.current++;
+releaseImage({ id: 'current-work', draftRevision: 7 });
+await withImage;
+assert.equal(action.calls.length, 1); assert.equal(action.calls[0].body.referenceImage, true);
+assert.equal(action.calls[0].url, '/api/video/multiview/actions/reference-runs');
+assert.equal(frozenDraft.work.draftRevision, 7); assert.equal(frozenDraft.frozen.text, '保留人工动作');
+action.env.handlers.consumeAi({ id: 'new-run', status: 'succeeded', text: '带参考图的整理', tasks: [] }, action.env.aiJournalRef.current.current);
+assert.equal(action.writes.length, 0); assert.equal(action.suggestions.length, 1);
+checks.push('checked action prepares the current image once, freezes click-time text and preserves edits made during preparation');
+action = actionHarness({ current: { ...original }, retained: [] }, queued);
+action.env.referenceImage = true; action.env.props.onPrepare = async () => { throw new Error('Reference unavailable'); };
+await action.env.handlers.organize();
+assert.equal(action.calls.length, 0); assert.equal(action.env.aiJournalRef.current.current.requestId, original.requestId);
+assert.equal(action.env.aiLock.current, false);
+checks.push('image preparation failure submits nothing and retains the original unknown request');
+action = actionHarness({ current: null, retained: [] }, queued);
+action.env.referenceImage = true; action.env.state.capabilities.referenceImageEnabled = false;
+await action.env.handlers.organize(); assert.equal(action.calls.length, 0);
+checks.push('an older service without image capability cannot silently accept a checked image request');
 console.log(JSON.stringify({ passed: true, checks, isolation: { realFetches: 0, realGeneration: 0, browserRuns: 0, productionWrites: 0, productionDatabaseOpened: false } }));

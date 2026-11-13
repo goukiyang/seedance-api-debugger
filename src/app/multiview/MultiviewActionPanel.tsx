@@ -47,6 +47,7 @@ export function MultiviewActionPanel(props: Props) {
   const { confirm, productDialog } = useProductDialog({ placement: 'center' });
   const [state,setState]=useState<MultiviewActionState|null>(null),[draft,setDraft]=useState<MultiviewActionDraft|null>(null);
   const [text,setText]=useState('');
+  const [referenceImage,setReferenceImage]=useState(false);
   const [parameters,setParameters]=useState<MultiviewActionParameters>({provider:'seedance',model:DEFAULT_SEEDANCE_VIDEO_MODEL_ID,duration:12,resolution:'720p',ratio:props.ratio,project_id:props.videoDefaults?.projectId||props.work?.projectId||'',video_card_id:props.videoDefaults?.videoCardId||props.work?.videoCardId||null});
   const [projects,setProjects]=useState<Array<{id:string;name:string}>>([]),[cards,setCards]=useState<Array<{id:string;title:string}>>([]);
   const [hydrated,setHydrated]=useState(false),[saving,setSaving]=useState(false),[draftBlocked,setDraftBlocked]=useState(false);
@@ -115,11 +116,11 @@ export function MultiviewActionPanel(props: Props) {
     if(adopt){setDraft(value.draft);draftRef.current=value.draft;if(value.draft){setText(value.draft.text);setParameters({...value.draft.parameters,ratio:props.ratio});saved.current=JSON.stringify([value.draft.text,value.draft.parameters,props.work.draftRevision]);}setHydrated(true);}
   }
   useEffect(()=>{
-    setState(null);setDraft(null);draftRef.current=null;setText('');setQuote(null);setHydrated(false);setOriginal(null);setMessage('');setAiJournal({current:null,retained:[]});aiJournalRef.current={current:null,retained:[]};saved.current='';
+    setState(null);setDraft(null);draftRef.current=null;setText('');setReferenceImage(false);setQuote(null);setHydrated(false);setOriginal(null);setMessage('');setAiJournal({current:null,retained:[]});aiJournalRef.current={current:null,retained:[]};saved.current='';
     const captured=scope;let cancelled=false;
     if(!props.work)return;
     setParameters(value=>({...value,ratio:props.ratio,project_id:props.videoDefaults?.projectId||props.work?.projectId||'',video_card_id:props.videoDefaults?.videoCardId||props.work?.videoCardId||null}));
-    void (async()=>{try{await refresh(true);if(cancelled||!active(captured))return;const local=localStorage.getItem(requestKey+':input');if(local){const value=JSON.parse(local);if(typeof value.text==='string'&&value.parameters&&typeof value.parameters==='object'){setText(value.text);setParameters({...value.parameters,ratio:props.ratio});}}const attempt=localStorage.getItem(attemptKey);if(attempt){const value=JSON.parse(attempt);if(value.id==='initial'||/^[a-f0-9-]{36}$/i.test(value.id)){setAttemptId(value.id);setNewAttemptRequired(value.needsNew===true);}}const old=localStorage.getItem(requestKey);if(old){const value=JSON.parse(old);if(typeof value.key!=='string'||typeof value.runId!=='string')throw new Error('原视频请求记录无法确认，请保留页面。');setOriginal(value);setSelectedRunId(value.runId);}const ai=localStorage.getItem(aiKey)||localStorage.getItem(legacyAiKey);if(ai){const value=JSON.parse(ai);const journal:AiJournal=typeof value.requestId==='string'?{current:value,retained:[]}:value;
+    void (async()=>{try{await refresh(true);if(cancelled||!active(captured))return;const local=localStorage.getItem(requestKey+':input');if(local){const value=JSON.parse(local);if(typeof value.text==='string'&&value.parameters&&typeof value.parameters==='object'){setText(value.text);setReferenceImage(value.referenceImage===true);setParameters({...value.parameters,ratio:props.ratio});}}const attempt=localStorage.getItem(attemptKey);if(attempt){const value=JSON.parse(attempt);if(value.id==='initial'||/^[a-f0-9-]{36}$/i.test(value.id)){setAttemptId(value.id);setNewAttemptRequired(value.needsNew===true);}}const old=localStorage.getItem(requestKey);if(old){const value=JSON.parse(old);if(typeof value.key!=='string'||typeof value.runId!=='string')throw new Error('原视频请求记录无法确认，请保留页面。');setOriginal(value);setSelectedRunId(value.runId);}const ai=localStorage.getItem(aiKey)||localStorage.getItem(legacyAiKey);if(ai){const value=JSON.parse(ai);const journal:AiJournal=typeof value.requestId==='string'?{current:value,retained:[]}:value;
       if(!journal||!Array.isArray(journal.retained)||[journal.current,...journal.retained].some(item=>item!==null&&(!item||typeof item.requestId!=='string'||item.runId!==undefined&&typeof item.runId!=='string')))throw new Error('原文案请求记录无法确认。');
       const restored={current:journal.current?{...journal.current,edit:-1}:null,retained:journal.retained.map(item=>({...item,edit:-1}))};aiJournalRef.current=restored;setAiJournal(restored);}}catch(cause){if(active(captured)){setDraftBlocked(true);setMessage(cause instanceof Error?cause.message:'草稿暂不可恢复。');}}})();
     return()=>{cancelled=true;};
@@ -128,21 +129,21 @@ export function MultiviewActionPanel(props: Props) {
   useEffect(()=>{if(!hydrated)return;setParameters(value=>value.ratio===props.ratio?value:{...value,ratio:props.ratio});},[props.ratio,hydrated]);
   useEffect(()=>{
     if(!hydrated)return;
-    try{localStorage.setItem(requestKey+':input',JSON.stringify({text,parameters}));}
+    try{localStorage.setItem(requestKey+':input',JSON.stringify({text,parameters,referenceImage}));}
     catch{setDraftBlocked(true);setMessage('当前动作暂不能在本机保留，请保留页面。');}
-  },[hydrated,requestKey,text,parameters]);
+  },[hydrated,requestKey,text,parameters,referenceImage]);
   useEffect(()=>{const captured=scope;void api<{projects:Array<{id:string;name:string}>}>('/api/projects?lite=true').then(value=>{if(active(captured))setProjects(value.projects||[]);}).catch(()=>undefined);},[scope,api,active, projectCatalogRevision]);
   useEffect(()=>{setCards([]);if(!parameters.project_id)return;const captured=scope;void api<{cards?:Array<{id:string;title:string}>;videoCards?:Array<{id:string;title:string}>}>(`/api/projects/${encodeURIComponent(parameters.project_id)}/video-cards`).then(value=>{if(active(captured))setCards(value.cards||value.videoCards||[]);}).catch(()=>undefined);},[scope,parameters.project_id,api,active]);
-  async function saveDraft(){
-    if(!props.work||!hydrated||saveLock.current||draftBlocked)return null;
-    if(saved.current===content&&draftRef.current)return draftRef.current;
-    const captured=scope,frozen=input.current,revision=draftRef.current?.revision||0,signature=JSON.stringify([frozen.text,frozen.parameters,props.work.draftRevision]);
+  async function saveDraft(work=workRef.current,frozen=input.current){
+    if(!work||!hydrated||saveLock.current||draftBlocked)return null;
+    const captured=scope,revision=draftRef.current?.revision||0,signature=JSON.stringify([frozen.text,frozen.parameters,work.draftRevision]);
+    if(saved.current===signature&&draftRef.current)return draftRef.current;
     saveLock.current=true;setSaving(true);
-    try{const result=await api<{draft:MultiviewActionDraft}>('/api/video/multiview/actions/drafts',{workId:props.work.id,draftId:draftRef.current?.id,revision,text:frozen.text,parameters:frozen.parameters});if(!active(captured))return null;setDraft(result.draft);draftRef.current=result.draft;saved.current=signature;return result.draft;}
+    try{const result=await api<{draft:MultiviewActionDraft}>('/api/video/multiview/actions/drafts',{workId:work.id,draftId:draftRef.current?.id,revision,text:frozen.text,parameters:frozen.parameters});if(!active(captured))return null;setDraft(result.draft);draftRef.current=result.draft;saved.current=signature;return result.draft;}
     catch(cause){if(active(captured)){setDraftBlocked(true);setMessage(cause instanceof Error?cause.message:'动作保存未完成，当前输入保留。');}return null;}
     finally{saveLock.current=false;if(active(captured))setSaving(false);}
   }
-  useEffect(()=>{if(!hydrated||draftBlocked||saving||submitting||saved.current===content)return;const timer=setTimeout(()=>void saveDraft(),550);return()=>clearTimeout(timer);});
+  useEffect(()=>{if(!hydrated||draftBlocked||saving||submitting||aiBusy||saved.current===content)return;const timer=setTimeout(()=>void saveDraft(),550);return()=>clearTimeout(timer);});
   useEffect(()=>{
     if(newAttemptRequired||!hydrated||!text.trim()||!parameters.project_id||!state?.capabilities.actionReady||original&&!original.taskId){setQuote(null);return;}
     const captured=scope,key=quoteKey;let cancelled=false;setQuoting(true);setQuoteError('');
@@ -155,21 +156,26 @@ export function MultiviewActionPanel(props: Props) {
     return()=>{cancelled=true;clearTimeout(timer);};
   },[quoteKey,quoteRetry,hydrated,content,text,parameters,state?.capabilities.actionReady,newAttemptRequired,original?.key,original?.taskId,scope,active,api]);
   async function organize(){
-    if(aiLock.current||aiPending&&aiPending.status!=='uncertain'||!state?.capabilities.llmEnabled||!llmReady||!text.trim())return;
+    if(aiLock.current||aiPending&&aiPending.status!=='uncertain'||!state?.capabilities.llmEnabled||referenceImage&&!state.capabilities.referenceImageEnabled||!llmReady||!text.trim())return;
     if(aiPending&&!await confirm('原文案结果仍未确认，原记录会保留，不会重发。继续将用当前所选模型新建一次整理，上游文字费用由平台承担。', {title:'新建一次动作整理',confirmLabel:'新建整理'}))return;
     rememberModel(llmModel);
-    const sourceEdit=editRevision.current,savedDraft=await saveDraft();if(!savedDraft)return;
-    const pending:AiRequest={requestId:crypto.randomUUID(),edit:sourceEdit,model:llmModel};aiLock.current=true;setAiBusy(true);setMessage('');
+    const sourceEdit=editRevision.current,frozen=input.current,withReference=referenceImage,captured=scope;
+    aiLock.current=true;setAiBusy(true);setMessage('');
     let retained=false;
     try{
+      let preparedWork=workRef.current;
+      if(withReference){setMessage('正在准备当前参考拼图…');preparedWork=await props.onPrepare();if(!active(captured))return;}
+      const savedDraft=await saveDraft(preparedWork,frozen);if(!savedDraft||!active(captured))return;
+      const pending:AiRequest={requestId:crypto.randomUUID(),edit:sourceEdit,model:llmModel};
       const previous=aiJournalRef.current;
       keepAiJournal({current:pending,retained:previous.current?[...previous.retained,previous.current]:previous.retained});retained=true;
-      const value=await api<{run:MultiviewActionRun}>('/api/video/multiview/actions/runs',{draftId:savedDraft.id,revision:savedDraft.revision,requestId:pending.requestId,llmModel});if(active())consumeAi(value.run,pending);
-    }catch(cause){if(active()){
-      if((cause as {result?:{details?:{notAccepted?:boolean}}})?.result?.details?.notAccepted===true){keepAiJournal({...aiJournalRef.current,current:null});setMessage(cause instanceof Error?cause.message:'本次整理未受理，原动作保留。');}
-      else setMessage(retained?'文案提交结果待确认，请查询原请求。':'原文案记录未能在本机保留，尚未提交；请保留页面。');
+      const value=await api<{run:MultiviewActionRun}>(withReference?'/api/video/multiview/actions/reference-runs':'/api/video/multiview/actions/runs',{draftId:savedDraft.id,revision:savedDraft.revision,requestId:pending.requestId,llmModel,referenceImage:withReference});if(active(captured))consumeAi(value.run,pending);
+    }catch(cause){if(active(captured)){
+      if(!retained)setMessage(cause instanceof Error?cause.message:'参考拼图未能准备，尚未提交整理；当前输入保留。');
+      else if((cause as {result?:{details?:{notAccepted?:boolean}}})?.result?.details?.notAccepted===true){keepAiJournal({...aiJournalRef.current,current:null});setMessage(cause instanceof Error?cause.message:'本次整理未受理，原动作保留。');}
+      else setMessage('文案提交结果待确认，请查询原请求。');
     }}
-    finally{aiLock.current=false;setAiBusy(false);}
+    finally{aiLock.current=false;if(active(captured))setAiBusy(false);}
   }
   function consumeAi(run:MultiviewActionRun,pending:AiRequest){
     const journal=aiJournalRef.current,isCurrent=journal.current?.requestId===pending.requestId;
@@ -255,8 +261,10 @@ export function MultiviewActionPanel(props: Props) {
       {showVideo && <details><summary>动作生成记录</summary><div className={styles.history}>{state?.runs.filter(run => run.tasks.length).map(run => <button type="button" key={run.id} aria-pressed={selectedRunId === run.id} onClick={() => setSelectedRunId(run.id)}>{seedanceVideoModelLabel(run.parameters.model)} · <RelativeTime value={run.createdAt} /></button>)}{state?.nextCursor && <button type="button" onClick={() => void refresh(false, state.nextCursor!)}>加载更多</button>}</div></details>}
       {showVideo&&selectedRun?<><p className={styles.frozenText}>{selectedRun.text}</p><p className={styles.notice}>{seedanceVideoModelLabel(selectedRun.parameters.model)} · {selectedRun.parameters.duration} 秒 · {selectedRun.parameters.resolution}</p><button onClick={()=>{if(!newAttempt())return;updateText(selectedRun.text||'');setParameters(selectedRun.parameters);props.onView('reference');}}>修改动作再做</button></>:<>
         <textarea aria-label="动作" placeholder="例如：原地挥拳三次，从轻到重。" maxLength={12000} value={text} disabled={!hydrated} onChange={event=>updateText(event.target.value)}/>
+        <label className={styles.aiReference}><input type="checkbox" checked={referenceImage} disabled={!hydrated||aiBusy} onChange={event=>setReferenceImage(event.target.checked)}/>让 GPT 参考当前拼图</label>
+        {referenceImage&&state&&!state.capabilities.referenceImageEnabled&&<p className={styles.notice}>当前服务暂不支持图片参考，可取消勾选继续文字整理。</p>}
         <div className={styles.aiControls}>
-          <button type="button" disabled={!state?.capabilities.llmEnabled||!llmReady||!text.trim()||aiBusy||Boolean(aiPending&&aiPending.status!=='uncertain')||saving||draftBlocked} onClick={()=>void organize()}>{aiBusy?'正在提交…':aiPending?.status==='uncertain'?'新建一次整理':aiPending?(aiPending.runId?'正在整理…':'提交结果待确认'):'AI整理动作'}</button>
+          <button type="button" disabled={!state?.capabilities.llmEnabled||referenceImage&&!state.capabilities.referenceImageEnabled||!llmReady||!text.trim()||aiBusy||Boolean(aiPending&&aiPending.status!=='uncertain')||saving||draftBlocked} onClick={()=>void organize()}>{aiBusy?'正在提交…':aiPending?.status==='uncertain'?'新建一次整理':aiPending?(aiPending.runId?'正在整理…':'提交结果待确认'):'AI整理动作'}</button>
           <div className={styles.modelPicker}><select aria-label="文案模型" value={llmReady?llmModel:''} onChange={event=>rememberModel(event.target.value)}><option value="" disabled>{modelsBusy&&!llmModels.length?'正在读取模型…':modelAvailabilityReason||'请选择可用文案模型'}</option>{modelOptions.map(model=><option key={model.id} value={model.id}>{model.label}</option>)}</select><button type="button" disabled={modelsBusy} aria-busy={modelsBusy} onClick={()=>{void loadModels(true);void refreshAvailability();}}><RefreshCw size={15}/>{modelsBusy?'更新中…':'更新'}</button></div>
           {beforeAi!==null&&<button onClick={()=>{updateText(beforeAi);setAppliedRunId(undefined);setBeforeAi(null);}}>撤销整理</button>}
         </div>

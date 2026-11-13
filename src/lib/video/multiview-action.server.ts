@@ -25,7 +25,7 @@ import { ensureMultiviewReferenceAsset, readMultiviewReferenceBinding } from './
 import { privateMultiviewFailure } from './multiview-task-privacy';
 import { multiviewActionContextMetadata, readMultiviewActionContext, multiviewActionContextOrigins } from './multiview-action-context.server';
 import { MULTIVIEW_ACTION_ENABLED } from './multiview-action-capability';
-import { MULTIVIEW_ACTION_PURPOSE, parseMultiviewActionBinding, type MultiviewActionBinding, type MultiviewActionDraft, type MultiviewActionParameters,
+import { MULTIVIEW_ACTION_PURPOSE, MULTIVIEW_ACTION_REFERENCE_PURPOSE, parseMultiviewActionBinding, type MultiviewActionBinding, type MultiviewActionDraft, type MultiviewActionParameters,
   type MultiviewActionRun, type MultiviewActionCapabilities, type MultiviewActionState } from './multiview-action-contract';
 
 type Db = Prisma.TransactionClient;
@@ -35,6 +35,7 @@ const invalid = (message: string) => new StudioError(message, 400, 'INVALID');
 const conflict = (message: string) => new StudioError(message, 409, 'CONFLICT');
 const notFound = () => new StudioError('动作记录不存在或无权访问', 404, 'NOT_FOUND');
 const purpose = MULTIVIEW_ACTION_PURPOSE;
+const runPurposes = [purpose, MULTIVIEW_ACTION_REFERENCE_PURPOSE];
 const identifier = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(value);
 function object(value: unknown): value is Record<string, unknown> { return Boolean(value && typeof value === 'object' && !Array.isArray(value)); }
 function actionText(value: unknown, required = false) {
@@ -68,7 +69,7 @@ function draftDto(row: DraftRow): MultiviewActionDraft {
 }
 function snapshot(row: RunRow) {
   const value = transformPrivateVideoRun(JSON.parse(row.snapshot_json) as StudioRunSnapshot, row.id, row.draft_id, false);
-  if (row.purpose !== purpose || value.purpose !== purpose || !value.multiviewAction || !['format', 'final'].includes(value.multiviewAction.stage)) throw conflict('动作快照用途不一致');
+  if (!runPurposes.includes(row.purpose) || value.purpose !== purpose || !value.multiviewAction || !['format', 'final'].includes(value.multiviewAction.stage)) throw conflict('动作快照用途不一致');
   return value;
 }
 async function runDto(row: RunRow, db: Db = prisma): Promise<MultiviewActionRun> {
@@ -97,7 +98,7 @@ export async function getMultiviewActionCapabilities(user: SessionUser): Promise
   try {
     const [format, sync] = await Promise.all([multiviewActionContextMetadata(user, 'format'), multiviewActionContextMetadata(user, 'sync')]);
     const ready = format.configured && sync.configured && MULTIVIEW_ACTION_ENABLED && process.env.MULTIVIEW_ACTION_ACCEPTING !== '0';
-    return { ...capabilities, actionReady: ready, actionReason: ready ? null : (!MULTIVIEW_ACTION_ENABLED || process.env.MULTIVIEW_ACTION_ACCEPTING === '0') ? '同步动作暂不接受新任务，原任务仍可查看' : '固定规则尚未配置，请联系管理员', rules: { format, sync } };
+    return { ...capabilities, referenceImageEnabled: true, actionReady: ready, actionReason: ready ? null : (!MULTIVIEW_ACTION_ENABLED || process.env.MULTIVIEW_ACTION_ACCEPTING === '0') ? '同步动作暂不接受新任务，原任务仍可查看' : '固定规则尚未配置，请联系管理员', rules: { format, sync } };
   } catch {
     return { ...capabilities, actionReady: false, actionReason: '私密规则暂不可用，请联系管理员',
       rules: { format: { configured: false, revision: 0, canEdit: false }, sync: { configured: false, revision: 0, canEdit: false } } };
@@ -109,7 +110,7 @@ export async function getMultiviewActionState(user: SessionUser, workId: string,
   if (!work.recipe || work.recipe.schema !== 3) throw conflict('这不是视频参考拼图');
   const parsed = parseCursor(cursor);
   const draft = await prisma.videoStudioDraft.findFirst({ where: { id: draftIdentity(user, workId), owner_user_id: user.id, purpose } });
-  const rows = draft ? await prisma.videoStudioRun.findMany({ where: { draft_id: draft.id, owner_user_id: user.id, purpose,
+  const rows = draft ? await prisma.videoStudioRun.findMany({ where: { draft_id: draft.id, owner_user_id: user.id, purpose: { in: runPurposes },
     ...(parsed ? { OR: [{ created_at: { lt: parsed.date } }, { created_at: parsed.date, id: { lt: parsed.id } }] } : {}) },
     orderBy: [{ created_at: 'desc' }, { id: 'desc' }], take: 13 }) : [];
   const page = rows.slice(0, 12), last = page.at(-1);
@@ -161,18 +162,22 @@ function baseSnapshot(user: SessionUser, draft: DraftRow, prompt: string, parame
     templateVersion: null, recipe: null, prompt, parameters: { ...parameters }, assets: [],
     owner: { userId: user.id, username: user.username, displayName: user.name || user.username, avatarUrl: user.avatar_url || null, accountType: user.account_type } };
 }
-export async function createMultiviewActionRun(user: SessionUser, input: unknown) {
+export async function createMultiviewActionRun(user: SessionUser, input: unknown, referenceRoute = false) {
   let admitted = false;
   try {
     requireStudioUser(user);
     if (!object(input) || !identifier(input.draftId) || !Number.isSafeInteger(input.revision) || typeof input.requestId !== 'string'
-      || !/^[A-Za-z0-9:_-]{1,96}$/.test(input.requestId) || input.llmModel !== undefined && (typeof input.llmModel !== 'string' || !input.llmModel || input.llmModel.length > 100)) throw invalid('文案请求无效');
+      || !/^[A-Za-z0-9:_-]{1,96}$/.test(input.requestId) || input.llmModel !== undefined && (typeof input.llmModel !== 'string' || !input.llmModel || input.llmModel.length > 100)
+      || input.referenceImage !== undefined && typeof input.referenceImage !== 'boolean') throw invalid('文案请求无效');
+    if ((input.referenceImage === true) !== referenceRoute) throw invalid('图片参考须从本次图文整理入口提交');
+    const requestPurpose = referenceRoute ? MULTIVIEW_ACTION_REFERENCE_PURPOSE : purpose;
     const requestId = `mv-action:${input.requestId}`;
     const prior = await prisma.videoStudioRun.findUnique({ where: { owner_user_id_request_id: { owner_user_id: user.id, request_id: requestId } } });
     if (prior) {
       admitted = true;
-      if (prior.purpose !== purpose || prior.draft_id !== input.draftId || prior.draft_revision !== input.revision || prior.mode !== 'llm'
-        || input.llmModel !== undefined && snapshot(prior).llmModel !== input.llmModel) throw conflict('原请求编号已用于另一份动作，请查看原记录');
+      if (prior.purpose !== requestPurpose || prior.draft_id !== input.draftId || prior.draft_revision !== input.revision || prior.mode !== 'llm'
+        || input.llmModel !== undefined && snapshot(prior).llmModel !== input.llmModel
+        || Boolean(snapshot(prior).multiviewAction?.assetId) !== (input.referenceImage === true)) throw conflict('原请求编号已用于另一份动作，请查看原记录');
       return { run: await runDto(prior), status: 200 };
     }
     const draft = await ownedDraft(user, input.draftId, input.revision), parsed = draftDto(draft);
@@ -189,6 +194,11 @@ export async function createMultiviewActionRun(user: SessionUser, input: unknown
     value.llmModel = model;
     value.multiviewAction = { stage: 'format', workId: work.id, revision: work.draftRevision, recipeHash: multiviewWorkRecipeHash(work.recipe!), outputHash: '',
       sourceTaskId: work.sourceTaskId, sourceVersion: work.recipe!.sourceVersion, geometry: workGeometry(work.recipe! as Parameters<typeof workGeometry>[0]), assetId: '', formatRevision: format.revision, syncRevision: 0 };
+    if (input.referenceImage === true) {
+      const reference = await ensureMultiviewReferenceAsset(user, work.id, parsed.workRevision);
+      value.multiviewAction = { ...value.multiviewAction, revision: parsed.workRevision, ...reference, geometry: workGeometry(reference.geometry) };
+      value.assets = [{ assetId: reference.assetId, type: 'image', role: 'reference' }];
+    }
     if (text.length + format.context.length > TEMPLATE_STUDIO_LIMITS.llmInput) throw invalid('动作和固定规则合计过长');
     const settings = { ...await getMuskApiSettings(), default_model: value.llmModel };
     const origins = privateVideoRunOrigins(value, draft.id);
@@ -199,12 +209,17 @@ export async function createMultiviewActionRun(user: SessionUser, input: unknown
       const existing = await tx.videoStudioRun.findUnique({ where: { owner_user_id_request_id: { owner_user_id: user.id, request_id: requestId } } });
       if (existing) {
         admitted = true;
-        if (existing.purpose !== purpose || existing.draft_id !== draft.id || existing.draft_revision !== draft.revision || existing.mode !== 'llm' || snapshot(existing).llmModel !== value.llmModel) throw conflict('原请求编号已使用');
+        if (existing.purpose !== requestPurpose || existing.draft_id !== draft.id || existing.draft_revision !== draft.revision || existing.mode !== 'llm' || snapshot(existing).llmModel !== value.llmModel
+          || Boolean(snapshot(existing).multiviewAction?.assetId) !== (input.referenceImage === true)) throw conflict('原请求编号已使用');
         return existing;
       }
       await assertSupplementaryModelEnabled('text', value.llmModel!, tx);
       const current = await tx.videoStudioDraft.findFirst({ where: { id: draft.id, owner_user_id: user.id, purpose, revision: draft.revision } });
       if (!current) throw conflict('动作已变化，请重新保存');
+      if (input.referenceImage === true) {
+        const fresh = await readMultiviewReferenceBinding(user, work.id, parsed.workRevision, tx);
+        if (fresh.assetId !== value.multiviewAction!.assetId || fresh.recipeHash !== value.multiviewAction!.recipeHash || fresh.outputHash !== value.multiviewAction!.outputHash) throw conflict('参考拼图已变化，请重新准备');
+      }
       const [active, pending, accepted] = await Promise.all([
         tx.videoStudioRun.count({ where: { owner_user_id: user.id, mode: 'llm', status: { in: ['queued', 'running'] } } }),
         tx.videoStudioRun.count({ where: { mode: 'llm', status: { in: ['queued', 'running'] } } }),
@@ -213,7 +228,7 @@ export async function createMultiviewActionRun(user: SessionUser, input: unknown
       if (active >= TEMPLATE_STUDIO_LIMITS.activeLlmRunsPerUser || pending >= TEMPLATE_STUDIO_LIMITS.maxPendingLlmRuns || accepted >= TEMPLATE_STUDIO_LIMITS.llmRequestsPerUserWindow) throw new StudioError('AI 整理提交较频繁，请稍后再试', 429, 'RATE_LIMITED');
       const id = randomUUID();
       await assertUsageProject(tx, user, parsed.parameters.project_id || null);
-      const created = await tx.videoStudioRun.create({ data: { id, owner_user_id: user.id, purpose, draft_id: draft.id, draft_revision: draft.revision, request_id: requestId,
+      const created = await tx.videoStudioRun.create({ data: { id, owner_user_id: user.id, purpose: requestPurpose, draft_id: draft.id, draft_revision: draft.revision, request_id: requestId,
         request_fingerprint: fingerprint, source: 'blank', mode: 'llm', status: 'queued', delivery_state: 'not_sent', model: value.llmModel,
         snapshot_json: JSON.stringify(transformPrivateVideoRun(value, id, draft.id, true)) } });
       await recordUsageAttribution(tx, { sourceKind: 'video_studio_run', sourceId: id, actorUserId: user.id, ownerUserId: user.id, billingSubjectType: 'user', billingSubjectId: user.id,
@@ -229,7 +244,7 @@ export async function createMultiviewActionRun(user: SessionUser, input: unknown
 }
 export async function getMultiviewActionRun(user: SessionUser, id: string) {
   requireStudioUser(user);
-  const row = await prisma.videoStudioRun.findFirst({ where: { owner_user_id: user.id, purpose, OR: [{ id }, { request_id: `mv-action:${id}` }] } });
+  const row = await prisma.videoStudioRun.findFirst({ where: { owner_user_id: user.id, purpose: { in: runPurposes }, OR: [{ id }, { request_id: `mv-action:${id}` }] } });
   if (!row) throw notFound();
   return runDto(row);
 }
@@ -259,7 +274,7 @@ export async function finalizeMultiviewAction(user: SessionUser, input: unknown)
   let sourceRunId: string | undefined;
   if (input.sourceRunId !== undefined && input.sourceRunId !== null) {
     if (!identifier(input.sourceRunId)) throw invalid('原文案记录无效');
-    const source = await prisma.videoStudioRun.findFirst({ where: { id: input.sourceRunId, owner_user_id: user.id, purpose, draft_id: draft.id, status: 'succeeded' } });
+    const source = await prisma.videoStudioRun.findFirst({ where: { id: input.sourceRunId, owner_user_id: user.id, purpose: { in: runPurposes }, draft_id: draft.id, status: 'succeeded' } });
     if (!source) throw conflict('原文案记录不可用，动作文字仍保留');
     sourceRunId = source.id;
   }
