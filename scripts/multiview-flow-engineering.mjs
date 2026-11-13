@@ -127,4 +127,12 @@ const originalMode={referenceEditor:{scope:'source-scope',slots,restored:{taskId
 vm.runInNewContext(functions('src/app/multiview/page.tsx',['changeOriginal','returnToAction']),originalMode);
 originalMode.actual.changeOriginal({text:'保留这个修改',parameters});assert.equal(originalMode.carriedAction.input.text,'保留这个修改');assert.equal(originalMode.originalEditing,true);assert.ok(originalMode.pickerRequested>0);checks.push('changing the original image opens the existing picker and retains action input without requiring an old rotation recipe');
 originalMode.referenceMounted=false;originalMode.actual.returnToAction();assert.equal(originalMode.location.taskId,'rotation');assert.equal(originalMode.editor.carry.text,'保留这个修改');assert.equal(originalMode.work.id,'bound-work');assert.equal(new URL(originalMode.returnUrl,'https://fixture.invalid').searchParams.get('workId'),'bound-work');checks.push('returning after an original-image change restores the same draft and media source route without generation');
+const preferenceRead=effects.find(value=>value.includes('const preference=localStorage.getItem(referencePreferenceKey)'));
+const preferenceWrite=effects.find(value=>value.includes('localStorage.setItem(referencePreferenceKey'));
+assert.ok(preferenceRead&&preferenceWrite);
+const preferenceStorage=new Map([['work-input',{referenceImage:true}]]),preferences={hydrated:true,props:{work:{id:'work'}},referencePreferenceKey:'work-preference',requestKey:'work',referencePreferenceReady:'',referenceImage:false,
+  localStorage:{getItem:key=>key==='work:input'?JSON.stringify(preferenceStorage.get('work-input')):preferenceStorage.get(key)||null,setItem:(key,value)=>preferenceStorage.set(key,value)},
+  setReferenceImage:value=>{preferences.referenceImage=value;},setReferencePreferenceReady:value=>{preferences.referencePreferenceReady=value;},setMessage(){}};
+vm.runInNewContext('globalThis.readPreference='+preferenceRead+';globalThis.writePreference='+preferenceWrite,preferences);
+preferences.writePreference();assert.equal(preferenceStorage.has('work-preference'),false);preferences.readPreference();preferences.writePreference();assert.equal(preferenceStorage.get('work-preference'),'true');checks.push('image-reference preference survives video restoration without editing text or overwriting it with an initial default');
 console.log(JSON.stringify({passed:true,checks,isolation:{realFetches:0,productionWrites:0,generationCalls:0,browserAcceptance:'manual-pending'}}));

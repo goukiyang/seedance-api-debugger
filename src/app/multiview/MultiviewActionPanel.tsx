@@ -98,6 +98,15 @@ export function MultiviewActionPanel(props: Props) {
   const modelOptions=llmModels.filter(model=>modelAvailable('text',model.id));
   const llmReady=modelOptions.some(model=>model.id===llmModel);
   const [viewOnly,setViewOnly]=useState(false);
+  const referencePreferenceKey=requestKey+':reference-image';
+  const [referencePreferenceReady,setReferencePreferenceReady]=useState('');
+  useEffect(()=>{
+    if(!hydrated||!props.work)return;
+    try{const preference=localStorage.getItem(referencePreferenceKey);const legacy=localStorage.getItem(requestKey+':input');setReferenceImage(preference===null?(legacy?JSON.parse(legacy).referenceImage===true:false):preference==='true');}
+    catch{setMessage('图片参考选择未能恢复，可以重新勾选；原动作保留。');}
+    setReferencePreferenceReady(referencePreferenceKey);
+  },[hydrated,referencePreferenceKey,requestKey,props.work]);
+  useEffect(()=>{if(referencePreferenceReady!==referencePreferenceKey)return;try{localStorage.setItem(referencePreferenceKey,String(referenceImage));}catch{setMessage('图片参考选择暂不能记住，当前仍可使用。');}},[referencePreferenceReady,referencePreferenceKey,referenceImage]);
   const [videoDraft,setVideoDraft]=useState<{text:string;parameters:MultiviewActionParameters;referenceImage?:boolean}|null>(null);
   const videoInputKey=props.restored ? `sd2:multiview-action-video-input:v1:${props.ownerId}:${props.restored.taskId}` : requestKey+':input';
   const restoredInput=useRef('');
@@ -108,7 +117,7 @@ export function MultiviewActionPanel(props: Props) {
     restoredInput.current=props.restored.taskId;
     try { const raw=localStorage.getItem(videoInputKey); if(raw){const previous=JSON.parse(raw);if(parseMultiviewActionInput(previous)&&JSON.stringify([previous.text,previous.parameters])!==JSON.stringify([props.restored.text,props.restored.parameters]))setVideoDraft(previous);} }
     catch {setDraftBlocked(true);setMessage('该版修改草稿暂不可读取，当前输入保留。');return;}
-    updateText(props.initialInput?.text??props.restored.text);setParameters(props.initialInput?{...props.initialInput.parameters,ratio:props.ratio}:props.restored.parameters);setAppliedRunId(undefined);setSuggestion(null);setBeforeAi(null);setReferenceImage(false);
+    updateText(props.initialInput?.text??props.restored.text);setParameters(props.initialInput?{...props.initialInput.parameters,ratio:props.ratio}:props.restored.parameters);setAppliedRunId(undefined);setSuggestion(null);setBeforeAi(null);
   },[hydrated,props.restored,videoInputKey]);
   const content=JSON.stringify([text,parameters,props.work?.draftRevision]);
   const quoteKey=JSON.stringify([scope,content,props.snapshotKey,state?.capabilities.rules.sync.revision,state?.capabilities.rules.format.revision,appliedRunId,attemptId]);
