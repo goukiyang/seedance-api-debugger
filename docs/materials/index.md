@@ -11,7 +11,7 @@ CCCC-DEBATE01同目录新增私有`cccc-debate01/`：2卡/2份真实Claude意见
 
 CC-DISCUSS01同目录新增私有cc-discuss01/：两轮合作讨论的卡/真实CC意见/审计6份、2份结果JSON/2份wrapper日志共10份原件，另存summary与16源码指纹。两轮wrapper0、同HEAD同Git状态，原件SHA/0700/0600可核；推荐分阶段执行/发布隔离、暂不分库，普通/H3与Ark合同、原号/原图/权限/账务和回退边界详原单CC-DISCUSS01。运行事实仍待后续核，不冒称新线上故障；无代码、测试、生产或部署改动。
 
-STAB01新增同目录私有stab01/local-engineering.private.json，保31项工程、6项源码SHA及本机旧Prisma客户端类型缺口；代码已聚焦推送并交统一无感候选验证，尚未部署。执行/运行核查/保护边界维护同一原单STAB01，不把候选或工程当功能验收。
+STAB01最终原证沿同目录私有stab01/candidate与deployed：6份候选、4份部署原件和审查摘要0600/0700可核，实际55feb1a13/v14813/I3oEN、31工程、完整types/Next、8阶段complete及价格/权限/无DB恢复保护有证；源与源码/回调整合差异经复核。原单STAB01已收口“已部署，待用户手验”，本机旧client与离线输出权限原失败保留，不当生产故障；无新真实生成/浏览器功能验收。
 <!-- /FB-PULL-20261112-MATERIALS -->
 
 <!-- ARK-CHARACTER-ASSET01-MATERIALS-20261111 -->
