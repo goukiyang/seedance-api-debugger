@@ -62,9 +62,22 @@ export function verifyShadowStart(file, unit, { io = fs, cwd = process.cwd(), ui
       assert.ok(io.lstatSync(absolute).isFile()); assert.equal(hash(io.readFileSync(absolute)), expected);
     }
   }
-  for (const [input, expected] of Object.entries(a.privateFiles)) assert.equal(hash(bytes(input)), expected);
+  for (const [input, expected] of Object.entries(a.privateFiles)) assert.equal(hash(privateDataBytes(input, a.serviceUid, io)), expected);
   return { schema: 'sd2-seamless-start-verified.v1', unit, source: a.entry.source, build: a.entry.build,
     originalBarrierVerified: true, sourceAndBuildVerified: true, permanentMembershipExpanded: false };
+}
+
+export function privateDataBytes(file, uid, io = fs) {
+  assert.equal(io.realpathSync(file), file);
+  const fd = io.openSync(file, io.constants.O_RDONLY | io.constants.O_NOFOLLOW);
+  try {
+    const before = io.fstatSync(fd);
+    assert.ok(before.isFile() && before.uid === uid && before.nlink === 1 && !(before.mode & 0o077)
+      && before.size > 0 && before.size <= 256 * 1024, 'Private data must retain its application owner and private mode');
+    const data = io.readFileSync(fd), after = io.fstatSync(fd);
+    for (const key of ['dev', 'ino', 'uid', 'gid', 'mode', 'size', 'mtimeMs', 'ctimeMs']) assert.equal(after[key], before[key]);
+    return data;
+  } finally { io.closeSync(fd); }
 }
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
   try { console.log(JSON.stringify(verifyShadowStart(...process.argv.slice(2)))); }
