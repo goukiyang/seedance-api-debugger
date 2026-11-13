@@ -175,7 +175,7 @@ assert.ok(replacing.next.placements[1].x>=0&&replacing.next.placements[1].y>=.5,
 assert.equal(hash(replacing.next.placements[0]),hash({...vertical.placements[0],slotId:replacementSlots[0].id}));assert.ok(contract.parseMultiviewWorkRecipe(replacing.next,info));checks.push('replacing frames restores a deleted image inside its original vertical panel while preserving the other placement');
 replacing.recipeRef.current={...vertical,placements:vertical.placements.map(item=>({...item,x:-8,y:-8}))};replacing.replaceFrames();
 assert.ok(layout.referencePixelGeometry(replacing.next,info).placements.every(item=>item.x>=0&&item.y>=0));checks.push('reselecting reference frames recovers a completely cleared canvas');
-function previewValue(name){let found;function visit(node){if(ts.isVariableDeclaration(node)&&node.name.getText(previewAst)===name)found=node.initializer.getText(previewAst);ts.forEachChild(node,visit);}visit(previewAst);assert.ok(found,name);return found;}
+function previewValue(name,callback=false){let found;function visit(node){if(ts.isVariableDeclaration(node)&&node.name.getText(previewAst)===name)found=(callback?node.initializer.arguments[0]:node.initializer).getText(previewAst);ts.forEachChild(node,visit);}visit(previewAst);assert.ok(found,name);return found;}
 const galleryFocus={selectedId:'',galleryOnly:true,currentTaskId:'previous-task',items:[{id:'previous-video'}]};
 vm.runInNewContext('globalThis.focused='+previewValue('focusedId'),galleryFocus);assert.equal(galleryFocus.focused,'');
 const previewEffects=[];function collectPreviewEffects(node){if(ts.isCallExpression(node)&&node.expression.getText(previewAst)==='useEffect')previewEffects.push(node.arguments[0].getText(previewAst));ts.forEachChild(node,collectPreviewEffects);}collectPreviewEffects(previewAst);
@@ -189,26 +189,25 @@ checks.push('action gallery ignores the last viewed video and starts with previe
 const galleryDeactivate=previewEffects.find(value=>value.includes('loadedIdentity === identity && active'));
 vm.runInNewContext('globalThis.activate='+galleryDeactivate,galleryState);galleryState.SelectedId='previous-video';galleryState.activate();assert.equal(galleryState.SelectedId,'');assert.equal(galleryState.Selected,null);
 checks.push('returning to the action gallery clears the prior detail selection instead of reopening it');
-const galleryReads=[],galleryReader={galleryOnly:true,owner:'owner',controllers:{current:new Set()},AbortController,AbortSignal,URLSearchParams,
-  fetch:async(url,options)=>{galleryReads.push({url,options});return {ok:true,json:async()=>({items:[],nextCursor:null})};}};
-vm.runInNewContext(ts.transpileModule('globalThis.read='+previewValue('read').replace(/^useCallback\(/,'').replace(/,\s*\[owner, galleryOnly\]\)$/,''),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,galleryReader);
-await galleryReader.read(new URLSearchParams({cursor:'next-page'}));let readQuery=new URL(galleryReads[0].url,'https://fixture.invalid').searchParams;assert.equal(readQuery.get('kind'),'action');assert.equal(readQuery.get('cursor'),'next-page');assert.equal(galleryReads[0].options.headers['x-app-session-user'],'owner');
-galleryReader.galleryOnly=false;await galleryReader.read(new URLSearchParams({taskId:'video'}));readQuery=new URL(galleryReads[1].url,'https://fixture.invalid').searchParams;assert.equal(readQuery.get('kind'),null);assert.equal(readQuery.get('taskId'),'video');
-checks.push('gallery reads action-only cursor pages while existing video-result readers keep their original query');
+const sourceVideos=[{id:'action',title:'动作视频',status:'success'},{id:'rotation',title:'旋转视频',status:'success'}],galleryReads=[];
+const videoResults=load('src/app/multiview/multiview-video-results.ts');
+const galleryReader={galleryOnly:true,owner:'owner',controllers:{current:new Set()},AbortController,AbortSignal,URLSearchParams,multiviewVideoStatusLabels:videoResults.multiviewVideoStatusLabels,
+  fetch:async(url,options)=>{galleryReads.push({url,options});return {ok:true,json:async()=>({items:sourceVideos,nextCursor:null})};}};
+vm.runInNewContext(ts.transpileModule('globalThis.validId='+previewValue('validId')+';globalThis.read='+previewValue('read',true),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,galleryReader);
+let galleryPage=await galleryReader.read(new URLSearchParams({cursor:'next-page'}));let readQuery=new URL(galleryReads[0].url,'https://fixture.invalid').searchParams;assert.equal(readQuery.get('kind'),null);assert.equal(readQuery.get('cursor'),'next-page');assert.equal(galleryReads[0].options.headers['x-app-session-user'],'owner');assert.equal(galleryPage.items.length,1);assert.equal(galleryPage.items[0].id,'action');
+galleryReader.galleryOnly=false;galleryPage=await galleryReader.read(new URLSearchParams({taskId:'video'}));readQuery=new URL(galleryReads[1].url,'https://fixture.invalid').searchParams;assert.equal(readQuery.get('kind'),null);assert.equal(readQuery.get('taskId'),'video');assert.equal(galleryPage.items.length,2);
+checks.push('only the action gallery filters the existing read-only response while other result readers remain unchanged');
 const galleryChoice={galleryOnly:true,selected:null,player:{current:null},sessionStorage:{setItem(){throw new Error('gallery must not replace workbench selection');}},setSelectedId:id=>{galleryChoice.chosen=id;},setPlayRequest(){},setMediaError(){},setViewOnlyCandidate(){}};
 vm.runInNewContext(ts.transpileModule('globalThis.choose='+previewValue('choose'),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,galleryChoice);galleryChoice.choose('chosen-video');assert.equal(galleryChoice.chosen,'chosen-video');
 checks.push('only an explicit gallery card click starts the existing restore-before-display detail chain');
-const whereContext={exports:{}};vm.runInNewContext(functions('src/lib/video/multiview-task-privacy.ts',['privateMultiviewTaskWhere']),whereContext);
-const queries=[],endpoint={exports:{},Buffer,PAGE_SIZE:24,headers:{},getSession:async()=>({id:'owner'}),assertInternalOnly(){},USER_VISIBLE_TASK_RETENTION_STATUSES:['active'],
-  privateMultiviewTaskWhere:whereContext.actual.privateMultiviewTaskWhere,AuthError:class extends Error{},NextResponse:{json:(body,{status=200}={})=>new Response(JSON.stringify(body),{status})},
-  prisma:{videoTask:{findMany:async query=>{queries.push(query);return [];}}}};
-vm.runInNewContext(functions('src/app/api/multiview/generations/route.ts',['cursor','GET']),endpoint);
-const cursor=Buffer.from(JSON.stringify({at:'2026-11-01T00:00:00.000Z',id:'older-video'})).toString('base64url');
-let response=await endpoint.actual.GET({nextUrl:new URL('https://fixture.invalid/api/multiview/generations?kind=action&cursor='+cursor),headers:new Headers({'x-app-session-user':'owner'})});assert.equal(response.status,200);
-assert.equal(queries[0].take,25);assert.equal(queries[0].where.AND[0].OR[0].owner_user_id,'owner');assert.ok(queries[0].where.AND.some(value=>value.source_metadata_json?.contains==='"kind":"multiview-action"'));assert.ok(queries[0].where.AND.some(value=>value.retention_status));assert.ok(queries[0].where.AND.some(value=>value.OR?.[0]?.created_at));
-await endpoint.actual.GET({nextUrl:new URL('https://fixture.invalid/api/multiview/generations'),headers:new Headers()});assert.ok(!queries[1].where.AND.some(value=>value.source_metadata_json?.contains==='"kind":"multiview-action"'));
-response=await endpoint.actual.GET({nextUrl:new URL('https://fixture.invalid/api/multiview/generations?kind=wrong'),headers:new Headers()});assert.equal(response.status,400);assert.equal(queries.length,2);
-checks.push('actual list endpoint filters action tasks before paging and retains owner, privacy and retention gates');
+const pages=[{items:[sourceVideos[1]],nextCursor:'next'},{items:[sourceVideos[0]],nextCursor:'older'},{items:[sourceVideos[1]],nextCursor:'tail'},{items:[],nextCursor:null}],pageReads=[];
+Object.assign(galleryReader,{galleryOnly:true,listSequence:{current:0},alive:()=>true,items:[],mergeMultiviewVideoResults:videoResults.mergeMultiviewVideoResults,
+  fetch:async url=>{pageReads.push(new URL(url,'https://fixture.invalid').searchParams.get('cursor'));return {ok:true,json:async()=>pages.shift()};},
+  setLoading(){},setNotice(){},setItems:update=>{galleryReader.items=typeof update==='function'?update(galleryReader.items):update;},setCursor:value=>{galleryReader.cursor=value;},rejectAccess(){throw new Error('unexpected access failure');}});
+vm.runInNewContext(ts.transpileModule('globalThis.loadList='+previewValue('loadList',true),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,galleryReader);
+await galleryReader.loadList();assert.equal(galleryReader.items.length,1);assert.equal(galleryReader.items[0].id,'action');assert.equal(galleryReader.cursor,'older');assert.deepEqual(pageReads,[null,'next']);
+await galleryReader.loadList(galleryReader.cursor);assert.equal(galleryReader.items.length,1);assert.equal(galleryReader.cursor,null);assert.deepEqual(pageReads,[null,'next','older','tail']);
+checks.push('action gallery traverses rotation-only pages and retains the original pagination cursor without hiding older actions');
 let actionEntry,referenceEntry;function findEntries(node){if(ts.isJsxElement(node)&&node.openingElement.tagName.getText(pageAst)==='button'){const text=node.children.filter(ts.isJsxText).map(child=>child.text.trim()).join('');const click=node.openingElement.attributes.properties.find(attr=>attr.name?.getText(pageAst)==='onClick')?.initializer?.expression?.getText(pageAst);if(text==='动作作品')actionEntry=click;if(text==='参考拼图')referenceEntry=click;}ts.forEachChild(node,findEntries);}findEntries(pageAst);assert.ok(actionEntry&&referenceEntry);
 let entryUrl='https://fixture.invalid/multiview?view=works&kind=reference&workId=old-work&returnTo=%2Fmultiview%3Fview%3Dactions';
 const entry={URL,URLSearchParams,owner:'owner',taskId:'rotation',pageView:'works',setActivity(){},setPageView(){},setEditorWork(){},setReferenceLibrary:value=>{entry.reference=value;},

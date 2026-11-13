@@ -50,7 +50,6 @@ export function MultiviewVideoResults({ owner, authority, active, currentTaskId,
   const focusedRef = useRef(focusedId); focusedRef.current = focusedId;
 
   const read = useCallback(async (query: URLSearchParams): Promise<Page> => {
-    if (galleryOnly) query.set('kind', 'action');
     const controller = new AbortController(); controllers.current.add(controller);
     try {
       const response = await fetch(`/api/multiview/generations?${query}`, { cache: 'no-store', credentials: 'same-origin',
@@ -58,7 +57,8 @@ export function MultiviewVideoResults({ owner, authority, active, currentTaskId,
       const value = await response.json() as Page;
       if (!response.ok) throw Object.assign(new Error(value.error || '视频记录暂时无法读取。'), { status: response.status });
       if (!Array.isArray(value.items)) throw new Error('视频记录暂时无法读取。');
-      return { ...value, items: value.items.filter(item => validId(item.id) && Object.hasOwn(multiviewVideoStatusLabels, item.status)) };
+      return { ...value, items: value.items.filter(item => validId(item.id) && Object.hasOwn(multiviewVideoStatusLabels, item.status)
+        && (!galleryOnly || item.title === '动作视频')) };
     } finally { controllers.current.delete(controller); }
   }, [owner, galleryOnly]);
 
@@ -75,14 +75,18 @@ export function MultiviewVideoResults({ owner, authority, active, currentTaskId,
     const sequence = ++listSequence.current;
     setLoading(true); setNotice('');
     try {
-      const value = await read(new URLSearchParams(after ? { cursor: after } : {}));
+      let value = await read(new URLSearchParams(after ? { cursor: after } : {}));
       if (!alive() || sequence !== listSequence.current) return;
+      while (galleryOnly && !value.items.length && value.nextCursor) {
+        value = await read(new URLSearchParams({ cursor: value.nextCursor }));
+        if (!alive() || sequence !== listSequence.current) return;
+      }
       setItems(previous => after ? mergeMultiviewVideoResults(previous, value.items) : value.items);
       setCursor(value.nextCursor);
     } catch (error) {
       if (alive() && sequence === listSequence.current) { rejectAccess(error); setNotice(error instanceof Error ? error.message : '视频记录暂时无法读取。'); }
     } finally { if (alive() && sequence === listSequence.current) setLoading(false); }
-  }, [alive, owner, read, rejectAccess]);
+  }, [alive, owner, read, rejectAccess, galleryOnly]);
 
   const loadTask = useCallback(async (id: string, asCurrent: boolean) => {
     if (!alive() || !validId(id)) return;
