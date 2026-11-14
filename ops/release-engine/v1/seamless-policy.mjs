@@ -1,6 +1,56 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 
+export const REFERENCE_MEDIA_CHECKS = [
+  { id: 'video-delivery', script: 'scripts/reference-video-delivery-engineering.ts', inputs: [
+    'src/app/api/provider/reference-media/route.ts', 'src/lib/provider/reference-video-delivery.server.ts',
+    'src/lib/provider/reference-video-delivery-build-mode.ts', 'src/lib/generation-retry/video.ts',
+    'src/lib/generation-retry/store.ts', 'src/app/api/tasks/create/route.ts', 'src/app/api/ip/tasks/create/route.ts',
+    'src/lib/provider/ip-reference-media-metadata.ts', 'src/lib/provider/reference-media-policy.ts',
+    'src/lib/provider/jimeng.ts', 'src/lib/provider/volcengine-ip.ts', 'src/lib/media/preview-response.ts',
+    'src/lib/reference-albums/permissions.ts', 'src/lib/assets/site-url.ts', 'src/lib/image-studio/protected-assets.ts'] },
+  { id: 'provider-error', script: 'scripts/reference-create-diagnostic-engineering.ts', inputs: [
+    'src/lib/provider/jimeng.ts', 'src/lib/provider/volcengine-ip.ts', 'src/lib/provider/reference-media-redaction.ts',
+    'src/lib/provider/create-diagnostic.ts', 'src/lib/generation-retry/video.ts',
+    'src/app/api/tasks/create/route.ts', 'src/app/api/ip/tasks/create/route.ts',
+    'src/app/api/tasks/request-status/route.ts', 'src/app/api/assets/library/route.ts'] },
+  { id: 'submission-state', script: 'scripts/video-submission-state-engineering.ts', inputs: [
+    'src/components/generate/video-submission-state.ts', 'src/components/generate/GeneratePageClient.tsx'] },
+  { id: 'image-cache', script: 'scripts/trusted-display-cache-engineering.ts', inputs: [
+    'src/lib/image-studio/media.ts', 'src/lib/media/authorized-image-response.ts', 'src/lib/content-reactions/content.ts',
+    'src/app/api/content-reactions/media/route.ts', 'src/app/api/reference-images/[id]/content/route.ts'] },
+  { id: 'media-recovery', script: 'scripts/reference-media-recovery-engineering.ts', inputs: [
+    'src/components/ReferenceThumb.tsx', 'src/components/ResourceLibraryPicker.tsx', 'src/lib/image-studio/media.ts',
+    'src/lib/media/authorized-image-response.ts', 'src/app/api/content-reactions/media/route.ts',
+    'src/app/api/reference-images/[id]/content/route.ts'] },
+  { id: 'workspace-selection', script: 'scripts/asset-workspace-selection-engineering.ts', inputs: [
+    'src/app/assets/page.tsx', 'src/lib/hooks/useWorkspace.ts', 'src/app/api/workspace/assets/route.ts', 'src/lib/assets/workspace.ts'] },
+  { id: 'compatible-guard', script: 'scripts/seamless-compatible-guard-engineering.mjs', inputs: [
+    'ops/release-engine/v1/seamless-web.mjs', 'ops/release-engine/v1/seamless-policy.mjs', 'ops/release-engine/v1/seamless-bridges.mjs'] },
+].map(check => ({ ...check, inputs: [check.script, ...check.inputs] }));
+
+export function referenceMediaChecksFor(previous, main) {
+  if (!main.sourceFiles['src/app/api/provider/reference-media/route.ts']
+    && !main.sourceFiles['scripts/trusted-display-cache-engineering.ts']) return [];
+  return REFERENCE_MEDIA_CHECKS.filter(check => check.inputs.some(name => (previous.sourceFiles[name] ?? null) !== (main.sourceFiles[name] ?? null)));
+}
+
+export function verifyReferenceMediaEngineering(previous, main, focused, stage, readLog) {
+  const checks = referenceMediaChecksFor(previous, main);
+  if (!checks.length) return [];
+  assert.equal(focused?.source, main.source, 'Scoped reference-media evidence must bind the candidate');
+  for (const check of checks) {
+    assert.ok(main.sourceFiles[check.script], 'Missing scoped engineering script: ' + check.script);
+    const result = focused.referenceMedia?.[check.id];
+    assert.equal(result?.script, check.script, 'Run selected reference-media check: ' + check.id);
+    assert.equal(result.exitCode, 0); assert.equal(result.signal, null); assert.equal(result.error, null);
+    assert.deepEqual(result.sourceSha256, Object.fromEntries(check.inputs.map(name => [name, main.sourceFiles[name] ?? null])));
+    assert.equal(result.log, stage + '/reference-' + check.id + '.log');
+    assert.equal(createHash('sha256').update(readLog(result.log)).digest('hex'), result.logSha256);
+  }
+  return checks.map(check => check.id);
+}
+
 export const DEFAULT_DELIVERY = Object.freeze({
   schema: 'sd2-release-delivery.v1', mode: 'seamless', primaryPort: 3302,
   candidatePort: 3303, recoveryPort: 3304, incompatible: 'retain-current-and-refuse', publicMaintenance: false,
@@ -10,8 +60,12 @@ export const SEAMLESS_STATIC = '/data/video-api-debugger/seamless-static';
 export const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 
 // Admission precedes any service/configuration effect. A failure keeps the old site.
-export function assertSeamlessCompatible(previous, main, guard, read, bridges) {
-  assert.deepEqual(guard, previous.releases[1], 'Retain the exact existing compatible recovery artifact');
+export function assertSeamlessCompatible(previous, main, guard, read, bridges, verifiedGuard = previous.releases[1]) {
+  assert.deepEqual(guard, verifiedGuard, 'Recovery artifact must match the retained or fully verified compatible guard');
+  if (guard.source !== previous.releases[1].source) {
+    const schema = entry => Object.fromEntries(Object.entries(entry.sourceFiles).filter(([name]) => name === 'prisma/schema.prisma' || name.startsWith('prisma/migrations/')));
+    assert.deepEqual(schema(guard), schema(main), 'New compatible guard must retain the main persisted schema');
+  } else assert.deepEqual(guard, previous.releases[1], 'Retain the exact existing compatible recovery artifact');
   const old = previous.releases[0]; assert.notEqual(main.source, old.source);
   const contract = file => file === 'prisma/schema.prisma' || file.startsWith('prisma/migrations/')
     || file.startsWith('src/app/api/') || file.startsWith('src/lib/')

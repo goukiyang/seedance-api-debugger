@@ -5,7 +5,8 @@ import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import bridges from './seamless-bridges.mjs';
-import { DEFAULT_DELIVERY, SEAMLESS_CONTROL, SEAMLESS_STATIC, digest, assertSeamlessCompatible } from './seamless-policy.mjs';
+import { DEFAULT_DELIVERY, SEAMLESS_CONTROL, SEAMLESS_STATIC, digest, assertSeamlessCompatible,
+  referenceMediaChecksFor, verifyReferenceMediaEngineering } from './seamless-policy.mjs';
 import { verifyFixedProgramEntry, PRICING_START_GUARD_SHA256 } from './pricing-start-pair.mjs';
 import { parseAllOwnerSynchronousRows } from './cutover-safety.mjs';
 import { privateDataBytes } from './seamless-shadow-start.mjs';
@@ -160,34 +161,95 @@ export function classifySynchronousRows(rows, plan, inspect = processIdentity) {
   return { oldRunningImages: old, candidateRunningImages: candidate, unconfirmedCandidateRunningImages: unconfirmed };
 }
 
-export function readCurrentBuildEvidence(file, { read = rootBytes, now = Date.now, verify = verifyFixedProgramEntry } = {}) {
+function readFullBuildEvidence(file, { read = rootBytes, now = Date.now, verify = verifyFixedProgramEntry, kind = 'main' } = {}) {
   const load = input => JSON.parse(read(input)), proof = load(file), stage = path.dirname(file);
-  assert.equal(path.basename(file), 'main-build-success.json'); assert.equal(proof.kind, 'main');
+  assert.ok(['main', 'guard'].includes(kind));
+  assert.equal(path.basename(file), kind + '-build-success.json'); assert.equal(proof.kind, kind);
   assert.equal(proof.stagingRoot, stage); assert.ok(stage.startsWith(PROJECT + '/release-staging/'));
   for (const flag of ['fullNextBuildPassed', 'fullTypeAndLintIncluded', 'isolatedBuildDatabase']) assert.equal(proof[flag], true);
   assert.equal(proof.deployed, false);
-  const finished = Date.parse(proof.completedAt); assert.ok(finished <= now() && now() - finished < 1800000, 'Current candidate needs a fresh full build; use an immutable original capsule for exact reuse');
+  const finished = Date.parse(proof.completedAt); assert.ok(Number.isFinite(finished) && finished <= now());
+  if (kind === 'main') assert.ok(now() - finished < 1800000, 'Current candidate needs a fresh full build; use an immutable original capsule for exact reuse');
   for (const [key, suffix] of [['sourceManifestSha256', 'source.json'], ['nextBuildLogSha256', 'next-build.log'],
     ['completeTypesLogSha256', 'complete-types.log'], ['pricingPreparedSha256', 'pricing-prepared.json'],
     ['nextProcessReceiptSha256', 'next-process.json'], ['typesProcessReceiptSha256', 'types-process.json']]) {
-    assert.equal(digest(read(stage + '/main-' + suffix)), proof[key]);
+    assert.equal(digest(read(stage + '/' + kind + '-' + suffix)), proof[key]);
   }
   for (const kind of ['next', 'types']) {
-    const process = load(stage + '/main-' + kind + '-process.json'); assert.equal(process.source, proof.source);
+    const process = load(stage + '/' + proof.kind + '-' + kind + '-process.json'); assert.equal(process.source, proof.source);
     assert.equal(process.exitCode, 0); assert.equal(process.signal, null); assert.equal(process.error, null);
     assert.ok(Date.parse(process.startedAt) <= Date.parse(process.finishedAt) && Date.parse(process.finishedAt) <= finished);
   }
-  const prepared = load(stage + '/main-pricing-prepared.json'); assert.equal(prepared.source, proof.source);
+  const prepared = load(stage + '/' + kind + '-pricing-prepared.json'); assert.equal(prepared.source, proof.source);
   for (const flag of ['nativePrebuildPassed', 'freshPricingPassed']) assert.equal(prepared[flag], true);
-  const native = load(prepared.nativeEvidence.receipt); assert.equal(digest(read(prepared.nativeEvidence.receipt)), prepared.nativeEvidence.receiptSha256);
-  assert.equal(native.source, proof.source);
-  assert.ok(native.passed === true && native.completeMatrix === true && native.runtimeCompatibilityDeltaVerified === true);
-  assert.equal(native.productionWrites, 0); assert.equal(native.paidRequests, 0); assert.equal(native.browserRuns, 0);
-  const entry = load(stage + '/prepared-pricing-writer-v1.json').releases[0];
+  const entry = load(stage + '/prepared-pricing-writer-v1.json').releases[kind === 'main' ? 0 : 1];
   for (const key of ['source', 'version', 'build']) assert.equal(entry[key], proof[key]);
-  const manifest = load(stage + '/main-source.json'); assert.equal(manifest.source, entry.source);
+  const manifest = load(stage + '/' + kind + '-source.json'); assert.equal(manifest.source, entry.source);
   assert.deepEqual(entry.sourceFiles, manifest.files);
-  verify(entry); return entry;
+  verify(entry);
+  const freshGuard = kind === 'guard' && prepared.nativePrebuildFresh === true;
+  const readNative = input => freshGuard && read === rootBytes ? privateDataBytes(input, fs.statSync(entry.root).uid) : read(input);
+  const nativeBytes = readNative(prepared.nativeEvidence.receipt), native = JSON.parse(nativeBytes);
+  assert.equal(digest(nativeBytes), prepared.nativeEvidence.receiptSha256);
+  if (freshGuard) {
+    assert.equal(native.schema, 'image-recovery-build-gate.v1'); assert.equal(native.completed, true);
+    assert.equal(native.candidateRoot, entry.root);
+    assert.ok(Number.isFinite(native.startedAt) && native.startedAt > 0 && native.startedAt <= native.finishedAt && native.finishedAt <= finished);
+    assert.ok(Object.keys(native.sourceSha256).length > 0);
+    for (const [name, expected] of Object.entries(native.sourceSha256)) assert.equal(manifest.files[name], expected);
+    for (const receipts of [native.fixtures, native.publicUsageFixtures]) {
+      assert.ok(Array.isArray(receipts) && receipts.length > 0);
+      for (const receipt of receipts) assert.equal(digest(readNative(receipt.receipt)), receipt.sha256);
+    }
+  } else {
+    assert.equal(native.source, proof.source);
+    assert.ok(native.passed === true && native.completeMatrix === true && native.runtimeCompatibilityDeltaVerified === true);
+    assert.equal(native.productionWrites, 0); assert.equal(native.paidRequests, 0); assert.equal(native.browserRuns, 0);
+  }
+  return entry;
+}
+
+export function readCurrentBuildEvidence(file, options = {}) {
+  return readFullBuildEvidence(file, { ...options, kind: 'main' });
+}
+
+export function readCompatibleGuardEvidence(file, main, previous, { read = rootBytes, verify = verifyFixedProgramEntry, now = Date.now } = {}) {
+  if (path.basename(file) !== 'main-build-success.json') {
+    assertGuardReferenceReaders(main, previous, read); return previous;
+  }
+  const stage = path.dirname(file), proposed = JSON.parse(read(stage + '/prepared-pricing-writer-v1.json')).releases[1];
+  if (proposed.source === previous.source) {
+    assert.deepEqual(proposed, previous); assertGuardReferenceReaders(main, previous, read); return previous;
+  }
+  const guard = readFullBuildEvidence(stage + '/guard-build-success.json', { read, verify, now, kind: 'guard' });
+  assert.deepEqual(guard, proposed); assert.notEqual(guard.source, main.source);
+  assertGuardReferenceReaders(main, guard, read);
+  const schema = entries => Object.fromEntries(Object.entries(entries).filter(([name]) => name.startsWith('prisma/')));
+  assert.deepEqual(schema(guard.sourceFiles), schema(main.sourceFiles));
+  return guard;
+}
+
+function assertGuardReferenceReaders(main, guard, read) {
+  if (!main.sourceFiles['src/app/api/provider/reference-media/route.ts']) return;
+  const readers = ['src/app/api/provider/reference-media/route.ts', 'src/lib/provider/reference-video-delivery.server.ts',
+    'src/lib/generation-retry/video.ts', 'src/lib/generation-retry/store.ts', 'src/lib/provider/jimeng.ts',
+    'src/lib/provider/create-diagnostic.ts', 'src/lib/provider/reference-media-redaction.ts', 'src/lib/image-studio/process-provenance.ts'];
+  for (const name of readers) {
+    assert.ok(main.sourceFiles[name], 'Compatible reader must exist: ' + name);
+    assert.equal(guard.sourceFiles[name], main.sourceFiles[name], 'Compatible guard reader differs: ' + name);
+  }
+  const flag = 'src/lib/provider/reference-video-delivery-build-mode.ts';
+  const mainMode = read(main.root + '/' + flag).toString().trim();
+  const enabled = 'export const PROVIDER_REFERENCE_MEDIA_ISSUANCE_ENABLED = true;';
+  assert.equal(mainMode.split(enabled).length, 2);
+  assert.equal(read(guard.root + '/' + flag).toString().trim(), mainMode.replace(enabled, enabled.replace('true', 'false')));
+}
+
+export function remapStartupRelease(previous, target) {
+  const sourceSha256 = Object.fromEntries(Object.keys(previous.sourceSha256).map(name => {
+    assert.ok(target.sourceFiles[name], 'Startup reader missing: ' + name); return [name, target.sourceFiles[name]];
+  }));
+  return { ...previous, root: target.root, source: target.source, version: target.version, build: target.build, sourceSha256 };
 }
 
 function mainEntryFromCapsule(file) {
@@ -233,8 +295,12 @@ export function prepareSeamlessPlan(capsuleFile) {
   const allowedBytes = rootBytes(pricingFile), previous = JSON.parse(allowedBytes);
   assert.equal(previous.schema, 'pricing-writer-start-allowlist.v1'); assert.equal(previous.releases.length, 2);
   for (const e of previous.releases) verifyFixedProgramEntry(e);
-  const guard = previous.releases[1], old = previous.releases[0];
-  const admission = assertSeamlessCompatible(previous, main, guard, f => fs.readFileSync(f), bridges);
+  const guard = readCompatibleGuardEvidence(capsuleFile, main, previous.releases[1]), old = previous.releases[0];
+  const admission = assertSeamlessCompatible(previous, main, guard, f => fs.readFileSync(f), bridges, guard);
+  if (referenceMediaChecksFor(old, main).length) {
+    const evidenceStage = path.dirname(capsuleFile);
+    verifyReferenceMediaEngineering(old, main, json(evidenceStage + '/main-focused-engineering.json'), evidenceStage, rootBytes);
+  }
   assert.equal(digest(rootBytes(PROJECT + '/controls/pricing-writer-v1/writer-start-guard.mjs')), PRICING_START_GUARD_SHA256);
   const markerFile = fs.realpathSync(old.root + '/storage/image-studio-drain'); assert.equal(previous.marker, markerFile);
   assert.match(nativeCall('/usr/bin/lsattr', ['-d', '--', markerFile]).split(/\s+/)[0], /i/);
@@ -330,7 +396,8 @@ export function createNativeSeamlessDriver(planFile) {
     for (const c of proof.consumers) if (c.id === (kind === 'image' ? 'image-worker' : kind === 'guard' ? 'guard' : 'web')) c.sourceRevision = entry.source;
     const prefix = PRIVATE + '/seamless-' + kind + '-' + p.runId;
     let policyFile = PRIVATE + '/policy-active.json', privateFiles;
-    if (kind === 'guard') {
+    const activeGuard = kind === 'guard' && p.guard.source === p.previous.releases[1].source;
+    if (activeGuard) {
       // Existing guard identity is already admitted by the live policy. Keep
       // reading that policy so permission revocations never depend on a copy.
       privateFiles = Object.fromEntries([policyFile, PRIVATE + '/consumers-active.json'].map(f => [f, digest(privateRead(f))]));
@@ -349,7 +416,7 @@ export function createNativeSeamlessDriver(planFile) {
     const helper = SEAMLESS_CONTROL + '/start-' + digest(helperBytes) + '.mjs'; ensure(helper, helperBytes, 0o440, gid);
     const authority = `${SEAMLESS_CONTROL}/authority-${kind}-${p.runId}.json`, unit = `sd2-release-${kind}-${p.runId}.service`;
     const unitFile = '/run/systemd/system/' + unit;
-    const policySha = kind === 'guard' ? digest(privateRead(policyFile)) : digest(bytes(p.privateFiles[PRIVATE + '/policy-active.json']));
+    const policySha = activeGuard ? digest(privateRead(policyFile)) : digest(bytes(p.privateFiles[PRIVATE + '/policy-active.json']));
     const unitBytes = renderShadowUnit(p.units[source.slice(0, -8)].definition, { root: entry.root, guard: helper,
       authority, kind, runId: p.runId, policy: policyFile,
       policySha });
@@ -481,9 +548,8 @@ export function createNativeSeamlessDriver(planFile) {
         else {
           const e = old.releases[0];
           assert.equal(e.source, p.previous.releases[0].source);
-          const sourceSha256 = Object.fromEntries(Object.keys(e.sourceSha256).map(f => { assert.ok(p.main.sourceFiles[f]); return [f, p.main.sourceFiles[f]]; }));
           next = { ...old, runId: p.runId, ...(Object.hasOwn(old, 'manifestSha256') ? { manifestSha256: digest(rootBytes(planFile)) } : {}),
-            releases: [{ ...e, root: p.main.root, source: p.main.source, version: p.main.version, build: p.main.build, sourceSha256 }, old.releases[1]] };
+            releases: [remapStartupRelease(e, p.main), remapStartupRelease(old.releases[1], p.guard)] };
         }
         const wanted = Buffer.from(JSON.stringify(next) + '\n');
         assert.ok(current.equals(bytes(p.controls[name])) || current.equals(wanted), 'Independent startup-control change');
