@@ -1,3 +1,7 @@
+<!-- FB-FIXPLAN-20261114 -->
+FB-FIXPLAN-20261114：W0–W5及R1–R6已实施，v0.148.23已无感部署并启用普通/IP受限取件；工程/双构建/服务与公网核对通过，实际生成/旧图恢复仍用户手验。保原图/权限/原key/预算，未人工重发旧任务或改账务，下载自然交接与2h看护保留。应用源382f820；外封发布器源2d394a0、guard eacd05e分别绑定，不混作同源。业务后续沿主工作区reference-media-stability-20261114，guard仅供相容保护。详[原单实施](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-14-feedback-24h.md#implementation-1114)。
+<!-- /FB-FIXPLAN-20261114 -->
+
 <!-- SEAMLESS01-20261112 -->
 ## SEAMLESS01 默认无感发布（v0.148.13补发已上线，自动流程已固化）
 

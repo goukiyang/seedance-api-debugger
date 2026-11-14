@@ -1,11 +1,21 @@
 # 项目任务外发现报告
 
+<!-- D-20261114-PROVIDER-BACKUP-HEAD -->
+## D-20261114-PROVIDER-BACKUP-HEAD 备用域合成HEAD被边缘拒绝（待核线索）
+
+2026-11-14发布检查中，sd2-server.youdoodesign.com对随机合成无效票据HEAD返回Cloudflare text/plain 403，cfOrigin=0且无应用read-id；不据此认定实际合法取件失败。实际签发仅使用已配sd2.youdooart.com，该域HEAD正确进入应用403并留安全read-id，三签名上下文一致；两域普通release/health和目标静态资源正常。未改Cloudflare/WAF或权限。后续仅在更换签发域、启用该备域取件或出现对应合法请求证据时定向检查，不全站触发。原证与边界沿[本批实施](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-14-feedback-24h.md#implementation-1114)。
+<!-- /D-20261114-PROVIDER-BACKUP-HEAD -->
+
 <!-- D-20261112-MEDIA-ERROR-COPY -->
 ## D-20261112-MEDIA-ERROR-COPY 媒体读取失败沿用喜欢功能文案（已确认，非阻断）
 
 本轮旧缩略图/参考传输修复的风险核对中，定向源码确认`src/app/api/content-reactions/media/route.ts`在非鉴权读取异常时调用共用`reactionError`；`src/lib/content-reactions/http.ts`对未知异常固定503与“喜欢暂时不可用，请稍后重试”。因此该媒体API实际错误场景的JSON提示与图片读取无关。普通img失败仍走既有不可用占位，不等同原件丢失/权限绕过/生成失败，未做浏览器现场复现。
 
 后续在该读取route窄改为明确媒体错误提示，保401/403/404、Cache-Control及真实503，不扩改其它喜欢/删除接口。本轮main8f73已冻结构建，未将这项旧错误文案夹入或重建全站；完整缩略图与普通视频引用两项目标继续。原任务和证据入口：[LEGACY-THUMB-REPAIR16](todo/2026-11-11-seedance-private-character-assets.md#16-旧缩略图完整显示修复与提交未知排查2026-11-12)。
+
+<!-- FIXPLAN-1114-MEDIA-ERROR-COPY-STATUS -->
+2026-11-14复核：本批已补两媒体入口read-id与前端图片失败/局部重试，但该route仍沿reactionError通用JSON文案；此旧条目继续待窄修，不冒本批已消除，当前不扩修其它喜欢接口。
+<!-- /FIXPLAN-1114-MEDIA-ERROR-COPY-STATUS -->
 <!-- /D-20261112-MEDIA-ERROR-COPY -->
 
 项目全名：video-api-debugger（sd2 视频生成API调试平台）
