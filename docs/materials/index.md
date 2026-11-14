@@ -1,3 +1,7 @@
+<!-- FB-ROOTCAUSE-20261114-5H-EVIDENCE -->
+FB-ROOTCAUSE-20261114：12份现网源SHA匹配、实际访问日志、原上传复用、分钟缓存/历史diff、当前源读取耗时及新截图已私有归档于原资料rootcause-5h-20261114；原件/身份/响应/源副本不推Git。缺证与边界见[原单](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-14-feedback-24h.md#latest-feedback-rootcause)。
+<!-- /FB-ROOTCAUSE-20261114-5H-EVIDENCE -->
+
 <!-- FB-PULL-20261114-24H-EVIDENCE -->
 FB-PULL-20261114：后台24小时只读快照、窗口、去重与两原截图/校验私有归档于2026-11-14-feedback-24h；原文/身份/截图不推Git。详[正式工单](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-14-feedback-24h.md)。
 <!-- /FB-PULL-20261114-24H-EVIDENCE -->

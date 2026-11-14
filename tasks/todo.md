@@ -1,3 +1,7 @@
+<!-- FB-ROOTCAUSE-20261114-5H -->
+FB-ROOTCAUSE-20261114：原固定5小时1条反馈，后续增量1条；已定位同一远程旧图，核到分钟换缓存键、同图重传复用旧源、两个显示入口的失败恢复缺口及当前原件读取慢。历史源头/风险与未证首个内层异常、最新客户端空白分列，不冒全因果闭合；仅只读调查/私有记录，无业务或线上改动。详[原单查因与最新增量](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-14-feedback-24h.md#f5h-rootcause)。
+<!-- /FB-ROOTCAUSE-20261114-5H -->
+
 <!-- FB-PULL-20261114-24H -->
 FB-PULL-20261114：纽约11/13 01:57至11/14 01:57，后台近24小时新反馈3、旧Feedback主记录更新0；去重2条新收录（参考图不可用、待确认引导）、1条VID-DL03同ID。只读拉取与2原截图归档完成，状态未改；旧下载反馈早于修复部署，不冒修后复发。详[正式工单](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-14-feedback-24h.md)。
 <!-- /FB-PULL-20261114-24H -->
