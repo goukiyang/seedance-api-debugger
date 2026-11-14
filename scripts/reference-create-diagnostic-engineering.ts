@@ -78,6 +78,17 @@ async function main() {
   assertNoCredential(requestRedactor({ echoes: echoes.map(([, value]) => ({ message: value, [value]: value })),
     error: Object.assign(new Error(ticket, { cause: new Error(encodeURIComponent(signed)) }), { name: ticket, raw: signed }) }), 'request redactor recursive');
   checks.push('request_bound_exact_credentials_and_encoding_forms_only');
+  const hiddenCause = new Error(ticket);
+  Object.defineProperty(hiddenCause, 'name', { value: ticket, enumerable: false });
+  const hiddenNameError = new Error('fixture error', { cause: hiddenCause });
+  Object.defineProperty(hiddenNameError, 'name', { value: ticket, enumerable: false });
+  assert.equal(Object.prototype.propertyIsEnumerable.call(hiddenNameError, 'name'), false);
+  assert.equal(Object.prototype.propertyIsEnumerable.call(hiddenNameError, 'cause'), false);
+  const safeHiddenNameError = requestRedactor(hiddenNameError);
+  assert.equal(safeHiddenNameError.name, '[redacted]');
+  assert.equal((safeHiddenNameError.cause as Error).name, '[redacted]');
+  assertNoCredential(safeHiddenNameError, 'nonenumerable Error name and cause');
+  checks.push('nonenumerable_error_name_and_cause_use_exact_ticket_redaction');
 
   const input = { generation_mode: 'all_in_one_reference', prompt: 'fixture', duration: 5, ratio: '16:9', resolution: '720p',
     model: 'dreamina-seedance-2-5-260628', reference_video_urls: [signed, unrelated] };
@@ -152,7 +163,10 @@ async function main() {
         if (kind === 'success') return Response.json({ id: 'matrix-accepted', echo, nested: { raw: echo } });
         if (kind === 'json_error') return Response.json(errorBody);
         if (kind === 'non_json_error') return new Response(`upstream error ${echo}`, { status: 502 });
-        const failure = Object.assign(new Error(`network ${echo}`, { cause: Object.assign(new Error(`cause ${echo}`), { code: 'ECONNRESET' }) }), { name: echo, raw: echo });
+        const cause = Object.assign(new Error(`cause ${echo}`), { code: 'ECONNRESET' });
+        Object.defineProperty(cause, 'name', { value: ticket, enumerable: false });
+        const failure = Object.assign(new Error(`network ${echo}`, { cause }), { raw: echo });
+        Object.defineProperty(failure, 'name', { value: ticket, enumerable: false });
         if (kind === 'network_cause') throw failure;
         return new Response(new ReadableStream({ start(controller) { controller.error(failure); } }));
       };
