@@ -1,3 +1,7 @@
+<!-- FB-PULL-20261114-24H -->
+FB-PULL-20261114：纽约11/13 01:57至11/14 01:57，后台近24小时新反馈3、旧Feedback主记录更新0；去重2条新收录（参考图不可用、待确认引导）、1条VID-DL03同ID。只读拉取与2原截图归档完成，状态未改；旧下载反馈早于修复部署，不冒修后复发。详[正式工单](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-14-feedback-24h.md)。
+<!-- /FB-PULL-20261114-24H -->
+
 <!-- RULES-EXEC-FIX01-20261113 -->
 RULES-EXEC-FIX01：W1/W2本机修复及启用验证完成，57项有效源检查、真实工具写入/范围复用、原生双工作区身份与幂等通过；W3按需Jev入口和未就绪回退已接好，真实云端未启用。业务与线上未动，旧会话自然收尾另观察。详[原单](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-12-feedback-submit-rootcause.md#rules-exec-fix01)。
 <!-- /RULES-EXEC-FIX01-20261113 -->

@@ -1,3 +1,7 @@
+<!-- FB-PULL-20261114-24H-EVIDENCE -->
+FB-PULL-20261114：后台24小时只读快照、窗口、去重与两原截图/校验私有归档于2026-11-14-feedback-24h；原文/身份/截图不推Git。详[正式工单](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-14-feedback-24h.md)。
+<!-- /FB-PULL-20261114-24H-EVIDENCE -->
+
 <!-- RULES-EXEC-FIX01-EVIDENCE-20261113 -->
 RULES-EXEC-FIX01：原规则资料下implementation-20261113T165212Z私有保存源/字段备份、57项最终检查、原生前后/幂等/配置差量及当前真实写入入口证据；区分本机启用、云端未启用与自然Stop未观察。详[原单](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-12-feedback-submit-rootcause.md#rules-exec-fix01)。
 <!-- /RULES-EXEC-FIX01-EVIDENCE-20261113 -->
