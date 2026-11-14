@@ -188,7 +188,7 @@ function readFullBuildEvidence(file, { read = rootBytes, now = Date.now, verify 
   assert.deepEqual(entry.sourceFiles, manifest.files);
   verify(entry);
   const freshGuard = kind === 'guard' && prepared.nativePrebuildFresh === true;
-  const readNative = input => freshGuard && read === rootBytes ? privateDataBytes(input, fs.statSync(entry.root).uid) : read(input);
+  const readNative = input => freshGuard && read === rootBytes ? privateDataBytes(input, fs.statSync(entry.root + '/package.json').uid) : read(input);
   const nativeBytes = readNative(prepared.nativeEvidence.receipt), native = JSON.parse(nativeBytes);
   assert.equal(digest(nativeBytes), prepared.nativeEvidence.receiptSha256);
   if (freshGuard) {
