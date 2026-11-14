@@ -213,17 +213,18 @@ export function readCurrentBuildEvidence(file, options = {}) {
   return readFullBuildEvidence(file, { ...options, kind: 'main' });
 }
 
-export function readCompatibleGuardEvidence(file, main, previous, { read = rootBytes, verify = verifyFixedProgramEntry, now = Date.now } = {}) {
+export function readCompatibleGuardEvidence(file, main, previous, { read = rootBytes,
+  readSource = read === rootBytes ? fs.readFileSync : read, verify = verifyFixedProgramEntry, now = Date.now } = {}) {
   if (path.basename(file) !== 'main-build-success.json') {
-    assertGuardReferenceReaders(main, previous, read); return previous;
+    assertGuardReferenceReaders(main, previous, readSource); return previous;
   }
   const stage = path.dirname(file), proposed = JSON.parse(read(stage + '/prepared-pricing-writer-v1.json')).releases[1];
   if (proposed.source === previous.source) {
-    assert.deepEqual(proposed, previous); assertGuardReferenceReaders(main, previous, read); return previous;
+    assert.deepEqual(proposed, previous); assertGuardReferenceReaders(main, previous, readSource); return previous;
   }
   const guard = readFullBuildEvidence(stage + '/guard-build-success.json', { read, verify, now, kind: 'guard' });
   assert.deepEqual(guard, proposed); assert.notEqual(guard.source, main.source);
-  assertGuardReferenceReaders(main, guard, read);
+  assertGuardReferenceReaders(main, guard, readSource);
   const schema = entries => Object.fromEntries(Object.entries(entries).filter(([name]) => name.startsWith('prisma/')));
   assert.deepEqual(schema(guard.sourceFiles), schema(main.sourceFiles));
   return guard;

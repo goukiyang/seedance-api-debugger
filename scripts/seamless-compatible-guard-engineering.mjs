@@ -80,6 +80,16 @@ check('fresh-guard-child-receipt-mutation-refused', () => {
   f.files.set(stage + '/guard-fresh-child.json', Buffer.from('modified after original gate'));
   assert.throws(() => readCompatibleGuardEvidence(stage + '/main-build-success.json', f.main, f.previous, options));
 });
+check('application-owned-flags-use-source-reader-with-root-controls-still-strict', () => {
+  const f = fixture(), options = documents(f);
+  const readControl = file => {
+    assert.equal(file.startsWith(f.main.root) || file.startsWith(f.guard.root), false, 'Control reader cannot read application source');
+    return options.read(file);
+  };
+  const guard = readCompatibleGuardEvidence(stage + '/main-build-success.json', f.main, f.previous,
+    { ...options, read: readControl, readSource: options.read });
+  assert.equal(guard.source, f.guard.source);
+});
 check('selected-new-guard-passes-actual-rolling-admission', () => {
   const f = fixture(), options = documents(f);
   const guard = readCompatibleGuardEvidence(stage + '/main-build-success.json', f.main, f.previous, options);
