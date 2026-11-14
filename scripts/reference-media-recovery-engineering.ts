@@ -54,6 +54,9 @@ function loadModule(file: string, mocks: Record<string, unknown>, append = '', s
     Headers,
     Uint8Array,
     AbortController,
+    // Module mocks and callers share the native error realm in the running app.
+    Error,
+    DOMException,
     setTimeout,
     clearTimeout,
   });
@@ -257,6 +260,7 @@ async function checkAuthorizedReaderAndDiagnostics(tempFile: string) {
     new Request('https://app.test/media?variant=thumbnail'), 'https://cdn.test/image.png', 'thumbnail', 'image/png', 'image.png', performance.now(), undefined, undefined, readId,
   );
   assert.equal(get.status, 200);
+  assert.equal(await get.text(), 'display');
   assert.equal(get.headers.get('X-Media-Request-Id'), readId, 'the caller read-id must survive the actual authorized reader');
   assert.equal(reads, 1);
   assert.equal(stats, 1);
@@ -298,12 +302,21 @@ async function checkAuthorizedReaderAndDiagnostics(tempFile: string) {
   const abort = new Error('sensitive abort text');
   abort.name = 'AbortError';
   diagnostic({ readId, variant: 'preview', started: performance.now(), stage: 'read', error: abort });
-  assert.equal((events[1].fields[1] as Props).stage, 'cancelled');
+  assert.equal((events.at(-1)!.fields[1] as Props).stage, 'cancelled');
+
+  const nativeAbort = new DOMException('sensitive DOM abort text', 'AbortError');
+  assert.ok(nativeAbort instanceof Error, 'the actual Node DOMException must inherit Error');
+  diagnostic({ readId, variant: 'preview', started: performance.now(), stage: 'read', error: nativeAbort });
+  assert.equal((events.at(-1)!.fields[1] as Props).stage, 'cancelled');
+
+  diagnostic({ readId, variant: 'preview', started: performance.now(), stage: 'read', error: { name: 'AbortError' } });
+  assert.equal((events.at(-1)!.fields[1] as Props).stage, 'read', 'a name-only object is not a native cancellation error');
 
   diagnostic({ readId, variant: 'detail', started: performance.now(), stage: 'read',
     error: new FixtureStudioImageDownloadError('display_encoding_failed', undefined, false, { phase: 'encoding' }) });
-  assert.equal((events[2].fields[1] as Props).stage, 'encoding');
-  assert.equal((events[2].fields[1] as Props).code, 'display_encoding_failed');
+  assert.equal((events.at(-1)!.fields[1] as Props).stage, 'encoding');
+  assert.equal((events.at(-1)!.fields[1] as Props).code, 'display_encoding_failed');
+  assert.doesNotMatch(JSON.stringify(events), /sensitive|secret-cdn|original\.png|token|prompt|cookie/i);
 }
 
 async function checkActualDisplayEncodingFailure() {
@@ -452,13 +465,13 @@ async function checkReferenceImageRoute() {
   const success = await get(nextRequest('https://app.test/api/reference-images/reference-1/content?variant=preview'), { params: { id: 'reference-1' } });
   assert.equal(success.status, 200);
   const successId = uuid(success.headers.get('X-Media-Request-Id'));
-  assert.equal(authorizedInput[7], successId, 'reference route must create the read-id before calling the reader');
-  assert.equal(authorizedInput[6], trusted, 'trusted version is passed only for the matching original source');
+  assert.equal(authorizedInput[8], successId, 'reference route must create the read-id before calling the reader');
+  assert.equal(authorizedInput[7], trusted, 'trusted version is passed only for the matching original source');
   assert.equal(diagnostics.at(-1)?.readId, successId);
 
   image = { ...image, url: 'https://cdn.test/independent-display.png' };
   await get(nextRequest('https://app.test/api/reference-images/reference-1/content?variant=preview'), { params: { id: 'reference-1' } });
-  assert.equal(authorizedInput[6], undefined, 'an independent display source must not borrow the original asset hash');
+  assert.equal(authorizedInput[7], undefined, 'an independent display source must not borrow the original asset hash');
 
   authorizedFailure = new FixtureStudioImageDownloadError('download_body_timeout', undefined, true, { phase: 'body' });
   const failed = await get(nextRequest('https://app.test/api/reference-images/reference-1/content?variant=preview'), { params: { id: 'reference-1' } });
