@@ -1,5 +1,5 @@
 <!-- FB-FIXPLAN-20261114-EVIDENCE -->
-FB-FIXPLAN-20261114：现有本地流式读、普通/IP提交、IP视频元数据、公开存储合同与Nginx日志能力的定向源码/设计依据私有保于原资料planning-20261114T170939Z；复用原三反馈与原图证据，无新生产访问/测试。方案、文件图、分批依赖、UX、场景验证和相容回退见[原单§10](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-14-feedback-24h.md#fixplan-1114)。
+FB-FIXPLAN-20261114：原设计依据沿planning-20261114T170939Z；本轮六组方案风险复核、8份定向Git源及修改前方案私有保于原资料plan-review-20261114T174817Z，复用原反馈/现网证据。未新访问生产/读取实际secret/测试，源码副本和私有原文不推Git。详[原单复核与准入缺口](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-14-feedback-24h.md#fixplan-risk-review-1114)。
 <!-- /FB-FIXPLAN-20261114-EVIDENCE -->
 
 <!-- FB-TODAY-20261114-EVIDENCE -->

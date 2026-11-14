@@ -1,5 +1,5 @@
 <!-- FB-FIXPLAN-20261114 -->
-FB-FIXPLAN-20261114：今日三反馈修改规划已排两批五包：先普通/IP本地视频受限取件与真实错误，后可信旧图缓存、两缩略图入口恢复及资产页视频加入；保原权限/原图/原号/费用和下载，未证历史状态单列诊断。执行前须鲜核基线、日志脱敏、在途reader/worker相容与回退；本轮仅规划，未改业务/配置或上线。详[原单§10](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-14-feedback-24h.md#fixplan-1114)。
+FB-FIXPLAN-20261114：两批五包规划已补六组交接/风险：未发送准备收尾、首次与worker错误留存、取件期限/日志/相容回退、图片后台版本、混合素材顺序与原回执、失败read-id；专项仅按实际依赖/状态触发。W1签发准入仍须执行鲜核，缺证不启用且可先交W2。仅文档审查，未改业务/线上，旧原号/费用/权限/原图及下载保护保持。详[原单方案与复核](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-14-feedback-24h.md#fixplan-risk-review-1114)。
 <!-- /FB-FIXPLAN-20261114 -->
 
 <!-- FB-TODAY-20261114 -->
