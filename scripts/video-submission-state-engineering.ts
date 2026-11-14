@@ -23,6 +23,39 @@ function callback(name: string) {
   }).outputText;
 }
 
+function submitErrorResponseBranch() {
+  let submit: ts.Node | undefined;
+  function findSubmit(node: ts.Node) {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === 'handleSubmit'
+      && node.initializer && ts.isCallExpression(node.initializer)) submit = node.initializer.arguments[0];
+    ts.forEachChild(node, findSubmit);
+  }
+  findSubmit(file); assert.ok(submit);
+  const property = (node: ts.Node, receiver: string, name: string) => ts.isPropertyAccessExpression(node)
+    && ts.isIdentifier(node.expression) && node.expression.text === receiver && node.name.text === name;
+  const branches: ts.IfStatement[] = [];
+  function findBranch(node: ts.Node) {
+    if (ts.isIfStatement(node) && ts.isPrefixUnaryExpression(node.expression)
+      && node.expression.operator === ts.SyntaxKind.ExclamationToken && property(node.expression.operand, 'res', 'ok')) {
+      let checksServerError = false, removesReceipt = false;
+      function inspect(child: ts.Node) {
+        if (ts.isBinaryExpression(child) && property(child.left, 'res', 'status')
+          && child.operatorToken.kind === ts.SyntaxKind.GreaterThanEqualsToken
+          && ts.isNumericLiteral(child.right) && child.right.text === '500') checksServerError = true;
+        if (ts.isCallExpression(child) && property(child.expression, 'sessionStorage', 'removeItem')) removesReceipt = true;
+        ts.forEachChild(child, inspect);
+      }
+      inspect(node);
+      if (checksServerError && removesReceipt) branches.push(node);
+    }
+    ts.forEachChild(node, findBranch);
+  }
+  findBranch(submit); assert.equal(branches.length, 1);
+  return ts.transpileModule(`module.exports = async () => { ${branches[0].getText(file)} }`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  }).outputText;
+}
+
 async function main() {
   let checks = 0;
   const fixtures = [
@@ -85,10 +118,44 @@ async function main() {
       checks++;
     }
   }
+  const responseCode = submitErrorResponseBranch();
+  for (const fixture of [
+    { status: 409, lookups: 0, retained: false, unconfirmed: false },
+    { status: 503, lookups: 1, retained: true, unconfirmed: true },
+  ]) {
+    const key = 'original-key', storageKey = 'original-request-storage';
+    const storage = new Map([[storageKey, JSON.stringify({ key })]]);
+    const params = { prompt: 'retain-input', referenceVideoUrls: ['/fixture-video'], generationMode: 'all_in_one_reference' };
+    const originalParams = structuredClone(params), pendingParams = { current: params as typeof params | null };
+    const message = '参考视频当前不可用，尚未提交生成。';
+    const observed = { lookups: 0, removed: 0, unconfirmed: true, accepted: 0 };
+    const context = {
+      module: { exports: undefined as unknown }, Error,
+      res: new Response(JSON.stringify({ error: message }), { status: fixture.status }), data: { error: message },
+      params, idempotencyKey: key, requestStorageKey: storageKey, unconfirmedGenerationParamsRef: pendingParams,
+      sessionStorage: { removeItem: (name: string) => { observed.removed++; storage.delete(name); } },
+      isCurrent: () => true, setErrorDebug() {}, notifyVideoPricingChanged() { throw new Error('Unexpected pricing change'); },
+      recoverAcceptedRequest: async (requestKey: string) => { assert.equal(requestKey, key); observed.lookups++; return null; },
+      acceptRecoveredTask: async () => { observed.accepted++; throw new Error('An empty lookup cannot accept a task'); },
+      setUnconfirmedGenerationRequest: (value: boolean) => { observed.unconfirmed = value; },
+    };
+    vm.runInNewContext(responseCode, context);
+    const run = context.module.exports as () => Promise<void>;
+    await assert.rejects(() => run(), (error: unknown) => { assert.equal((error as Error).message, message); return true; });
+    assert.equal(storage.has(storageKey), fixture.retained);
+    assert.equal(observed.removed, fixture.retained ? 0 : 1);
+    assert.equal(observed.unconfirmed, fixture.unconfirmed);
+    assert.equal(observed.lookups, fixture.lookups);
+    assert.equal(observed.accepted, 0);
+    assert.equal(pendingParams.current, fixture.retained ? params : null);
+    assert.deepEqual(params, originalParams);
+    checks++;
+  }
   const output = process.argv[2];
   assert.ok(output && path.resolve(output).startsWith(path.resolve('.role-tests') + path.sep));
   fs.mkdirSync(path.dirname(output), { recursive: true });
-  fs.writeFileSync(output, JSON.stringify({ checks, passed: true, actualClientCallbacks: 2, networkCalls: 0, productionWrites: 0, providerCalls: 0 }, null, 2));
-  console.log(JSON.stringify({ checks, passed: true, actualClientCallbacks: 2 }));
+  fs.writeFileSync(output, JSON.stringify({ checks, passed: true, actualClientCallbacks: 2, actualSubmitErrorResponseBranch: true,
+    submitErrorStatuses: [409, 503], networkCalls: 0, productionWrites: 0, providerCalls: 0 }, null, 2));
+  console.log(JSON.stringify({ checks, passed: true, actualClientCallbacks: 2, actualSubmitErrorResponseBranch: true }));
 }
 void main().catch(error => { console.error(error); process.exitCode = 1; });

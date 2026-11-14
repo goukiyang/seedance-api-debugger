@@ -1360,7 +1360,7 @@ export async function POST(request: NextRequest) {
   let referenceVideoDelivery: ReferenceVideoDelivery | undefined;
   try { referenceVideoDelivery = await planReferenceVideoDelivery(user, providerInput, 'ip', authorizedVideos); }
   catch (error) { return error instanceof RangeError ? errorJson(error.message, 400)
-      : errorJson('参考视频安全交付暂不可用，尚未提交，请联系管理员。', 503); }
+      : errorJson('参考视频安全交付暂不可用，尚未提交，请联系管理员。', 409); }
 
   // --- Create snapshot ---
   if (groupRefs.length) await assertPrivateVolcengineIpDestination(selectedModel, videoGroups.origins);

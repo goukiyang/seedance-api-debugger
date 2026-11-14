@@ -2107,7 +2107,7 @@ export async function POST(request: NextRequest) {
   if (requestedProvider === 'seedance') {
     try { referenceVideoDelivery = await planReferenceVideoDelivery(user, providerInput, 'ordinary', authorizedVideos); }
     catch (error) { return error instanceof RangeError ? errorJson(error.message, 400)
-      : errorJson('参考视频安全交付暂不可用，尚未提交，请联系管理员。', 503); }
+      : errorJson('参考视频安全交付暂不可用，尚未提交，请联系管理员。', 409); }
   }
 
   let h3ReferenceTransfer: Awaited<ReturnType<typeof uploadH3ReferenceImagesForTask>> | null = null;

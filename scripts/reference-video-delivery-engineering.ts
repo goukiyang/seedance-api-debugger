@@ -48,6 +48,24 @@ async function main() {
       retainVideoPendingDiagnostic: video.retainVideoPendingDiagnostic, markProviderApiRequestFailed: ledger.markProviderApiRequestFailed,
       NextResponse: require('next/server').NextResponse });
   const runInitialCatch = createFixture.exports!;
+  const preparationCatch = async (file: string) => {
+    const source = await fs.readFile(path.join(root, file), 'utf8');
+    const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+    let caught: ts.CatchClause | undefined;
+    const visit = (node: ts.Node) => {
+      if (ts.isCatchClause(node) && node.block.getText(ast).includes('参考视频安全交付暂不可用')) caught = node;
+      ts.forEachChild(node, visit);
+    };
+    visit(ast); assert.ok(caught);
+    const loaded: { exports?: (error: Error) => Promise<Response> } = {};
+    runInNewContext(ts.transpileModule(`async function fixture(error) ${caught.block.getText(ast)} module.exports=fixture;`,
+      { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText,
+      { module: loaded, RangeError, errorJson: require('../src/lib/auth/api-helpers').errorJson });
+    return loaded.exports!;
+  };
+  const ordinaryPreparationCatch = await preparationCatch('src/app/api/tasks/create/route.ts');
+  const ipPreparationCatch = await preparationCatch('src/app/api/ip/tasks/create/route.ts');
+
   const ipSource = await fs.readFile(path.join(root, 'src/app/api/ip/tasks/create/route.ts'), 'utf8');
   const ipAst = ts.createSourceFile('ip-create.ts', ipSource, ts.ScriptTarget.Latest, true);
   let ipSendStatements: readonly ts.Statement[] | undefined;
@@ -190,6 +208,13 @@ async function main() {
       await assert.rejects(delivery.planReferenceVideoDelivery(owner, input, 'ordinary', authorized));
     } finally { Reflect.set(process.env, 'NODE_ENV', 'test'); process.env.PROVIDER_REFERENCE_MEDIA_ORDINARY_ENABLED = '1'; }
     checks.push('production_fresh_dotenv_activation_after_handoff_family_isolation_missing_gate_rejects_reader_survives');
+    for (const catchPreparation of [ordinaryPreparationCatch, ipPreparationCatch]) {
+      const response = await catchPreparation(new Error('synthetic-disabled-gate'));
+      assert.equal(response.status, 409); assert.match((await response.json()).error, /尚未提交/);
+      assert.equal((await catchPreparation(new RangeError('synthetic-invalid-window'))).status, 400);
+    }
+    checks.push('both_actual_pre_reserve_preparation_catches_use_known_rejection_not_http5xx_unknown');
+
     const secret = process.env.SESSION_SECRET;
     process.env.SESSION_SECRET = 'dev-secret-change-in-production';
     await assert.rejects(delivery.planReferenceVideoDelivery(owner, input, 'ordinary', authorized));
