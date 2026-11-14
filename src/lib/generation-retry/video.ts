@@ -7,16 +7,21 @@ import { createVideoTask, getProviderConfig } from '@/lib/provider/jimeng';
 import { createH3VideoJob, H3RequestError, type H3GeneratePayload } from '@/lib/provider/h3';
 import { getH3ApiSettings } from '@/lib/integrations/h3';
 import { writePrivatePrompt, readPrivatePrompt, type PrivateOrigin } from '@/lib/security/private-prompts.server';
-import { beginRetry, markRetrySent, acceptRetry, planRetry, finishRetry, readRetry, retryHash, advanceRetry, mutateRetry } from './store';
+import { beginRetry, markRetrySent, acceptRetry, planRetry, finishRetry, readRetry, retryHash, advanceRetry, mutateRetry, writeRetry } from './store';
 import { retryFailure, RETRY_TASK_PREFIX, type RetryFailure } from './contracts';
 import { createProviderApiRequest, markProviderApiRequestAccepted, markProviderApiRequestFailed } from '@/lib/costs/ledger';
+import { prepareReferenceVideoDelivery, type ReferenceVideoDelivery } from '@/lib/provider/reference-video-delivery.server';
+import { providerCreateFailureUserMessage, type ProviderCreateDiagnostic } from '@/lib/provider/create-diagnostic';
 import type { SessionUser } from '@/lib/auth/session';
 
 type SeedanceInput = Parameters<typeof createVideoTask>[0];
 export type FrozenVideoRetryInput = { provider: 'seedance' | 'h3'; input: SeedanceInput | H3GeneratePayload;
-  privateOrigins: PrivateOrigin[]; sensitiveRecipe: boolean; credentialHash: string; baseUrl: string };
+  privateOrigins: PrivateOrigin[]; sensitiveRecipe: boolean; referenceVideoDelivery?: ReferenceVideoDelivery; credentialHash: string; baseUrl: string };
 export class SafeVideoPending extends Error {
-  constructor(public state: 'retry_wait' | 'submission_unknown') { super(state); }
+  constructor(public state: 'retry_wait' | 'submission_unknown', public diagnostic?: ProviderCreateDiagnostic) { super(state); }
+}
+export class SafeVideoPreparationFailed extends Error {
+  constructor() { super('参考视频准备未完成，本次未发送生成请求；请保留素材后重试。'); }
 }
 const payloadPath = (id: string) => {
   if (!/^[A-Za-z0-9-]{1,120}$/.test(id)) throw new Error('retry_invalid_identity');
@@ -65,6 +70,48 @@ export async function handleVideoRetryFailure(task: VideoTask, failure: RetryFai
   });
 }
 
+
+async function closeUnsentReferenceVideo(task: VideoTask) {
+  return prisma.$transaction(async tx => {
+    const prior = await readRetry('video', task.id, tx);
+    const current = await tx.videoTask.findUnique({ where: { id: task.id } });
+    if (!prior || !current || prior.value.state !== 'active' || prior.value.attempts.at(-1)?.state !== 'prepared'
+      || current.provider_task_id || current.local_status !== 'retry_submitting' || current.actual_cost !== null || current.refund_amount !== null) return false;
+    const value = structuredClone(prior.value);
+    value.state = 'failed'; value.stopped = true; value.attempts.at(-1)!.state = 'failed';
+    await writeRetry(tx, prior, value);
+    await tx.videoTask.update({ where: { id: task.id }, data: { local_status: 'failed', error_code: 'REFERENCE_VIDEO_PREPARATION_FAILED',
+      error_message: new SafeVideoPreparationFailed().message, completed_at: new Date() } });
+    await (await import('@/lib/video/task-finalizer')).settleTask(task.id, current.user_id!, current.frozen_cost || 0, 'failed', tx);
+    return true;
+  });
+}
+
+// Keep accepted/terminal receipts authoritative while retaining the original safe create diagnostic.
+export async function retainVideoPendingDiagnostic(taskId: string, state: SafeVideoPending['state'], diagnostic?: ProviderCreateDiagnostic, requestId?: string | null) {
+  return prisma.$transaction(async tx => {
+    const current = await tx.videoTask.findUnique({ where: { id: taskId } });
+    if (!current) return null;
+    const accepted = Boolean(current.provider_task_id) || ['submitted', 'queued', 'running', 'succeeded'].includes(current.local_status);
+    const message = providerCreateFailureUserMessage(diagnostic) || current.error_message || '原提交结果或费用待核对，保留原预留；不会重新发送。';
+    if (!accepted && state === 'submission_unknown') await tx.videoTask.updateMany({ where: { id: taskId, provider_task_id: null,
+      local_status: { in: ['retry_submitting', 'submission_unknown'] } }, data: { error_message: message,
+      ...(diagnostic ? { raw_create_response: JSON.stringify({ seedance_diagnostic: diagnostic, safe_retry_state: state }) } : {}) } });
+    if (requestId) {
+      const request = await tx.providerApiRequest.findUnique({ where: { id: requestId } });
+      if (request && !request.provider_task_id && !['accepted', 'succeeded'].includes(request.status)) {
+        const summary = request.response_summary_json ? JSON.parse(request.response_summary_json) as Record<string, unknown> : {};
+        await tx.providerApiRequest.updateMany({ where: { id: requestId, status: request.status, provider_task_id: null,
+          response_summary_json: request.response_summary_json }, data: { status: accepted ? 'accepted' : state === 'retry_wait' ? 'failed' : 'unknown',
+          ...(accepted ? { provider_task_id: current.provider_task_id, error_code: null, error_message: null } : { error_code: current.error_code, error_message: message }),
+          ...(diagnostic?.http_status !== undefined ? { http_status: diagnostic.http_status } : {}),
+          response_summary_json: JSON.stringify({ ...summary, ...(diagnostic ? { seedance_diagnostic: diagnostic } : {}), safe_retry_state: state }), completed_at: new Date() } });
+      }
+    }
+    return { accepted, message: accepted ? '已受理，继续查询原任务。' : message, status: accepted ? current.local_status : state };
+  });
+}
+
 export async function dispatchFrozenVideoRetry(task: VideoTask, frozen: FrozenVideoRetryInput,
   onDiagnostic?: Parameters<typeof createVideoTask>[1]) {
   const record = await readRetry('video', task.id);
@@ -94,13 +141,29 @@ export async function dispatchFrozenVideoRetry(task: VideoTask, frozen: FrozenVi
     const { assertCanUseReferenceImage } = await import('@/lib/reference-albums/permissions');
     for (const id of JSON.parse(task.reference_image_ids || '[]') as string[]) await assertCanUseReferenceImage(actor, id);
   }
+  let seedanceInput = frozen.input as SeedanceInput;
+  if (frozen.referenceVideoDelivery) {
+    try {
+      const stamped = await mutateRetry('video', task.id, value => {
+        const current = value.attempts.at(-1)!;
+        if (value.state !== 'active' || current.state !== 'prepared' || current.key !== attempt.key) throw new Error('retry_send_not_authorized');
+        current.referenceMediaIssuedAt ??= Date.now();
+      });
+      seedanceInput = { ...seedanceInput, reference_video_urls: await prepareReferenceVideoDelivery(task.id, actor,
+        seedanceInput.reference_video_urls || [], frozen.referenceVideoDelivery, stamped!.attempts.at(-1)!.referenceMediaIssuedAt!) };
+    } catch (error) {
+      if (await closeUnsentReferenceVideo(task)) throw new SafeVideoPreparationFailed();
+      throw error;
+    }
+  }
   await markRetrySent('video', task.id);
+  let diagnostic: ProviderCreateDiagnostic | undefined;
   try {
     const result = frozen.provider === 'h3'
       ? await createH3VideoJob({ ...frozen.input as H3GeneratePayload,
           metadata: { ...(frozen.input as H3GeneratePayload).metadata, external_task_id: attempt.key } },
         { baseUrl: frozen.baseUrl, apiToken: h3?.api_token || undefined, idempotencyKey: attempt.key, privateOrigins: frozen.privateOrigins, signal: AbortSignal.timeout(300000) })
-      : await createVideoTask({ ...frozen.input as SeedanceInput, clientRequestId: attempt.key, client_request_id: attempt.key }, onDiagnostic,
+      : await createVideoTask({ ...seedanceInput, clientRequestId: attempt.key, client_request_id: attempt.key }, value => { diagnostic = value; onDiagnostic?.(value); },
         { sensitiveRecipe: frozen.sensitiveRecipe, privateOrigins: frozen.privateOrigins, signal: AbortSignal.timeout(300000) });
     // The provider id and attempt receipt are durable before returning to any
     // HTTP caller. Later diagnostics cannot turn an accepted POST into a resend.
@@ -109,22 +172,32 @@ export async function dispatchFrozenVideoRetry(task: VideoTask, frozen: FrozenVi
       provider_task_id: result.provider_task_id, local_status: 'submitted', error_code: null, error_message: null } });
     return result;
   } catch (error) {
+    diagnostic ||= (error as { providerCreateDiagnostic?: ProviderCreateDiagnostic }).providerCreateDiagnostic;
     const failure = (error as { retryFailure?: RetryFailure }).retryFailure
       || (error instanceof H3RequestError ? retryFailure(error.raw, error.statusCode || null) : null);
-    if (failure && await handleVideoRetryFailure(task, failure)) throw new SafeVideoPending('retry_wait');
+    if (failure && await handleVideoRetryFailure(task, failure)) throw new SafeVideoPending('retry_wait', diagnostic);
     const latest = await readRetry('video', task.id);
     if (latest?.value.attempts.at(-1)?.providerTaskId) {
       const providerTaskId = latest.value.attempts.at(-1)!.providerTaskId!;
       await prisma.videoTask.updateMany({ where: { id: task.id, local_status: { in: ['retry_submitting', 'submitted'] } },
         data: { provider_task_id: providerTaskId, local_status: 'submitted' } });
-      throw new SafeVideoPending('submission_unknown');
+      throw new SafeVideoPending('submission_unknown', diagnostic);
     }
     if (latest?.value.attempts.at(-1)?.state === 'free_failed') throw error;
-    await finishRetry('video', task.id, 'unknown');
-    await prisma.videoTask.updateMany({ where: { id: task.id, provider_task_id: task.provider_task_id,
-      local_status: { notIn: ['succeeded', 'failed', 'cancelled'] } }, data: { local_status: 'submission_unknown',
-      error_code: 'SAFE_RETRY_SUBMISSION_UNKNOWN', error_message: '原提交结果或费用待核对，保留原预留；不会重新发送。' } });
-    throw new SafeVideoPending('submission_unknown');
+    await prisma.$transaction(async tx => {
+      const prior = await readRetry('video', task.id, tx);
+      const current = await tx.videoTask.findUnique({ where: { id: task.id } });
+      if (!prior || !current || prior.value.attempts.at(-1)?.providerTaskId || current.provider_task_id
+        || ['succeeded', 'failed', 'cancelled'].includes(current.local_status)) return;
+      const value = structuredClone(prior.value);
+      value.state = 'unknown'; value.attempts.at(-1)!.state = 'unknown';
+      await writeRetry(tx, prior, value);
+      await tx.videoTask.updateMany({ where: { id: task.id, provider_task_id: null,
+        local_status: { in: ['retry_submitting', 'submission_unknown'] } }, data: { local_status: 'submission_unknown',
+        error_code: 'SAFE_RETRY_SUBMISSION_UNKNOWN', error_message: providerCreateFailureUserMessage(diagnostic) || '原提交结果或费用待核对，保留原预留；不会重新发送。',
+        ...(diagnostic ? { raw_create_response: JSON.stringify({ seedance_diagnostic: diagnostic, safe_retry_state: 'submission_unknown' }) } : {}) } });
+    });
+    throw new SafeVideoPending('submission_unknown', diagnostic);
   }
 }
 
@@ -166,8 +239,9 @@ export async function processVideoRetries(shouldStop: () => boolean = () => fals
     if (shouldStop()) break;
     const taskId = task.id;
     let requestId: string | null = null;
+    let frozen: FrozenVideoRetryInput | undefined;
     try {
-      const frozen = await readFrozen(task);
+      frozen = await readFrozen(task);
       const state = (await readRetry('video', taskId))!.value;
       const request = await createProviderApiRequest({ task, endpoint: state.scope.endpoint, method: 'POST',
         idempotencyKey: state.attempts.at(-1)!.key, requestPayload: { safe_retry: true, ordinal: state.attempts.length - 1 } });
@@ -179,6 +253,22 @@ export async function processVideoRetries(shouldStop: () => boolean = () => fals
         console.error('[safe-retry] accepted diagnostic deferred; original provider id retained');
       });
     } catch (error) {
+      if (error instanceof SafeVideoPending) {
+        await retainVideoPendingDiagnostic(taskId, error.state, error.diagnostic, requestId).catch(() => {
+          console.error('[safe-retry] pending diagnostic deferred; original retry state retained');
+        });
+        continue;
+      }
+      if (frozen?.referenceVideoDelivery && await closeUnsentReferenceVideo(task)) {
+        if (requestId) await markProviderApiRequestFailed({ requestId, errorCode: 'REFERENCE_VIDEO_PREPARATION_FAILED',
+          errorMessage: new SafeVideoPreparationFailed().message, responseSummary: { reference_video_preparation: 'unsent' } });
+        continue;
+      }
+      if (error instanceof SafeVideoPreparationFailed) {
+        if (requestId) await markProviderApiRequestFailed({ requestId, errorCode: 'REFERENCE_VIDEO_PREPARATION_FAILED',
+          errorMessage: error.message, responseSummary: { reference_video_preparation: 'unsent' } });
+        continue;
+      }
       if (requestId) await markProviderApiRequestFailed({ requestId, errorCode: 'SAFE_RETRY_DISPATCH', errorMessage: 'Retry dispatch did not return an accepted receipt' }).catch(() => {
         console.error('[safe-retry] failure diagnostic deferred; original retry state retained');
       });

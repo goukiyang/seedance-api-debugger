@@ -1,7 +1,9 @@
+import { authorizeLocalReferenceVideos, authorizedReferenceVideoFile, planReferenceVideoDelivery, type AuthorizedLocalReferenceVideo, type ReferenceVideoDelivery } from '@/lib/provider/reference-video-delivery.server';
+import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { videoReferenceImageInputs } from '@/lib/character-assets/video-reference.server';
 import { NextRequest, NextResponse } from 'next/server';
 import { freezeWorkMethodUse } from '@/lib/works/method-reference';
-import { freezeVideoRetry, dispatchFrozenVideoRetry, SafeVideoPending } from '@/lib/generation-retry/video';
+import { freezeVideoRetry, dispatchFrozenVideoRetry, SafeVideoPending, SafeVideoPreparationFailed, retainVideoPendingDiagnostic } from '@/lib/generation-retry/video';
 import { readRetry, finishRetry } from '@/lib/generation-retry/store';
 import { privateMultiviewOrigins } from '@/lib/video/private-storage.server';
 import { CreationError, isCreationV2 } from '@/lib/creation/contract';
@@ -335,8 +337,12 @@ async function probePublicImageDimensions(url: string) {
     : null;
 }
 
-async function probePublicVideoDimensions(url: string) {
-  if (!isPubliclyReachableUrl(url)) return null;
+async function probePublicVideoDimensions(url: string, authorizedVideos: AuthorizedLocalReferenceVideo[] = []) {
+  const local = siteUploadPathFromUrl(url);
+  const source = local ? authorizedVideos.find(item => siteUploadPathFromUrl(item.source) === local) : null;
+  if (local && !source) throw new Error('本地参考视频未获使用授权');
+  if (!local && !isPubliclyReachableUrl(url)) return null;
+  const input = source ? (await authorizedReferenceVideoFile(source)).file : url;
   const { stdout } = await execFileAsync('ffprobe', [
     '-v',
     'error',
@@ -346,7 +352,7 @@ async function probePublicVideoDimensions(url: string) {
     'stream=width,height,avg_frame_rate,r_frame_rate:format=duration',
     '-of',
     'json',
-    url,
+    input,
   ], { timeout: 15000, maxBuffer: 1024 * 32 });
   const parsed = JSON.parse(String(stdout || '{}')) as {
     streams?: Array<{ width?: number; height?: number; avg_frame_rate?: string; r_frame_rate?: string }>;
@@ -396,6 +402,7 @@ async function validateReferenceMediaResolution(input: {
   preparedImages: PreparedRefImage[];
   imageUrls: string[];
   referenceVideoUrls: string[];
+  authorizedVideos?: AuthorizedLocalReferenceVideo[];
 }): Promise<ReferenceMediaResolutionIssue | null> {
   const imageUrls = uniquePreserveOrder(input.imageUrls);
   const preparedImageByUrl = new Map(input.preparedImages.map((image) => [image.originalUrl, image]));
@@ -479,7 +486,7 @@ async function validateReferenceMediaResolution(input: {
 
     if (width == null || height == null) {
       try {
-        const probed = await probePublicVideoDimensions(url);
+        const probed = await probePublicVideoDimensions(url, input.authorizedVideos);
         if (probed) {
           width = probed.width ?? width;
           height = probed.height ?? height;
@@ -514,6 +521,7 @@ async function validateReferenceMediaResolution(input: {
 }
 
 async function validateReferenceMediaProviderPreflight(input: {
+  authorizedVideos?: AuthorizedLocalReferenceVideo[];
   preparedImages: PreparedRefImage[];
   imageUrls: string[];
   referenceVideoUrls: string[];
@@ -564,7 +572,7 @@ async function validateReferenceMediaProviderPreflight(input: {
     let durationSeconds: number | null = null;
     let fps: number | null = null;
     try {
-      const probed = await probePublicVideoDimensions(url);
+      const probed = await probePublicVideoDimensions(url, input.authorizedVideos);
       if (probed) {
         width = width ?? probed.width;
         height = height ?? probed.height;
@@ -1944,6 +1952,16 @@ export async function POST(request: NextRequest) {
       break;
   }
 
+  if (requestedProvider === 'seedance' && generationMode !== 'all_in_one_reference' && (referenceVideoUrls.length || referenceAudioUrls.length)) {
+    return errorJson('首尾帧和智能多帧模式不支持参考视频或音频，请切换到全能参考模式。', 400);
+  }
+
+  let authorizedVideos: AuthorizedLocalReferenceVideo[] = [];
+  if (requestedProvider === 'seedance') {
+    try { authorizedVideos = await authorizeLocalReferenceVideos(user, referenceVideoUrls); }
+    catch { return errorJson('参考视频当前不可用或没有使用权限，尚未提交。', 403); }
+  }
+
   const nonPublicReferenceMediaUrl = firstNonPublicReferenceMediaUrl([
     ...referenceVideoUrls,
     ...referenceAudioUrls,
@@ -1970,6 +1988,7 @@ export async function POST(request: NextRequest) {
     preparedImages,
     imageUrls: finalReferenceImageUrls,
     referenceVideoUrls: requestedProvider === H3_VIDEO_PROVIDER ? [] : referenceVideoUrls,
+    authorizedVideos,
   });
   if (referenceMediaResolutionIssue) {
     return NextResponse.json(referenceMediaResolutionIssue, { status: 400 });
@@ -1981,6 +2000,7 @@ export async function POST(request: NextRequest) {
       imageUrls: finalReferenceImageUrls,
       referenceVideoUrls,
       referenceAudioUrls,
+      authorizedVideos,
       onVideoProbed: videoEditRequested ? (reference) => editReferences.push(reference) : undefined,
     });
     if (referenceMediaPreflightIssue) {
@@ -2082,6 +2102,13 @@ export async function POST(request: NextRequest) {
     model: selectedModel,
     draft: draftRequested,
   };
+
+  let referenceVideoDelivery: ReferenceVideoDelivery | undefined;
+  if (requestedProvider === 'seedance') {
+    try { referenceVideoDelivery = await planReferenceVideoDelivery(user, providerInput, 'ordinary', authorizedVideos); }
+    catch (error) { return error instanceof RangeError ? errorJson(error.message, 400)
+      : errorJson('参考视频安全交付暂不可用，尚未提交，请联系管理员。', 503); }
+  }
 
   let h3ReferenceTransfer: Awaited<ReturnType<typeof uploadH3ReferenceImagesForTask>> | null = null;
   let seedanceReferenceTransport: Partial<CreateVideoInput> = {};
@@ -2782,6 +2809,7 @@ export async function POST(request: NextRequest) {
       provider: requestedProvider === H3_VIDEO_PROVIDER ? 'h3' : 'seedance',
       input: requestedProvider === H3_VIDEO_PROVIDER && h3GeneratePayload ? h3GeneratePayload : { ...providerInput, ...seedanceReferenceTransport },
       sensitiveRecipe: Boolean(groupRefs.length || multiviewGeneration || multiviewAction),
+      referenceVideoDelivery,
       privateOrigins: groupRefs.length ? videoGroups.origins : multiviewAction ? multiviewAction.action.origins : multiviewGeneration ? privateMultiviewOrigins() : [],
     });
     const providerResult = await dispatchFrozenVideoRetry(retryTask, frozenRetry,
@@ -2900,11 +2928,15 @@ export async function POST(request: NextRequest) {
       created_at: new Date().toISOString(),
     });
   } catch (err) {
+    if (err instanceof SafeVideoPreparationFailed) {
+      if (providerRequestId) await markProviderApiRequestFailed({ requestId: providerRequestId, errorCode: 'REFERENCE_VIDEO_PREPARATION_FAILED',
+        errorMessage: err.message, responseSummary: { reference_video_preparation: 'unsent' } }).catch(() => {});
+      return NextResponse.json({ error: 'REFERENCE_VIDEO_PREPARATION_FAILED', message: err.message, task_id: taskId }, { status: 400, headers: privateNoStore() });
+    }
     if (err instanceof SafeVideoPending) {
-      if (providerRequestId) await prisma.providerApiRequest.update({ where: { id: providerRequestId }, data: {
-        status: err.state === 'retry_wait' ? 'failed' : 'unknown', response_summary_json: JSON.stringify({ safe_retry_state: err.state }) } });
-      return NextResponse.json({ id: taskId, status: err.state, local_status: err.state,
-        message: err.state === 'retry_wait' ? '后台等待安全自动重试，保留原预留。' : '原提交结果或费用待核对，未重新发送。' },
+      const pending = await retainVideoPendingDiagnostic(taskId, err.state, err.diagnostic, providerRequestId);
+      return NextResponse.json({ id: taskId, status: pending?.status || err.state, local_status: pending?.status || err.state,
+        message: err.state === 'retry_wait' ? '后台等待安全自动重试，保留原预留。' : pending?.message || '原提交结果或费用待核对，未重新发送。' },
       { status: 202, headers: privateNoStore() });
     }
     const retryReceipt = await readRetry('video', taskId);

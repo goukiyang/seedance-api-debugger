@@ -1,3 +1,4 @@
+import { authorizeLocalReferenceVideos, planReferenceVideoDelivery, prepareReferenceVideoDelivery, type AuthorizedLocalReferenceVideo, type ReferenceVideoDelivery } from '@/lib/provider/reference-video-delivery.server';
 import { randomUUID } from 'node:crypto';
 import { assertVideoPromptGroupSurface, VideoPromptGroupError } from '@/lib/video/prompt-groups';
 import { resolveVideoPromptGroups } from '@/lib/video/prompt-groups.server';
@@ -1267,12 +1268,16 @@ export async function POST(request: NextRequest) {
     return errorJson(`当前 IP 模型最多支持 ${referenceMediaCapabilities.videoLimit} 个参考视频和 ${referenceMediaCapabilities.audioLimit} 个参考音频。`, 400);
   }
 
+  let authorizedVideos: AuthorizedLocalReferenceVideo[];
+  try { authorizedVideos = await authorizeLocalReferenceVideos(user, referenceVideoUrls); }
+  catch { return errorJson('参考视频当前不可用或没有使用权限，尚未提交。', 403); }
+
   let preflightVideos = seedanceMediaItemsFromUrls('video', referenceVideoUrls);
   let preflightAudios = seedanceMediaItemsFromUrls('audio', referenceAudioUrls);
   if (selectedModel === SEEDANCE_2_5_IP_MODEL_ID) {
     try {
       [preflightVideos, preflightAudios] = await Promise.all([
-        probeIpReferenceMedia(referenceVideoUrls, 'video'),
+        probeIpReferenceMedia(referenceVideoUrls, 'video', authorizedVideos),
         probeIpReferenceMedia(referenceAudioUrls, 'audio'),
       ]);
     } catch (error) {
@@ -1351,6 +1356,11 @@ export async function POST(request: NextRequest) {
     callback_url: body.callback_url,
     execution_expires_after: body.execution_expires_after,
   };
+
+  let referenceVideoDelivery: ReferenceVideoDelivery | undefined;
+  try { referenceVideoDelivery = await planReferenceVideoDelivery(user, providerInput, 'ip', authorizedVideos); }
+  catch (error) { return error instanceof RangeError ? errorJson(error.message, 400)
+      : errorJson('参考视频安全交付暂不可用，尚未提交，请联系管理员。', 503); }
 
   // --- Create snapshot ---
   if (groupRefs.length) await assertPrivateVolcengineIpDestination(selectedModel, videoGroups.origins);
@@ -1762,10 +1772,13 @@ export async function POST(request: NextRequest) {
     });
     providerRequestId = providerRequest.id;
 
+    const deliveredVideoUrls = referenceVideoDelivery ? await prepareReferenceVideoDelivery(taskId, user,
+      providerInput.reference_video_urls || [], referenceVideoDelivery, Date.now()) : providerInput.reference_video_urls;
     submissionStarted = true;
     const acceptedProviderResult = await createVolcengineIpVideoTask({
       ...providerInput,
       ...ipReferenceTransport,
+      reference_video_urls: deliveredVideoUrls,
       model: selectedModel,
     }, { privateOrigins: videoGroups.origins });
     providerResult = acceptedProviderResult;

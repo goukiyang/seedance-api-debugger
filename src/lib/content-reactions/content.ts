@@ -22,6 +22,7 @@ import { resolveStudioPinnedAsset } from '@/lib/image-studio/result-pins';
 import { multiviewOutputFileAccess } from '@/lib/video/multiview-output-access.server';
 import { archivedPresetKey } from '@/lib/image-studio/preset-lifecycle';
 import type { ReactionProjection } from './projection-context';
+import { trustedStudioImageVersion, type TrustedStudioImageVersion } from '@/lib/image-studio/media';
 
 export class ReactionError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -35,7 +36,7 @@ export function parseContentKey(input: unknown): ContentKey {
 export type ResolvedContent = {
   summary: ContentSummary;
   source?: { url: string; thumbnail: string | null; referenceId?: string; canPreviewOriginal?: boolean; mimeType?: string; fileName?: string;
-    hdOwner?: { kind: 'asset' | 'reference'; id: string; ownerId: string } };
+    hdOwner?: { kind: 'asset' | 'reference'; id: string; ownerId: string }; trustedVersion?: TrustedStudioImageVersion };
   prompt?: string;
 };
 const mediaUrl = (key: ContentKey, variant: string) => `/api/content-reactions/media?key=${encodeURIComponent(key)}&variant=${variant}`;
@@ -131,7 +132,8 @@ export async function resolveContent(user: SessionUser, input: ContentKey, conte
         // private task route, inputs, prompt, reuse or download permissions.
         return { summary: withMedia(item, false), source: { url: asset.original_url, thumbnail: asset.thumbnail_url,
           canPreviewOriginal: false, mimeType: asset.mime_type || undefined, fileName: 'template-pinned-image',
-          hdOwner: { kind: 'asset', id: asset.id, ownerId: asset.owner_id } } };
+          hdOwner: { kind: 'asset', id: asset.id, ownerId: asset.owner_id },
+          trustedVersion: trustedStudioImageVersion(asset) } };
       }
       const item = summary(input, asset.type as ContentCategory, asset.file_name || '素材', `/assets?content=${encodeURIComponent(input)}`);
       if (asset.type === 'image' && projection?.details !== false) item.generationOrigin = assetGenerationOrigin(asset, await generationOrigins(user, [asset]));
@@ -147,7 +149,8 @@ export async function resolveContent(user: SessionUser, input: ContentKey, conte
       return { summary: media, source: { url: asset.original_url, thumbnail: asset.thumbnail_url,
         referenceId: download ? referenceId : reusableReferenceId || referenceId, canPreviewOriginal,
         mimeType: asset.mime_type || undefined, fileName: asset.file_name,
-        hdOwner: { kind: 'asset', id: asset.id, ownerId: asset.owner_id } } };
+        hdOwner: { kind: 'asset', id: asset.id, ownerId: asset.owner_id },
+        trustedVersion: asset.type === 'image' ? trustedStudioImageVersion(asset) : undefined } };
     }
     if (type === 'video_task') {
       const task = projection ? projection.tasks.get(id) : await prisma.videoTask.findUnique({ where: { id } });

@@ -27,7 +27,8 @@ import {
 } from './seedance-models';
 import { buildSeedanceDraftContent, SeedanceDraftSubmissionError } from './seedance-draft';
 import { seedanceVideoEditParameters, type SeedanceProviderInput } from './seedance-video-edit';
-import { providerCreateDiagnostic, type ProviderCreateDiagnostic, type ProviderCreatePhase } from './create-diagnostic';
+import { providerCreateDiagnostic, providerCreateKnownFailure, type ProviderCreateDiagnostic, type ProviderCreateKnownFailure, type ProviderCreatePhase } from './create-diagnostic';
+import { createProviderReferenceMediaRedactor, sanitizeProviderReferenceMedia } from './reference-media-redaction';
 import { privateMultiviewFailure } from '../video/multiview-task-privacy';
 
 // ============================================================================
@@ -460,6 +461,7 @@ export async function createVideoTask(
   options: { sensitiveRecipe?: boolean; privateOrigins?: PrivateOrigin[]; signal?: AbortSignal } = {},
 ): Promise<ProviderCreateResponse> {
   const sensitiveRecipe = Boolean(options.sensitiveRecipe || options.privateOrigins?.length);
+  const redactReferenceMedia = createProviderReferenceMediaRedactor(input.reference_video_urls);
   if (!isApiKeyConfigured()) throw new Error('API key not configured');
   const endpoint = `${SEEDANCE_BASE_URL}/call`;
   const payload = buildSeedanceVideoPayload(input);
@@ -479,7 +481,7 @@ export async function createVideoTask(
   console.log(`Endpoint:  ${endpoint}`);
   console.log(`Model:     ${model}`);
   console.log(`Mode:      ${input.generation_mode}`);
-  console.log(`Prompt:    ${sensitiveRecipe ? '[protected multiview recipe]' : `${input.prompt?.slice(0, 100)}...`}`);
+  console.log(`Prompt:    ${sensitiveRecipe ? '[protected multiview recipe]' : `${redactReferenceMedia(input.prompt)?.slice(0, 100)}...`}`);
   console.log(`Duration:  ${input.duration || 'default'}s`);
   console.log(`Ratio:     ${payload.ratio || 'default'}`);
   console.log(`Resolution: ${input.resolution || 'default'}`);
@@ -492,8 +494,9 @@ export async function createVideoTask(
   const startedAt = Date.now();
   let phase: ProviderCreatePhase = 'fetch';
   let httpStatus: number | null = null;
+  let providerError: ProviderCreateKnownFailure | undefined;
   const capture = (error?: unknown) => {
-    const diagnostic = providerCreateDiagnostic({ phase, startedAt, encodedJsonBytes, httpStatus, error });
+    const diagnostic = providerCreateDiagnostic({ phase, startedAt, encodedJsonBytes, httpStatus, error: redactReferenceMedia(error), providerError });
     try { onDiagnostic?.(diagnostic); } catch { /* Capture must not change task or refund handling. */ }
     return diagnostic;
   };
@@ -512,19 +515,20 @@ export async function createVideoTask(
 
     httpStatus = response.status;
     phase = 'response_body';
-    const responseText = await response.text();
+    const responseText = redactReferenceMedia(await response.text());
     
     // 处理空响应或非 JSON 响应
     let data: Record<string, unknown> = {};
     phase = 'response_parse';
     if (responseText.trim()) {
       try {
-        data = JSON.parse(responseText);
+        data = redactReferenceMedia(JSON.parse(responseText));
       } catch {
         throw createNonJsonProviderError(response, hasInlineImages ? String(redactInlineImageTransport(responseText)) : responseText);
       }
     }
     if (hasInlineImages) data = redactInlineImageTransport(data) as Record<string, unknown>;
+    if (!sensitiveRecipe && response.status === 200) providerError = providerCreateKnownFailure(data, redactReferenceMedia(response.headers.get('x-request-id') || response.headers.get('x-tt-logid')));
 
     console.log(`[Create] HTTP Status: ${response.status}`);
     console.log(`[Create] Response:`, JSON.stringify(sensitiveRecipe
@@ -561,7 +565,7 @@ export async function createVideoTask(
   } catch (error) {
     if (isPrivatePromptError(error)) throw error;
     const diagnostic = capture(error);
-    const safeError = sensitiveRecipe ? (() => {
+    const safeError = redactReferenceMedia(sensitiveRecipe ? (() => {
       const failure = privateMultiviewFailure(
         error instanceof Error ? error.message : typeof error === 'string' ? error : 'unknown',
         sensitiveCreateFailureState(diagnostic),
@@ -571,10 +575,11 @@ export async function createVideoTask(
       return sanitized;
     })() : hasInlineImages
       ? new Error(String(redactInlineImageTransport(error instanceof Error ? error.message : 'Seedance 创建任务失败')))
-      : error;
+      : error);
+    if (safeError && typeof safeError === 'object') Object.assign(safeError, { providerCreateDiagnostic: diagnostic });
     console.error('\n❌ Step1 Create failed:', safeError instanceof Error ? safeError.message : 'Seedance 创建任务失败', diagnostic);
     if (safeError && typeof safeError === 'object' && error && typeof error === 'object' && 'retryFailure' in error) {
-      Object.assign(safeError, { retryFailure: error.retryFailure });
+      Object.assign(safeError, { retryFailure: redactReferenceMedia(error.retryFailure) });
     }
     throw safeError;
   }
@@ -607,12 +612,12 @@ export async function createSeedanceDraftUpgradeTask(input: {
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
-    const responseText = await response.text();
+    const responseText = sanitizeProviderReferenceMedia(await response.text());
     let data: Record<string, unknown>;
     try {
       const parsed: unknown = JSON.parse(responseText);
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Invalid response object');
-      data = parsed as Record<string, unknown>;
+      data = sanitizeProviderReferenceMedia(parsed as Record<string, unknown>);
     } catch {
       throw new SeedanceDraftSubmissionError('Seedance Draft 升级响应无法确认，请查询原请求', 'unknown');
     }
@@ -678,13 +683,13 @@ export async function getVideoTaskStatus(
       body: JSON.stringify(payload),
     });
 
-    const responseText = await response.text();
+    const responseText = sanitizeProviderReferenceMedia(await response.text());
     
     // 处理空响应或非 JSON 响应
     let data: Record<string, unknown> = {};
     if (responseText.trim()) {
       try {
-        data = JSON.parse(responseText);
+        data = sanitizeProviderReferenceMedia(JSON.parse(responseText));
       } catch {
         throw new Error(`Invalid JSON response: ${String(redactInlineImageTransport(responseText)).slice(0, 200)}`);
       }
@@ -793,8 +798,9 @@ export async function getVideoTaskStatus(
       output.error('\n❌ Step2 protected query failed:', safeError.message, { code: safeError.code });
       throw safeError;
     }
-    output.error('\n❌ Step2 Query failed:', error);
-    throw error;
+    const safeError = sanitizeProviderReferenceMedia(error);
+    output.error('\n❌ Step2 Query failed:', safeError);
+    throw safeError;
   }
 }
 
@@ -807,11 +813,11 @@ export async function getVideoTaskStatusByClientRequestId(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ clientRequestId }),
   });
-  const responseText = await response.text();
+  const responseText = sanitizeProviderReferenceMedia(await response.text());
   let data: Record<string, unknown> = {};
   if (responseText.trim()) {
     try {
-      data = JSON.parse(responseText);
+      data = sanitizeProviderReferenceMedia(JSON.parse(responseText));
     } catch {
       throw new Error(`Seedance 查询返回非 JSON 响应：${String(redactInlineImageTransport(responseText)).slice(0, 200)}`);
     }

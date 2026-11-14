@@ -14,6 +14,29 @@ import { imageStatEtag } from '@/lib/media/image-validators';
 
 const MAX_BYTES = 20 * 1024 * 1024;
 
+declare const trustedStudioImageVersionBrand: unique symbol;
+export type TrustedStudioImageVersion = Readonly<{
+  source: string;
+  hash: string;
+  size: number;
+  proof: 'verified-upload-v2' | 'candidate';
+  [trustedStudioImageVersionBrand]: true;
+}>;
+
+export function trustedStudioImageVersion(asset: { original_url: string; hash: string | null; file_size: number; metadata_json?: string | null }): TrustedStudioImageVersion | undefined {
+  if (siteUploadPathFromUrl(asset.original_url) || !/^[a-f0-9]{64}$/.test(asset.hash || '')
+    || !Number.isSafeInteger(asset.file_size) || asset.file_size < 1) return undefined;
+  let source: URL;
+  try { source = new URL(asset.original_url); } catch { return undefined; }
+  if (source.protocol !== 'https:' || source.username || source.password) return undefined;
+  let proof: TrustedStudioImageVersion['proof'] = 'candidate';
+  try {
+    const metadata = JSON.parse(asset.metadata_json || '{}') as { uploadIntegrity?: { version?: unknown; hash?: unknown } };
+    if (metadata.uploadIntegrity?.version === 'verified-upload-v2' && metadata.uploadIntegrity.hash === asset.hash) proof = 'verified-upload-v2';
+  } catch {}
+  return { source: asset.original_url, hash: asset.hash!, size: asset.file_size, proof } as TrustedStudioImageVersion;
+}
+
 export function studioAssetUrl(assetId: string, thumbnail = false) {
   return `/api/image-studio/assets/${encodeURIComponent(assetId)}${thumbnail ? '?thumbnail=1' : ''}`;
 }
@@ -27,23 +50,26 @@ let thumbnailActive = 0;
 const thumbnailWaiters: Array<() => void> = [];
 
 // Call only after the asset route has checked the current viewer's permissions.
-export async function readStudioThumbnail(url: string): Promise<Buffer> {
-  const bytes = await readStudioDisplayImage(url, 'thumbnail');
+export async function readStudioThumbnail(url: string, trustedVersion?: TrustedStudioImageVersion): Promise<Buffer> {
+  const bytes = await readStudioDisplayImage(url, 'thumbnail', trustedVersion);
   // Only an authorized web read prepares follow-up displays; no worker or bulk prewarming.
-  void readStudioPreview(url).catch(() => {});
+  void readStudioPreview(url, trustedVersion).catch(() => {});
   return bytes;
 }
 
-export async function readStudioPreview(url: string): Promise<Buffer> {
-  return readStudioDisplayImage(url, 'preview');
+export async function readStudioPreview(url: string, trustedVersion?: TrustedStudioImageVersion): Promise<Buffer> {
+  return readStudioDisplayImage(url, 'preview', trustedVersion);
 }
-export async function readStudioDetail(url: string): Promise<Buffer> { return readStudioDisplayImage(url, 'detail'); }
+export async function readStudioDetail(url: string, trustedVersion?: TrustedStudioImageVersion): Promise<Buffer> {
+  return readStudioDisplayImage(url, 'detail', trustedVersion);
+}
 
 type StudioDisplayVariant = 'thumbnail' | 'preview' | 'detail';
-async function studioDisplayLocation(url: string, variant: StudioDisplayVariant) {
+async function studioDisplayLocation(url: string, variant: StudioDisplayVariant, trustedVersion?: TrustedStudioImageVersion) {
   const size = variant === 'thumbnail' ? 640 : variant === 'preview' ? 1600 : 2048;
   const quality = variant === 'thumbnail' ? 78 : variant === 'preview' ? 70 : 75;
   let version = `remote-${Math.floor(Date.now() / 60000)}`;
+  let recipe = 'v2';
   const local = siteUploadPathFromUrl(url);
   if (local) {
     const root = await fs.realpath(path.join(process.cwd(), 'public/uploads'));
@@ -52,17 +78,21 @@ async function studioDisplayLocation(url: string, variant: StudioDisplayVariant)
     const stat = await fs.stat(file);
     if (!stat.isFile() || !stat.size) throw new Error('图片文件不可用');
     version = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+  } else if (trustedVersion) {
+    if (trustedVersion.source !== url) throw new Error('可信图片版本与读取源不一致');
+    version = `${trustedVersion.source}:${trustedVersion.hash}:${trustedVersion.size}`;
+    recipe = 'stablev3';
   }
-  const key = createHash('sha256').update(`webp-${size}-q${quality}-v2:${version}:${url}`).digest('hex');
+  const key = createHash('sha256').update(`webp-${size}-q${quality}-${recipe}:${version}:${url}`).digest('hex');
   const directory = path.join(process.cwd(), 'storage', 'studio-thumbnails');
   const file = path.join(directory, `${key}.webp`);
   return { size, quality, directory, file, key };
 }
 
 // Metadata only: neither missing derivatives nor remote versions start preparation.
-export async function statStudioDisplayImage(url: string, variant: StudioDisplayVariant) {
-  if (!siteUploadPathFromUrl(url)) return null;
-  const location = await studioDisplayLocation(url, variant);
+export async function statStudioDisplayImage(url: string, variant: StudioDisplayVariant, trustedVersion?: TrustedStudioImageVersion) {
+  if (!siteUploadPathFromUrl(url) && !trustedVersion) return null;
+  const location = await studioDisplayLocation(url, variant, trustedVersion);
   try {
     const root = await fs.realpath(location.directory);
     const file = await fs.realpath(location.file);
@@ -73,52 +103,70 @@ export async function statStudioDisplayImage(url: string, variant: StudioDisplay
   } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
 }
 
-async function readStudioDisplayImage(url: string, variant: StudioDisplayVariant): Promise<Buffer> {
-  const { size, quality, directory, file, key } = await studioDisplayLocation(url, variant);
-  try { return await fs.readFile(file); } catch (error) {
+async function readStudioDisplayImage(url: string, variant: StudioDisplayVariant, trustedVersion?: TrustedStudioImageVersion): Promise<Buffer> {
+  const location = await studioDisplayLocation(url, variant, trustedVersion);
+  const boundedLocation = trustedVersion?.proof === 'candidate' ? await studioDisplayLocation(url, variant) : undefined;
+  try { return await fs.readFile(location.file); } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
+  if (boundedLocation) try { return await fs.readFile(boundedLocation.file); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  const { size, quality, key } = location;
   const pending = thumbnailJobs.get(key);
   if (pending) return pending;
-  if (thumbnailJobs.size >= 32) throw new Error('缩略图处理中，请稍后重试');
+  if (thumbnailJobs.size >= 32) throw displayReadError('display_queue_full', 'queue', Date.now(), true);
   const job = (async () => {
     if (thumbnailActive >= 2) await new Promise<void>(resolve => thumbnailWaiters.push(resolve));
     else thumbnailActive += 1;
+    const started = Date.now();
     try {
       let original = await readStudioImage(url);
-      // Sharp cannot decode BMP. Keep its original intact and decode a bounded,
-      // private single-frame display inside the same two-slot derivative queue.
-      if (original.toString('latin1', 0, 2) === 'BM') {
-        if (original.length < 26 || original.readUInt32LE(2) !== original.length) throw new Error('BMP 图片无效');
-        const dib = original.readUInt32LE(14);
-        if (![12, 40, 52, 56, 64, 108, 124].includes(dib) || original.length < 14 + dib) throw new Error('BMP 图片无效');
-        const width = dib === 12 ? original.readUInt16LE(18) : original.readInt32LE(18);
-        const height = dib === 12 ? original.readUInt16LE(20) : Math.abs(original.readInt32LE(22));
-        const offset = original.readUInt32LE(10);
-        if (width <= 0 || height <= 0 || width * height > 40_000_000
-          || original.readUInt16LE(dib === 12 ? 22 : 26) !== 1
-          || ![1, 4, 8, 16, 24, 32].includes(original.readUInt16LE(dib === 12 ? 24 : 28))
-          || offset < 14 + dib || offset >= original.length) throw new Error('BMP 图片尺寸或格式无效');
-        await fs.mkdir(directory, { recursive: true });
-        const temporary = await fs.mkdtemp(path.join(directory, 'bmp-display-'));
-        try {
-          const input = path.join(temporary, 'source.bmp'), output = path.join(temporary, 'display.png');
-          await fs.writeFile(input, original, { mode: 0o600 });
-          const maximum = size * size * 4 + 1024 * 1024;
-          await promisify(execFile)(process.env.FFMPEG_PATH || 'ffmpeg', ['-nostdin', '-v', 'error', '-xerror', '-err_detect', 'explode',
-            '-threads', '2', '-f', 'bmp_pipe', '-i', input, '-map', '0:v:0', '-frames:v', '1',
-            '-vf', `scale=w='min(${size},iw)':h='min(${size},ih)':force_original_aspect_ratio=decrease`,
-            '-threads', '2', '-c:v', 'png', '-fs', String(maximum), '-f', 'image2', output], { timeout: 45000, maxBuffer: 65536 });
-          const info = await fs.stat(output);
-          if (!info.isFile() || !info.size || info.size > maximum) throw new Error('BMP 缩略图无法准备');
-          original = await fs.readFile(output);
-        } finally { await fs.rm(temporary, { recursive: true, force: true }); }
+      let publishLocation = location;
+      if (trustedVersion && (original.length !== trustedVersion.size
+        || createHash('sha256').update(original).digest('hex') !== trustedVersion.hash)) {
+        if (trustedVersion.proof === 'verified-upload-v2') throw new StudioImageDownloadError('download_source_changed');
+        publishLocation = boundedLocation!;
       }
-      const bytes = await sharp(original, { limitInputPixels: 40_000_000, animated: false }).timeout({ seconds: 45 })
-        .rotate().resize(size, size, { fit: 'inside', withoutEnlargement: true }).webp({ quality }).toBuffer();
-      await fs.mkdir(directory, { recursive: true });
-      const temporary = `${file}.${randomUUID()}.tmp`;
-      try { await fs.writeFile(temporary, bytes); await fs.rename(temporary, file); }
+      let bytes: Buffer;
+      try {
+        // Sharp cannot decode BMP. Keep its original intact and decode a bounded,
+        // private single-frame display inside the same two-slot derivative queue.
+        if (original.toString('latin1', 0, 2) === 'BM') {
+          if (original.length < 26 || original.readUInt32LE(2) !== original.length) throw new Error('BMP 图片无效');
+          const dib = original.readUInt32LE(14);
+          if (![12, 40, 52, 56, 64, 108, 124].includes(dib) || original.length < 14 + dib) throw new Error('BMP 图片无效');
+          const width = dib === 12 ? original.readUInt16LE(18) : original.readInt32LE(18);
+          const height = dib === 12 ? original.readUInt16LE(20) : Math.abs(original.readInt32LE(22));
+          const offset = original.readUInt32LE(10);
+          if (width <= 0 || height <= 0 || width * height > 40_000_000
+            || original.readUInt16LE(dib === 12 ? 22 : 26) !== 1
+            || ![1, 4, 8, 16, 24, 32].includes(original.readUInt16LE(dib === 12 ? 24 : 28))
+            || offset < 14 + dib || offset >= original.length) throw new Error('BMP 图片尺寸或格式无效');
+          await fs.mkdir(publishLocation.directory, { recursive: true });
+          const temporary = await fs.mkdtemp(path.join(publishLocation.directory, 'bmp-display-'));
+          try {
+            const input = path.join(temporary, 'source.bmp'), output = path.join(temporary, 'display.png');
+            await fs.writeFile(input, original, { mode: 0o600 });
+            const maximum = size * size * 4 + 1024 * 1024;
+            await promisify(execFile)(process.env.FFMPEG_PATH || 'ffmpeg', ['-nostdin', '-v', 'error', '-xerror', '-err_detect', 'explode',
+              '-threads', '2', '-f', 'bmp_pipe', '-i', input, '-map', '0:v:0', '-frames:v', '1',
+              '-vf', `scale=w='min(${size},iw)':h='min(${size},ih)':force_original_aspect_ratio=decrease`,
+              '-threads', '2', '-c:v', 'png', '-fs', String(maximum), '-f', 'image2', output], { timeout: 45000, maxBuffer: 65536 });
+            const info = await fs.stat(output);
+            if (!info.isFile() || !info.size || info.size > maximum) throw new Error('BMP 缩略图无法准备');
+            original = await fs.readFile(output);
+          } finally { await fs.rm(temporary, { recursive: true, force: true }); }
+        }
+        bytes = await sharp(original, { limitInputPixels: 40_000_000, animated: false }).timeout({ seconds: 45 })
+          .rotate().resize(size, size, { fit: 'inside', withoutEnlargement: true }).webp({ quality }).toBuffer();
+      } catch (error) {
+        if (error instanceof StudioImageDownloadError) throw error;
+        throw displayReadError('display_encoding_failed', 'encoding', started);
+      }
+      const temporary = `${publishLocation.file}.${randomUUID()}.tmp`;
+      try { await fs.mkdir(publishLocation.directory, { recursive: true }); await fs.writeFile(temporary, bytes); await fs.rename(temporary, publishLocation.file); }
+      catch { throw displayReadError('display_publishing_failed', 'publishing', started); }
       finally { await fs.unlink(temporary).catch(() => {}); }
       return bytes;
     } finally {
@@ -160,7 +208,7 @@ export async function readStudioImage(url: string, signal?: AbortSignal): Promis
 }
 
 export type StudioDownloadDiagnostics = {
-  phase: 'dns' | 'connect' | 'headers' | 'body';
+  phase: 'dns' | 'connect' | 'headers' | 'body' | 'queue' | 'encoding' | 'publishing';
   attempt: number; redirects: number; receivedBytes: number; expectedBytes?: number; elapsedMs: number; httpStatus?: number;
   host?: string;
 };
@@ -169,6 +217,12 @@ export class StudioImageDownloadError extends Error {
     super(code);
     this.name = 'StudioImageDownloadError';
   }
+}
+
+function displayReadError(code: string, phase: 'queue' | 'encoding' | 'publishing', started: number, retryable = false) {
+  return new StudioImageDownloadError(code, undefined, retryable, {
+    phase, attempt: 1, redirects: 0, receivedBytes: 0, elapsedMs: Math.max(0, Date.now() - started),
+  });
 }
 
 export function classifyStudioDownloadError(error: unknown): StudioImageDownloadError {

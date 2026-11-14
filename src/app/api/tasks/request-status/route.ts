@@ -11,7 +11,7 @@ import { authenticateCodexVideoApi, hasCodexApiAuthSignal, CodexApiAuthError } f
 export const dynamic = 'force-dynamic';
 const headers = { 'Cache-Control': 'private, no-store', Vary: 'Cookie, Authorization' };
 const taskSelect = { id: true, user_id: true, owner_user_id: true, local_status: true, project_id: true,
-  video_card_id: true, retention_status: true, provider: true } as const;
+  video_card_id: true, retention_status: true, provider: true, error_code: true, error_message: true } as const;
 
 export async function GET(request: NextRequest) {
   try {
@@ -29,7 +29,8 @@ export async function GET(request: NextRequest) {
     });
     if (task) await assertCanViewTask(user, task);
     if (task?.provider === VOLCENGINE_IP_VIDEO_PROVIDER) return NextResponse.json({ error: '请通过原 IP 任务查询入口确认', safeToResubmit: false }, { status: 400, headers });
-    if (task) return NextResponse.json({ task: { id: task.id, status: task.local_status, project_id: task.project_id, video_card_id: task.video_card_id },
+    if (task) return NextResponse.json({ task: { id: task.id, status: task.local_status,
+      ...(task.local_status === 'submission_unknown' ? { error_code: task.error_code, error_message: task.error_message, submission_unconfirmed: true } : {}), project_id: task.project_id, video_card_id: task.video_card_id },
       lookup: 'found', safeToResubmit: false }, { headers });
     const stored = await readMultiviewRequestReceipt(user.id, key);
     return NextResponse.json({ task: null, lookup: stored?.receipt?.state || (stored ? 'pending' : 'not_found'), safeToResubmit: false,
@@ -80,7 +81,8 @@ export async function POST(request: NextRequest) {
       if (!task || task.id !== result.taskId) throw new Error('task changed');
       await assertCanViewTask(user, task);
       if (task.provider === VOLCENGINE_IP_VIDEO_PROVIDER) return NextResponse.json({ error: '请通过原 IP 任务查询入口确认', safeToResubmit: false }, { status: 400, headers });
-      return NextResponse.json({ task: { id: task.id, status: task.local_status, project_id: task.project_id, video_card_id: task.video_card_id },
+      return NextResponse.json({ task: { id: task.id, status: task.local_status,
+      ...(task.local_status === 'submission_unknown' ? { error_code: task.error_code, error_message: task.error_message, submission_unconfirmed: true } : {}), project_id: task.project_id, video_card_id: task.video_card_id },
         lookup: 'found', safeToResubmit: false }, { headers });
     }
     if (result.kind === 'unknown') return NextResponse.json({ task: null, lookup: 'pending',

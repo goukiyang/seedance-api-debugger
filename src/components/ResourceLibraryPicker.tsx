@@ -83,11 +83,45 @@ function stored<T>(key: string, fallback: T): T { try { return JSON.parse(localS
 function validKeys(input: unknown): string[] { return Array.isArray(input) ? input.filter((key): key is string => typeof key === 'string' && /^(asset|reference_image|video_task):[a-zA-Z0-9_-]+$/.test(key)).slice(0, 60) : []; }
 function failure(result: UploadedImagePickerConfirmResult) { return result === false ? '所选素材未能加入，请重试' : result && typeof result === 'object' && !result.success ? result.message || '所选素材未能加入，请重试' : null; }
 function durationText(value: number) { return `${Math.floor(value / 60).toString().padStart(2, '0')}:${Math.floor(value % 60).toString().padStart(2, '0')}`; }
-function Thumbnail({ item }: { item: PickerItem }) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [item.thumbnailUrl]);
-  if (!item.thumbnailUrl || failed || item.type === 'audio') return <span className={styles.placeholder}>{item.type === 'audio' ? <Music size={30} /> : <ImageIcon size={26} />}<small>{item.type === 'audio' ? '音频' : '预览不可用'}</small></span>;
-  return <img src={item.thumbnailUrl} alt={item.fileName} loading="lazy" onError={() => setFailed(true)} />;
+type ThumbnailReadState = { source: string | null; status: 'loading' | 'ready' | 'failed'; attempt: number };
+function retryFailedThumbnailStates(current: Record<string, ThumbnailReadState>, items: PickerItem[]) {
+  let next = current;
+  for (const item of items) {
+    const state = current[item.identity];
+    if (state?.status !== 'failed' || state.source !== item.thumbnailUrl) continue;
+    if (next === current) next = { ...current };
+    next[item.identity] = { ...state, status: 'loading', attempt: state.attempt + 1 };
+  }
+  return next;
+}
+function Thumbnail({ item, state, onStateChange }: { item: PickerItem; state?: ThumbnailReadState; onStateChange?: (status: ThumbnailReadState['status']) => void }) {
+  const [localStatus, setLocalStatus] = useState<ThumbnailReadState['status']>('loading');
+  useEffect(() => { if (!state) setLocalStatus('loading'); }, [item.thumbnailUrl, state]);
+  const status = state?.status || localStatus;
+  const update = (next: ThumbnailReadState['status']) => onStateChange ? onStateChange(next) : setLocalStatus(next);
+  if (!item.thumbnailUrl || item.type === 'audio') return <span className={styles.placeholder}>{item.type === 'audio' ? <Music size={30} /> : <ImageIcon size={26} />}<small>{item.type === 'audio' ? '音频' : '预览不可用'}</small></span>;
+  const source = state?.attempt ? `${item.thumbnailUrl}${item.thumbnailUrl.includes('?') ? '&' : '?'}read-retry=${state.attempt}` : item.thumbnailUrl;
+  return <>
+    {status !== 'failed' && <img src={source} alt={item.fileName} loading="lazy" onLoad={() => update('ready')} onError={() => update('failed')} />}
+    {status === 'loading' && <span className={styles.placeholder} role="status" style={{ position: 'absolute', inset: 0 }}><small>读取中</small></span>}
+    {status === 'failed' && <span className={styles.placeholder} role="alert"><ImageIcon size={26} /><small>预览暂不可用</small></span>}
+  </>;
+}
+function PickerThumbnailSelection({ item, busy, inUse, order, state, onStateChange, onToggle, onRetry }: {
+  item: PickerItem; busy: boolean; inUse: boolean; order: number; state: ThumbnailReadState;
+  onStateChange: (status: ThumbnailReadState['status']) => void; onToggle: () => void; onRetry: () => void;
+}) {
+  return <>
+    <button type="button" className={styles.selectCard} disabled={busy || inUse || !!item.unavailableReason} aria-pressed={order >= 0}
+      aria-label={`${order >= 0 ? '取消选择' : '选择'}${selectionName(item)}`} title={item.unavailableReason} onClick={onToggle}>
+      <Thumbnail item={item} state={state} onStateChange={onStateChange} />
+      {order >= 0 && <span className={styles.order}>{order + 1}</span>}{inUse && <span className={styles.inUse}>已添加</span>}
+    </button>
+    {state.status === 'failed' && item.thumbnailUrl && <button type="button" aria-label={`重试${selectionName(item)}预览`} onClick={event => { event.stopPropagation(); onRetry(); }}
+      style={{ position: 'absolute', left: '50%', top: '50%', zIndex: 4, minHeight: 40, maxWidth: 'calc(100% - 24px)', padding: '6px 10px', transform: 'translate(-50%, -50%)', background: 'rgba(16, 22, 25, .92)', color: 'var(--text-primary, #eef1f2)' }}>
+      预览暂不可用，重试
+    </button>}
+  </>;
 }
 
 // The template filter choice made while opened from a template is kept for this browser session only.
@@ -162,6 +196,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   const imports = useRef(new Map<string, PickerItem>()), importOwner = useRef('');
   const uploadReceipts = useRef(new Map<string, UploadedAssetPayload>());
   const [items, setItems] = useState<PickerItem[]>([]), [albums, setAlbums] = useState<PickerAlbum[]>([]), [selected, setSelected] = useState<PickerItem[]>([]), [preview, setPreview] = useState<PickerItem | null>(null);
+  const [thumbnailStates, setThumbnailStates] = useState<Record<string, ThumbnailReadState>>({});
   const [loading, setLoading] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState(''), [directoryError, setDirectoryError] = useState(''), [total, setTotal] = useState(0), [hasMore, setHasMore] = useState(false), [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState(false), [failedUploads, setFailedUploads] = useState<FailedUploadItem[]>([]), [progress, setProgress] = useState<UploadProgressSnapshot | null>(null), [uploadLabel, setUploadLabel] = useState(''), [container, setContainer] = useState<Element | null>(null), [epoch, setEpoch] = useState(0);
   const dialog = useRef<HTMLDivElement>(null), backdrop = useRef<HTMLDivElement>(null), body = useRef<HTMLDivElement>(null), browse = useRef<HTMLElement>(null), sourceBar = useRef<HTMLDivElement>(null), input = useRef<HTMLInputElement>(null);
@@ -235,7 +270,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     browseRevision.current++; setNavigation(null); setRemovedInSession(false);
     restoration.current = next.scroll; restoring.current = true; lastVisiblePage.current = null;
     locked.current = false; setBusy(false);
-    setPrefs(next); setQuery(next.query); setSelected([]); setRemovedUploads([]); setRestoredUploadIds([]); setItems([]); setAlbums([]); setTemplates([]); setTotal(0); setPreview(null); setFailedUploads([]); setError(''); setDirectoryError(''); setNotice(''); setDirectoryNotice(''); setUploadLabel(''); setProgress(null); setSessionOwner(prefsKey);
+    setPrefs(next); setQuery(next.query); setSelected([]); setRemovedUploads([]); setRestoredUploadIds([]); setItems([]); setThumbnailStates({}); setAlbums([]); setTemplates([]); setTotal(0); setPreview(null); setFailedUploads([]); setError(''); setDirectoryError(''); setNotice(''); setDirectoryNotice(''); setUploadLabel(''); setProgress(null); setSessionOwner(prefsKey);
     initializedKey.current = ownerKey;
     setReady(true);
     return () => { sequence.current++; session.current++; };
@@ -326,7 +361,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
           }
           if (!data.hasMore) break;
         }
-        setItems(batch); setLoadedFilter(filterKey);
+        setItems(batch); setThumbnailStates(current => retryFailedThumbnailStates(current, batch)); setLoadedFilter(filterKey);
       } catch (e) { if (token === sequence.current) setDirectoryError(e instanceof Error ? e.message : '素材库读取失败'); }
       finally { if (token === sequence.current) setLoading(false); }
     })();
@@ -732,9 +767,23 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
           <span className={styles.uploadFailureActions}>{failure.recovery !== 'none' && <button type="button" disabled={busy} aria-label={`${failure.recovery === 'query' ? '核对原上传' : failure.recovery === 'resume' || failure.code === 'RAW_UPLOAD_NOT_ACCEPTED' ? '继续上传' : '重试上传'}：${failure.file.name}`} onClick={() => void upload([failure.file])}>{failure.recovery === 'query' ? '核对原上传' : failure.recovery === 'resume' || failure.code === 'RAW_UPLOAD_NOT_ACCEPTED' ? '继续上传' : '重试上传'}</button>}<button type="button" disabled={busy} aria-label={`移除失败文件：${failure.file.name}`} onClick={() => setFailedUploads(old => removeUploadFailure(old, failure.id))}>移除</button></span>
         </div>)}</div>}
         <div ref={body} className={styles.body} aria-busy={loading} onScroll={e => rememberScroll(e.currentTarget)} onWheel={() => { restoring.current = false; }} onTouchStart={() => { restoring.current = false; }}>
-          <div ref={resultPages.gridRef} className={styles.grid}>{resultPages.pageItems.map(({ item }) => { const order = selected.findIndex(s => s.identity === item.identity), inUse = existing(item); return <article key={item.identity} className={`${styles.card} ${order >= 0 ? styles.selected : ''}`}>
+          <div ref={resultPages.gridRef} className={styles.grid}>{resultPages.pageItems.map(({ item }) => { const order = selected.findIndex(s => s.identity === item.identity), inUse = existing(item);
+            const storedThumbnailState = thumbnailStates[item.identity];
+            const thumbnailState = storedThumbnailState?.source === item.thumbnailUrl ? storedThumbnailState : { source: item.thumbnailUrl, status: 'loading' as const, attempt: 0 };
+            const setThumbnailStatus = (status: ThumbnailReadState['status']) => setThumbnailStates(current => {
+              const existingState = current[item.identity];
+              const latest = existingState?.source === item.thumbnailUrl ? existingState : thumbnailState;
+              return latest.status === status ? current : { ...current, [item.identity]: { ...latest, status } };
+            });
+            const retryThumbnail = () => setThumbnailStates(current => {
+              const existingState = current[item.identity];
+              const latest = existingState?.source === item.thumbnailUrl ? existingState : thumbnailState;
+              return { ...current, [item.identity]: { ...latest, status: 'loading', attempt: latest.attempt + 1 } };
+            });
+            return <article key={item.identity} className={`${styles.card} ${order >= 0 ? styles.selected : ''}`}>
             <div className={styles.cover} data-reaction-surface>
-            <button type="button" className={styles.selectCard} disabled={busy || inUse || !!item.unavailableReason} aria-pressed={order >= 0} aria-label={`${order >= 0 ? '取消选择' : '选择'}${selectionName(item)}`} title={item.unavailableReason} onClick={() => toggle(item)}><Thumbnail item={item} />{order >= 0 && <span className={styles.order}>{order + 1}</span>}{inUse && <span className={styles.inUse}>已添加</span>}</button>
+            <PickerThumbnailSelection item={item} busy={busy} inUse={inUse} order={order} state={thumbnailState}
+              onStateChange={setThumbnailStatus} onToggle={() => toggle(item)} onRetry={retryThumbnail} />
             {item.canRemoveFromLibrary && <button type="button" className={styles.removeButton} title="从我的素材库删除" aria-label={`从我的素材库删除：${selectionName(item)}`} disabled={busy} onClick={() => void removeItem(item)}><Trash2 size={17} /></button>}
             <button type="button" className={styles.preview} title={item.type === 'image' ? '放大图片' : `播放${labels[item.type]}`} aria-label={`${item.type === 'image' ? '放大' : '播放'}${item.fileName}`} onClick={() => setPreview(item)}>{item.type === 'image' ? <ZoomIn size={17} /> : <Play size={20} fill="currentColor" />}</button>
             {item.type !== 'image' && <span className={styles.duration}>{item.duration != null ? durationText(item.duration) : '时长未知'}</span>}

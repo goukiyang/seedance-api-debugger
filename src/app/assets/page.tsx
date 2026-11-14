@@ -34,6 +34,7 @@ import { authorizeTaskReuseHref, taskReuseHref, taskReuseReturnTo } from '@/lib/
 import { isExternalUser } from '@/lib/access/external-role';
 import { uploadFileAsAsset, type UploadedAssetPayload, type UploadProgressSnapshot } from '@/lib/http/file-upload';
 import { uploadSession } from '@/lib/http/upload-session';
+import { postWorkspaceAssociation } from '@/lib/hooks/useWorkspace';
 import { UploadSimilarityReview } from '@/components/UploadSimilarityReview';
 import MediaPreview from '@/components/MediaPreview';
 import { TaskPromptGroupOrigin } from '@/components/generate/TaskPromptGroupOrigin';
@@ -163,6 +164,7 @@ type AssetLibraryItem = {
   canEnhanceVideo: boolean;
   enhanceSourceTaskId: string | null;
   status: string;
+  errorMessage?: string | null;
   retentionStatus: string | null;
   createdAt: string;
   completedAt: string | null;
@@ -716,6 +718,12 @@ function isReusableImageItem(item: AssetLibraryItem) {
     || (item.source === 'reference_image' && Boolean(item.referenceImageId));
 }
 
+function isWorkspaceReusableItem(item: AssetLibraryItem) {
+  return isReusableImageItem(item)
+    || (item.source === 'asset' && item.kind === 'video' && !item.isEnhanceTask && item.status === 'active'
+      && Boolean(item.assetId && item.previewUrl));
+}
+
 function toCacheSafeOwner(owner: AssetLibraryItem['owner']): AssetLibraryItem['owner'] {
   if (!owner) return null;
   return {
@@ -996,6 +1004,7 @@ function AssetsPageContent() {
     return Array.from(groups.values());
   }, [items, groupBy]);
   const displayItems = useMemo(() => groupedItems.flatMap((group) => group.items), [groupedItems]);
+  const workspaceReusableItems = displayItems.filter(item => selectedSet.has(item.id)).filter(isWorkspaceReusableItem);
 
   const activateAssetPreviewItem = useCallback((item: AssetLibraryItem) => {
     previewRestoreGeneration.current += 1;
@@ -1722,35 +1731,30 @@ function AssetsPageContent() {
   };
 
   const handleAddImagesToWorkspace = async () => {
-    if (reusableImageItems.length === 0) {
-      setError('当前选择里没有可加入工作区的图片或参考素材');
+    if (workspaceReusableItems.length === 0) {
+      setError('当前选择里没有可加入工作区的参考素材');
       return;
     }
+    const session = uploadSession();
+    if (!user?.id || session.ownerId !== user.id) { setError('当前账号尚未确认，请重新登录后再加入素材'); return; }
+    const current = () => { const now = uploadSession(); return now.ownerId === session.ownerId && now.epoch === session.epoch; };
     setMoving(true);
     setError('');
     setMessage('');
     try {
-      const response = await fetch('/api/workspace/assets', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-tab-id': getOrCreateWorkspaceTabId(),
-        },
-        body: JSON.stringify({
-          assetIds: reusableAssetIds,
-          referenceImageIds: reusableReferenceImageIds,
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || data.message || '加入工作区失败');
-      const count = Array.isArray(data.workspaceAssetIds) ? data.workspaceAssetIds.length : null;
-      const receipt = count === null ? '工作区已接收本次操作，可打开核对参考图。'
-        : count > 0 ? `已确认 ${count} 张参考图加入工作区` : '本次没有新增参考图';
+      let count: number | null = null;
+      await postWorkspaceAssociation(getOrCreateWorkspaceTabId(), {
+        selection: workspaceReusableItems.map(item => item.source === 'reference_image'
+          ? { referenceImageId: item.referenceImageId! } : { assetId: item.assetId! }),
+      }, data => { count = Array.isArray(data.workspaceAssetIds) ? data.workspaceAssetIds.length : null; });
+      if (!current()) return;
+      const receipt = count === null ? '工作区已接收本次操作，可打开核对参考素材。'
+        : count > 0 ? `已确认 ${count} 项参考素材在工作区` : '本次没有确认新的参考素材';
       setMessage(receipt);
-      if (user?.id) setDelivery({ owner: user.id, message: receipt, href: '/generate', label: '打开生成工作区' });
+      setDelivery({ owner: user.id, message: receipt, href: '/generate', label: '打开生成工作区' });
       clearSelection();
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加入工作区失败');
+      if (current()) setError(`${err instanceof Error ? err.message : '加入工作区结果未确认'}；选择已保留，可重试原操作，无需重新上传。`);
     } finally {
       setMoving(false);
     }
@@ -1944,6 +1948,7 @@ function AssetsPageContent() {
     </div>}
     <dl className="asset-detail-list">
       <div><dt>状态</dt><dd>{statusLabel(activeItem.status)}</dd></div>
+      {activeItem.errorMessage && <div><dt>原请求说明</dt><dd>{activeItem.errorMessage}</dd></div>}
       {formatChargedCredits(activeItem) && <div><dt>实际扣点</dt><dd>{formatChargedCredits(activeItem)}</dd></div>}
       {shouldShowDeliveryStage(activeItem) && <div><dt>稳定下载</dt><dd>{activeItem.deliveryStage?.label || '-'}</dd></div>}
       <div><dt>项目</dt><dd>{activeItem.project?.name || '未归属项目'}</dd></div>
@@ -2190,16 +2195,16 @@ function AssetsPageContent() {
       )}
 
       {selectedIds.length > 0 && (
-        <SelectionBar className={`asset-library-bulkbar ${assetStyles.compactBulkbar}`} count={selectedIds.length} summary={`可下载 ${downloadableTaskIds.length} 个，可移动视频 ${movableItemIds.length} 个，可加入参考 ${reusableImageItems.length} 个，涉及项目 ${new Set(selectedItems.map(item => item.project?.id || 'unassigned')).size} 个${isAdmin ? `，涉及用户 ${new Set(selectedItems.map(item => item.owner?.id || 'unknown')).size} 位` : ''}`}>
+        <SelectionBar className={`asset-library-bulkbar ${assetStyles.compactBulkbar}`} count={selectedIds.length} summary={`可下载 ${downloadableTaskIds.length} 个，可移动视频 ${movableItemIds.length} 个，可加入参考 ${workspaceReusableItems.length} 个，涉及项目 ${new Set(selectedItems.map(item => item.project?.id || 'unassigned')).size} 个${isAdmin ? `，涉及用户 ${new Set(selectedItems.map(item => item.owner?.id || 'unknown')).size} 位` : ''}`}>
 
             <button type="button" onClick={clearSelection}>取消选择</button>
             <button type="button" onClick={handleDownload} disabled={bulkDownloading || downloadableTaskIds.length === 0}>
               <Download size={15} />
               {bulkDownloading ? bulkDownloadStage : `下载视频（${downloadableTaskIds.length}/${selectedIds.length}）`}
             </button>
-            <button type="button" onClick={handleAddImagesToWorkspace} disabled={moving || reusableImageItems.length === 0}>
+            <button type="button" onClick={handleAddImagesToWorkspace} disabled={moving || workspaceReusableItems.length === 0}>
               <ImagePlus size={15} />
-              加入工作区（{reusableImageItems.length}/{selectedIds.length}）
+              加入工作区（{workspaceReusableItems.length}/{selectedIds.length}）
             </button>
             <button
               ref={moveAlbumTriggerRef}
@@ -2466,6 +2471,7 @@ function AssetsPageContent() {
                       <div className="asset-card-config-row">{specText && <span className="asset-card-spec">{specText}</span>}
                         <button type="button" className="asset-card-view" title="查看资产详情" onClick={event => { event.stopPropagation(); selectAssetItem(item); }}><Eye size={15} />查看</button>
                       </div>
+                      {item.errorMessage && <small title={item.errorMessage}>{item.errorMessage}</small>}
                       {isAdmin && item.owner && (
                         <UserIdentityBadge
                           user={item.owner}

@@ -29,13 +29,15 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
     : asset.assetId
       ? `/api/content-reactions/media?key=${encodeURIComponent(`asset:${asset.assetId}`)}&variant=preview`
       : '';
-  const fallbackSrc = protectedSource ? `${protectedSource}${protectedSource.includes('?') ? '&' : '?'}variant=preview` : asset.thumbnailUrl && asset.originalUrl && asset.thumbnailUrl !== asset.originalUrl
+  const fallbackSrc = !protectedSource && asset.thumbnailUrl && asset.originalUrl && asset.thumbnailUrl !== asset.originalUrl
     ? asset.originalUrl
     : null;
   const isUploading = uploadStatus === 'uploading';
   const isFailed = uploadStatus === 'failed';
   const [imageSrc, setImageSrc] = useState(src);
-  const [imageFailed, setImageFailed] = useState(false);
+  const [imageStatus, setImageStatus] = useState<'loading' | 'ready' | 'failed'>(src ? 'loading' : 'failed');
+  const [retryAttempt, setRetryAttempt] = useState(0);
+  const [videoFailed, setVideoFailed] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const isImage = asset.type === 'image';
   const isVideo = asset.type === 'video';
@@ -45,7 +47,9 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
 
   useEffect(() => {
     setImageSrc(src);
-    setImageFailed(false);
+    setImageStatus(src ? 'loading' : 'failed');
+    setRetryAttempt(0);
+    setVideoFailed(false);
   }, [src]);
 
   return (
@@ -54,8 +58,17 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
       <button
         type="button"
         className="ref-thumb-img-btn"
+        aria-busy={isImage && imageStatus === 'loading'}
+        aria-label={isImage && imageStatus === 'failed' ? `图${index + 1}预览暂不可用，重试` : undefined}
         onClick={() => {
-          if (isImage && (!imageSrc || imageFailed)) return;
+          if (isImage && imageStatus === 'failed' && src) {
+            const nextAttempt = retryAttempt + 1;
+            setRetryAttempt(nextAttempt);
+            setImageSrc(`${src}${src.includes('?') ? '&' : '?'}read-retry=${nextAttempt}`);
+            setImageStatus('loading');
+            return;
+          }
+          if (isImage && !imageSrc) return;
           if (canZoomPreview) {
             setPreviewOpen(true);
             return;
@@ -63,30 +76,41 @@ export function ReferenceThumb({ asset, index, uploadStatus = 'uploaded', frameR
           if (previewSrc && contentKey) onPreview(previewSrc, asset.type, asset.fileName || `素材 ${index + 1}`, asset.thumbnailUrl || undefined, contentKey);
         }}
       >
-        {isImage && imageSrc && !imageFailed ? (
+        {isImage && imageSrc && imageStatus !== 'failed' ? (
           <img
             src={imageSrc}
             alt={`图${index + 1}`}
             className="ref-thumb-img"
+            style={{ objectFit: 'contain' }}
             loading="lazy"
             draggable={false}
             onDragStart={(e) => e.preventDefault()}
+            onLoad={() => setImageStatus('ready')}
             onError={() => {
               if (fallbackSrc && imageSrc !== fallbackSrc) {
                 setImageSrc(fallbackSrc);
+                setImageStatus('loading');
                 return;
               }
-              setImageFailed(true);
+              setImageStatus('failed');
             }}
           />
-        ) : isVideo && asset.thumbnailUrl && asset.thumbnailUrl !== asset.originalUrl && !imageFailed ? (
-          <img src={asset.thumbnailUrl} alt={`视频${index + 1}`} className="ref-thumb-video" loading="lazy" onError={() => setImageFailed(true)} />
+        ) : isVideo && asset.thumbnailUrl && asset.thumbnailUrl !== asset.originalUrl && !videoFailed ? (
+          <img src={asset.thumbnailUrl} alt={`视频${index + 1}`} className="ref-thumb-video" loading="lazy" onError={() => setVideoFailed(true)} />
         ) : isAudio ? (
           <div className="ref-thumb-media-placeholder">
             <span>音频</span>
           </div>
         ) : (
           <div className="ref-thumb-placeholder" />
+        )}
+        {isImage && imageStatus === 'loading' && (
+          <span className="ref-thumb-upload-overlay" role="status" style={{ color: 'white', fontSize: 10 }}>读取中</span>
+        )}
+        {isImage && imageStatus === 'failed' && (
+          <span className="ref-thumb-fail-overlay" role="alert" style={{ color: 'white', fontSize: 9, lineHeight: 1.2, padding: 3 }}>
+            预览暂不可用，重试
+          </span>
         )}
       </button>
 

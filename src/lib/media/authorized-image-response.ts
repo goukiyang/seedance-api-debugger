@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
-import { readStudioDetail, readStudioPreview, readStudioThumbnail, statStudioDisplayImage } from '@/lib/image-studio/media';
+import { readStudioDetail, readStudioPreview, readStudioThumbnail, statStudioDisplayImage, StudioImageDownloadError, type TrustedStudioImageVersion } from '@/lib/image-studio/media';
 import { mediaPreviewResponse } from './preview-response';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -16,6 +16,34 @@ import { COMPARISON_VERSION_HEADER, COMPARISON_VERSION_PARAM, validComparisonVer
 
 export type ImageVariant = 'thumbnail' | 'preview' | 'detail' | 'original' | 'download' | 'hd' | 'hd-description' | 'hd-download';
 export const privateImageHeaders = { 'Cache-Control': 'private, no-store', Vary: 'Cookie', 'X-Content-Type-Options': 'nosniff' };
+const imageVariants = new Set<ImageVariant>(['thumbnail', 'preview', 'detail', 'original', 'download', 'hd', 'hd-description', 'hd-download']);
+const safeDownloadCodes = new Set(['download_aborted', 'download_body_timeout', 'download_connect_timeout', 'download_dns_failed', 'download_dns_timeout',
+  'download_headers_timeout', 'download_http_error', 'download_incomplete', 'download_invalid_url', 'download_network_failed', 'download_redirect_limit',
+  'download_size_limit', 'download_source_changed', 'download_timeout', 'download_tls_failed', 'download_total_timeout', 'download_unsafe_address', 'download_unsafe_url',
+  'display_queue_full', 'display_encoding_failed', 'display_publishing_failed']);
+const safeDownloadStages = new Set(['dns', 'connect', 'headers', 'body', 'queue', 'encoding', 'publishing']);
+
+export function recordImageReadDiagnostic(input: { readId: string; variant: string; started: number; stage: 'authorization' | 'read' | 'completed'; error?: unknown; cancelled?: boolean }) {
+  try {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(input.readId)) return;
+    let stage: string = input.stage;
+    let code: string | undefined;
+    if (input.cancelled) stage = 'cancelled';
+    else if (input.error instanceof StudioImageDownloadError) {
+      code = safeDownloadCodes.has(input.error.code) ? input.error.code : undefined;
+      stage = input.error.code === 'download_aborted' ? 'cancelled'
+        : input.error.diagnostics?.phase && safeDownloadStages.has(input.error.diagnostics.phase) ? input.error.diagnostics.phase : 'download';
+    } else if (input.error) {
+      stage = input.error instanceof Error && input.error.name === 'AbortError' ? 'cancelled'
+        : input.stage;
+    }
+    const elapsed = performance.now() - input.started;
+    const event = { readId: input.readId, variant: imageVariants.has(input.variant as ImageVariant) ? input.variant : 'unknown', stage,
+      elapsedMs: Number.isFinite(elapsed) ? Math.max(0, Math.round(elapsed)) : 0, ...(code ? { code } : {}) };
+    if (stage === 'completed') console.info('[authorized-image-read]', event);
+    else console.warn('[authorized-image-read]', event);
+  } catch { /* Diagnostics never alter the media response. */ }
+}
 
 /** A denied authenticated open can only remove its own page interest. */
 export async function discardHdViewingInterest(request: Request, requesterId: string) {
@@ -45,7 +73,8 @@ function imageFileResponse(request: Request, file: string, headers: Headers, unc
 }
 
 // The caller must finish its existing owner/source/download permission checks first.
-export async function authorizedImageResponse(request: Request, source: string, variant: ImageVariant, mime: string, fileName?: string, started = performance.now(), context?: HdRequestContext) {
+export async function authorizedImageResponse(request: Request, source: string, variant: ImageVariant, mime: string, fileName?: string, started = performance.now(), context?: HdRequestContext,
+  trustedVersion?: TrustedStudioImageVersion, readId = randomUUID()) {
   const prepared = performance.now();
   const statusOnly = request.headers.get('x-image-read-intent') === 'status';
   const readOnly = request.method === 'HEAD' || isImagePrefetch(request) || statusOnly;
@@ -134,14 +163,14 @@ export async function authorizedImageResponse(request: Request, source: string, 
       ? `attachment; filename*=UTF-8''${encodeURIComponent((fileName || 'image').replace(/[\r\n]/g, '')).replace(/'/g, '%27')}` : 'inline');
   } else {
     if (readOnly) {
-      const meta = await statStudioDisplayImage(source, variant as 'thumbnail' | 'preview' | 'detail');
+      const meta = await statStudioDisplayImage(source, variant as 'thumbnail' | 'preview' | 'detail', trustedVersion);
       if (!meta) return notPrepared();
       const headers = new Headers({ ...privateImageHeaders, ETag: meta.etag, 'X-Image-Source-Version': meta.etag,
         'Content-Type': 'image/webp', 'Content-Length': String(meta.size), 'Content-Disposition': 'inline' });
       response = imageFileResponse(request, meta.file, headers, imageEtagMatches(request.headers.get('if-none-match'), meta.etag));
     } else {
-      const bytes = await (variant === 'thumbnail' ? readStudioThumbnail(source) : variant === 'detail' ? readStudioDetail(source) : readStudioPreview(source));
-      const meta = await statStudioDisplayImage(source, variant as 'thumbnail' | 'preview' | 'detail');
+      const bytes = await (variant === 'thumbnail' ? readStudioThumbnail(source, trustedVersion) : variant === 'detail' ? readStudioDetail(source, trustedVersion) : readStudioPreview(source, trustedVersion));
+      const meta = await statStudioDisplayImage(source, variant as 'thumbnail' | 'preview' | 'detail', trustedVersion);
       const etag = meta?.etag || `"${createHash('sha256').update(bytes).digest('hex')}"`;
       const headers = new Headers({ ...privateImageHeaders, ETag: etag, ...(meta ? { 'X-Image-Source-Version': meta.etag } : {}),
         'Content-Type': 'image/webp', 'Content-Length': String(meta?.size || bytes.length), 'Content-Disposition': 'inline' });
@@ -160,6 +189,6 @@ export async function authorizedImageResponse(request: Request, source: string, 
     response.headers.set(COMPARISON_VERSION_HEADER, after);
   }
   response.headers.set('Server-Timing', `access;dur=${(prepared - started).toFixed(1)},media;dur=${(performance.now() - prepared).toFixed(1)}`);
-  response.headers.set('X-Media-Request-Id', randomUUID());
+  response.headers.set('X-Media-Request-Id', readId);
   return response;
 }

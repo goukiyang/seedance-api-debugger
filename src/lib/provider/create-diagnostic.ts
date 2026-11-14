@@ -1,4 +1,10 @@
 export type ProviderCreatePhase = 'fetch' | 'response_body' | 'response_parse' | 'response_validation' | 'complete';
+export type ProviderCreateKnownFailure = {
+  provider_code?: string;
+  parameter?: string;
+  request_id?: string;
+  reason?: 'invalid_parameter' | 'reference_unavailable';
+};
 export type ProviderCreateDiagnostic = {
   phase: ProviderCreatePhase;
   elapsed_ms: number;
@@ -7,7 +13,42 @@ export type ProviderCreateDiagnostic = {
   name: string | null;
   code: string | null;
   cause: { name: string | null; code: string | null } | null;
+  provider_error?: ProviderCreateKnownFailure;
 };
+
+const providerCodeFamilies = new Set(['InvalidParameter', 'InvalidArgument', 'BadRequest', 'AuthenticationError',
+  'InvalidAPIKey', 'AccessDenied', 'ModelNotOpen', 'QuotaExceeded', 'RateLimitExceeded', 'InternalError', 'ServiceUnavailable']);
+const parameterPattern = '(?:content(?:\\[\\d{1,2}\\]|\\.\\d{1,2})(?:\\.(?:image_url|video_url|audio_url))?(?:\\.url)?|model|duration|ratio|resolution|seed|generate_audio|return_last_frame|watermark|callback_url|client_request_id|service_tier|execution_expires_after|output_format|omni_reference_task_type)';
+
+export function providerCreateKnownFailure(raw: unknown, responseRequestId?: string | null): ProviderCreateKnownFailure | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const body = raw as Record<string, unknown>;
+  if (body.id || !body.error || typeof body.error !== 'object' || Array.isArray(body.error)) return undefined;
+  const error = body.error as Record<string, unknown>;
+  const code = typeof error.code === 'string' ? error.code.split('.')[0] : '';
+  if (!providerCodeFamilies.has(code)) return undefined;
+  const message = typeof error.message === 'string' ? error.message : '';
+  const candidateParameter = error.param ?? error.parameter ?? error.field;
+  const parameter = typeof candidateParameter === 'string' ? candidateParameter
+    : message.match(new RegExp('[`"\'](' + parameterPattern + ')[`"\']'))?.[1];
+  const requestId = responseRequestId || body.request_id || body.requestId || body.RequestId;
+  return {
+    provider_code: code,
+    ...(parameter && new RegExp('^' + parameterPattern + '$').test(parameter) ? { parameter } : {}),
+    ...(typeof requestId === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{5,127}$/.test(requestId) ? { request_id: requestId } : {}),
+    ...(/resource not found|not accessible|(?:failed|unable|cannot|could not)\s+(?:to\s+)?(?:download|fetch|access)/i.test(message)
+      ? { reason: 'reference_unavailable' as const }
+      : ['InvalidParameter', 'InvalidArgument', 'BadRequest'].includes(code) ? { reason: 'invalid_parameter' as const } : {}),
+  };
+}
+
+export function providerCreateFailureUserMessage(diagnostic: ProviderCreateDiagnostic | null | undefined): string | null {
+  const error = diagnostic?.provider_error;
+  const reason = error?.reason === 'reference_unavailable'
+    ? `生成服务无法读取${error.parameter?.includes('video_url') ? '参考视频' : '参考素材'}`
+    : error?.reason === 'invalid_parameter' ? '生成服务未接受本次参数' : null;
+  return reason ? `${reason}；原提交结果和费用仍待核对，原预留保留，请勿重复提交。` : null;
+}
 
 const names = new Set(['Error', 'TypeError', 'AggregateError', 'AbortError', 'TimeoutError', 'DOMException']);
 const codes = new Set([
@@ -31,6 +72,7 @@ function errorFields(value: unknown): { name: string | null; code: string | null
 
 export function providerCreateDiagnostic(input: {
   phase: ProviderCreatePhase; startedAt: number; encodedJsonBytes: number; httpStatus: number | null; error?: unknown;
+  providerError?: ProviderCreateKnownFailure;
 }): ProviderCreateDiagnostic {
   let cause: ProviderCreateDiagnostic['cause'] = null;
   try {
@@ -38,5 +80,6 @@ export function providerCreateDiagnostic(input: {
     if (value && typeof value === 'object') cause = errorFields(value);
   } catch { /* A diagnostic getter cannot replace the original failure. */ }
   return { phase: input.phase, elapsed_ms: Math.max(0, Date.now() - input.startedAt),
-    encoded_json_bytes: input.encodedJsonBytes, http_status: input.httpStatus, ...errorFields(input.error), cause };
+    encoded_json_bytes: input.encodedJsonBytes, http_status: input.httpStatus, ...errorFields(input.error), cause,
+    ...(input.providerError ? { provider_error: input.providerError } : {}) };
 }

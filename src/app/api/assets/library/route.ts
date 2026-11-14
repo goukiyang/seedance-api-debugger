@@ -91,6 +91,7 @@ type LibraryItem = {
   canEnhanceVideo: boolean;
   enhanceSourceTaskId: string | null;
   status: string;
+  errorMessage?: string | null;
   deliveryStage: VideoDeliveryStage;
   stableDownloadReady: boolean;
   previewAvailable: boolean;
@@ -199,6 +200,7 @@ async function serializeTask(task: {
   generation_mode: string;
   prompt: string;
   local_status: string;
+  error_message: string | null;
   public_video_url: string | null;
   result_video_url: string | null;
   result_last_frame_url: string | null;
@@ -315,6 +317,7 @@ async function serializeTask(task: {
     canEnhanceVideo: task.local_status === 'succeeded' && hasVideo && Boolean(task.duration) && !isEnhanceTask,
     enhanceSourceTaskId,
     status: task.local_status,
+    errorMessage: task.local_status === 'submission_unknown' ? task.error_message : null,
     deliveryStage,
     stableDownloadReady: deliveryStage.stableDownloadReady,
     previewAvailable: deliveryStage.previewAvailable,
@@ -612,6 +615,7 @@ async function loadVideoItems(options: {
         generation_mode: true,
         prompt: true,
         local_status: true,
+        error_message: true,
         public_video_url: true,
         result_video_url: true,
         result_last_frame_url: true,

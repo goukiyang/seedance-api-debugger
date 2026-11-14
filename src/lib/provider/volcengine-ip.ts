@@ -1,3 +1,4 @@
+import { createProviderReferenceMediaRedactor, sanitizeProviderReferenceMedia, type ProviderReferenceMediaRedactor } from './reference-media-redaction';
 import type { PrivateOrigin } from '@/lib/security/private-prompts.server';
 import { normalizeArkAssetId } from '@/lib/character-assets/inputs';
 import type {
@@ -131,11 +132,11 @@ export class VolcengineIpRequestError extends Error {
     normalized: NormalizedVolcengineIpError;
     raw?: unknown;
   }) {
-    super(input.normalized.providerMessage || input.normalized.userMessage);
+    super(sanitizeProviderReferenceMedia(input.normalized.providerMessage || input.normalized.userMessage));
     this.name = 'VolcengineIpRequestError';
     this.statusCode = input.statusCode;
-    this.normalized = input.normalized;
-    this.raw = input.raw;
+    this.normalized = sanitizeProviderReferenceMedia(input.normalized);
+    this.raw = sanitizeProviderReferenceMedia(input.raw);
   }
 }
 
@@ -491,6 +492,7 @@ function redactUrl(raw: string) {
 }
 
 export function redactVolcengineIpLog<T>(value: T): T {
+  if (typeof value === 'string') return sanitizeProviderReferenceMedia(value);
   if (Array.isArray(value)) return value.map((item) => redactVolcengineIpLog(item)) as T;
   if (!value || typeof value !== 'object') return value;
 
@@ -553,22 +555,25 @@ function buildTaskUrl(baseUrl: string, providerTaskId?: string) {
   return `${baseUrl}${VOLCENGINE_IP_CREATE_TASK_PATH}/${encodeURIComponent(providerTaskId)}`;
 }
 
-async function readResponseBody(response: Response) {
-  const text = await response.text();
+async function readResponseBody(response: Response, redactReferenceMedia: ProviderReferenceMediaRedactor) {
+  const text = redactReferenceMedia(await response.text().catch(error => { throw redactReferenceMedia(error); }));
   if (!text.trim()) return {};
   try {
-    return JSON.parse(text);
+    return redactReferenceMedia(JSON.parse(text));
   } catch {
     return { raw_text: text };
   }
 }
 
+type VolcengineIpJsonOptions = VolcengineIpRequestOptions & { referenceMediaRedactor?: ProviderReferenceMediaRedactor };
+
 async function requestVolcengineIpJson(
   url: string,
   init: RequestInit,
   config: PrivateConfig,
-  options?: VolcengineIpRequestOptions,
+  options?: VolcengineIpJsonOptions,
 ) {
+  const redactReferenceMedia = options?.referenceMediaRedactor || sanitizeProviderReferenceMedia;
   const fetchImpl = options?.fetchImpl || globalThis.fetch;
   if (!fetchImpl) {
     throw new VolcengineIpRequestError({
@@ -599,7 +604,8 @@ async function requestVolcengineIpJson(
       const { isPrivatePromptError } = await import('@/lib/security/private-prompts.server');
       if (isPrivatePromptError(error)) throw error;
     }
-    const message = error instanceof Error ? error.message : 'network error';
+    const safeError = redactReferenceMedia(error);
+    const message = safeError instanceof Error ? safeError.message : 'network error';
     throw new VolcengineIpRequestError({
       normalized: normalizeVolcengineIpError({
         raw: { error: { code: 'NetworkError', message } },
@@ -608,8 +614,8 @@ async function requestVolcengineIpJson(
     });
   }
 
-  const body = await readResponseBody(response);
-  const requestId = response.headers.get('x-request-id') || response.headers.get('x-tt-logid');
+  const body = await readResponseBody(response, redactReferenceMedia);
+  const requestId = redactReferenceMedia(response.headers.get('x-request-id') || response.headers.get('x-tt-logid'));
   if (!response.ok) {
     throw new VolcengineIpRequestError({
       statusCode: response.status,
@@ -759,6 +765,7 @@ export async function createVolcengineIpVideoTask(
   input: CreateVideoInput & { generation_mode: GenerationMode; model?: string; service_tier?: string },
   options?: VolcengineIpRequestOptions,
 ): Promise<ProviderCreateResponse> {
+  const redactReferenceMedia = createProviderReferenceMediaRedactor(input.reference_video_urls);
   const config = await resolvePrivateConfig(options, true);
   const payload = buildVolcengineIpCreatePayload({
     ...input,
@@ -772,7 +779,7 @@ export async function createVolcengineIpVideoTask(
         body: JSON.stringify(payload),
       },
       config,
-      { ...options, model: payload.model },
+      { ...options, model: payload.model, referenceMediaRedactor: redactReferenceMedia },
     );
 
     const result = parseCreateResponse(raw);

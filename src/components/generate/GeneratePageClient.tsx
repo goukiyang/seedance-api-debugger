@@ -1,6 +1,6 @@
 'use client';
 import { markVideoSubmission, observePendingVideoSubmission } from './video-submission-progress';
-import { isVideoSubmissionUnconfirmed, videoPendingStatusLabel } from '@/components/generate/video-submission-state';
+import { isVideoSubmissionUnconfirmed, videoPendingStatusLabel, videoSubmissionUnknownMessage } from '@/components/generate/video-submission-state';
 import { projectDisplayName } from '@/lib/projects/display';
 import { ProjectSelector } from '@/components/ProjectSelector';
 import DraftUpgradeAction from '@/components/creation/DraftUpgradeAction';
@@ -2808,7 +2808,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       setActivePollingTaskIds(current => [data.task!.id, ...current.filter(id => id !== data.task!.id)].slice(0, MAX_ACTIVE_POLLING_TASKS));
       void loadRecentTasksPage(1, 'merge-head');
       setErrorDebug(null); setPolledResult(null);
-      setGenerationNotice(unconfirmed ? '上游受理结果待确认，请继续查询原任务' : '已恢复原任务，本次没有再次生成。当前输入保留。');
+      setGenerationNotice(unconfirmed ? videoSubmissionUnknownMessage(data.task)! : '已恢复原任务，本次没有再次生成。当前输入保留。');
     } catch (cause) { if (isCurrent()) setGenerationNotice(cause instanceof Error ? cause.message : '原请求暂时无法确认'); }
     finally { if (generationOperation.current === operation) { generationOperation.current = null; setSubmitting(false); } }
   }, [currentUser?.id, activeGenerationRequestStorageKey, studioRunId, isIpSurface, loadRecentTasksPage, creation.acceptTask]);
@@ -2855,7 +2855,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       setUnconfirmedGenerationRequest(unconfirmed);
       unconfirmedGenerationParamsRef.current = unconfirmed ? params : null;
       setResult(unconfirmed ? null : task);
-      setGenerationNotice(unconfirmed ? task.message || '上游受理结果待确认，请继续查询原任务'
+      setGenerationNotice(unconfirmed ? videoSubmissionUnknownMessage(task)!
         : '已恢复原请求的任务，本次没有再次生成。当前输入保留。');
       setPolledResult(null);
       setActivePollingTaskIds(current => [task.id, ...current.filter(id => id !== task.id)].slice(0, MAX_ACTIVE_POLLING_TASKS));
@@ -3806,7 +3806,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                   const chargeText = formatProviderUsdCharge(task);
                   const recentTaskChargeText = chargeText ? formatRecentTaskChargeText(chargeText) : null;
                   const enhanceTask = isRecentEnhanceTask(task);
-                  const taskErrorMessage = task.error_message?.trim();
+                  const taskErrorMessage = videoSubmissionUnknownMessage(task) || task.error_message?.trim();
 
                   return (
                     <article
@@ -3892,7 +3892,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
                                 task.local_status === 'failed' ? '失败' : task.local_status)}
                             </span>
                           </div>
-                          {(task.local_status === 'failed' || task.error_code?.startsWith('IP_')) && taskErrorMessage && (
+                          {(task.local_status === 'failed' || isVideoSubmissionUnconfirmed(task) || task.error_code?.startsWith('IP_')) && taskErrorMessage && (
                             <div className="composer-task-card-error" title={taskErrorMessage}>
                               {taskErrorMessage}
                             </div>

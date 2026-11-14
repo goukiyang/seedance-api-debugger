@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import ts from 'typescript';
-import { isVideoSubmissionUnconfirmed, videoPendingStatusLabel } from '../src/components/generate/video-submission-state';
+import { isVideoSubmissionUnconfirmed, videoPendingStatusLabel, videoSubmissionUnknownMessage } from '../src/components/generate/video-submission-state';
 import { videoDeliveryStageForTask } from '../src/lib/video/delivery-status';
 
 const source = fs.readFileSync('src/components/generate/GeneratePageClient.tsx', 'utf8');
@@ -65,7 +65,7 @@ async function main() {
           return { ok: true, body: { task } };
         },
         readJsonResponse: async (response: { body: unknown }) => response.body,
-        isVideoSubmissionUnconfirmed, isCurrent: () => true,
+        isVideoSubmissionUnconfirmed, videoSubmissionUnknownMessage, isCurrent: () => true,
         creation: { acceptTask: async (request: string, id: string) => { observed.accepted.push(`${request}:${id}`); } },
         setSubmitting() {}, setError() {}, setErrorDebug() {}, setPolledResult() {}, setActivePollingTaskIds() {},
         setUnconfirmedGenerationRequest: (value: boolean) => { observed.unconfirmed = value; },
@@ -76,6 +76,7 @@ async function main() {
       const run = context.module.exports as (...args: unknown[]) => Promise<void>;
       await run(...(name === 'acceptRecoveredTask' ? [task, key] : []));
       assert.equal(observed.unconfirmed, fixture.expected);
+      if (fixture.expected) assert.match(observed.notice, /费用仍待核对/);
       assert.equal(storage.has(storageKey), fixture.expected);
       assert.deepEqual(observed.accepted, [`${key}:original-task`]);
       assert.equal(observed.result === null, fixture.expected);

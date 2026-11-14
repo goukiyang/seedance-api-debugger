@@ -7,26 +7,36 @@ import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { promisify } from 'node:util';
 import { fetchPublicMedia } from '@/lib/media/preview-response';
+import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
+import { authorizedReferenceVideoFile, type AuthorizedLocalReferenceVideo } from './reference-video-delivery.server';
 import type { SeedanceReferenceMediaItem } from './reference-media-policy';
 
 const execFileAsync = promisify(execFile);
 
-export async function probeIpReferenceMedia(urls: string[], kind: 'video' | 'audio'): Promise<SeedanceReferenceMediaItem[]> {
+export async function probeIpReferenceMedia(urls: string[], kind: 'video' | 'audio', authorizedVideos: AuthorizedLocalReferenceVideo[] = []): Promise<SeedanceReferenceMediaItem[]> {
   if (!urls.length) return [];
   const signal = AbortSignal.timeout(90_000);
   const items: SeedanceReferenceMediaItem[] = [];
   const maxBytes = (kind === 'video' ? 200 : 15) * 1024 * 1024;
   for (let index = 0; index < urls.length; index += 1) {
     const url = urls[index];
-    const directory = await mkdtemp(path.join(os.tmpdir(), 'sd2-ip-reference-'));
-    const file = path.join(directory, 'media.bin');
+    let directory: string | null = null;
+    let file: string;
     try {
       signal.throwIfAborted();
-      const response = await fetchPublicMedia(new Request('https://sd2.invalid/reference', { signal }), url, `${kind}/octet-stream`);
-      if (!response.ok || !response.body) throw new Error('unavailable');
-      if (Number(response.headers.get('content-length')) > maxBytes) {
-        await response.body.cancel();
-        throw new Error('too_large');
+      const local = kind === 'video' ? siteUploadPathFromUrl(url) : null;
+      if (local) {
+        const source = authorizedVideos.find(item => siteUploadPathFromUrl(item.source) === local);
+        if (!source || source.size > maxBytes) throw new Error('unavailable');
+        file = (await authorizedReferenceVideoFile(source)).file;
+      } else {
+        directory = await mkdtemp(path.join(os.tmpdir(), 'sd2-ip-reference-'));
+        file = path.join(directory, 'media.bin');
+        const response = await fetchPublicMedia(new Request('https://sd2.invalid/reference', { signal }), url, `${kind}/octet-stream`);
+        if (!response.ok || !response.body) throw new Error('unavailable');
+        if (Number(response.headers.get('content-length')) > maxBytes) {
+          await response.body.cancel();
+          throw new Error('too_large');
       }
       let size = 0;
       const limit = new Transform({ transform(chunk: Buffer, _encoding, callback) {
@@ -34,6 +44,7 @@ export async function probeIpReferenceMedia(urls: string[], kind: 'video' | 'aud
         callback(size > maxBytes ? new Error('too_large') : null, chunk);
       } });
       await pipeline(Readable.fromWeb(response.body as import('node:stream/web').ReadableStream), limit, createWriteStream(file), { signal });
+      }
       const { stdout } = await execFileAsync('ffprobe', [
         '-v', 'error', '-protocol_whitelist', 'file,pipe', '-format_whitelist', 'mov,mp3,wav',
         '-show_entries', 'stream=codec_type,codec_name,width,height,avg_frame_rate:format=duration,format_name',
@@ -60,7 +71,7 @@ export async function probeIpReferenceMedia(urls: string[], kind: 'video' | 'aud
     } catch {
       throw new Error(`无法核对参考${kind === 'video' ? '视频' : '音频'} ${index + 1} 的真实时长或文件格式，请确认链接可访问、大小符合要求，或重新上传后再提交。尚未扣点。`);
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      if (directory) await rm(directory, { recursive: true, force: true });
     }
   }
   return items;

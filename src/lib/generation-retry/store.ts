@@ -7,7 +7,7 @@ import { matchingRetryRule, RETRY_CONFIG_KEY, RETRY_POLICY_VERSION, RETRY_RULES,
 
 type DB = Prisma.TransactionClient;
 export type RetryAttempt = { ordinal: number; key: string; state: 'prepared' | 'sent' | 'accepted' | 'free_failed' | 'succeeded' | 'failed' | 'unknown';
-  startedAt: string; providerTaskId?: string; failure?: RetryFailure; rule?: { id: string; version: string; evidence: string } };
+  startedAt: string; referenceMediaIssuedAt?: number; providerTaskId?: string; failure?: RetryFailure; rule?: { id: string; version: string; evidence: string } };
 export type RetryRecord = { schema: typeof RETRY_POLICY_VERSION; kind: 'image' | 'video'; taskId: string; ownerId: string;
   scope: RetryScope; inputHash: string; ruleIds: string[]; maxRetries: 3; stopped: boolean;
   state: 'active' | 'wait' | 'succeeded' | 'failed' | 'unknown'; dueAt?: string; attempts: RetryAttempt[] };

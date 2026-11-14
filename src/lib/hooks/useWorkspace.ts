@@ -51,7 +51,12 @@ type PendingWorkspaceAttach = {
 
 // File upload and placement are separate operations. Keep the same placement
 // receipt after an unknown response so retry never resets an existing role/order.
-async function postWorkspaceAssociation(tabId: string, body: Record<string, unknown>) {
+export type WorkspaceAssociationResponse = ApiMessageResponse & {
+  association?: { requestId?: string; associated?: boolean };
+  workspaceAssetIds?: string[];
+};
+export async function postWorkspaceAssociation(tabId: string, body: Record<string, unknown>,
+  onConfirmed?: (data: WorkspaceAssociationResponse) => void) {
   const session = uploadSession();
   if (!session.ownerId) throw new Error('当前账号尚未确认，请重新登录后再加入素材');
   const bytes = new TextEncoder().encode(JSON.stringify([session.ownerId, session.epoch, tabId, body]));
@@ -68,10 +73,11 @@ async function postWorkspaceAssociation(tabId: string, body: Record<string, unkn
     method: 'POST', headers: { 'Content-Type': 'application/json', 'x-tab-id': tabId, 'x-upload-owner-id': session.ownerId },
     body: JSON.stringify({ ...body, ownerId: session.ownerId, requestId }), signal: AbortSignal.timeout(30000),
   });
-  const data = await readJsonResponse<ApiMessageResponse & { association?: { requestId?: string; associated?: boolean } }>(response, { invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE });
+  const data = await readJsonResponse<WorkspaceAssociationResponse>(response, { invalidJsonMessage: WORKSPACE_INVALID_JSON_MESSAGE });
   if (!current()) throw new Error('当前账号已变化，原账号的加入结果未写入当前页面');
   if (!response.ok) throw new Error(data.error || data.message || '素材加入结果未确认，请重试原操作；不用重新上传文件');
   if (data.association?.requestId !== requestId || data.association.associated !== true) throw new Error('素材加入回执未确认，请重试原操作；不用重新上传文件');
+  onConfirmed?.(data);
   const releaseReceipt = () => { try { sessionStorage.removeItem(key); } catch { /* A confirmed receipt remains safe to read. */ } };
   // A clear retry must read its first CAS receipt, not clear a later attachment.
   if (!body.recoveryClear) releaseReceipt();
