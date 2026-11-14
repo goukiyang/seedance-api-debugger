@@ -71,10 +71,12 @@ async function main() {
       multiviewAction: variant === 'action' ? { action: { origins: ['synthetic-action'] } } : null,
       videoGroups: { origins: ['synthetic-group'] },
       requestedProvider: 'seedance', H3_VIDEO_PROVIDER: 'h3', h3GeneratePayload: null,
-      providerInput: {}, seedanceReferenceTransport: {}, privateMultiviewOrigins: () => ['synthetic-rotation'],
+      providerInput: {}, seedanceReferenceTransport: {}, referenceVideoDelivery: undefined,
+      privateMultiviewOrigins: () => ['synthetic-rotation'],
     });
     assert.equal(options.sensitiveRecipe, variant !== 'ordinary');
-    assert.deepEqual(Object.keys(options).sort(), ['provider', 'input', 'sensitiveRecipe', 'privateOrigins'].sort());
+    assert.deepEqual(Object.keys(options).sort(), ['provider', 'input', 'sensitiveRecipe', 'referenceVideoDelivery', 'privateOrigins'].sort());
+    assert.equal(options.referenceVideoDelivery, undefined, 'Image-only multiview has no local-video delivery plan');
     assert.deepEqual(Array.from(options.privateOrigins), variant === 'ordinary' ? [] : [`synthetic-${variant === 'groups' ? 'group' : variant}`]);
   }
   const retryFile = readFileSync('src/lib/generation-retry/video.ts', 'utf8');
