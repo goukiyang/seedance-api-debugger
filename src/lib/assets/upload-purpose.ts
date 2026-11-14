@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 
 // Compatible rollback keeps original-request reads, but closes new feedback uploads.
-export const FEEDBACK_UPLOADS_ENABLED = true;
+export const FEEDBACK_UPLOADS_ENABLED = false;
 
 // Server-owned canonical JSON markers. These affect material discovery only;
 // feedback attachment and original-file permissions remain independent.
