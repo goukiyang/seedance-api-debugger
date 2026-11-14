@@ -1,3 +1,7 @@
+<!-- FB-TODAY-20261114-EVIDENCE -->
+FB-TODAY-20261114：全窗口新快照、新视频反馈原截图、只读ffprobe/上传/挂载/取件、原业务拒绝安全摘要及唯一未知尝试、14份现网源匹配/历史diff和官方搜索核对，私有保于原资料today-20261114T155843Z；原文/身份/源URL/响应/截图不推Git。详[今日查因](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-14-feedback-24h.md#video-reference-1114)。
+<!-- /FB-TODAY-20261114-EVIDENCE -->
+
 <!-- FB-ROOTCAUSE-20261114-5H-EVIDENCE -->
 FB-ROOTCAUSE-20261114：12份现网源SHA匹配、实际访问日志、原上传复用、分钟缓存/历史diff、当前源读取耗时及新截图已私有归档于原资料rootcause-5h-20261114；原件/身份/响应/源副本不推Git。缺证与边界见[原单](/Volumes/Data/Projects/video-api-debugger/tasks/todo/2026-11-14-feedback-24h.md#latest-feedback-rootcause)。
 <!-- /FB-ROOTCAUSE-20261114-5H-EVIDENCE -->
