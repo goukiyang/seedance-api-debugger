@@ -59,7 +59,7 @@ async function main() {
     ['literal', signed], ['slashescaped', signed.replaceAll('/', '\\/')], ['encoded_url', encodeURIComponent(signed)],
     ['ticket_only', ticket], ['encoded_ticket', encodeURIComponent(ticket)],
   ] as const;
-  const credentials = [...new Set(echoes.map(([, value]) => value))];
+  const credentials = Array.from(new Set(echoes.map(([, value]) => value)));
   const assertNoCredential = (value: unknown, label: string) => {
     const observed = inspect(value, { depth: 20, showHidden: true, maxArrayLength: null, maxStringLength: null });
     for (const credential of credentials) assert.equal(observed.includes(credential), false, `${label}: known credential remained`);

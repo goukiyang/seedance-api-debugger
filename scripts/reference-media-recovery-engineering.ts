@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
@@ -307,15 +307,17 @@ async function checkAuthorizedReaderAndDiagnostics(tempFile: string) {
 }
 
 async function checkActualDisplayEncodingFailure() {
-  const uploadRoot = resolve(root, 'public/uploads');
-  const directory = await mkdtemp(resolve(uploadRoot, 'reference-media-recovery-'));
+  const fixtureRoot = await mkdtemp(resolve(tmpdir(), 'reference-media-encoding-'));
+  const previousDirectory = process.cwd();
   try {
-    const file = resolve(directory, 'invalid.png');
+    const uploadRoot = resolve(fixtureRoot, 'public/uploads');
+    await mkdir(uploadRoot, { recursive: true });
+    const file = resolve(uploadRoot, 'invalid.png');
     await writeFile(file, Buffer.from('not-an-image'));
-    const relativeDirectory = directory.slice(uploadRoot.length + 1);
     const media = await import('../src/lib/image-studio/media');
+    process.chdir(fixtureRoot);
     await assert.rejects(
-      media.readStudioThumbnail(`/uploads/${relativeDirectory}/invalid.png`),
+      media.readStudioThumbnail('/uploads/invalid.png'),
       error => {
         assert.ok(error instanceof media.StudioImageDownloadError);
         assert.equal(error.code, 'display_encoding_failed');
@@ -326,7 +328,8 @@ async function checkActualDisplayEncodingFailure() {
       'the actual reader must classify a real image encoding failure without source details',
     );
   } finally {
-    await rm(directory, { recursive: true, force: true });
+    process.chdir(previousDirectory);
+    await rm(fixtureRoot, { recursive: true, force: true });
   }
 }
 

@@ -44,7 +44,7 @@ export function createProviderReferenceMediaRedactor(referenceVideoUrls?: readon
       fragments.add(encoded.replace(/%[0-9A-F]{2}/g, match => match.toLowerCase()));
     }
   }
-  const known = [...fragments].sort((a, b) => b.length - a.length);
+  const known = Array.from(fragments).sort((a, b) => b.length - a.length);
   return <T>(value: T): T => redactValue(value, text => {
     for (const fragment of known) text = text.split(fragment).join('[redacted]');
     return redactReferenceMediaUri(text);

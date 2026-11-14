@@ -38,13 +38,13 @@ function submitErrorResponseBranch() {
     if (ts.isIfStatement(node) && ts.isPrefixUnaryExpression(node.expression)
       && node.expression.operator === ts.SyntaxKind.ExclamationToken && property(node.expression.operand, 'res', 'ok')) {
       let checksServerError = false, removesReceipt = false;
-      function inspect(child: ts.Node) {
+      const inspect = (child: ts.Node) => {
         if (ts.isBinaryExpression(child) && property(child.left, 'res', 'status')
           && child.operatorToken.kind === ts.SyntaxKind.GreaterThanEqualsToken
           && ts.isNumericLiteral(child.right) && child.right.text === '500') checksServerError = true;
         if (ts.isCallExpression(child) && property(child.expression, 'sessionStorage', 'removeItem')) removesReceipt = true;
         ts.forEachChild(child, inspect);
-      }
+      };
       inspect(node);
       if (checksServerError && removesReceipt) branches.push(node);
     }
