@@ -151,7 +151,7 @@ async function main() {
     assert.deepEqual(params, originalParams);
     checks++;
   }
-  const output = process.argv[2];
+  const output = process.argv[2] ?? '.role-tests/video-submission-state-w2.json';
   assert.ok(output && path.resolve(output).startsWith(path.resolve('.role-tests') + path.sep));
   fs.mkdirSync(path.dirname(output), { recursive: true });
   fs.writeFileSync(output, JSON.stringify({ checks, passed: true, actualClientCallbacks: 2, actualSubmitErrorResponseBranch: true,

@@ -126,7 +126,7 @@ async function checkComponents() {
   assert.match(renderedText(referenceRenderer.toJSON()), /预览暂不可用，重试/, 'failed reference thumbnail must keep a local retry action');
   const retry = buttons(referenceRenderer).find(button => String(button.props['aria-label'] || '').includes('重试'));
   assert.ok(retry, 'the existing outer image button must become the retry target');
-  assert.equal(retry.findAll(node => node.type === 'button').length, 0, 'reference retry must not nest another button');
+  assert.equal(retry.findAll(node => node !== retry && node.type === 'button').length, 0, 'reference retry must not nest another button');
   await rendererApi.act(() => { (retry.props.onClick as () => void)(); });
   assert.match(renderedText(referenceRenderer.toJSON()), /读取中/, 'one retry returns only this object to reading');
   image = referenceRenderer.root.findAll(node => node.type === 'img')[0];
@@ -176,7 +176,7 @@ async function checkComponents() {
   const selectButton = selectionButtons.find(button => String(button.props['aria-label']).startsWith('取消选择'));
   const retryButton = selectionButtons.find(button => String(button.props['aria-label']).startsWith('重试'));
   assert.ok(selectButton && retryButton, 'picker retry must be a sibling of the existing selection control');
-  assert.equal(selectButton.findAll(node => node.type === 'button').length, 0, 'picker selection button must not contain the retry button');
+  assert.equal(selectButton.findAll(node => node !== selectButton && node.type === 'button').length, 0, 'picker selection button must not contain the retry button');
   await rendererApi.act(() => { (retryButton.props.onClick as (event: { stopPropagation(): void }) => void)({ stopPropagation() {} }); });
   assert.equal(selectionChanges, 0, 'retry must not change the selected item');
   assert.equal(selectButton.props['aria-pressed'], true, 'retry must preserve selection order/state');
@@ -484,4 +484,7 @@ async function main() {
   }
 }
 
-await main();
+main().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});
