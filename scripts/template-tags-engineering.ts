@@ -4,13 +4,12 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { tmpdir } from 'node:os';
 import { mock } from 'node:test';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 async function main() {
-  const root = process.cwd(), scratch = path.join(root, '.role-tests');
-  mkdirSync(scratch, { recursive: true });
-  const directory = mkdtempSync(path.join(scratch, 'template-tags-'));
+  const root = process.cwd(), directory = mkdtempSync(path.join(tmpdir(), 'sd2-template-tags-'));
   const env: NodeJS.ProcessEnv = { NODE_ENV: 'test', DATABASE_URL: `file:${path.join(directory, 'synthetic.db')}`, SESSION_SECRET: randomUUID() };
   for (const key of ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'TZ']) if (process.env[key]) env[key] = process.env[key];
   const require = createRequire(import.meta.url);
