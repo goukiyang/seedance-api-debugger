@@ -80,6 +80,7 @@ export function useModuleGalleryState(userId: string, { enabled = true }: { enab
   }, [ensureSnapshot, filtersKey, owner, persistent, tabKey]);
 
   const setQuery = useCallback((query: string) => setFilters({ query }), [setFilters]);
+  const setTag = useCallback((tag: string) => setFilters({ tag }), [setFilters]);
   const setScope = useCallback((scope: GalleryScope) => setFilters({ scope }), [setFilters]);
   const setSort = useCallback((sort: GallerySort) => setFilters({ sort }), [setFilters]);
   const setAuthorKey = useCallback((authorKey: string | null) => setFilters({ authorKey }), [setFilters]);
@@ -132,6 +133,6 @@ export function useModuleGalleryState(userId: string, { enabled = true }: { enab
   // No previous-account values are rendered while the next account initializes.
   const ready = snapshot.owner === owner;
   const state = ready ? snapshot : empty();
-  return { query: state.query, setQuery, scope: state.scope, setScope, sort: state.sort, setSort,
+  return { query: state.query, setQuery, tag: state.tag, setTag, scope: state.scope, setScope, sort: state.sort, setSort,
     authorKey: state.authorKey, setAuthorKey, ready, lastOpened: state.lastOpened, markOpened, reset };
 }

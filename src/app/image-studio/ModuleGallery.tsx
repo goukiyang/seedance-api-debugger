@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react';
-import { MoreHorizontal, ImagePlus, RefreshCw, Search, Trash2, UserRound, X } from 'lucide-react';
+import { MoreHorizontal, ImagePlus, RefreshCw, Search, Tags, Trash2, UserRound, X } from 'lucide-react';
 import type { GalleryAuthor, GalleryScope, GallerySort } from '@/lib/image-studio/gallery-types';
 import styles from './ModuleGallery.module.css';
 import { ProductActionMenu } from '@/components/ProductActionMenu';
@@ -12,6 +12,7 @@ export type ModuleGalleryItem = {
   id: string;
   name: string;
   groupName: string;
+  tags?: string[];
   shared: boolean;
   /** Short label next to the name, e.g. 共享模板 for a shared copy. */
   badge?: string;
@@ -28,6 +29,7 @@ export type ModuleGalleryItem = {
   sharingControl?: ReactNode;
   onOpen: () => void;
   onEditCover?: () => void;
+  onEditTags?: () => void;
   onDelete?: (anchor: HTMLElement) => void;
   deleteDisabled?: boolean;
   deletePending?: boolean;
@@ -39,6 +41,9 @@ export type ModuleGalleryProps = {
   filteredTotal: number | null;
   query: string;
   onQueryChange: (value: string) => void;
+  tag: string;
+  availableTags: string[];
+  onTagChange: (value: string) => void;
   scope: GalleryScope;
   onScopeChange: (value: ModuleGalleryProps['scope']) => void;
   sort: GallerySort;
@@ -91,11 +96,13 @@ function GalleryVisual({ children }: { children: ReactNode }) {
   return <div ref={ref} className={styles.visual} aria-busy={!visible}>{visible ? children : null}</div>;
 }
 
-export function ModuleGallery({ items, total, filteredTotal, query, onQueryChange, scope, onScopeChange,
+export function ModuleGallery({ items, total, filteredTotal, query, onQueryChange, tag, availableTags, onTagChange, scope, onScopeChange,
   sort, onSortChange, onReset, gridRef, pagination, headerActions, title, loading = false,
   error = false, onRetry, opening = false, authorKey, authorLabel, onAuthorChange }: ModuleGalleryProps) {
   const headingId = useId();
-  const hasFilter = Boolean(query.trim() || authorKey) || scope !== 'all';
+  const [expandedTags, setExpandedTags] = useState(false);
+  const visibleTags = expandedTags ? availableTags : availableTags.filter((value, index) => index < 12 || value === tag);
+  const hasFilter = Boolean(query.trim() || tag || authorKey) || scope !== 'all';
   return <section className={styles.gallery} aria-labelledby={headingId}>
     <header className={styles.header}>
       <div className={styles.heading}>
@@ -111,8 +118,8 @@ export function ModuleGallery({ items, total, filteredTotal, query, onQueryChang
     <div className={styles.toolbar}>
       <label className={styles.search}>
         <Search size={17} aria-hidden="true" />
-        <span className={styles.srOnly}>搜索模块、作者或分组</span>
-        <input type="search" value={query} placeholder="搜索模块、作者、分组" onChange={event => onQueryChange(event.target.value)} />
+        <span className={styles.srOnly}>搜索模块、标签、作者或分组</span>
+        <input type="search" value={query} placeholder="搜索模块、标签、作者、分组" onChange={event => onQueryChange(event.target.value)} />
         {query && <button type="button" className={styles.clearSearch} aria-label="清空搜索" onClick={() => onQueryChange('')}><X size={16} aria-hidden="true" /></button>}
       </label>
       <div className={styles.scopes} role="group" aria-label="模块范围">
@@ -133,6 +140,14 @@ export function ModuleGallery({ items, total, filteredTotal, query, onQueryChang
       <button type="button" className={styles.reset} onClick={onReset}>重置</button>
       {authorKey && <button type="button" className={styles.authorCondition} onClick={() => onAuthorChange?.(null)} title="清除作者条件">{authorLabel || '已选作者'}<X size={14} /></button>}
     </div>
+    {Boolean(availableTags.length || tag) && <div className={styles.quickTags} role="group" aria-label="快捷标签">
+      <Tags size={16} aria-hidden="true" />
+      <button type="button" className={styles.tagChip} aria-pressed={!tag} onClick={() => onTagChange('')}>全部标签</button>
+      {Array.from(new Set([...visibleTags, ...(tag ? [tag] : [])])).map(value => <button key={value} type="button"
+        className={styles.tagChip} aria-pressed={tag === value} onClick={() => onTagChange(tag === value ? '' : value)}>{value}</button>)}
+      {availableTags.length > 12 && <button type="button" className={styles.tagMore} aria-expanded={expandedTags}
+        onClick={() => setExpandedTags(value => !value)}>{expandedTags ? '收起' : '更多标签'}</button>}
+    </div>}
     {error && <div className={styles.notice} role="alert">
       <span>模块未能完整读取，已有内容仍可查看。</span>
       {onRetry && <button type="button" className={styles.retry} disabled={loading} onClick={onRetry}><RefreshCw size={15} aria-hidden="true" />重试读取</button>}
@@ -154,7 +169,7 @@ export function ModuleGallery({ items, total, filteredTotal, query, onQueryChang
           {item.reactions}
           <div className={styles.footer}>
             <div className={styles.titleRow}>
-              <h3 title={item.name}>{item.name}</h3>
+              <h3 title={[item.name, ...(item.tags || [])].join(' · ')}>{item.name}</h3>
               {item.sharingControl && <span className={styles.sharingControl}>{item.sharingControl}</span>}
               {item.unread && <span className={styles.unread} role="img" aria-label="有未读结果" />}
             </div>
@@ -167,8 +182,9 @@ export function ModuleGallery({ items, total, filteredTotal, query, onQueryChang
             <div className={styles.cardActions}>
               {item.error && onRetry && <button type="button" className={styles.cardAction} disabled={loading}
                 aria-label={`重试读取封面：${item.name}`} title="重试读取封面" onClick={onRetry}><RefreshCw size={17} aria-hidden="true" /></button>}
-              {(editable || item.onDelete) && <span className={styles.cardMenu}><ProductActionMenu label={`模板操作：${item.name}`} disabled={opening} actions={[
+              {(editable || item.onEditTags || item.onDelete) && <span className={styles.cardMenu}><ProductActionMenu label={`模板操作：${item.name}`} disabled={opening} actions={[
                 ...(editable ? [{ id: 'cover', label: '修改封面', icon: <ImagePlus size={16} />, onSelect: () => item.onEditCover?.() }] : []),
+                ...(item.onEditTags ? [{ id: 'tags', label: '设置标签', icon: <Tags size={16} />, onSelect: () => item.onEditTags?.() }] : []),
                 ...(item.onDelete ? [{ id: 'delete', label: item.deletePending ? '核对原删除' : '删除模板', icon: <Trash2 size={16} />, danger: true,
                   disabled: item.deleteDisabled, onSelect: item.onDelete }] : []),
               ]}><MoreHorizontal size={20} aria-hidden="true" /></ProductActionMenu></span>}
@@ -181,6 +197,7 @@ export function ModuleGallery({ items, total, filteredTotal, query, onQueryChang
     {!items.length && !loading && !error && <div className={styles.empty} role="status">
       <p>{hasFilter ? '没有找到匹配的模块' : '暂无可查看的模块'}</p>
       {query && <button type="button" className={styles.retry} onClick={() => onQueryChange('')}>清空搜索</button>}
+      {tag && <button type="button" className={styles.retry} onClick={() => onTagChange('')}>清除标签筛选</button>}
       {!query && scope !== 'all' && <button type="button" className={styles.retry} onClick={() => onScopeChange('all')}>查看全部模块</button>}
     </div>}
     <div className={styles.pagination}>{pagination}</div>

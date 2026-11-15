@@ -1252,7 +1252,7 @@ function ImageStudioWorkspace({ isAdmin, externalActor = false, userId, template
   const galleryLastUsed = useMemo(() => serverRecentUse.owner === userId
     ? mergeModuleGalleryLastOpened(gallery.lastOpened, serverRecentUse.lastUsed, Date.now()) : gallery.lastOpened,
   [gallery.lastOpened, serverRecentUse, userId]);
-  const pool = useGalleryCatalog(userId, { query: gallery.query, scope: gallery.scope, sort: gallery.sort,
+  const pool = useGalleryCatalog(userId, { query: gallery.query, tag: gallery.tag, scope: gallery.scope, sort: gallery.sort,
     authorKey: gallery.authorKey, ...(gallery.sort === 'recent' ? { recentHints: galleryLastUsed } : {}), directoryOrder: { groups: studioOrder.groups, entries: studioOrder.entries }, navigationOnly: !coverView,
     navigationPage, ...(locateNavigation && active && !coverView ? { locate: { moduleId: active } } : {}) }, gallery.ready && viewRestored,
   { revision: shared.catalogRevision, active: coverView });
@@ -1298,6 +1298,7 @@ function ImageStudioWorkspace({ isAdmin, externalActor = false, userId, template
     viewRestored && directoryReady && (!coverView || gallery.ready && galleryDirectoryReady && !coverPages.restoring && !hydrating) && !loading,
     { localFallback: true, skipRestore: !coverView && typeof window !== 'undefined' && Boolean(new URLSearchParams(window.location.search).get('moduleId') || new URLSearchParams(window.location.search).get('presetId')) });
   const changeGalleryQuery = (value: string) => { gallery.setQuery(value); coverPages.resetForQueryChange(); resetCoverScroll(); };
+  const changeGalleryTag = (value: string) => { gallery.setTag(value); coverPages.resetForQueryChange(); resetCoverScroll(); };
   const changeGalleryScope = (value: GalleryScope) => { gallery.setScope(value); coverPages.resetForQueryChange(); resetCoverScroll(); };
   const changeGallerySort = (value: GallerySort) => { gallery.setSort(value); coverPages.resetForQueryChange(); resetCoverScroll(); };
   const changeGalleryAuthor = (key: string | null) => { gallery.setAuthorKey(key); coverPages.resetForQueryChange(); resetCoverScroll(); };
@@ -1559,6 +1560,7 @@ function ImageStudioWorkspace({ isAdmin, externalActor = false, userId, template
     {coverView && <ModuleGallery title={templateWorkbench ? '模块封面' : '模板封面'}
       total={galleryDirectoryReady ? galleryDerived.total : null} filteredTotal={galleryDirectoryReady ? galleryDerived.filteredTotal : null}
       query={gallery.query} onQueryChange={changeGalleryQuery} scope={gallery.scope} onScopeChange={changeGalleryScope}
+      tag={gallery.tag} availableTags={pool.data?.availableTags || []} onTagChange={changeGalleryTag}
       sort={gallery.sort} onSortChange={changeGallerySort} onReset={resetGallery} gridRef={coverPages.gridRef} pagination={coverPagination}
       authorKey={gallery.authorKey} authorLabel={pool.data?.navigation.find(item => item.author.key === gallery.authorKey)?.author.displayName} onAuthorChange={changeGalleryAuthor}
       loading={pool.loading || !gallery.ready} error={Boolean(pool.error || galleryReadErrors.size)} opening={sharedOpening}
@@ -1573,7 +1575,20 @@ function ImageStudioWorkspace({ isAdmin, externalActor = false, userId, template
         ? pool.data?.items.find(item => item.key === entry.key) : undefined;
       const onReadError = () => setGalleryReadErrors(current => new Set(Array.from(current).concat(entry.key)));
       const deleteTarget = entry.deletion;
-      return { key: entry.key, id: entry.id, name: entry.name, groupName: entry.groupName, mine: entry.mine, shared: entry.shared,
+      return { key: entry.key, id: entry.id, name: entry.name, groupName: entry.groupName, tags: entry.tags, mine: entry.mine, shared: entry.shared,
+        onEditTags: entry.tagsEditable === true ? () => {
+          const requestId = crypto.randomUUID();
+          void askPresetName('多个标签用顿号或逗号分隔，最多6个，每个最多16字', (entry.tags || []).join('、'), {
+            title: `设置标签：${entry.name}`, confirmLabel: '保存标签', allowEmpty: true, maxLength: 101,
+            onSubmit: async value => {
+              const response = await fetch('/api/image-studio/gallery/tags', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ requestId, contentKey: entry.key, expectedRevision: entry.tagsRevision || 0,
+                  tags: value.split(/[、,，;；]+/).map(tag => tag.trim()).filter(Boolean) }) });
+              await readResponse(response);
+              pool.refresh({ invalidateRevision: true });
+            },
+          });
+        } : undefined,
         lastOpenedAt: galleryLastUsed[entry.key], unread: attention.unread.has(entry.id),
         sharingControl: pageItem?.sharing && <TemplateSharingSwitch name={entry.name}
           shared={pageItem.sharing.kind === 'preset' && pageItem.sharing.shared}

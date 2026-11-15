@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { orderTemplateTags } from './template-tags';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { CatalogSqlCompatibilityError } from '@/lib/assets/catalog-visibility-sql';
@@ -32,15 +33,15 @@ export async function readGalleryPage(db: Prisma.TransactionClient, user: ImageS
   const actor = await assertStudioActor(user.id, db), before = await readCatalogRevision(db, 'templates');
   if (!before) throw new CatalogSqlCompatibilityError('目录writer尚未就绪');
   const revision = createHash('sha256').update(JSON.stringify([before, actor.id, actor.role, actor.account_type, actor.feature_profile_id, actor.externalStudioAccess,
-    input.query || '', input.scope || 'all', input.authorKey || null, input.sort || 'created', input.directoryOrder || {}, input.recentHints || {}])).digest('hex');
+    input.query || '', input.tag || '', input.scope || 'all', input.authorKey || null, input.sort || 'created', input.directoryOrder || {}, input.recentHints || {}])).digest('hex');
   if (input.catalogRevision && input.catalogRevision !== revision) throw new StudioSharingError('封面目录已变化，请重新读取', 409, 'state-conflict');
   const directory = await galleryDirectorySql(db, actor, input);
   const pageSize = input.pageSize || 12, navigationPageSize = 24;
   let total: number, page: number, pageRows: GalleryDirectoryRow[], navigationTotal: number, navigationPage: number,
-    navigationRows: GalleryDirectoryRow[], capturedGroups: string[] | null = null;
+    navigationRows: GalleryDirectoryRow[], capturedGroups: string[] | null = null, capturedTags: string[] | null = null;
   let navigation: Awaited<ReturnType<typeof galleryDirectorySql>> | null = null;
   if (directory.pageBundle) {
-    ({ total, page, pageRows, navigationTotal, navigationPage, navigationRows, directoryGroups: capturedGroups } = await directory.pageBundle());
+    ({ total, page, pageRows, navigationTotal, navigationPage, navigationRows, directoryGroups: capturedGroups, availableTags: capturedTags } = await directory.pageBundle());
   } else {
     const counts = await db.$queryRaw<Array<{ total: bigint }>>(Prisma.sql`WITH ${directory.ctes} SELECT count(*) AS total FROM filtered`);
     total = Number(counts[0].total); page = Math.min(input.page || 1, Math.max(1, Math.ceil(total / pageSize)));
@@ -71,6 +72,8 @@ export async function readGalleryPage(db: Prisma.TransactionClient, user: ImageS
   const cover = await tracePhase('gallery-cover', () => project(pageRows, Boolean(input.navigationOnly))),
     nav = await tracePhase('gallery-navigation', () => project(navigationRows, true));
   const groups = capturedGroups ?? (await db.$queryRaw<Array<{ groupName: string }>>(Prisma.sql`WITH ${navigation!.ctes} SELECT DISTINCT groupName FROM filtered ORDER BY groupName`)).map(row => row.groupName);
+  const availableTags = capturedTags ?? orderTemplateTags((await db.$queryRaw<Array<{ name: string; uses: bigint }>>(Prisma.sql`WITH ${navigation!.ctes}
+    SELECT CAST(tag.value AS TEXT) AS name, count(*) AS uses FROM decorated d, json_each(d.tagsJson) tag GROUP BY tag.value`)).map(row => [row.name, Number(row.uses)] as const));
   if (before !== await readCatalogRevision(db, 'templates')) throw new StudioSharingError('封面目录已变化，请重新读取', 409, 'state-conflict');
   const freshActor = await assertStudioActor(user.id, db);
   if (isExternalImageStudioActor(actor) && JSON.stringify(freshActor.externalStudioAccess) !== JSON.stringify(actor.externalStudioAccess)) {
@@ -78,6 +81,7 @@ export async function readGalleryPage(db: Prisma.TransactionClient, user: ImageS
   }
   const result: GalleryQueryResult = { protocol: 'catalog-paged-v2', items: cover.items, navigation: nav.navigation, matches: pageRows.length ? cover.navigation : [],
     total, page, pageSize, catalogRevision: revision, directoryRevision: before, navigationTotal, navigationPage, navigationPageSize, directoryGroups: groups,
+    availableTags,
     capabilities: { independentReactions: true }, removedDefaultGroups: nav.removedDefaultGroups, deletedSourcePresetIds: [] };
   observed({ rows: result.items.length + result.navigation.length, bytes: Buffer.byteLength(JSON.stringify(result)) });
   return result;

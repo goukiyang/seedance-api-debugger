@@ -67,6 +67,13 @@
 .empty p { margin: 0; }
 .pagination { min-width: 0; margin-top: 20px; }
 .pagination:empty { display: none; }
+.quickTags { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 14px 0 18px; color: #adb6bd; }
+.quickTags > svg { flex: 0 0 16px; }
+.gallery .tagChip, .gallery .tagMore { min-height: 32px; padding: 5px 12px; border: 1px solid #364248; border-radius: 999px; background: #151b1e; color: #adb6bd; font: inherit; font-size: 13px; cursor: pointer; }
+.gallery .tagChip:hover, .gallery .tagMore:hover { border-color: #79daca; color: #b9f7e8; }
+.gallery .tagChip[aria-pressed="true"] { border-color: #598f81; background: #203d38; color: #b9f7e8; }
+.gallery .tagMore { border-color: transparent; background: transparent; }
+@media (hover: none), (pointer: coarse) { .gallery .tagChip, .gallery .tagMore { min-height: 44px; } }
 .srOnly { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 @media (max-width: 600px) {
   .header { align-items: flex-start; gap: 12px; }

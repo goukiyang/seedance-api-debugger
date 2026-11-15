@@ -1,4 +1,6 @@
 import { templateUsageCounts } from '@/lib/template-studio/usage-counts';
+import { readTemplateTagCatalog } from './template-tags.server';
+import { orderTemplateTags, TEMPLATE_TAG_LENGTH } from './template-tags';
 import { isParameterCopyId } from './parameter-copy';
 import 'server-only';
 import { readStudioModuleSharingPreference } from './module-sharing-preference';
@@ -30,6 +32,7 @@ export function parseGalleryQuery(value: unknown): GalleryQuery {
       || Object.keys(input.locate).some(key => !['moduleId', 'presetId'].includes(key))
       || Object.values(input.locate).some(id => typeof id !== 'string' || id.length > 180 || !/^[a-zA-Z0-9:_-]+$/.test(id)))
     || input.query !== undefined && (typeof input.query !== 'string' || input.query.length > 160)
+    || input.tag !== undefined && (typeof input.tag !== 'string' || input.tag.length > TEMPLATE_TAG_LENGTH)
     || input.navigationOnly !== undefined && typeof input.navigationOnly !== 'boolean'
     || input.scope !== undefined && !['all', 'mine', 'shared', 'favorites'].includes(input.scope)
     || input.sort !== undefined && !['created', 'updated', 'likes', 'recent', 'name', 'directory'].includes(input.sort)
@@ -133,7 +136,13 @@ export async function readGalleryCatalog(user: ImageStudioIdentity, tx: Prisma.T
 export async function queryStudioGallery(user: ImageStudioIdentity, raw: unknown, projection?: { tx: Prisma.TransactionClient; selection: GalleryPageSelection }): Promise<GalleryQueryResult> {
   const input = parseGalleryQuery(raw);
   const read = async (tx: Prisma.TransactionClient): Promise<GalleryQueryResult> => {
-    const catalog = await readGalleryCatalog(user, tx, projection?.selection), entries = catalog.entries;
+    const catalog = await readGalleryCatalog(user, tx, projection?.selection);
+    const tagCatalog = await readTemplateTagCatalog(tx);
+    const entries = catalog.entries.map(entry => {
+      const source = entry.key.startsWith('image_template:') ? catalog.sourceById.get(entry.key.slice('image_template:'.length)) : null;
+      return { ...entry, tags: tagCatalog.get(entry.key)?.tags || [], tagsRevision: tagCatalog.get(entry.key)?.revision || 0,
+        tagsEditable: !isExternalImageStudioActor(catalog.actor) && (source ? canManageStudioPreset(catalog.actor, source) : entry.key.startsWith('image_module:') && entry.mine) };
+    });
     const recent = input.recentHints || {}, directory = input.directoryOrder || {};
     const orderIndex = (entry: GalleryNavigationItem) => {
       const legacy = entry.presetId ? `preset:${entry.presetId}` : `module:${entry.id}`;
@@ -147,13 +156,14 @@ export async function queryStudioGallery(user: ImageStudioIdentity, raw: unknown
       recent[entry.presetId ? `preset:${entry.presetId}` : `module:${entry.id}`] || 0);
     const revision = digest([catalog.actor.id, catalog.actor.role, catalog.actor.account_type, catalog.actor.feature_profile_id, catalog.actor.externalStudioAccess,
       entries, catalog.dependency, catalog.settings.filter(row => /archived|binding|publisher|deleted/.test(row.key)),
-      input.query || '', input.scope || 'all', input.authorKey || null, input.sort || 'created', recent, directory]);
+      input.query || '', input.tag || '', input.scope || 'all', input.authorKey || null, input.sort || 'created', recent, directory]);
     if (input.catalogRevision && input.catalogRevision !== revision) throw new StudioSharingError('封面目录已变化，请重新读取', 409, 'state-conflict');
     const search = input.query?.trim().toLocaleLowerCase() || '';
     const matches = entries.filter(entry => (!input.scope || input.scope === 'all' || input.scope === 'mine' && entry.mine
       || input.scope === 'shared' && entry.shared || input.scope === 'favorites' && Boolean(entry.reaction?.liked || entry.reaction?.favorited))
       && (!input.authorKey || entry.author.known && entry.author.key === input.authorKey)
-      && (!search || [entry.name, entry.groupName, entry.author.known ? entry.author.displayName : ''].some(text => text.toLocaleLowerCase().includes(search))));
+      && (!input.tag || entry.tags.includes(input.tag))
+      && (!search || [entry.name, entry.groupName, entry.author.known ? entry.author.displayName : '', ...entry.tags].some(text => text.toLocaleLowerCase().includes(search))));
     const sort = input.sort || 'created';
     matches.sort((a, b) => (sort === 'created' ? time(b.createdAt) - time(a.createdAt) || directoryCompare(a, b)
       : sort === 'updated' ? time(b.updatedAt) - time(a.updatedAt) || directoryCompare(a, b)
@@ -200,7 +210,10 @@ export async function queryStudioGallery(user: ImageStudioIdentity, raw: unknown
       }
       items.push({ ...entry, sharing, usageCount: entry.available ? usage.get(entry.key) ?? null : null, fixedCover, banner, cover, originalActions: { open: true, editCover: entry.coverEditable, deletion: entry.deletion } });
     }
+    const tagCounts = new Map<string, number>();
+    for (const entry of entries) for (const tag of entry.tags) tagCounts.set(tag, (tagCounts.get(tag) || 0) + 1);
     return { items, navigation: entries, matches, total: matches.length, page, pageSize, catalogRevision: revision, capabilities: { independentReactions: true },
+      availableTags: orderTemplateTags(tagCounts),
       removedDefaultGroups: await getStudioRemovedDefaultGroups(catalog.actor.id, catalog.client),
       deletedSourcePresetIds: catalog.deletedRows.filter(row => !row.reopenedModuleId).map(row => row.presetId) };
   };

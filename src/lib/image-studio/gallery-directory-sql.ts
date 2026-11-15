@@ -10,6 +10,7 @@ import { sharedCommandFingerprint } from './shared-command-storage';
 import { studioReproductionBindingSql } from './reproduction-record-keys';
 import { catalogIdsSql, catalogKeyBatches } from '@/lib/assets/catalog-batches';
 import { usageRowSpool } from '@/lib/usage/row-spool';
+import { orderTemplateTags, TEMPLATE_TAG_PREFIX } from './template-tags';
 
 const json = (value: Prisma.Sql) => Prisma.sql`CASE WHEN json_valid(${value}) THEN ${value} ELSE '{}' END`;
 const field = (value: Prisma.Sql, path: string) => Prisma.sql`json_extract(${json(value)}, ${path})`;
@@ -23,7 +24,7 @@ const display = Prisma.sql`CASE WHEN trim(u."name") <> '' AND NOT ${technical(Pr
 export type GalleryDirectoryRow = { key: string; targetKind: 'module' | 'preset'; targetId: string };
 export type GalleryDirectoryPageBundle = {
   total: number; page: number; pageRows: GalleryDirectoryRow[];
-  navigationTotal: number; navigationPage: number; navigationRows: GalleryDirectoryRow[]; directoryGroups: string[];
+  navigationTotal: number; navigationPage: number; navigationRows: GalleryDirectoryRow[]; directoryGroups: string[]; availableTags: string[];
 };
 
 /** Permission and normalization precede the count and page. No private body leaves SQLite here. */
@@ -83,7 +84,9 @@ export async function galleryDirectorySql(db: Prisma.TransactionClient, actor: I
       AND NOT EXISTS (SELECT 1 FROM "PlatformSetting" d WHERE d."key" GLOB 'studio_deleted_workspace_v1:*'
         AND ${field(Prisma.sql`d."value_json"`, '$.ownerId')} = p."owner_id" AND ${field(Prisma.sql`d."value_json"`, '$.moduleId')} = pm."id")))`;
   const coverPredicate = Prisma.sql`${input.scope === 'mine' ? Prisma.sql`mine = 1` : input.scope === 'shared' ? Prisma.sql`shared = 1` : input.scope === 'favorites' ? Prisma.sql`favorited = 1` : Prisma.sql`1 = 1`}
-      AND (${input.query?.trim() ? Prisma.sql`instr(lower(name), lower(${input.query.trim()})) > 0 OR instr(lower(groupName), lower(${input.query.trim()})) > 0 OR instr(lower(authorName), lower(${input.query.trim()})) > 0` : Prisma.sql`1 = 1`})
+      AND (${input.query?.trim() ? Prisma.sql`instr(lower(name), lower(${input.query.trim()})) > 0 OR instr(lower(groupName), lower(${input.query.trim()})) > 0 OR instr(lower(authorName), lower(${input.query.trim()})) > 0
+        OR EXISTS (SELECT 1 FROM json_each(tagsJson) tag WHERE instr(lower(tag.value), lower(${input.query.trim()})) > 0)` : Prisma.sql`1 = 1`})
+      AND (${input.tag ? Prisma.sql`EXISTS (SELECT 1 FROM json_each(tagsJson) tag WHERE tag.value = ${input.tag})` : Prisma.sql`1 = 1`})
       AND (${input.authorKey ? Prisma.sql`knownAuthor = ${authorId}` : Prisma.sql`1 = 1`})
       AND (${keys ? catalogIdsSql(Prisma.sql`key`, keys) : Prisma.sql`1 = 1`})`;
   const ctes = Prisma.sql`${visibility.ctes},
@@ -185,7 +188,8 @@ export async function galleryDirectorySql(db: Prisma.TransactionClient, actor: I
         WHERE ${external ? Prisma.sql`0 = 1` : Prisma.sql`1 = 1`} AND NOT EXISTS (SELECT 1 FROM "ImageStudioModule" m WHERE m."id" = ${'default-' + actor.id} AND m."owner_id" = ${actor.id})
           AND NOT EXISTS (SELECT 1 FROM "PlatformSetting" d WHERE d."key" = ${deletedPrefix + 'default-' + actor.id})
     ), decorated AS MATERIALIZED (
-      SELECT e.*, CASE WHEN u."account_type" = 'internal' THEN e.authorId ELSE NULL END AS knownAuthor,
+      SELECT e.*, COALESCE(json_extract(tag_meta."value_json", '$.tags'), '[]') AS tagsJson,
+        CASE WHEN u."account_type" = 'internal' THEN e.authorId ELSE NULL END AS knownAuthor,
         CASE WHEN u."account_type" = 'internal' THEN ${display} ELSE '' END AS authorName,
         (COALESCE(own."liked", 0) = 1 OR COALESCE(own."favorited", 0) = 1) AS favorited,
         CASE WHEN e.available = 1 THEN (SELECT count(*) FROM "ContentReaction" r WHERE r."content_key" = e.key AND r."liked" = 1) ELSE -1 END AS likes,
@@ -195,6 +199,7 @@ export async function galleryDirectorySql(db: Prisma.TransactionClient, actor: I
         COALESCE((SELECT max(h.value) FROM json_each(${JSON.stringify(input.recentHints || {})}) h WHERE h.key IN (e.key,
           CASE WHEN e.presetId IS NOT NULL THEN 'preset:' || e.presetId ELSE 'module:' || e.targetId END)), 0) AS recent
       FROM entries e LEFT JOIN "User" u ON u."id" = e.authorId LEFT JOIN "ContentReaction" own ON own."content_key" = e.key AND own."user_id" = ${actor.id}
+        LEFT JOIN "PlatformSetting" tag_meta ON tag_meta."key" = ${TEMPLATE_TAG_PREFIX} || e.key
     ), filtered AS MATERIALIZED (SELECT * FROM decorated WHERE
       ${coverPredicate}
     )`;
@@ -231,6 +236,8 @@ export async function galleryDirectorySql(db: Prisma.TransactionClient, actor: I
           COALESCE(CAST((locate_position - 1) / 24 AS INTEGER) + 1,
             min(${input.navigationPage || 1}, max(1, CAST((navigationTotal + 23) / 24 AS INTEGER)))) AS navigationPage
         FROM capture_located
+      ), tag_options AS MATERIALIZED (
+        SELECT CAST(tag.value AS TEXT) AS name, count(*) AS uses FROM decorated d, json_each(d.tagsJson) tag GROUP BY tag.value
       ), output_kinds(kind) AS (VALUES (0), (1), (2), (3))
       SELECT kind,
         CASE WHEN kind IN (1, 2) THEN key END AS key,
@@ -239,7 +246,8 @@ export async function galleryDirectorySql(db: Prisma.TransactionClient, actor: I
         CASE WHEN kind = 3 THEN groupName END AS groupName,
         CASE WHEN kind = 0 THEN total END AS total, CASE WHEN kind = 0 THEN page END AS page,
         CASE WHEN kind = 0 THEN navigationTotal END AS navigationTotal,
-        CASE WHEN kind = 0 THEN navigationPage END AS navigationPage
+        CASE WHEN kind = 0 THEN navigationPage END AS navigationPage,
+        CASE kind WHEN 1 THEN cover_position WHEN 2 THEN navigation_position ELSE 0 END AS position
       FROM capture_pages CROSS JOIN output_kinds
       WHERE (kind = 0 AND navigation_position = 1)
         OR (kind = 1 AND ${input.navigationOnly ? 0 : 1} = 1 AND cover_match = 1
@@ -247,16 +255,19 @@ export async function galleryDirectorySql(db: Prisma.TransactionClient, actor: I
         OR (kind = 2 AND key IS NOT NULL
           AND navigation_position BETWEEN (navigationPage - 1) * 24 + 1 AND navigationPage * 24)
         OR (kind = 3 AND key IS NOT NULL AND group_position = 1)
-      ORDER BY kind, CASE kind WHEN 1 THEN cover_position WHEN 2 THEN navigation_position ELSE 0 END, groupName`);
+      UNION ALL SELECT 4, NULL, NULL, NULL, name, uses, NULL, NULL, NULL, 0 FROM tag_options
+      ORDER BY kind, position, groupName`);
     const pageRows: GalleryDirectoryRow[] = [], navigationRows: GalleryDirectoryRow[] = [], directoryGroups: string[] = [];
+    const tagCounts = new Map<string, number>();
     for (const row of rows) {
       const kind = Number(row.kind);
       if (kind === 1 || kind === 2) (kind === 1 ? pageRows : navigationRows).push({ key: row.key!, targetKind: row.targetKind!, targetId: row.targetId! });
       else if (kind === 3) directoryGroups.push(row.groupName!);
+      else if (kind === 4) tagCounts.set(row.groupName!, Number(row.total));
     }
     const header = rows[0];
     return { total: Number(header.total), page: Number(header.page), pageRows,
-      navigationTotal: Number(header.navigationTotal), navigationPage: Number(header.navigationPage), navigationRows, directoryGroups };
+      navigationTotal: Number(header.navigationTotal), navigationPage: Number(header.navigationPage), navigationRows, directoryGroups, availableTags: orderTemplateTags(tagCounts) };
   };
   return { ctes, pageBundle, order: Prisma.sql`${order}, key`, all: Prisma.sql`SELECT * FROM filtered`, rows: async (page: number, size: number): Promise<GalleryDirectoryRow[]> => {
     if (input.sort !== 'name') return db.$queryRaw<GalleryDirectoryRow[]>(Prisma.sql`WITH ${ctes} SELECT key, targetKind, targetId FROM filtered ORDER BY ${order}, key LIMIT ${size} OFFSET ${(page - 1) * size}`);

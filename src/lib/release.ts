@@ -1,11 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '视频参考素材稳定性修复',
+  title: '模板快捷标签',
   outline: [
-    '参考视频读取与提交反馈更清楚',
-    '旧参考图复用缓存，读取失败可重试',
-    '资产页可将视频加入参考区'
+    '模板封面页增加快捷标签筛选',
+    '搜索支持标签，查找模板更方便',
+    '模板菜单可修改标签'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

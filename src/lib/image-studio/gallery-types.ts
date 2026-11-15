@@ -11,6 +11,7 @@ export type GalleryNavigationItem = {
   sourcePresetId?: string | null; sourcePresetShared?: boolean | null;
   objectKind?: 'publisher' | 'live' | 'legacy-copy' | 'local';
   author: GalleryAuthor; createdAt: string | null; updatedAt: string | null; available: boolean;
+  tags?: string[]; tagsRevision?: number; tagsEditable?: boolean;
   reaction: ReactionState | null; coverEditable: boolean; deletion: StudioDeletionCapability;
 };
 export type GalleryItem = GalleryNavigationItem & {
@@ -25,7 +26,7 @@ export type GalleryItem = GalleryNavigationItem & {
 export type GalleryQuery = {
   protocol?: 'catalog-paged-v2'; navigationPage?: number;
   locate?: { moduleId?: string; presetId?: string };
-  query?: string; scope?: GalleryScope; authorKey?: string | null; sort?: GallerySort;
+  query?: string; tag?: string; scope?: GalleryScope; authorKey?: string | null; sort?: GallerySort;
   page?: number; pageSize?: number; catalogRevision?: string;
   recentHints?: Record<string, number>; directoryOrder?: { groups?: string[]; entries?: string[] };
   navigationOnly?: boolean;
@@ -33,6 +34,7 @@ export type GalleryQuery = {
 export type GalleryQueryResult = {
   protocol?: 'catalog-paged-v2'; navigationTotal?: number; navigationPage?: number; navigationPageSize?: number;
   directoryGroups?: string[]; directoryRevision?: string;
+  availableTags?: string[];
   items: GalleryItem[]; navigation: GalleryNavigationItem[]; matches: GalleryNavigationItem[];
   total: number; page: number; pageSize: number; catalogRevision: string;
   capabilities: { independentReactions: true };

@@ -8,16 +8,17 @@ export type GalleryCatalogItem = {
   groupName: string;
   mine: boolean;
   shared: boolean;
+  tags?: string[];
 };
 
-export type ModuleGalleryFilters = { query: string; scope: GalleryScope; sort: GallerySort; authorKey: string | null };
+export type ModuleGalleryFilters = { query: string; tag: string; scope: GalleryScope; sort: GallerySort; authorKey: string | null };
 export type ModuleGalleryLastOpened = Record<string, number>;
 
 export const MODULE_GALLERY_QUERY_LIMIT = 160;
 export const MODULE_GALLERY_RECENT_LIMIT = 1000;
 
 export function defaultModuleGalleryFilters(): ModuleGalleryFilters {
-  return { query: '', scope: 'all', sort: 'created', authorKey: null };
+  return { query: '', tag: '', scope: 'all', sort: 'created', authorKey: null };
 }
 
 export function normalizeModuleGalleryFilters(value: unknown): ModuleGalleryFilters {
@@ -26,6 +27,7 @@ export function normalizeModuleGalleryFilters(value: unknown): ModuleGalleryFilt
   const fields = value as Record<string, unknown>;
   return {
     query: typeof fields.query === 'string' ? fields.query.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, MODULE_GALLERY_QUERY_LIMIT) : defaults.query,
+    tag: typeof fields.tag === 'string' ? fields.tag.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 16) : '',
     scope: fields.scope === 'mine' || fields.scope === 'shared' || fields.scope === 'favorites' ? fields.scope : defaults.scope,
     sort: ['created', 'updated', 'likes', 'recent', 'name', 'directory'].includes(String(fields.sort)) ? fields.sort as GallerySort : defaults.sort,
     authorKey: typeof fields.authorKey === 'string' && /^author:[a-f0-9]{64}$/.test(fields.authorKey) ? fields.authorKey : null,
@@ -58,10 +60,11 @@ export function mergeModuleGalleryLastOpened(left: ModuleGalleryLastOpened, righ
 export function deriveModuleGallery<T extends GalleryCatalogItem>(entries: readonly T[], options: Partial<ModuleGalleryFilters> & {
   lastOpened?: ModuleGalleryLastOpened;
 } = {}) {
-  const { query, scope, sort } = normalizeModuleGalleryFilters(options);
+  const { query, tag, scope, sort } = normalizeModuleGalleryFilters(options);
   const search = query.trim().toLowerCase();
   let filteredEntries = entries.filter(entry => (scope === 'all' || (scope === 'mine' ? entry.mine : entry.shared))
-    && (!search || entry.name.toLowerCase().includes(search) || entry.groupName.toLowerCase().includes(search)));
+    && (!tag || entry.tags?.includes(tag))
+    && (!search || [entry.name, entry.groupName, ...(entry.tags || [])].some(value => value.toLowerCase().includes(search))));
   if (sort === 'recent') {
     const lastOpened = options.lastOpened || {};
     const timeOf = (entry: T) => {
