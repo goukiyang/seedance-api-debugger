@@ -1,5 +1,33 @@
 // Exact additive bridges admitted from reviewed source pairs.
 export default {
+  "src/app/api/image-studio/gallery/tags/route.ts": {
+    "previous": null,
+    "current": "60f59018aaca691de912bebdbabf32e3976d13da0f21805b83acd53c343f8783"
+  },
+  "src/lib/image-studio/gallery-directory-sql.ts": {
+    "previous": "47676a3448514c0377ecb3e9a17472d628d9db81fd7ccfda337d4e49de5f1c91",
+    "current": "6ef313766574bf6485619b22059af22706256c116088003254878cef86290156"
+  },
+  "src/lib/image-studio/gallery-page.ts": {
+    "previous": "67a4035f0ec54ec17ee4188ff4fafcb0b6cd22f3f8b174116eb71f9213c1406f",
+    "current": "ed5b88462ee00e5d40f398edcda887d89633458e0f6ce91b6649d12185930bbc"
+  },
+  "src/lib/image-studio/gallery-types.ts": {
+    "previous": "af1667f889020aa6cc079aa89c570f3f66b468c0758f36674143461e8db53f32",
+    "current": "a62ba506d8639b6dddb9fc2bc48d108dc3cdc23fb41c81882c57cbdb83128faf"
+  },
+  "src/lib/image-studio/gallery.ts": {
+    "previous": "38bfa3dd7d80e1b9b3eb31ea36a4ab1fce9feaf32702f8b74298213b5744cfc3",
+    "current": "7ced61d1cd29e128f86be55393b2df56933bef64ac10cb435686ae4cd211b0c0"
+  },
+  "src/lib/image-studio/template-tags.server.ts": {
+    "previous": null,
+    "current": "ee708cdb523303f214da30f4602a7b11899df7de06ac5673cfdecce393928501"
+  },
+  "src/lib/image-studio/template-tags.ts": {
+    "previous": null,
+    "current": "095add029e78ef64c0a61e383cf855515e85cf8c7a648b7e8828d6252375415f"
+  },
   "src/lib/image-studio/synchronous-admission.ts": {
     "previous": "67a1c53406516b0b90c7159d3447db9a80bd2aca16cac2efcb32ce59611a4012",
     "current": "294bc37f200b8a6fbc08df63b62ddfd28fec2b6a343ab401e7a14bdabbd9c2c3"
