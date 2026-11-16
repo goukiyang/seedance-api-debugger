@@ -695,7 +695,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     ...(prefs.scope !== 'mine' ? [{ id: 'scope', label: scopes.find(([scope]) => scope === prefs.scope)?.[1] || '所选范围', remove: () => change({ scope: 'mine', album: '', project: '', albumGroup: '' }) }] : []),
     ...(prefs.source !== 'all' ? [{ id: 'source', label: sourceLabels[prefs.source] || '所选来源', remove: () => changeSource('all') }] : []),
     ...(prefs.album ? [{ id: 'album', label: scopedAlbums.find(album => album.id === prefs.album)?.name || '所选图集暂不可用', remove: () => change({ album: '' }) }] : []),
-    ...(prefs.albumGroup ? [{ id: 'albumGroup', label: '单图分享', remove: () => change({ albumGroup: '' }) }] : []),
+    ...(prefs.albumGroup ? [{ id: 'albumGroup', label: '分享图片', remove: () => change({ albumGroup: '' }) }] : []),
     ...(prefs.project ? [{ id: 'project', label: projects.find(project => project.id === prefs.project)?.name || '所选项目暂不可用', remove: () => change({ project: '' }) }] : []),
     ...(prefs.type !== 'all' ? [{ id: 'type', label: labels[prefs.type as AssetType], remove: () => change({ type: 'all' }) }] : []),
     ...(prefs.source === 'template-image' && prefs.template ? [{ id: 'template', label: templates.find(template => template.id === prefs.template)?.name || '所选模板暂不可用', remove: () => change({ template: '' }) }] : []),
@@ -708,12 +708,13 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     types.length > 1 ? types.flatMap(t => typeLimits?.[t] !== undefined ? [`${labels[t]}还可选 ${Math.max(0, typeLimits[t]! - selectedCounts[t])}`] : selectedCounts[t] ? [`${labels[t]} ${selectedCounts[t]}`] : []).join(' · ') : '',
   ].filter(Boolean).join(' · ');
   const imageShareAlbums = scopedAlbums.filter(album => isImageShareAlbum(album.id));
+  const collectionAlbums = scopedAlbums.filter(album => !isImageShareAlbum(album.id) || album.name !== '分享的图片' || album.count > 1);
   const albumOptions = [
     { value: '', label: '全部图集与项目', group: '' },
-    ...scopedAlbums.filter(album => !isImageShareAlbum(album.id)).map(album => ({ value: `album:${album.id}`, label: album.name, count: album.count, group: '图集' })),
+    ...collectionAlbums.map(album => ({ value: `album:${album.id}`, label: album.name, count: album.count, group: '图集' })),
     ...projects.map(project => ({ value: `project:${project.id}`, label: project.name, group: '项目' })),
-    ...(imageShareAlbums.length ? [{ value: 'group:image-shares', label: '单图分享', group: '分享' }] : []),
-    ...(prefs.album && isImageShareAlbum(prefs.album) ? [{ value: `album:${prefs.album}`, label: '上次查看的单图分享', group: '分享' }] : []),
+    ...(imageShareAlbums.length ? [{ value: 'group:image-shares', label: '分享图片', group: '分享' }] : []),
+    ...(prefs.album && isImageShareAlbum(prefs.album) && !collectionAlbums.some(album => album.id === prefs.album) ? [{ value: `album:${prefs.album}`, label: '上次查看的单图分享', group: '分享' }] : []),
   ];
   const rememberScroll = (element: HTMLElement) => {
     if (!restoring.current && element === browseSurface()) setPrefs(p => ({ ...p, scroll: element.scrollTop }));
