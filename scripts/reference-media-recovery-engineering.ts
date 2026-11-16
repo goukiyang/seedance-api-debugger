@@ -141,10 +141,14 @@ async function checkComponents() {
   const picker = loadModule(
     'src/components/ResourceLibraryPicker.tsx',
     mocks,
-    'export { Thumbnail as __PickerThumbnail, PickerThumbnailSelection as __PickerThumbnailSelection, retryFailedThumbnailStates as __retryFailedThumbnailStates };',
+    'export { Thumbnail as __PickerThumbnail, PickerThumbnailSelection as __PickerThumbnailSelection, retryFailedThumbnailStates as __retryFailedThumbnailStates, pickerFilterKey as __pickerFilterKey };',
   );
   const PickerSelection = picker.__PickerThumbnailSelection as (props: Props) => unknown;
   const retryFailed = picker.__retryFailedThumbnailStates as (current: Props, items: Props[]) => Props;
+  const filterKey = picker.__pickerFilterKey as (types: string, preferences: object) => string;
+  const legacyPreferences = { view: 'library', scope: 'mine', source: 'all', template: '', type: 'all', query: '', sort: 'newest', album: '', project: '', albumGroup: '' };
+  assert.equal(filterKey('image', legacyPreferences), '["image","library","mine","all","","all","","newest","",""]', 'default filters retain existing saved page and scroll keys');
+  assert.notEqual(filterKey('image', { ...legacyPreferences, albumGroup: 'image-shares' }), filterKey('image', legacyPreferences), 'share group must keep its own browsing position');
   const pickerItem = {
     identity: 'asset:picker-1',
     key: 'asset:picker-1',

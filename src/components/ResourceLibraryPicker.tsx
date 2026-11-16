@@ -69,7 +69,7 @@ export function removeUploadFailure(current: FailedUploadItem[], id: string) {
 const defaults: Preferences = { view: 'library', scope: 'mine', source: 'all', template: '', type: 'all', query: '', sort: 'newest', album: '', project: '', albumGroup: '', scroll: 0, pages: 1, filtersOpen: false, selectionOpen: false };
 const labels = { image: '图片', video: '视频', audio: '音频' };
 function pickerFilterKey(typesKey: string, prefs: Preferences) {
-  return JSON.stringify([typesKey, prefs.view, prefs.scope, prefs.source, prefs.template, prefs.type, prefs.query, prefs.sort, prefs.album, prefs.project, prefs.albumGroup]);
+  return JSON.stringify([typesKey, prefs.view, prefs.scope, prefs.source, prefs.template, prefs.type, prefs.query, prefs.sort, prefs.album, prefs.project, ...(prefs.albumGroup ? [prefs.albumGroup] : [])]);
 }
 
 function selectionName(item: PickerItem) {
