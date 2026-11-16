@@ -195,5 +195,17 @@ export default {
   "src/lib/provider/volcengine-ip.ts": {
     "previous": "563c1081e97cee22b2fc90ea5ccc1558fc69a00930efe6138e6ece135d21ca23",
     "current": "757c99b4b93342698a311c028d42f27d6b2708e1472fa667cb9f43bd3c11f1ea"
+  },
+  "src/app/api/assets/picker/route.ts": {
+    "previous": "3b9b537584c58ccac17e40ac80852da908d811113414fb8237d30681e31925de",
+    "current": "cb3e3e7f143f2bf575d8ee6413ccb4cd558457ee207d8994e05d40d9b886fd6d"
+  },
+  "src/lib/assets/picker-directory.ts": {
+    "previous": "402600692ece66070f5a235672550bea8fa3dbcb83efce47d168c2f6dbecb231",
+    "current": "2d97039774165f86a450a9138aafe05345477c9c098f26d9db343a070201b845"
+  },
+  "src/lib/assets/picker-types.ts": {
+    "previous": "d168af82085aaa9a1038d2471ad82034bf456c255d5839080c8252d2d8fbc754",
+    "current": "ba4e4797e012f570b56b75d2bdf384750a6fa66bf13f7d4912109ffeb7844cdf"
   }
 };
