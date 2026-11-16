@@ -92,9 +92,40 @@ export async function verifyPickerDirectory(db: PrismaClient, root: string) {
   assert.equal(second.keys.length, 24); assert.equal(new Set([...first.keys, ...second.keys]).size, 48);
   const exact = await readPickerDirectory(db, user, query, ['asset:picker-asset-0', 'reference_image:picker-standalone']);
   assert.deepEqual(exact.keys, ['asset:picker-asset-0']);
+  const ownShare = `image-share-${'a'.repeat(40)}`, incomingShare = `image-share-${'b'.repeat(40)}`, deniedShare = `image-share-${'c'.repeat(40)}`;
+  await db.referenceAlbum.createMany({ data: [
+    { id: ownShare, name: '分享的图片', owner_user_id: owner, album_type: 'personal', visibility: 'public' },
+    { id: incomingShare, name: '分享的图片', owner_user_id: publisher, album_type: 'personal', visibility: 'private' },
+    { id: deniedShare, name: '分享的图片', owner_user_id: publisher, album_type: 'personal', visibility: 'private' },
+    { id: 'picker-manual-share-name', name: '分享的图片', owner_user_id: owner, album_type: 'personal', visibility: 'private' },
+    { id: 'image-share-user-folder', name: '手动图集', owner_user_id: owner, album_type: 'personal', visibility: 'private' },
+  ] });
+  await db.referenceImage.createMany({ data: [ownShare, incomingShare, deniedShare, 'picker-manual-share-name', 'image-share-user-folder'].map((id, index) => ({
+    id: `picker-share-reference-${index}`, album_id: id, owner_user_id: id === ownShare || index > 2 ? owner : publisher,
+    url: `/uploads/picker-share-fixture-${index}.png`, source_type: 'shared',
+  })) });
+  const incomingGrant = await db.albumShare.create({ data: { album_id: incomingShare, grantee_type: 'user', grantee_id: owner, created_by: publisher,
+    permissions_json: '{"view":true,"use":true,"download":false}' } });
+  for (const [scope, expected] of [['mine', ['reference_image:picker-share-reference-0']], ['shared', ['reference_image:picker-share-reference-1']], ['public', ['reference_image:picker-share-reference-0']]] as const) {
+    const grouped = new URLSearchParams({ scope, types: 'image', target: 'image-studio', albumGroup: 'image-shares' });
+    const legacy = await invoke(grouped, false), paged = await invoke(grouped, true);
+    assert.equal(legacy.total, expected.length); assert.equal(paged.total, expected.length);
+    assert.deepEqual(legacy.items.map((item: { identity: string }) => item.identity), expected);
+    assert.deepEqual(paged.items, legacy.items);
+    assert.equal(paged.albums.some((album: { id: string }) => album.id === 'picker-manual-share-name'), true);
+    assert.equal(paged.albums.some((album: { id: string }) => album.id === deniedShare), false);
+  }
+  await db.albumShare.update({ where: { id: incomingGrant.id }, data: { status: 'revoked' } });
+  const revokedGroup = new URLSearchParams('scope=shared&types=image&target=image-studio&albumGroup=image-shares');
+  assert.equal((await invoke(revokedGroup, false)).total, 0);
+  assert.equal((await invoke(revokedGroup, true)).total, 0);
+  const oldShareFilter = new URLSearchParams({ scope: 'mine', types: 'image', target: 'image-studio', album: ownShare });
+  assert.equal((await invoke(oldShareFilter, true)).total, 1);
+  const manualFilter = new URLSearchParams({ scope: 'mine', types: 'image', target: 'image-studio', album: 'picker-manual-share-name' });
+  assert.equal((await invoke(manualFilter, true)).total, 1);
   const revoked = await db.albumShare.findUniqueOrThrow({ where: { album_id_grantee_type_grantee_id: { album_id: 'picker-shared', grantee_type: 'user', grantee_id: owner } } });
   await db.albumShare.update({ where: { id: revoked.id }, data: { status: 'revoked' } });
   await assert.rejects(readPickerDirectory(db, user, new URLSearchParams({ scope: 'mine', types: 'image', target: 'image-studio', directory_revision: first.revision }), null), /目录已变化/);
   assert.equal((await readPickerDirectory(db, user, new URLSearchParams('scope=shared&types=image&target=image-studio'), null)).keys.includes('reference_image:picker-standalone'), false);
-  return { comparisons, realRouteProjection: true, albumPermissionMatrix: true, canonicalDedup: true, pageMaximum: 24, exactKeys: true, revokedShareInvalidates: true };
+  return { comparisons, imageShareGrouping: true, manualSameNamePreserved: true, historicalAlbumFilter: true, groupedRevocation: true, realRouteProjection: true, albumPermissionMatrix: true, canonicalDedup: true, pageMaximum: 24, exactKeys: true, revokedShareInvalidates: true };
 }

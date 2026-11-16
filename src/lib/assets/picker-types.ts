@@ -7,6 +7,11 @@ export function templateFilterId(input: unknown): string {
   return typeof input === 'string' && input.length <= 160 && /^(?:module-source:)?[a-zA-Z0-9_-]{1,100}$/.test(input) ? input : '';
 }
 
+export const IMAGE_SHARE_ALBUM_PREFIX = 'image-share-';
+export function isImageShareAlbum(id: string) {
+  return /^image-share-[a-f0-9]{40}$/.test(id);
+}
+
 export type PickerScope = 'mine' | 'project' | 'shared' | 'public';
 export type PickerItem = {
   key: ContentKey;

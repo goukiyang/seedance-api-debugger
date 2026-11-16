@@ -9,7 +9,7 @@ import { getAlbumAccess, assertCanViewReferenceImage, canDownloadOriginal } from
 import { studioHiddenAssetUrls, studioVisibleReferenceWhere } from '@/lib/image-studio/protected-assets';
 import { sameOriginPublicUrlForSiteUpload } from '@/lib/assets/site-url';
 import type { PickerAlbum, PickerItem, PickerScope, PickerTemplate } from '@/lib/assets/picker-types';
-import { templateFilterId } from '@/lib/assets/picker-types';
+import { isImageShareAlbum, templateFilterId } from '@/lib/assets/picker-types';
 import { comparisonOriginalVersion } from '@/lib/media/image-comparison-version';
 import { removedLibraryResources } from '@/lib/assets/library-removal';
 import { generationOrigins } from '@/lib/assets/generation-origin';
@@ -103,9 +103,10 @@ export async function GET(request: NextRequest) {
       for (const member of memberships) albums.push({ id: album.id, name: album.name, scope: member, project: album.project, count: album._count.images });
       if (memberships.includes(scope)) scopeAlbumIds.push(album.id);
     }
+    const imageShares = p.get('albumGroup') === 'image-shares';
     const albumId = p.get('album');
     const projectId = p.get('project');
-    const permittedAlbums = scopeAlbumIds.filter(id => (!albumId || id === albumId) && (!projectId || albums.some(a => a.id === id && a.project?.id === projectId)));
+    const permittedAlbums = scopeAlbumIds.filter(id => (!imageShares || isImageShareAlbum(id)) && (!albumId || id === albumId) && (!projectId || albums.some(a => a.id === id && a.project?.id === projectId)));
     const legacyIds = await legacyFeedbackAssetIds(prisma, user.id);
     const assetWhere: Prisma.AssetWhereInput = {
       owner_id: user.id, status: 'active', type: { in: imageStudio ? ['image'] : types }, AND: [materialAssetWhere(legacyIds)],
@@ -115,7 +116,7 @@ export async function GET(request: NextRequest) {
     const refWhere: Prisma.ReferenceImageWhereInput = {
       status: 'active', AND: [visibleRefs, ...(directory ? [{ id: { in: directory.referenceIds } }] : exactKeys ? [{ OR: [{ id: { in: exactIds('reference_image')! } }, { asset_id: { in: exactIds('asset')! } }] }] : []), { OR: [
         { album_id: { in: permittedAlbums } },
-        ...(scope === 'mine' && !albumId && !projectId
+        ...(scope === 'mine' && !albumId && !projectId && !imageShares
           ? [{ owner_user_id: user.id, asset_id: null, album_id: { in: usableAlbumIds } }] : []),
       ] }, { OR: [
         { asset: { is: { status: 'active', type: { in: imageStudio ? ['image'] : types } } } },
@@ -123,11 +124,11 @@ export async function GET(request: NextRequest) {
       ] }],
     };
     const [assets, references, generatedTasks, favorites, videoTasks] = await Promise.all([
-      scope === 'mine' && !albumId && !projectId ? prisma.asset.findMany({ where: assetWhere, select: { id: true, owner_id: true, type: true, file_name: true, metadata_json: true, created_at: true } }) : Promise.resolve([]),
+      scope === 'mine' && !albumId && !projectId && !imageShares ? prisma.asset.findMany({ where: assetWhere, select: { id: true, owner_id: true, type: true, file_name: true, metadata_json: true, created_at: true } }) : Promise.resolve([]),
       prisma.referenceImage.findMany({ where: refWhere, select: { id: true, album_id: true, owner_user_id: true, source_type: true, created_at: true, asset: { select: { id: true, type: true, file_name: true, metadata_json: true, owner_id: true } } } }),
       exactKeys ? Promise.resolve([]) : prisma.imageStudioTask.findMany({ where: { owner_id: user.id, AND: [studioOutputTaskWhere], asset_id: { not: null } }, select: { asset_id: true, status: true, usage_json: true } }),
       p.get('view') === 'favorites' ? prisma.contentReaction.findMany({ where: { user_id: user.id, OR: [{ liked: true }, { favorited: true }] }, select: { content_key: true } }) : Promise.resolve([]),
-      !imageStudio && types.includes('video') && scope === 'mine' && !albumId && !projectId ? prisma.videoTask.findMany({ where: {
+      !imageStudio && types.includes('video') && scope === 'mine' && !albumId && !projectId && !imageShares ? prisma.videoTask.findMany({ where: {
         ...(exactKeys ? { id: { in: exactIds('video_task')! } } : {}),
         local_status: 'succeeded', retention_status: { in: [...USER_VISIBLE_TASK_RETENTION_STATUSES] },
         OR: [{ owner_user_id: user.id }, { owner_user_id: null, user_id: user.id }],

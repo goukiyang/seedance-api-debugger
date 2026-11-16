@@ -1,9 +1,9 @@
 'use client';
-import { ProjectSelector } from '@/components/ProjectSelector';
+import { ResourceLibraryAlbumFilter } from '@/components/ResourceLibraryAlbumFilter';
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, Folder, Grid2X2, ImageIcon, Maximize, Minimize, Music, Play, RotateCcw, Search, SlidersHorizontal, Upload, X, ZoomIn, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronFirst, ChevronLast, ChevronLeft, ChevronRight, ImageIcon, Maximize, Minimize, Music, Play, RotateCcw, Search, SlidersHorizontal, Upload, X, ZoomIn, Trash2 } from 'lucide-react';
 import { useResultPages } from '@/components/useResultPages';
 import { ExperienceEmpty, FilterSummary, type ExperienceFilter } from '@/components/experience/ExperienceParts';
 import ContentReactions from '@/components/content-reactions/ContentReactions';
@@ -19,7 +19,7 @@ import { describeUploadFileError, uniqueUploadFiles, type UploadFileFailure, typ
 import type { AssetType } from '@/types';
 import type { PickerAlbum, PickerItem, PickerResponse, PickerScope, PickerTemplate } from '@/lib/assets/picker-types';
 import type { LibraryRemovalState } from '@/lib/assets/library-removal';
-import { templateFilterId } from '@/lib/assets/picker-types';
+import { isImageShareAlbum, templateFilterId } from '@/lib/assets/picker-types';
 import type { UploadedAssetSelection, UploadedImagePickerConfirmResult } from '@/components/UploadedImagePicker';
 import styles from './ResourceLibraryPicker.module.css';
 import type { AvatarReturnTarget } from '@/lib/avatar-random/handoff';
@@ -58,7 +58,7 @@ export interface ResourceLibraryPickerProps {
   onAvatarApplied?: () => Promise<void>;
   onAvatarConfirm?: ResourceLibraryPickerProps['onConfirm'];
 }
-type Preferences = { view: 'library' | 'favorites' | 'recent'; scope: PickerScope; source: string; template: string; type: string; query: string; sort: string; album: string; project: string; scroll: number; pages: number; filtersOpen: boolean; selectionOpen: boolean };
+type Preferences = { view: 'library' | 'favorites' | 'recent'; scope: PickerScope; source: string; template: string; type: string; query: string; sort: string; album: string; project: string; albumGroup: '' | 'image-shares'; scroll: number; pages: number; filtersOpen: boolean; selectionOpen: boolean };
 export type FailedUploadItem = UploadFileFailure & { id: string; file: File };
 export function reconcileUploadFailures(current: FailedUploadItem[], attempted: File[], next: FailedUploadItem[]) {
   return [...current.filter(item => !attempted.includes(item.file)), ...next];
@@ -66,10 +66,10 @@ export function reconcileUploadFailures(current: FailedUploadItem[], attempted: 
 export function removeUploadFailure(current: FailedUploadItem[], id: string) {
   return current.filter(item => item.id !== id);
 }
-const defaults: Preferences = { view: 'library', scope: 'mine', source: 'all', template: '', type: 'all', query: '', sort: 'newest', album: '', project: '', scroll: 0, pages: 1, filtersOpen: false, selectionOpen: false };
+const defaults: Preferences = { view: 'library', scope: 'mine', source: 'all', template: '', type: 'all', query: '', sort: 'newest', album: '', project: '', albumGroup: '', scroll: 0, pages: 1, filtersOpen: false, selectionOpen: false };
 const labels = { image: '图片', video: '视频', audio: '音频' };
 function pickerFilterKey(typesKey: string, prefs: Preferences) {
-  return JSON.stringify([typesKey, prefs.view, prefs.scope, prefs.source, prefs.template, prefs.type, prefs.query, prefs.sort, prefs.album, prefs.project]);
+  return JSON.stringify([typesKey, prefs.view, prefs.scope, prefs.source, prefs.template, prefs.type, prefs.query, prefs.sort, prefs.album, prefs.project, prefs.albumGroup]);
 }
 
 function selectionName(item: PickerItem) {
@@ -113,9 +113,9 @@ function PickerThumbnailSelection({ item, busy, inUse, order, state, onStateChan
 }) {
   return <>
     <button type="button" className={styles.selectCard} disabled={busy || inUse || !!item.unavailableReason} aria-pressed={order >= 0}
-      aria-label={`${order >= 0 ? '取消选择' : '选择'}${selectionName(item)}`} title={item.unavailableReason} onClick={onToggle}>
+      aria-label={`${inUse ? '已添加' : order >= 0 ? '取消选择' : '选择'}${selectionName(item)}`} title={inUse ? '已添加，可放大查看' : item.unavailableReason} onClick={onToggle}>
       <Thumbnail item={item} state={state} onStateChange={onStateChange} />
-      {order >= 0 && <span className={styles.order}>{order + 1}</span>}{inUse && <span className={styles.inUse}>已添加</span>}
+      {!inUse && <span className={styles.selectionMark} aria-hidden="true">{order >= 0 ? order + 1 : null}</span>}{inUse && <span className={styles.inUse}>已添加</span>}
     </button>
     {state.status === 'failed' && item.thumbnailUrl && <button type="button" aria-label={`重试${selectionName(item)}预览`} onClick={event => { event.stopPropagation(); onRetry(); }}
       style={{ position: 'absolute', left: '50%', top: '50%', zIndex: 4, minHeight: 40, maxWidth: 'calc(100% - 24px)', padding: '6px 10px', transform: 'translate(-50%, -50%)', background: 'rgba(16, 22, 25, .92)', color: 'var(--text-primary, #eef1f2)' }}>
@@ -256,6 +256,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     if (typeof raw.query === 'string') next.query = raw.query.slice(0, 160);
     if (raw.sort === 'name') next.sort = 'name';
     for (const field of ['album', 'project'] as const) if (typeof raw[field] === 'string' && /^[a-zA-Z0-9_-]{0,100}$/.test(raw[field]!)) next[field] = raw[field]!;
+    if (raw.albumGroup === 'image-shares' && !next.album && !next.project) next.albumGroup = raw.albumGroup;
     next.template = templateFilterId(raw.template);
     // Old v1 positions have no target identity; retain their filter preferences only.
     const position = stored<{ scroll?: unknown; pages?: unknown }>(`${positionScope}:position:v2:${pickerFilterKey(typesKey, next)}`, {});
@@ -319,6 +320,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   const fetchPage = useCallback(async (nextPage: number, after?: string | null): Promise<PickerResponse> => {
     const params = new URLSearchParams({ protocol: 'catalog-paged-v2', scope: prefs.scope, source: prefs.source, types: prefs.type === 'all' ? typesKey : prefs.type, q: prefs.query, view: prefs.view, sort: prefs.sort, target, page: String(nextPage) });
     if (prefs.album) params.set('album', prefs.album); if (prefs.project) params.set('project', prefs.project);
+    if (prefs.albumGroup) params.set('albumGroup', prefs.albumGroup);
     if (after) params.set('after', after);
     if (prefs.template && prefs.source === 'template-image') params.set('template', prefs.template);
     if (prefs.view === 'recent') params.set('keys', validKeys(stored(recentKey, [])).join(','));
@@ -330,7 +332,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
     if (!response.ok) throw Object.assign(new Error(data.error || '素材库读取失败'), { status: response.status });
     directoryRevision.current = { scope, revision: data.protocol === 'catalog-paged-v2' ? data.directoryRevision || '' : '' };
     return data;
-  }, [prefs.scope, prefs.source, prefs.template, prefs.type, prefs.query, prefs.view, prefs.sort, prefs.album, prefs.project, typesKey, target, recentKey, sessionOwner]);
+  }, [prefs.scope, prefs.source, prefs.template, prefs.type, prefs.query, prefs.view, prefs.sort, prefs.album, prefs.project, prefs.albumGroup, typesKey, target, recentKey, sessionOwner]);
   useEffect(() => {
     if (!open || !sessionReady || !ready || sessionOwner !== prefsKey) return;
     const token = ++sequence.current; setLoading(true); setDirectoryError(''); setItems([]); setLoadedFilter(''); setHasMore(false);
@@ -684,22 +686,35 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
   const scopedAlbums = albums.filter(a => a.scope === prefs.scope), projects = Array.from(new Map(scopedAlbums.flatMap(a => a.project ? [[a.project.id, a.project] as const] : [])).values());
   const selectedCounts = { image: selected.filter(i => i.type === 'image').length, video: selected.filter(i => i.type === 'video').length, audio: selected.filter(i => i.type === 'audio').length };
   const availableScopes = scopes.filter(([s]) => s === 'mine' || albums.some(a => a.scope === s));
-  const generatedLabel = prefs.view === 'favorites' ? '喜欢的生成' : prefs.view === 'recent' ? '最近用过的生成' : '全部生成';
+  const generatedLabel = '生成的';
   const generatedViewNotice = prefs.source === 'generated' && prefs.view !== 'library'
     ? prefs.view === 'favorites' ? '当前仅显示我喜欢的生成素材' : '当前仅显示本账号在本浏览器最近用过的生成素材' : '';
   const sourceLabels: Record<string, string> = { uploaded: '上传的', generated: generatedLabel, 'template-image': '模板生图', 'random-person': '随机人物', 'other-generated': '其他生成', 'multiview-output': '3D多视图' };
   const filters: ExperienceFilter[] = [
     ...(prefs.query ? [{ id: 'query', label: `搜索：${prefs.query}`, remove: () => { setQuery(''); change({ query: '' }); } }] : []),
-    ...(prefs.scope !== 'mine' ? [{ id: 'scope', label: scopes.find(([scope]) => scope === prefs.scope)?.[1] || '所选范围', remove: () => change({ scope: 'mine', album: '', project: '' }) }] : []),
+    ...(prefs.scope !== 'mine' ? [{ id: 'scope', label: scopes.find(([scope]) => scope === prefs.scope)?.[1] || '所选范围', remove: () => change({ scope: 'mine', album: '', project: '', albumGroup: '' }) }] : []),
     ...(prefs.source !== 'all' ? [{ id: 'source', label: sourceLabels[prefs.source] || '所选来源', remove: () => changeSource('all') }] : []),
     ...(prefs.album ? [{ id: 'album', label: scopedAlbums.find(album => album.id === prefs.album)?.name || '所选图集暂不可用', remove: () => change({ album: '' }) }] : []),
+    ...(prefs.albumGroup ? [{ id: 'albumGroup', label: '单图分享', remove: () => change({ albumGroup: '' }) }] : []),
     ...(prefs.project ? [{ id: 'project', label: projects.find(project => project.id === prefs.project)?.name || '所选项目暂不可用', remove: () => change({ project: '' }) }] : []),
     ...(prefs.type !== 'all' ? [{ id: 'type', label: labels[prefs.type as AssetType], remove: () => change({ type: 'all' }) }] : []),
     ...(prefs.source === 'template-image' && prefs.template ? [{ id: 'template', label: templates.find(template => template.id === prefs.template)?.name || '所选模板暂不可用', remove: () => change({ template: '' }) }] : []),
     ...(prefs.sort !== 'newest' ? [{ id: 'sort', label: '按名称', remove: () => change({ sort: 'newest' }) }] : []),
   ];
   const activeFilterCount = filters.length;
-  const selectionDetails = `${types.map(t => `${labels[t]} ${selectedCounts[t]}${typeLimits?.[t] !== undefined ? ` · 剩余 ${Math.max(0, typeLimits[t]! - selectedCounts[t])}` : ''}`).join(' / ')}${maxSelection !== undefined ? ` · 本次剩余 ${Math.max(0, maxSelection - selected.length)}` : ''} · 当前已添加 ${currentCount}`;
+  const selectionDetails = [
+    currentCount ? `已添加 ${currentCount} 项` : '',
+    maxSelection !== undefined ? `还可添加 ${Math.max(0, maxSelection - selected.length)} 项` : '',
+    types.length > 1 ? types.flatMap(t => typeLimits?.[t] !== undefined ? [`${labels[t]}还可选 ${Math.max(0, typeLimits[t]! - selectedCounts[t])}`] : selectedCounts[t] ? [`${labels[t]} ${selectedCounts[t]}`] : []).join(' · ') : '',
+  ].filter(Boolean).join(' · ');
+  const imageShareAlbums = scopedAlbums.filter(album => isImageShareAlbum(album.id));
+  const albumOptions = [
+    { value: '', label: '全部图集与项目', group: '' },
+    ...scopedAlbums.filter(album => !isImageShareAlbum(album.id)).map(album => ({ value: `album:${album.id}`, label: album.name, count: album.count, group: '图集' })),
+    ...projects.map(project => ({ value: `project:${project.id}`, label: project.name, group: '项目' })),
+    ...(imageShareAlbums.length ? [{ value: 'group:image-shares', label: '单图分享', group: '分享' }] : []),
+    ...(prefs.album && isImageShareAlbum(prefs.album) ? [{ value: `album:${prefs.album}`, label: '上次查看的单图分享', group: '分享' }] : []),
+  ];
   const rememberScroll = (element: HTMLElement) => {
     if (!restoring.current && element === browseSurface()) setPrefs(p => ({ ...p, scroll: element.scrollTop }));
   };
@@ -716,12 +731,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
       </div></header>
       <input hidden ref={input} type="file" accept={types.map(t => `${t}/*`).join(',')} multiple={maxSelection !== 1} onChange={e => { const files = Array.from(e.target.files || []); e.target.value = ''; void upload(files); }} />
       <div className={styles.topbar}><nav className={styles.tabs} aria-label="浏览素材">{([['library', '素材库'], ['favorites', '我的喜欢'], ['recent', '最近使用']] as const).map(([view, label]) => <button key={view} type="button" aria-pressed={prefs.view === view} onClick={() => change({ view })}>{label}</button>)}</nav><label className={styles.search}><Search size={18} /><input type="search" aria-label="搜索素材名称、图集" placeholder="搜索素材名称、图集" value={query} maxLength={160} onChange={e => { browseRevision.current++; setNavigation(null); setQuery(e.target.value); }} /></label><button type="button" className={styles.filterToggle} aria-expanded={prefs.filtersOpen} aria-controls={`${pickerId}-filters`} onClick={() => { if (!prefs.filtersOpen) browseSurface()?.scrollTo({ top: 0 }); setPrefs(p => ({ ...p, filtersOpen: !p.filtersOpen })); }}><SlidersHorizontal size={17} /><span>筛选{activeFilterCount ? ` ${activeFilterCount}` : ''}</span></button></div>
-      <div className={styles.layout}><aside className={styles.sidebar} data-sidebar-scroll="pane" aria-label="图集和项目">
-        <label className={`${styles.scopeControl} ${styles.sidebarScope}`}><span>素材范围</span><select aria-label="素材范围" value={prefs.scope} onChange={e => change({ scope: e.target.value as PickerScope, album: '', project: '' })}>{availableScopes.map(([s, label]) => <option key={s} value={s}>{label}</option>)}{!availableScopes.some(([s]) => s === prefs.scope) && <option value={prefs.scope}>此范围已不可用</option>}</select></label>
-        <button type="button" className={!prefs.album && !prefs.project ? styles.active : ''} onClick={() => change({ album: '', project: '' })}><Grid2X2 size={18} />全部素材</button>
-        {!!scopedAlbums.length && <h3>图集</h3>}{scopedAlbums.map(a => <button key={a.id} type="button" title={a.name} className={prefs.album === a.id ? styles.active : ''} onClick={() => change({ album: a.id, project: '' })}><Folder size={17} /><span>{a.name}</span></button>)}
-        {!!projects.length && <h3>项目素材</h3>}{projects.map(p => <button key={p.id} type="button" className={prefs.project === p.id ? styles.active : ''} onClick={() => change({ project: p.id, album: '' })}><Folder size={17} /><span>{p.name}</span></button>)}
-      </aside><section ref={browse} className={styles.main} aria-label="素材目录" onScroll={e => { if (e.target === e.currentTarget) rememberScroll(e.currentTarget); }} onWheel={() => { restoring.current = false; }} onTouchStart={() => { restoring.current = false; }}>
+      <div className={styles.layout}><section ref={browse} className={styles.main} aria-label="素材目录" onScroll={e => { if (e.target === e.currentTarget) rememberScroll(e.currentTarget); }} onWheel={() => { restoring.current = false; }} onTouchStart={() => { restoring.current = false; }}>
         <div className={styles.filters}>
           <div className={styles.sourceControl} role="group" aria-label="素材来源"><span>来源</span><div ref={sourceBar} className={styles.sourceSegments}>
             <button type="button" aria-pressed={prefs.source === 'all'} onClick={() => changeSource('all')}>全部来源</button>
@@ -737,17 +747,13 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
             {types.includes('video') && <button type="button" aria-pressed={prefs.source === 'video-generated'} onClick={() => changeSource('video-generated')}>视频生成</button>}
             <button type="button" aria-pressed={prefs.source === 'other'} onClick={() => changeSource('other')}>其他素材</button>
           </div></div>
+          <div className={styles.catalogControls}>
+            <label className={styles.scopeControl}><span>范围</span><select aria-label="素材范围" value={prefs.scope} onChange={e => change({ scope: e.target.value as PickerScope, album: '', project: '', albumGroup: '' })}>{availableScopes.map(([scope, label]) => <option key={scope} value={scope}>{label}</option>)}{!availableScopes.some(([scope]) => scope === prefs.scope) && <option value={prefs.scope}>此范围已不可用</option>}</select></label>
+            <ResourceLibraryAlbumFilter key={`${sessionOwner}:${prefs.scope}`} options={albumOptions} value={prefs.album ? `album:${prefs.album}` : prefs.project ? `project:${prefs.project}` : prefs.albumGroup ? 'group:image-shares' : ''} onChange={value => { const [kind, id = ''] = value.split(':'); change({ album: kind === 'album' ? id : '', project: kind === 'project' ? id : '', albumGroup: kind === 'group' ? 'image-shares' : '' }); }} />
+            {prefs.source === 'template-image' && <label className={styles.sortControl}><span>模板</span><select aria-label="具体模板" value={prefs.template} onChange={e => change({ template: e.target.value })}><option value="">全部模板</option>{templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>}
+          </div>
           <div id={`${pickerId}-filters`} className={`${styles.filterDetails} ${prefs.filtersOpen ? styles.filterDetailsOpen : ''}`}>
-          <label className={`${styles.scopeControl} ${styles.mobileScope}`}><span>范围</span><select aria-label="素材范围" value={prefs.scope} onChange={e => change({ scope: e.target.value as PickerScope, album: '', project: '' })}>{availableScopes.map(([s, label]) => <option key={s} value={s}>{label}</option>)}{!availableScopes.some(([s]) => s === prefs.scope) && <option value={prefs.scope}>此范围已不可用</option>}</select></label>
-          <label className={`${styles.sortControl} ${styles.mobileAlbum}`}><span>图集／项目</span><ProjectSelector onCatalogChange={() => setEpoch(value => value + 1)}  aria-label="图集或项目" value={prefs.album ? `album:${prefs.album}` : prefs.project ? `project:${prefs.project}` : ''} onChange={e => { const [kind, id = ''] = e.target.value.split(':'); change({ album: kind === 'album' ? id : '', project: kind === 'project' ? id : '' }); }}>
-            <option value="">全部素材</option>
-            {prefs.album && !scopedAlbums.some(album => album.id === prefs.album) && <option value={`album:${prefs.album}`} disabled>所选图集暂不可用</option>}
-            {prefs.project && !projects.some(project => project.id === prefs.project) && <option value={`project:${prefs.project}`} disabled>所选项目暂不可用</option>}
-            {!!scopedAlbums.length && <optgroup label="图集">{scopedAlbums.map(album => <option key={album.id} value={`album:${album.id}`}>{album.name}</option>)}</optgroup>}
-            {!!projects.length && <optgroup label="项目素材">{projects.map(project => <option key={project.id} value={`project:${project.id}`}>{project.name}</option>)}</optgroup>}
-          </ProjectSelector></label>
           {types.length > 1 && <div className={`${styles.segments} ${styles.typeSegments}`} aria-label="素材类型">{['all', ...types].map(t => <button key={t} type="button" aria-pressed={prefs.type === t} onClick={() => change({ type: t })}>{t === 'all' ? '全部' : labels[t as AssetType]}</button>)}</div>}
-          {prefs.source === 'template-image' && <label className={styles.sortControl}><span>模板</span><select aria-label="具体模板" value={prefs.template} onChange={e => change({ template: e.target.value })}><option value="">全部模板</option>{templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>}
           <label className={styles.sortControl}><span>排序</span><select aria-label="排序" value={prefs.sort} onChange={e => change({ sort: e.target.value })}><option value="newest">最新添加</option><option value="name">名称</option></select></label>
           <button type="button" className={styles.refreshDirectory} disabled={busy || loading} onClick={() => refreshDirectory()}>刷新列表</button>
           <button type="button" className={styles.resetFilter} title="重置筛选和浏览位置" aria-label="重置筛选和浏览位置" disabled={busy} onClick={() => refreshDirectory(resetFilterPreferences())}><RotateCcw size={16} /><span className={styles.mobileResetLabel}>重置</span></button>
@@ -787,7 +793,7 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
             {item.canRemoveFromLibrary && <button type="button" className={styles.removeButton} title="从我的素材库删除" aria-label={`从我的素材库删除：${selectionName(item)}`} disabled={busy} onClick={() => void removeItem(item)}><Trash2 size={17} /></button>}
             <button type="button" className={styles.preview} title={item.type === 'image' ? '放大图片' : `播放${labels[item.type]}`} aria-label={`${item.type === 'image' ? '放大' : '播放'}${item.fileName}`} onClick={() => setPreview(item)}>{item.type === 'image' ? <ZoomIn size={17} /> : <Play size={20} fill="currentColor" />}</button>
             {item.type !== 'image' && <span className={styles.duration}>{item.duration != null ? durationText(item.duration) : '时长未知'}</span>}
-            <ContentReactions contentKey={item.key} overlay imageSharing={false} onChange={() => { if (prefs.view === 'favorites') setEpoch(v => v + 1); }} />
+            <span className={styles.cardReactions}><ContentReactions contentKey={item.key} favoriteOnly imageSharing={false} onChange={() => { if (prefs.view === 'favorites') setEpoch(v => v + 1); }} /></span>
             </div>
             <div className={styles.meta}><strong title={selectionName(item)}>{selectionName(item)}</strong>{item.unavailableReason && <small className={styles.compatibility}>{item.unavailableReason}</small>}
               <small>{item.generationOrigin?.label || (item.source === 'uploaded' ? '上传的' : '其他素材')}</small>
@@ -807,11 +813,11 @@ export function ResourceLibraryPicker({ open, imageOnly, target = imageOnly ? 'i
           </nav></div>
         </div>
       </section></div>
-      <footer className={styles.footer}><button type="button" className={styles.uploadAction} disabled={busy || maxSelection === 0} onClick={() => input.current?.click()}><Upload size={18} /><span>上传素材</span></button><div className={styles.count}><strong>已选 {selected.length} 个</strong><small>{selectionDetails}</small></div>
+      <footer className={styles.footer}><button type="button" className={styles.uploadAction} disabled={busy || maxSelection === 0} onClick={() => input.current?.click()}><Upload size={18} /><span>上传素材</span></button><div className={styles.count}><strong>已选 {selected.length} 项</strong><small>{selectionDetails}</small></div>
         {types.some(type => typeLimits?.[type] !== undefined) && <small className={styles.mobileLimits}>{types.filter(type => typeLimits?.[type] !== undefined).map(type => `${labels[type]} ${selectedCounts[type]}/${typeLimits![type]}`).join(' · ')}</small>}
-        <button type="button" className={styles.selectionToggle} aria-expanded={prefs.selectionOpen} aria-controls={`${pickerId}-selection`} onClick={() => setPrefs(p => ({ ...p, selectionOpen: !p.selectionOpen }))}><span>已选 {selected.length}{maxSelection !== undefined ? `/${maxSelection}` : ''}</span><ChevronDown size={16} /></button>
+        <button type="button" className={styles.selectionToggle} aria-expanded={prefs.selectionOpen} aria-controls={`${pickerId}-selection`} onClick={() => setPrefs(p => ({ ...p, selectionOpen: !p.selectionOpen }))}><span>已选 {selected.length}</span><ChevronDown size={16} /></button>
         <div id={`${pickerId}-selection`} className={`${styles.selectionPanel} ${prefs.selectionOpen ? styles.selectionPanelOpen : ''}`}><small className={styles.selectionDetails}>{selectionDetails}</small><div className={styles.selection}>{selected.map((item, index) => <div key={item.identity} className={styles.selectedThumb} title={item.fileName}><Thumbnail item={item} /><span>{index + 1}</span><button type="button" disabled={busy} aria-label={`移除${item.fileName}`} onClick={() => toggle(item)}><X size={13} /></button></div>)}</div></div>
-        <div className={`${styles.footerActions} exp-dialog-actions`}><button type="button" className={styles.cancelAction} disabled={busy} onClick={close}>取消</button><button type="button" className={styles.primary} disabled={busy || !selected.length || !!canSelect(selected)} onClick={() => void confirm()}>{busy && !uploadLabel ? '正在添加' : confirmLabel}</button></div>
+        <div className={`${styles.footerActions} exp-dialog-actions`}><button type="button" className={styles.cancelAction} disabled={busy} onClick={close}>取消</button><button type="button" className={styles.primary} disabled={busy || !selected.length || !!canSelect(selected)} onClick={() => void confirm()}>{busy && !uploadLabel ? '正在添加' : `${confirmLabel}${selected.length ? `（${selected.length}）` : ''}`}</button></div>
       </footer>
     </div>
     {preview && (preview.type === 'image' ? renderImagePreview ? renderImagePreview({ src: preview.previewUrl || preview.originalUrl, alt: selectionName(preview), onClose: () => setPreview(null) }) : <ZoomableImagePreview contentKey={preview.key} src={preview.previewUrl || preview.originalUrl} thumbnailSrc={preview.thumbnailUrl || undefined} alt={selectionName(preview)} fileName={preview.fileName} safeDetails={{ width: preview.width || undefined, height: preview.height || undefined, fileSize: preview.fileSize ?? undefined }} onClose={() => setPreview(null)} /> : <MediaPreview contentKey={preview.key} src={preview.previewUrl || preview.originalUrl} type={preview.type} title={preview.fileName} poster={preview.thumbnailUrl || undefined} onClose={() => setPreview(null)} />)}

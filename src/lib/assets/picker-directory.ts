@@ -7,7 +7,7 @@ import { readCatalogRevision } from '@/lib/image-studio/catalog-revision';
 import { CatalogSqlCompatibilityError } from './catalog-visibility-sql';
 import { directoryPermissionsSql, jsonField, sqlRemoved } from './directory-permissions-sql';
 import { originDirectorySql } from './origin-directory-sql';
-import { templateFilterId, type PickerAlbum, type PickerTemplate } from './picker-types';
+import { IMAGE_SHARE_ALBUM_PREFIX, templateFilterId, type PickerAlbum, type PickerTemplate } from './picker-types';
 import { catalogIdsSql, catalogKeyBatches } from './catalog-batches';
 import { usageRowSpool } from '@/lib/usage/row-spool';
 
@@ -34,12 +34,14 @@ export async function readPickerDirectory(db: Prisma.TransactionClient, session:
   const revisionQuery = new URLSearchParams(p); for (const field of ['page', 'after', 'directory_revision']) revisionQuery.delete(field);
   const revision = createHash('sha256').update(JSON.stringify(['feedback-library-v1', before, user.id, user.role, user.account_type, revisionQuery.toString()])).digest('hex');
   if (p.get('directory_revision') && p.get('directory_revision') !== revision) throw new StudioSharingError('素材目录已变化，请重新读取', 409);
-  const ownFiles = scope === 'mine' && !album && !project;
+  const imageShares = p.get('albumGroup') === 'image-shares';
+  const ownFiles = scope === 'mine' && !album && !project && !imageShares;
   const template = templateFilterId(p.get('template'));
   const ctes = Prisma.sql`${access.ctes}, ${originDirectorySql(user, batch ? batchAssetIds : undefined)},
     usable_albums AS MATERIALIZED (SELECT * FROM authorized_albums WHERE can_view = 1 AND can_use = 1 AND picker_candidate = 1),
     permitted_albums AS MATERIALIZED (SELECT * FROM usable_albums WHERE ${Prisma.raw('scope_' + scope)} = 1
-      AND (${album ? Prisma.sql`"id" = ${album}` : Prisma.sql`1 = 1`}) AND (${project ? Prisma.sql`"project_id" = ${project}` : Prisma.sql`1 = 1`})),
+      AND (${album ? Prisma.sql`"id" = ${album}` : Prisma.sql`1 = 1`}) AND (${project ? Prisma.sql`"project_id" = ${project}` : Prisma.sql`1 = 1`})
+      AND (${imageShares ? Prisma.sql`substr("id", 1, 12) = ${IMAGE_SHARE_ALBUM_PREFIX} AND length("id") = 52 AND substr("id", 13) NOT GLOB '*[^0-9a-f]*'` : Prisma.sql`1 = 1`})),
     allowed_references AS MATERIALIZED (
       SELECT r."id" AS reference_id, r."asset_id", r."owner_user_id", r."album_id", r."source_type", r."created_at", r.rowid AS natural,
         a."file_name", a."type", a."metadata_json", albums."name" AS album_name
