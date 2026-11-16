@@ -31,8 +31,7 @@
     "video:finalize-pending": "tsx scripts/finalize-pending-videos.ts",
     "video:deliver-public": "tsx scripts/process-video-delivery-jobs.ts",
     "video:delivery-metrics": "tsx scripts/video-delivery-metrics.ts",
-    "video:delivery-backfill": "tsx scripts/backfill-public-video-delivery.ts",
-    "test:studio-pose-variation": "tsx scripts/check-studio-pose-variation.ts"
+    "video:delivery-backfill": "tsx scripts/backfill-public-video-delivery.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "6.3.1",

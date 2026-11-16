@@ -16,6 +16,7 @@ import { validStudioPresetId } from '../src/lib/image-studio/preset-id';
 import { CURRENT_STUDIO_SIZE_POLICY_VERSION } from '../src/lib/image-studio/ratios';
 import { normalizeImageFeishuChoice } from '../src/lib/image-studio/feishu-contract';
 import { historicalStudioStyles } from '../src/lib/image-studio/style-history';
+import { buildStudioPoseVariations } from '../src/lib/image-studio/pose-variation';
 import { freezeImageWorkMethodUse } from '../src/lib/works/method-reference';
 import { canAccessImageTemplates, isExternalImageStudioActor, externalStudioCanUsePresetId } from '../src/lib/image-studio/access';
 import { EXTERNAL_IMAGE_ADMISSION_ENABLED } from '../src/lib/image-studio/external-admission';
@@ -37,6 +38,7 @@ async function main() {
   files.push('src/lib/image-studio/personal-prompt.ts', 'src/lib/image-studio/personal-prompt.server.ts');
   files.push('src/lib/image-studio/current-inputs.ts', 'src/lib/image-studio/shared-contract.ts');
   files.push('src/lib/works/method-reference.ts', 'src/lib/image-studio/pricing-state.ts');
+  files.push('src/lib/image-studio/pose-variation.ts');
   files.push('src/lib/image-studio/access.ts', 'src/lib/image-studio/external-access.server.ts',
     'src/lib/image-studio/external-admission.ts', 'src/lib/projects/permissions.ts');
   const sources = new Map(files.map(file => [file, readFileSync(path.join(root, file), 'utf8')]));
@@ -178,7 +180,7 @@ async function main() {
     readExistingModuleContextVersion: async () => 'synthetic-context-version',
     parseUsageProjectId: (value: unknown) => value, creditCents: (value: number) => Math.round(value * 100),
     // Retry policy is outside this restoration fixture; durable execution has its own SQLite fixture.
-    retryConfig: async () => ({ enabledIds: [] }), RETRY_RULES: [],
+    retryConfig: async () => ({ enabledIds: [] }), RETRY_RULES: [], buildStudioPoseVariations,
     addCredits: (left: number, right: number) => left + right, sumCredits: (values: number[]) => values.reduce((a, b) => a + b, 0),
     parseSharedStudioPersonalOverrides: (value: unknown) => plain(value), parseEvolution: () => undefined,
     normalizeStudioRatio: (value: string) => value, parseImageQualityRouteSnapshot: () => null,
