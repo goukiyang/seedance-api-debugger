@@ -80,7 +80,7 @@ function componentMocks() {
     'lucide-react': new Proxy({}, { get: () => icon }),
     './ResourceLibraryPicker.module.css': { __esModule: true, default: new Proxy({}, { get: (_target, key) => String(key) }) },
     '@/components/ZoomableImagePreview': { ZoomableImagePreview: () => null },
-    '@/components/ProjectSelector': components,
+    '@/components/ResourceLibraryAlbumFilter': components,
     '@/components/useResultPages': components,
     '@/components/experience/ExperienceParts': components,
     '@/components/content-reactions/ContentReactions': components,
