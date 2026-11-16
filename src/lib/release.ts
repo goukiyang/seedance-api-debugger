@@ -1,11 +1,10 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '选图更清楚',
+  title: '模板动作更丰富',
   outline: [
-    '图集和项目支持搜索，图片区更宽',
-    '单图分享集中查看，目录不再重复堆叠',
-    '本次选择、喜欢与已添加更容易区分'
+    '启用动作变化的模板，同批图片可选择不同动作',
+    '保留当前主图、生成参数与原任务记录'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

@@ -1,6 +1,7 @@
 import { releaseWorkerKey } from './process-provenance';
 import { createHash, randomUUID } from 'node:crypto';
 import { parseStudioCurrentInputs } from './current-inputs';
+import { buildStudioPoseVariations } from './pose-variation';
 import { observeOperation } from '@/lib/performance/server-operations';
 import { likedStudioTaskPage } from './liked-task-page';
 import { studioClaimScanPage } from './claim-scan';
@@ -1342,10 +1343,12 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       ...privateFieldOrigins(frozenDefinition, restored ? 'moduleContext' : 'context'),
       ...privateFieldOrigins(frozenDefinition, restored || sharedDefinition ? 'templatePrompt' : 'prompt'),
     ] : undefined;
+    const posePrompts = !avatar && !characterLabPlanId
+      ? buildStudioPoseVariations(effectiveTemplatePrompt, personalPrompt, input.requestId, input.count) : undefined;
     for (let i = 0; i < input.count; i++) {
       const id = `${billingContract.pricing ? 'rate-' : ''}${batchId}-${i}`;
       const candidate = sheet ? undefined : avatar?.candidates[i];
-      const taskPrompt = candidate?.prompt || input.prompt;
+      const taskPrompt = candidate?.prompt || posePrompts?.[i] || input.prompt;
       const freeze = !preparation && price > 0 ? await allocateTaskCredits(tx, user, price, id) : null;
       const taskData: Prisma.ImageStudioTaskUncheckedCreateInput = {
         id, batch_id: batchId, owner_id: ownerId, module_id: moduleId as string | undefined, source_preset_id: sourcePresetId, ordinal: i + 1, fingerprint,
@@ -1356,7 +1359,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
         quality: generation.quality,
         provider_cost_usd: imageChannel ? null : IMAGE_STUDIO_MODEL_COST_USD[generation.model as keyof typeof IMAGE_STUDIO_MODEL_COST_USD],
         status: studioTaskState({ billing_contract_json: JSON.stringify(billingContract), status: 'sr_queued' }, imageChannel ? 'channel_queued' : 'queued'),
-        snapshot_json: sheet ? JSON.stringify({ ...JSON.parse(snapshot), avatarLayout: avatar!.layout, avatar: { layout: avatar!.layout, cells: avatar!.candidates } }) : candidate ? JSON.stringify({ ...JSON.parse(snapshot), prompt: taskPrompt, avatar: candidate }) : snapshot,
+        snapshot_json: sheet ? JSON.stringify({ ...JSON.parse(snapshot), avatarLayout: avatar!.layout, avatar: { layout: avatar!.layout, cells: avatar!.candidates } }) : candidate ? JSON.stringify({ ...JSON.parse(snapshot), prompt: taskPrompt, avatar: candidate }) : posePrompts ? JSON.stringify({ ...JSON.parse(snapshot), prompt: taskPrompt }) : snapshot,
         aspect_ratio: aspectRatio, output_size: outputSize,
         reference_ids: JSON.stringify(orderedReferenceIds), unit_credits: price, freeze_snapshot: freeze?.snapshot,
       };

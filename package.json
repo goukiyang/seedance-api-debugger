@@ -1,6 +1,6 @@
 {
   "name": "video-api-debugger",
-  "version": "0.148.25",
+  "version": "0.148.26",
   "private": true,
   "scripts": {
     "dev": "NEXT_DIST_DIR=.next-dev next dev",
@@ -31,7 +31,8 @@
     "video:finalize-pending": "tsx scripts/finalize-pending-videos.ts",
     "video:deliver-public": "tsx scripts/process-video-delivery-jobs.ts",
     "video:delivery-metrics": "tsx scripts/video-delivery-metrics.ts",
-    "video:delivery-backfill": "tsx scripts/backfill-public-video-delivery.ts"
+    "video:delivery-backfill": "tsx scripts/backfill-public-video-delivery.ts",
+    "test:studio-pose-variation": "tsx scripts/check-studio-pose-variation.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "6.3.1",
