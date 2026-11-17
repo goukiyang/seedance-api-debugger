@@ -1,5 +1,21 @@
 # BR-FEEDBACK01 插件右上角信封反馈入口与后端复用
 
+## 2026-11-17 接续：反馈详情登录初始化
+
+当前用户在Windows“诊断GPT问题”任务要求修复信箱提交错误，后回复“没有了”，按该错误不再出现记录；未替用户重发反馈。关联主任务仍为T5“修复后台反馈链路”，完成标准保留“提交、后台查看和回复连通”；当前仍进行中，不能用原接口200冒充整条链路完成。
+
+现有线上网站0.148.25，已找到对应来源族`origin/codex/asset-picker-ux-20261116` / faf51d8；其反馈组件与本轮实页公共JS中的登录门、原号及读取结构对应。独立Windows源码副本`D:/MYDR/cdoex/sd2/seedance-api-debugger`，分支`codex/feedback-session-bootstrap-20261117`；旧默认main及codex/v12-full-todo停在7月，均未作为实施来源。候选预留0.148.27，避开已存在但未发布的0.148.26模板动作分支；发布前仍须重核线上及并行来源，不覆盖其它功能。
+
+根因：`ClientLayout`提供共享AppSession，但`AppShell`只在带导航壳的路由触发refreshUser。直接打开`/feedback/[id]`不启导航壳；`FeedbackLifecyclePanel`等待共享hasLoadedUser而没有启动读取。`FeedbackWidget`另有自己的登录请求，导致网络里auth/me虽200，共享状态仍未初始化。原详情GET也200且本人匹配，页面却一直“正在核对登录状态”。只补组件的共享会话初始化，复用`ResourceLibraryPicker`已有去重/阻断方式；保留原服务端登录、账号隔离、原号、冻结输入、上传及通知合同。依据[React Effects](https://react.dev/reference/react/useEffect#fetching-data-with-effects)核对异步边界，不增加登录SDK或第二套状态。
+
+本批范围：反馈组件初始化及登录失败重试/已退出/账号变化文案；对应真实React与共享Provider的隔离工程检查；package唯一版本与现有更新提示摘要。全部配套修改后统一检查，工程检查不生成生产反馈、飞书通知或业务数据。候选的不同账号、网络失败恢复和未知原号保留必须有证据，再形成聚焦提交/推送。
+
+最终工程检查：2026-11-17T14:35:18.367Z，同一候选8份相关源码前后hash一致；真实React/共享Provider的5项隔离Chrome检查、会话边界检查、组件ESLint、现有发布策略读取四项退出0。覆盖独立详情StrictMode去重初始化、503手动重试且保留原冻结操作、不同账号不读取原反馈/不展示原草稿、未登录可恢复且保留round返回、真实退出事件阻止自动恢复；工程环境拒绝全部业务写入和外部请求。ESLint只有两条既有警告（sequence清理和img），无新增警告；未做完整生产构建，不能用这些检查冒充线上验证。独立只读审查未发现P1/P2，并复核上述8份hash及结果；只读审查未运行测试或浏览器。证据为主项目QA目录的backend-verification.json、backend-ui.log、backend-boundary.log、backend-lint.log和backend-release-policy.log。
+
+当前缺口：源码已接通，服务器访问仍未接通。Windows无可用SSH agent/默认密钥，既有root@42.193.221.253:22连接提前关闭；当前Codex项目工具只列本地项目，没有可执行的远程Mac项目。未读写生产数据库、上传、服务配置或运行版。实际发布须沿本项目现有1.1.2/seamless入口及相容回退；当前未构建服务器产物、未部署，网站仍0.148.25。不得改用旧Mac youdoo-sites或绕过发布保护。需要恢复既有安全服务器连接，或由用户明确指定已连接的部署环境；不索取聊天中的密码、私钥，不重复询问普通发布授权。
+
+关联资料与证据沿主项目固定入口：`D:/MYDR/cdoex/sd2/sd2-production-bridge/tasks/todo/2026-11-07-gpt-message-controls.md`、`D:/MYDR/cdoex/sd2/materials/index.md`和`.cache/qa/gpt-sidebar-feedback-20261117/viewport-live-acceptance.json`。本次无新的用户附件；原侧栏截图只用于T4，不冒充反馈页面截图。以下2026-11-02状态均为历史。
+
 - 日期：2026-11-02（America/Los_Angeles）
 - 工单版本：v1.0.0 / R01
 - 状态：链路取证与设计完成，可进入实施；**本轮仅工单，未实施、未部署、未实发反馈**。

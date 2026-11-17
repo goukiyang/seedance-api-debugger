@@ -35,6 +35,7 @@ function images(raw: string | null) {
 }
 export function FeedbackLifecyclePanel({ owner, feedbackId, admin = false, initialRound }: { owner: string; feedbackId: string; admin?: boolean; initialRound?: number }) {
   const session = useAppSession();
+  const { hasLoadedUser, loadingUser, refreshUser, sessionChanged } = session;
   const [round, setRound] = useState(initialRound);
   const scope = `${owner}:${feedbackId}:${admin ? 'admin' : `author:${round ?? 'latest'}`}`;
   const key = `sd2:feedback-action:v1:${scope}`;
@@ -46,7 +47,14 @@ export function FeedbackLifecyclePanel({ owner, feedbackId, admin = false, initi
   const [hydrated, setHydrated] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [picker, setPicker] = useState(false), [preview, setPreview] = useState<string | null>(null);
   const endpoint = admin ? `/api/admin/feedback/${encodeURIComponent(feedbackId)}` : `/api/feedback/${encodeURIComponent(feedbackId)}`;
+  const loginReturnPath = admin ? '/admin/feedback' : `/feedback/${encodeURIComponent(feedbackId)}${round === undefined ? '' : `?round=${round}`}`;
   const usable = () => live.current && identity.current.scope === scope && identity.current.ready && !isClientSessionBlocked();
+  // Direct feedback links do not mount the navigation shell's session loader.
+  // Use the shared, deduplicated session reader, as the resource picker does.
+  useEffect(() => {
+    if (hasLoadedUser || loadingUser || sessionChanged || isClientSessionBlocked()) return;
+    void refreshUser();
+  }, [hasLoadedUser, loadingUser, refreshUser, sessionChanged]);
   const remember = (next: Draft, operation: Body | null) => localStorage.setItem(key, JSON.stringify({ version: 1, draft: next, pending: operation }));
   function edit(next: Draft) {
     setDraft(next);
@@ -111,7 +119,19 @@ export function FeedbackLifecyclePanel({ owner, feedbackId, admin = false, initi
     } catch (cause) { if (usable()) setError(cause instanceof Error ? cause.message : '结果待核对，请继续核对原操作'); }
     finally { lock.current = false; if (usable()) setBusy(false); }
   }
-  if (!identity.current.ready || hydrated !== scope) return <p role="status">正在核对登录状态…</p>;
+  if (!identity.current.ready || hydrated !== scope) {
+    if (session.sessionChanged) return <p role="status">登录状态已变化，当前反馈已暂停。已保存的草稿和提交编号保留。</p>;
+    if (session.userLoadError) return <div className={styles.message} role="alert">
+      <p>暂时无法确认登录，已保存的草稿和提交编号保留。</p>
+      <button type="button" className={styles.primary} disabled={session.loadingUser} onClick={() => void session.refreshUser({ force: true })}>{session.loadingUser ? '正在确认…' : '重新确认登录'}</button>
+    </div>;
+    if (session.hasLoadedUser && !session.loadingUser && session.user?.id !== owner) return <div className={styles.message} role="alert">
+      <p>{session.user ? '当前账号与打开此页时不同，请返回反馈列表重新打开。' : '登录已失效，请重新登录后查看反馈。'}已保存的草稿和提交编号保留。</p>
+      {/* A full navigation reinitializes an old account's shared session. */}
+      <a href={session.user ? admin ? '/admin/feedback' : '/feedback' : `/login?next=${encodeURIComponent(loginReturnPath)}`}>{session.user ? '返回反馈列表' : '前往登录'}</a>
+    </div>;
+    return <p role="status">正在核对登录状态…</p>;
+  }
   const selected = view?.round, editable = !admin && selected && !selected.review && selected.number === view?.currentRound;
   const picture = (url: string, i: number) => <button type="button" key={`${url}:${i}`} onClick={() => setPreview(url)} title={`查看截图${i + 1}`}><img src={url} loading="lazy" decoding="async" alt={`反馈截图${i + 1}`} /></button>;
   return <section className={styles.flow} aria-label="反馈处理与回测" aria-busy={busy}>
