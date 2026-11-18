@@ -15,6 +15,15 @@ export async function createDirectoryFixture() {
   const db=new PrismaClient({datasources:{db:{url:'file:'+database}}});
   await db.$executeRawUnsafe('CREATE TABLE "UserPreference" ("id" TEXT NOT NULL PRIMARY KEY, "user_id" TEXT NOT NULL, "key" TEXT NOT NULL, "value_json" TEXT NOT NULL, "created_at" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, "updated_at" DATETIME NOT NULL)');
   await db.$executeRawUnsafe('CREATE UNIQUE INDEX "UserPreference_user_id_key_key" ON "UserPreference"("user_id", "key")');
+  for (const sql of [
+    'CREATE TABLE "BridgeQueuePreset" (id TEXT PRIMARY KEY, owner_id TEXT, name TEXT, items_json TEXT, client_id TEXT, team_id TEXT, copied_from TEXT)',
+    'CREATE TABLE "BridgeQueuePresetLike" (id TEXT PRIMARY KEY, preset_id TEXT, user_id TEXT)',
+    'CREATE TABLE "OperationLog" (id TEXT PRIMARY KEY, operator_id TEXT, action TEXT, target_type TEXT, target_id TEXT, detail TEXT)',
+    'CREATE TABLE "Feedback" (id TEXT PRIMARY KEY, user_id TEXT, content TEXT, image_urls_json TEXT, page_url TEXT, pathname TEXT, user_agent TEXT, admin_note TEXT)',
+    'CREATE TABLE "PlatformSetting" (key TEXT PRIMARY KEY, value_json TEXT, updated_by TEXT)',
+    'CREATE TABLE "Notification" (id TEXT PRIMARY KEY, type TEXT, target_user_id TEXT, title TEXT, body TEXT, metadata_json TEXT, error_message TEXT)',
+    'CREATE TABLE "Asset" (id TEXT PRIMARY KEY, owner_id TEXT, original_url TEXT, hash TEXT, file_size INTEGER)'
+  ]) await db.$executeRawUnsafe(sql);
   function load(file,imports) {
     const source=fs.readFileSync(path.join(root,file),'utf8');
     const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,esModuleInterop:true}}).outputText;
@@ -23,6 +32,9 @@ export async function createDirectoryFixture() {
     return module.exports;
   }
   const service=load('src/lib/bridge/gpt-directory.ts',{'node:crypto':{randomUUID},'@/lib/prisma':{prisma:db,retrySqliteBusy:async run=>run()}});
+  const storage=load('src/lib/bridge/storage-usage.ts',{'@/lib/prisma':{prisma:db},'@/lib/assets/site-url':load('src/lib/assets/site-url.ts',{})});
+  const identity={getBridgeUser:async request=>{const id=request.headers.get('x-fixture-session');return id?{id}:null;},isAllowedShellOrigin:origin=>origin==='chrome-extension://nkflamhogbmmfbjjkajhofaejlddjffc'};
+  const storageRoutes=load('src/app/api/bridge/storage-usage/route.ts',{'next/server':{NextRequest,NextResponse},'@/lib/bridge/storage-usage':storage,'@/lib/bridge/panel-token':identity});
   const routes=load('src/app/api/bridge/gpt-directory/route.ts',{'next/server':{NextRequest,NextResponse},'@/lib/bridge/gpt-directory':service,'@/lib/bridge/panel-token':{
     getBridgeUser:async request=>{const id=request.headers.get('x-fixture-session');return id?{id}:null;},
     isAllowedShellOrigin:origin=>origin==='chrome-extension://nkflamhogbmmfbjjkajhofaejlddjffc'
@@ -31,12 +43,12 @@ export async function createDirectoryFixture() {
     try {
       const chunks=[];for await(const chunk of req)chunks.push(chunk);
       const request=new NextRequest('http://127.0.0.1'+req.url,{method:req.method,headers:req.headers,...(req.method==='PATCH'?{body:Buffer.concat(chunks)}:{})});
-      const response=await routes[req.method](request);
+      const response=await (req.url.startsWith('/api/bridge/storage-usage')?storageRoutes:routes)[req.method](request);
       res.writeHead(response.status,Object.fromEntries(response.headers));res.end(await response.text());
     }catch(error){res.writeHead(500);res.end(JSON.stringify({ok:false,error:error.message}));}
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-  return {service,routes,db,url:'http://127.0.0.1:'+server.address().port+'/api/bridge/gpt-directory',database,close:async()=>{await new Promise(resolve=>server.close(resolve));await db.$disconnect();}};
+  return {service,routes,storage,db,url:'http://127.0.0.1:'+server.address().port+'/api/bridge/gpt-directory',storageUrl:'http://127.0.0.1:'+server.address().port+'/api/bridge/storage-usage',database,close:async()=>{await new Promise(resolve=>server.close(resolve));await db.$disconnect();}};
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   const fixture=await createDirectoryFixture(),scope='a'.repeat(64),project={id:'g-p-one',name:'项目一',color:'rgb(173,123,249)',icon:''};
