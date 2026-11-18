@@ -1,5 +1,23 @@
 // Exact additive bridges admitted from reviewed source pairs.
 export default {
+  // New account-private UserPreference namespace; no schema or existing writer protocol changes.
+  "src/app/api/bridge/gpt-directory/route.ts": {
+    "previous": null,
+    "current": "1c5623be0f898e10320644b8608f41783b6c2c898cdc6371a045871d077534d5"
+  },
+  "src/lib/bridge/gpt-directory.ts": {
+    "previous": null,
+    "current": "497e86488f2ee7410316eeb5526fac69c2b3241ad72671bc4de3c97da69460c7"
+  },
+  // Read-only account-filtered logical storage accounting.
+  "src/app/api/bridge/storage-usage/route.ts": {
+    "previous": null,
+    "current": "cf473257c8bbe4073029460651c3521215c2ce456d926007d832144e237e3e93"
+  },
+  "src/lib/bridge/storage-usage.ts": {
+    "previous": null,
+    "current": "783b956ce8f1d7ef59bf3aa6c4b92fc83ec7e287d60843bbb56987c5ffa82e74"
+  },
   "src/app/api/image-studio/gallery/tags/route.ts": {
     "previous": null,
     "current": "60f59018aaca691de912bebdbabf32e3976d13da0f21805b83acd53c343f8783"

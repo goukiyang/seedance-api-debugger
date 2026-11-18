@@ -239,4 +239,6 @@ flowchart TD
 
 ## 10. 本轮新发现的线索与问题
 
+2026-11-18 GPT-CLOUD01发布整合：候选0.149.0从现网faf51d8/0.148.25承接已授权反馈详情session修补、新增账号私有目录及插件已确认空间接口。四个新API/lib仅精确null→SHA256准入，目录写独立UserPreference namespace，统计只读；无schema、依赖或旧协议变化，保原retained guard。统一工程批次：相容guard23组、目录真实隔离SQLite4组、统计7组全部通过，git diff --check通过；独立只读复审无P1/P2。此为工程/静态兼容证据，不代替线上构建、现场guard匹配、安装和真实账号验收。Windows代理TUN握手前断线已定位，公司Mac原密钥root实登恢复；沿1.1.2/seamless自动接续，不用冷切或退役Control Tower。
+
 D-20261102-02：网站现有反馈POST无耐久提交幂等，重试机制可能重复创建反馈。已确认源码机制，未核生产重复数量；插件新路径按本单设计防重，网站旧入口后续另排，不顺手扩改。登记于正式根 `tasks/discoveries.md`。

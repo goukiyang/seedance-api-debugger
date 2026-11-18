@@ -1,10 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '反馈可查看',
+  title: '插件资料同步',
   outline: [
-    '直接打开反馈详情可正常读取记录',
-    '登录确认失败时可重试，原稿和编号继续保留'
+    '插件目录随账号保存，本机先显示，后台轻量核对',
+    '设置可查看当前账号插件的已确认云端占用',
+    '直接打开反馈详情可正常读取记录，失败可保留原稿重试'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
