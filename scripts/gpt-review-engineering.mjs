@@ -11,7 +11,7 @@ export async function reviewFixture(){
   for(const who of ['review-a','review-b'])await db.$executeRaw`INSERT INTO "User" (id,status,password_hash) VALUES (${who},'active','fixture-only')`;
   const privacy=load('src/lib/security/private-prompts.server.ts',{'server-only':{},'node:fs':require('node:fs'),'node:crypto':crypto,'node:path':path,'../image-studio/process-provenance':{}});
   const auth=load('src/lib/auth/session.ts',{'crypto':crypto,'next/headers':{},'@/lib/prisma':{prisma:db},'./password':{},'./session-account-binding':{},'@/lib/security/private-prompt-identity.server':{}});
-  const control={failure:null,fallbackFailure:null,catalog:['gpt-fixture-fallback'],allowedModels:[],approved:new Set(['gpt-fixture-default','gpt-fixture-fallback']),disabled:new Set(),defaultGate:null,onDefault:null},modelCalls=[];
+  const control={failure:null,fallbackFailure:null,catalog:['gpt-fixture-fallback'],allowedModels:[],approved:new Set(['gpt-fixture-default','gpt-fixture-fallback']),disabled:new Set(),defaultGate:null,onDefault:null,artVerdict:null},modelCalls=[];
   const musk=load('src/lib/integrations/musk.ts',{'node:timers/promises':{},'@/lib/prisma':{prisma:db},'@/lib/security/private-credentials.server':{},'@/lib/security/private-prompts.server':privacy,'@/lib/security/private-prompt-send.server':{privateCredentialSendOrigins:()=>[{}],assertPrivateSend:({model})=>{if(!control.approved.has(model))throw new privacy.PrivatePromptError();}}});
   const localPrivacy={...privacy,privatePromptPolicy:()=>({destinations:[{provider:'musk',models:control.catalog}]})};
   const judge={MuskApiError:musk.MuskApiError,getMuskApiSettings:async()=>({enabled:true,base_url:'https://fixture.invalid/',api_key:'fixture-only',default_model:'gpt-fixture-default',allowed_models:control.allowedModels}),isMuskApiReady:()=>true,resolveMuskChatModels:musk.resolveMuskChatModels,createMuskChatCompletion:async({messages,model})=>{
@@ -21,12 +21,14 @@ export async function reviewFixture(){
     if(failure)throw failure;
 
     const m=JSON.parse(messages[1].content[0].text);modelInputs.push(m);
+    if(m.前置分析!==undefined){const v=control.artVerdict||{decision:'revise',reason:'画面仍有设施堆砌',evidence:'中央地形尚未连接',change:'让中央地形连成整体，保留人物造型',actualImage:true,better:false};return {content:JSON.stringify(v),model};}
     const decision=m.当前完整稿.includes('乙项已交付')?'pass':'revise',final=m.历轮结果.length===3;
     const v={decision,reason:decision==='pass'?'两个要求都已完成':'缺少乙项',evidence:m.当前完整稿,change:decision==='pass'?'':'请交付乙项'};
     if(final&&decision!=='pass')v.recap={goal:'同时交付甲乙',diagnosis:'反复只修改甲，方向偏离乙',direction:'先完成乙',experiment:'新增乙项说明',check:'核对甲乙各有一句成品'};
     return {content:JSON.stringify(v),model};
   }};
-  const q=load('src/lib/bridge/gpt-review.ts',{'node:crypto':crypto,'@/lib/prisma':{prisma:db},'@/lib/auth/session':auth,'@/lib/security/private-prompts.server':localPrivacy,'@/lib/integrations/musk':judge,'@/lib/pricing/model-access.server':{assertSupplementaryModelEnabled:async(_kind,model)=>{if(control.disabled.has(model))throw new auth.AuthError('该模型已在费率页关闭',403);}}});
+  const artImage=load('src/lib/bridge/gpt-art-image.ts',{'node:crypto':crypto,sharp:require('sharp')});
+  const q=load('src/lib/bridge/gpt-review.ts',{'node:crypto':crypto,'./gpt-art-image':artImage,'@/lib/prisma':{prisma:db},'@/lib/auth/session':auth,'@/lib/security/private-prompts.server':localPrivacy,'@/lib/integrations/musk':judge,'@/lib/pricing/model-access.server':{assertSupplementaryModelEnabled:async(_kind,model)=>{if(control.disabled.has(model))throw new auth.AuthError('该模型已在费率页关闭',403);}}});
   const grant=load('src/lib/bridge/review-oauth.ts',{'node:crypto':crypto,'@/lib/prisma':{prisma:db}});
   const request=load('src/lib/bridge/review-request.ts',{'./gpt-review':q}),image=load('src/lib/bridge/review-tool-image.ts',{'./gpt-review':q});
   const pairing=load('src/lib/bridge/review-pairing.ts',{'node:crypto':crypto,'@/lib/prisma':{prisma:db},'./gpt-review':q});
@@ -123,6 +125,16 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
     assert.equal((await post('recaps')).data.rows[0].id,id2);assert.equal((await post('list')).data.total,2);
     assert.ok((await f.storage.readBridgeStorageUsage('review-a')).categories.find(r=>r.kind==='reviews').bytes>0);
     assert.throws(()=>f.q.parseVerdict('这版应该可以了',false));assert.throws(()=>f.q.parseVerdict('{"decision":"revise","reason":"x","evidence":"x","change":"x"}',true));
+    const retryId=crypto.randomUUID();
+    f.control.failure=new f.musk.MuskApiError('fixture first-draft failure',502,'musk_api_empty_content');
+    const failedFirst=await post('create',{id:retryId});assert.ok(failedFirst.ok,failedFirst.data.error);assert.equal(failedFirst.data.task.phase,'error');assert.equal(failedFirst.data.task.art,undefined);
+    let savedFirst=(await f.q.getTask('review-a',scope,retryId)).task;assert.equal(savedFirst.delivery,undefined);assert.equal(savedFirst.art,undefined);
+    f.control.failure=null;
+    const retriedFirst=await post('retry',{id:retryId,version:savedFirst.version});assert.ok(retriedFirst.ok,retriedFirst.data.error);assert.equal(retriedFirst.data.task.phase,'ready');assert.equal(retriedFirst.data.task.art,undefined);
+    savedFirst=(await f.q.getTask('review-a',scope,retryId)).task;assert.equal(savedFirst.art,undefined);assert.equal(savedFirst.delivery,undefined);
+    const judgedFirst=await post('judge',{id:retryId,version:savedFirst.version});assert.ok(judgedFirst.ok,judgedFirst.data.error);assert.equal(judgedFirst.data.task.phase,'feedback');assert.equal(judgedFirst.data.task.art,undefined);
+    const finalFirst=(await f.q.getTask('review-a',scope,retryId)).task;assert.equal(finalFirst.art,undefined);assert.equal(finalFirst.rounds.length,1);assert.equal(finalFirst.rounds[0].result.decision,'revise');
+    console.log('PASS legacy first-draft model failure before ticket -> retry -> normal judge; never creates art state');
     const previousFetch=global.fetch;let directoryRequests=0;global.fetch=async()=>{directoryRequests++;throw Error('Unexpected directory request');};
     try{
     const unavailable=()=>new f.musk.MuskApiError('upstream private diagnostic',503,'musk_api_model_unavailable');

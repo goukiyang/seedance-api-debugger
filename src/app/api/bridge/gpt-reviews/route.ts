@@ -30,12 +30,13 @@ async function handle(req:NextRequest,write:boolean) {
     if(b.scope!==scope)throw new ReviewError('ChatGPT 工作区已变化',409);
     if(b.op==='create'){
       const task=await startReview(user.id,b);
-      return reply({ok:true,task:summary(await judgeReview(user.id,await getTask(user.id,scope,task.id)))});
+      return reply({ok:true,task:summary(task.kind==='art'?task:await judgeReview(user.id,await getTask(user.id,scope,task.id)))});
     }
     const saved=await getTask(user.id,scope,String(b.id||''));
     if(b.op==='judge' && b.version!==saved.task.version)return reply({ok:true,task:summary(saved.task)});
     const task=b.op==='judge'?await judgeReview(user.id,saved):b.op==='confirm'?await confirmSource(user.id,saved.task,b):await updateReview(user.id,saved,b);
-    return reply({ok:true,task:summary(task),...(b.op==='claim'?{delivery:task.delivery}:{})});
+    const recovered=b.op==='recover'&&task.art?.wake?.delivery===task.delivery&&['delivering','awaiting'].includes(task.phase);
+    return reply({ok:true,task:summary(task),...(b.op==='claim'||recovered?{delivery:task.delivery}:{}),...(recovered?{instructions:task.art?.instructions}:{})});
   } catch(error) {
     return reply({ok:false,error:error instanceof ReviewError?error.message:'暂时无法读取或保存验收，请保留当前任务重试'},error instanceof ReviewError?error.status:503);
   }

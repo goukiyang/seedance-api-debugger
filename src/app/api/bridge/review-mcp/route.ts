@@ -11,7 +11,7 @@ export const maxDuration=150;
 const scopes=[{type:'oauth2',scopes:[SCOPE]}];
 const files=['image','image2','image3','image4','image5','image6'];
 const artifact={type:'object',properties:{file_id:{type:'string'},download_url:{type:'string'},mime_type:{type:'string'},file_name:{type:'string'}},required:['file_id','download_url']};
-const tool={name:'submit_revision',title:'交回本轮改稿',description:'在用户发起验收的原对话中交回本次完整成品。若返回 revise，按具体改法在本对话修改再用新单号交回。pass 或 stop 即停止。',securitySchemes:scopes,
+const tool={name:'submit_revision',title:'交回本轮实际产物',description:'在用户发起任务的原对话交回本步骤实际产物。美术自动流先交包含 problem/cause/direction/check 实质内容的分析正文，再按 instructions 真正编辑出图，每轮只以 image 交回一张主成品，不附参考图或示意图；复盘步骤交同样四项的复盘正文。旧文字任务仍可交多图。continue 或 revise 必须在本对话自动继续新步骤，用返回的新 delivery 交回，不等用户再点按钮。pending 时保留相同 delivery、正文和附件，稍后重试本次提交，不再出图。只有 pass 或 stop 才结束。',securitySchemes:scopes,
   inputSchema:{type:'object',properties:{delivery:{type:'string',description:'本轮验收单号'},text:{type:'string',maxLength:20000,description:'本轮实际交付的完整正文，纯图用空字符串'},...Object.fromEntries(files.map(f=>[f,artifact]))},required:['delivery','text'],additionalProperties:false},
   annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:false,idempotentHint:true},
   _meta:{securitySchemes:scopes,'openai/fileParams':files,'openai/toolInvocation/invoking':'正在复验新稿','openai/toolInvocation/invoked':'本轮验收已返回'}};

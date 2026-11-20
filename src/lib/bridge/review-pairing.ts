@@ -22,7 +22,7 @@ export async function pairSource(owner:string,delivery:string,connection:string)
     row=await prisma.userPreference.findUniqueOrThrow({where:{user_id_key:filter}});proof=JSON.parse(row.value_json);
   }
   // Only the original tool component sees this. The model never receives its confirmation nonce.
-  return {linked:false,proof:{link:key.slice(PREFIX.length),nonce:proof.nonce,delivery}};
+  return {linked:false,proof:{link:key.slice(PREFIX.length),nonce:proof.nonce,delivery,expires:proof.expires}};
 }
 export async function confirmSource(owner:string,task:ReviewTask,b:Record<string,unknown>){
   if(b.device!==task.binding.device||b.cid!==task.binding.cid||typeof b.link!=='string'||!/^[a-f0-9]{64}$/.test(b.link)||
@@ -35,12 +35,12 @@ export async function confirmSource(owner:string,task:ReviewTask,b:Record<string
 }
 export const componentHTML=`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><body><small>SD2 正在核对发起验收的原对话</small><script>
 const origins=['https://chatgpt.com','https://chat.openai.com'];
-let proof,attempt=0;
-function announce(meta){if(meta?.sd2ReviewProof&&meta.sd2ReviewProof.nonce!==proof?.nonce){proof=meta.sd2ReviewProof;attempt=0;}if(proof&&attempt++<12){for(const origin of origins)window.top.postMessage({type:'sd2b-review-origin',proof},origin);}}
+let proof;
+function announce(meta){if(meta?.sd2ReviewProof)proof=meta.sd2ReviewProof;if(proof&&typeof proof.expires==='number'&&Date.now()<proof.expires){for(const origin of origins)window.top.postMessage({type:'sd2b-review-origin',proof},origin);}}
 function send(m){window.parent.postMessage({...m,jsonrpc:'2.0'},'*');}
 addEventListener('message',e=>{if(e.source!==parent)return;const m=e.data;if(m?.id===1&&m.result)send({method:'ui/notifications/initialized'});if(m?.method==='ui/notifications/tool-result')announce(m.params?._meta);});
 addEventListener('openai:set_globals',e=>announce(e.detail?.globals?.toolResponseMetadata));
 announce(window.openai?.toolResponseMetadata);
 send({id:1,method:'ui/initialize',params:{appInfo:{name:'SD2 验收',version:'1.0.0'},appCapabilities:{},protocolVersion:'2026-01-26'}});
-setInterval(()=>announce(window.openai?.toolResponseMetadata),800);
+setInterval(()=>announce(window.openai?.toolResponseMetadata),2000);
 </script></body></html>`;

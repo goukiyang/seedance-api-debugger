@@ -61,3 +61,17 @@ Windows真实页面点击“允许交回新稿”仍403。已确认授权HTML的
 默认请求在途允许用户暂停；候选选定后立即按owner/scope/id重读，须仍judging且等于本次claim.version才发。已暂停/换版返回当前状态，不发候选；不声称撤回已发默认请求。真实SQLite回归包含默认挂起→pause完成→503后候选0/仍paused，以及pause/resume后被新轮领取、phase仍judging但version不同→旧轮候选0，均通过。
 
 最终实现真实小规模验证通过：仅两个chat/completions POST，gpt-5.5=503、gpt-5.6-luna=200，二者redirect:error；目录请求0。原材料内存judging副本判revise且缺乙，14.761秒；原生产任务逐字核同、写入0。调用实际runJudge和现有私密/启用门，不改全局默认、用户参数、通道、凭据或费用许可。原生Chrome相关源未变，复用已通过证据；R1–R3仍待Windows唯一原记录继续真实验收。
+
+## I1 美术自动流 0.151.0候选（Windows续接，2026-11-20）
+
+用户已确认：原图和目标一次启动，原GPT先看图分析，再自动真实改图和独立图审。首张真图不算修改，每组最多3次修改，最多两次复盘后重试，共9次修改；任意一组通过即结束，仍不成仅提报未决方向，不把失败稿当成品交付。制作和判定分开；方案文字、示意图、原图副本不能当改好成品。保持原目标、保留项、原账号/工作区/设备/对话归属与旧文字三次验收；不新增计费图片通道、私密许可、模型默认、费率或权限。已授权保护部署、自动安装与真实实测，待独立通过后才给用户看。
+
+当前候选从线上0.150.1/206e67410c9c235c0e1bcf5bdc21a5e11a218d3e继承，分支codex/art-autoflow-20261120，SemVer新增兼容能力0.151.0。同create接口kind=art，analysis/image/recap/done持久状态；初始round0仅原提问基线，不伪造图审。实际Sharp解码及像素重复检查；主成品单张，多参考与旧文字多图保留。actualImage:true才计实际改图或选最好版，示意图另有累计3次停止预算。确定超限/格式错误与未知传输分开，重复回执幂等；分析/复盘要求具体问题、原因、方向、核验四项实值。summary/status轻投影不读全图，详情才提供参考/审稿预览与记录，2MiB限制及原始文件留原对话不冒称高清副本。
+
+显式暂停/重试保存wakeVersion，旧动作版本重复仅复用同wakeId；recover在原绑定device/CID/sourceId与当前wakeId下给新票据，不沿旧票据复活。未pair仅初始analysis零receipt的已签初始票据允许恢复，新单必须再经可信组件/原消息/nonce双证。判图在途新暂停/CAS更新优先，确定暂停给MCP结构化stop；原文字无delivery首稿失败重试不误写art。配对私有proof加入真实expires，组件只在该截止前低频重播；服务端所有Origin/nonce/账号和原URI精确核验不放宽。
+
+Windows统一工程验证结果：scripts/gpt-art-review-engineering.mjs 17组真实临时SQLite+Sharp全部exit0，涵盖完整初图+9改/两复盘、首版通过、真文件工具路径、原图/示意/坏图/超限/格式/重复预算、账号/工作区/session、暂停晚到、recover幂等、首派发未pair与丢resume/retry响应。scripts/gpt-review-engineering.mjs旧文字/OAuth/PKCE/回调/许可模型回退及无票据retry全过；npx tsc --noEmit --incremental false最终exit0。最初Prisma客户端未生成导致的类型环境问题与Set旧编译目标错误均留原失败日志，未抬候选版本；模型与传输为隔离夹具，生产写入0、付费图片调用0。Windows完整原队列/账号/对话文字闭环亦通过。工程记录：D:/MYDR/cdoex/sd2/.cache/qa/gpt-art-autoflow-20261120/r3-*.log；这些是Windows本机路径，不冒Mac可读附件。
+
+原图资料：codex-clipboard-d5cca489-9430-4eb2-bfb1-d25e4477fe14.png，用户本次马里奥式开放世界案例，1280×915、1617194字节，SHA256=066a0bad574ea7087f6699c69edd7cdd2d273874d5e6e1c94d48d98f29f35899；Windows固定归档D:/MYDR/cdoex/sd2/materials/2026-11-20-gpt-world-review/同名文件。已通过本人正式桥传交Mac mini，job=3ecb381a-f617-4493-b278-989c81e50663（状态与接收路径需Mac查询该原job，勿重发），供理解/后续查证，不公开上传图片，不加入公开源码包。真实出图/同会话工具交回/退回改图/复验及Windows效果仍在I1原单继续，不用本工程验证代替。原方案评审任务f57a98d6-ecd0-4dcc-8a27-b6ca26f8425f仅历史诊断方案；原文字任务743b2b34-199f-41b9-8f97-1eb6f6d5e23a及原R1–R3记录保留，不覆盖结论、不重发原未知任务。
+
+发布沿原seamless1.1.2流程，冻结准确提交，核现网源/BUILD及共享发布占用后，完整Next/类型/lint/准入再切换，保留原数据库、价格/旧未知请求与相容guard，不回业务库。候选构建失败保留旧站，旧尝试不覆盖；上线后回执只说明工程部署，不代Windows真实美术验收。对应发起Windows原会话01a1f724-18ef-77f0-945e-a92f765cf2fc。
