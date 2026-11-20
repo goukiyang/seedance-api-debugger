@@ -15,7 +15,7 @@ export default {
   },
   "src/lib/bridge/gpt-review.ts": {
     "previous": "fd631a00a3d7e72d7cc76884a3f9c470b92672778fdaa54c7c8db75a941d5778",
-    "current": "5f94398a58264afe1e157e2e986da4268f320283cde5a9b64a2953b142e19180"
+    "current": "8b929fe6e564dd32a10b61ae16f687e3e0bc9ddf8b4ea03af778e7c7762579f2"
   },
   "src/lib/bridge/review-oauth.ts": {
     "previous": null,

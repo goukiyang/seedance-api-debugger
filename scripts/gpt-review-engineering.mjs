@@ -11,11 +11,13 @@ export async function reviewFixture(){
   for(const who of ['review-a','review-b'])await db.$executeRaw`INSERT INTO "User" (id,status,password_hash) VALUES (${who},'active','fixture-only')`;
   const privacy=load('src/lib/security/private-prompts.server.ts',{'server-only':{},'node:fs':require('node:fs'),'node:crypto':crypto,'node:path':path,'../image-studio/process-provenance':{}});
   const auth=load('src/lib/auth/session.ts',{'crypto':crypto,'next/headers':{},'@/lib/prisma':{prisma:db},'./password':{},'./session-account-binding':{},'@/lib/security/private-prompt-identity.server':{}});
-  const musk=load('src/lib/integrations/musk.ts',{'node:timers/promises':{},'@/lib/prisma':{prisma:db},'@/lib/security/private-credentials.server':{},'@/lib/security/private-prompts.server':privacy,'@/lib/security/private-prompt-send.server':{}});
-  const control={failure:null,fallbackFailure:null,catalog:['isolated-fallback'],disabled:new Set()},modelCalls=[];
-  const judge={MuskApiError:musk.MuskApiError,getMuskApiSettings:async()=>({default_model:'isolated-judge'}),isMuskApiReady:()=>true,resolveMuskChatModels:async()=>control.catalog,createMuskChatCompletion:async({messages,model})=>{
+  const control={failure:null,fallbackFailure:null,catalog:['gpt-fixture-fallback'],allowedModels:[],approved:new Set(['gpt-fixture-default','gpt-fixture-fallback']),disabled:new Set(),defaultGate:null,onDefault:null},modelCalls=[];
+  const musk=load('src/lib/integrations/musk.ts',{'node:timers/promises':{},'@/lib/prisma':{prisma:db},'@/lib/security/private-credentials.server':{},'@/lib/security/private-prompts.server':privacy,'@/lib/security/private-prompt-send.server':{privateCredentialSendOrigins:()=>[{}],assertPrivateSend:({model})=>{if(!control.approved.has(model))throw new privacy.PrivatePromptError();}}});
+  const localPrivacy={...privacy,privatePromptPolicy:()=>({destinations:[{provider:'musk',models:control.catalog}]})};
+  const judge={MuskApiError:musk.MuskApiError,getMuskApiSettings:async()=>({enabled:true,base_url:'https://fixture.invalid/',api_key:'fixture-only',default_model:'gpt-fixture-default',allowed_models:control.allowedModels}),isMuskApiReady:()=>true,resolveMuskChatModels:musk.resolveMuskChatModels,createMuskChatCompletion:async({messages,model})=>{
     modelCalls.push(model);
-    const failure=model==='isolated-judge'?control.failure:control.fallbackFailure;
+    if(model==='gpt-fixture-default'&&control.defaultGate){control.onDefault();await control.defaultGate;}
+    const failure=model==='gpt-fixture-default'?control.failure:control.fallbackFailure;
     if(failure)throw failure;
 
     const m=JSON.parse(messages[1].content[0].text);modelInputs.push(m);
@@ -24,7 +26,7 @@ export async function reviewFixture(){
     if(final&&decision!=='pass')v.recap={goal:'同时交付甲乙',diagnosis:'反复只修改甲，方向偏离乙',direction:'先完成乙',experiment:'新增乙项说明',check:'核对甲乙各有一句成品'};
     return {content:JSON.stringify(v),model};
   }};
-  const q=load('src/lib/bridge/gpt-review.ts',{'node:crypto':crypto,'@/lib/prisma':{prisma:db},'@/lib/auth/session':auth,'@/lib/security/private-prompts.server':privacy,'@/lib/integrations/musk':judge,'@/lib/pricing/model-access.server':{assertSupplementaryModelEnabled:async(_kind,model)=>{if(control.disabled.has(model))throw new auth.AuthError('该模型已在费率页关闭',403);}}});
+  const q=load('src/lib/bridge/gpt-review.ts',{'node:crypto':crypto,'@/lib/prisma':{prisma:db},'@/lib/auth/session':auth,'@/lib/security/private-prompts.server':localPrivacy,'@/lib/integrations/musk':judge,'@/lib/pricing/model-access.server':{assertSupplementaryModelEnabled:async(_kind,model)=>{if(control.disabled.has(model))throw new auth.AuthError('该模型已在费率页关闭',403);}}});
   const grant=load('src/lib/bridge/review-oauth.ts',{'node:crypto':crypto,'@/lib/prisma':{prisma:db}});
   const request=load('src/lib/bridge/review-request.ts',{'./gpt-review':q}),image=load('src/lib/bridge/review-tool-image.ts',{'./gpt-review':q});
   const pairing=load('src/lib/bridge/review-pairing.ts',{'node:crypto':crypto,'@/lib/prisma':{prisma:db},'./gpt-review':q});
@@ -121,6 +123,8 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
     assert.equal((await post('recaps')).data.rows[0].id,id2);assert.equal((await post('list')).data.total,2);
     assert.ok((await f.storage.readBridgeStorageUsage('review-a')).categories.find(r=>r.kind==='reviews').bytes>0);
     assert.throws(()=>f.q.parseVerdict('这版应该可以了',false));assert.throws(()=>f.q.parseVerdict('{"decision":"revise","reason":"x","evidence":"x","change":"x"}',true));
+    const previousFetch=global.fetch;let directoryRequests=0;global.fetch=async()=>{directoryRequests++;throw Error('Unexpected directory request');};
+    try{
     const unavailable=()=>new f.musk.MuskApiError('upstream private diagnostic',503,'musk_api_model_unavailable');
     async function judged(){
       const task=await f.q.startReview('review-a',{...base,id:crypto.randomUUID()});
@@ -129,14 +133,42 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
       return {result,calls:f.modelCalls.slice(start)};
     }
     f.control.failure=unavailable();
-    let check=await judged();assert.equal(check.result.phase,'feedback');assert.equal(check.result.rounds[0].model,'isolated-fallback');assert.deepEqual(check.calls,['isolated-judge','isolated-fallback']);
-    f.control.disabled.add('isolated-fallback');check=await judged();assert.equal(check.result.phase,'error');assert.match(check.result.note,/没有已获许可/);assert.deepEqual(check.calls,['isolated-judge']);f.control.disabled.clear();
-    f.control.catalog=[];check=await judged();assert.equal(check.result.phase,'error');assert.deepEqual(check.calls,['isolated-judge']);
-    f.control.catalog=['isolated-fallback','never-attempted'];f.control.fallbackFailure=unavailable();check=await judged();assert.equal(check.result.phase,'error');assert.deepEqual(check.calls,['isolated-judge','isolated-fallback']);assert.ok(!check.result.note.includes('private diagnostic'));f.control.fallbackFailure=null;
+    f.control.catalog=['gpt-fixture-unapproved','gpt-fixture-fallback'];
+    let check=await judged();assert.equal(check.result.phase,'feedback');assert.equal(check.result.rounds[0].model,'gpt-fixture-fallback');assert.deepEqual(check.calls,['gpt-fixture-default','gpt-fixture-fallback']);
+    f.control.disabled.add('gpt-fixture-fallback');check=await judged();assert.equal(check.result.phase,'error');assert.match(check.result.note,/没有已获许可/);assert.deepEqual(check.calls,['gpt-fixture-default']);f.control.disabled.clear();
+    f.control.catalog=[];check=await judged();assert.equal(check.result.phase,'error');assert.deepEqual(check.calls,['gpt-fixture-default']);
+    f.control.catalog=['gpt-fixture-fallback','gpt-fixture-never'];f.control.fallbackFailure=unavailable();check=await judged();assert.equal(check.result.phase,'error');assert.deepEqual(check.calls,['gpt-fixture-default','gpt-fixture-fallback']);assert.ok(!check.result.note.includes('private diagnostic'));f.control.fallbackFailure=null;
     for(const error of [new f.musk.MuskApiError('secret upstream body',502,'musk_api_empty_content'),new f.privacy.PrivatePromptError()]){
-      f.control.failure=error;check=await judged();assert.equal(check.result.phase,'error');assert.deepEqual(check.calls,['isolated-judge']);assert.ok(!check.result.note.includes('secret'));assert.notEqual(check.result.note,'验收服务暂时未返回完整结论，可重试当前稿件');
+      f.control.failure=error;check=await judged();assert.equal(check.result.phase,'error');assert.deepEqual(check.calls,['gpt-fixture-default']);assert.ok(!check.result.note.includes('secret'));assert.notEqual(check.result.note,'验收服务暂时未返回完整结论，可重试当前稿件');
     }
-    f.control.failure=null;f.control.disabled.add('isolated-judge');check=await judged();assert.equal(check.result.phase,'error');assert.deepEqual(check.calls,[]);assert.match(check.result.note,/关闭/);
+    f.control.failure=null;f.control.disabled.add('gpt-fixture-default');check=await judged();assert.equal(check.result.phase,'error');assert.deepEqual(check.calls,[]);assert.match(check.result.note,/关闭/);
+    f.control.disabled.clear();f.control.failure=unavailable();f.control.catalog=['gpt-fixture-fallback'];
+    for(const newClaim of [false,true]){
+      let releaseDefault,enteredDefault;
+      const entered=new Promise(resolve=>{enteredDefault=resolve;});
+      f.control.defaultGate=new Promise(resolve=>{releaseDefault=resolve;});f.control.onDefault=enteredDefault;
+      const task=await f.q.startReview('review-a',{...base,id:crypto.randomUUID()});
+      const start=f.modelCalls.length,pending=f.q.judgeReview('review-a',await f.q.getTask('review-a',scope,task.id));
+      await entered;
+      const claim=await f.q.getTask('review-a',scope,task.id);assert.equal(claim.task.phase,'judging');
+      const paused=await f.q.updateReview('review-a',claim,{op:'pause',version:claim.task.version});
+      let newer,finishNew;
+      if(newClaim){
+        await f.q.updateReview('review-a',await f.q.getTask('review-a',scope,task.id),{op:'resume',version:paused.version});
+        let enteredNew;const claimed=new Promise(resolve=>{enteredNew=resolve;});
+        newer=f.q.judgeReview('review-a',await f.q.getTask('review-a',scope,task.id),async()=>{enteredNew();return new Promise(resolve=>{finishNew=resolve;});});
+        await claimed;
+      }
+      const expected=await f.q.getTask('review-a',scope,task.id);assert.equal(expected.task.phase,newClaim?'judging':'paused');assert.notEqual(expected.task.version,claim.task.version);
+      releaseDefault();const after=await pending;
+      assert.equal(after.phase,expected.task.phase);assert.equal(after.version,expected.task.version);assert.deepEqual(f.modelCalls.slice(start),['gpt-fixture-default']);
+      if(newer){finishNew({result:{decision:'revise',reason:'fixture',evidence:'fixture',change:'fixture'},model:'new-claim-fixture'});await newer;}
+      f.control.defaultGate=null;f.control.onDefault=null;
+    }
+    assert.equal(directoryRequests,0);
+    console.log('PASS actual resolver uses local approved candidates with zero directory fetch; paused and changed judging claim dispatch no fallback');
+    }finally{global.fetch=previousFetch;}
+
     console.log('PASS actual runJudge bounded approved-model fallback / actual model recorded / closed and empty catalog / no loop / specific safe errors; simulated model transport');
     console.log('PASS scoped create / one record / judge / feedback / actual changed draft / pass; real SQLite; simulated model');
     console.log('PASS two owners and workspaces with equal CID, other chat callback, pause/replay, three revisions and retrospective, storage projection, OAuth exact registered callbacks / bound redirects / PKCE single use');

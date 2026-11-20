@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
 import { AuthError } from '@/lib/auth/session';
-import { isPrivatePromptError } from '@/lib/security/private-prompts.server';
+import { isPrivatePromptError, privatePromptPolicy } from '@/lib/security/private-prompts.server';
 import { assertSupplementaryModelEnabled } from '@/lib/pricing/model-access.server';
 import { createMuskChatCompletion, getMuskApiSettings, isMuskApiReady, resolveMuskChatModels, MuskApiError, type MuskChatMessage } from '@/lib/integrations/musk';
 
@@ -118,7 +118,7 @@ export function parseVerdict(text:string, last:boolean): Verdict {
   }
   return result;
 }
-export async function judgeReview(owner:string, saved:Saved, run=runJudge) {
+export async function judgeReview(owner:string, saved:Saved, run=(task:ReviewTask)=>runJudge(owner,task)) {
   const t=saved.task;
   if(t.phase!=='ready')return t;
   const claim=await replace(owner,saved,{...t,phase:'judging',note:''});
@@ -142,7 +142,7 @@ export async function judgeReview(owner:string, saved:Saved, run=runJudge) {
   try {return (await replace(owner,claim,next)).task;}
   catch(error){if(error instanceof ReviewError && error.status===409)return (await getTask(owner,t.scope,t.id)).task;throw error;}
 }
-async function runJudge(t:ReviewTask) {
+async function runJudge(owner:string,t:ReviewTask) {
   const settings=await getMuskApiSettings();
   if(!isMuskApiReady(settings))throw new ReviewError('SD2 模型服务尚未配置',503);
   await assertSupplementaryModelEnabled('text',settings.default_model);
@@ -158,13 +158,18 @@ async function runJudge(t:ReviewTask) {
   catch(error){
     if(!(error instanceof MuskApiError) || error.code!=='musk_api_model_unavailable')throw error;
     let candidate:string|undefined;
-    for(const available of await resolveMuskChatModels(settings)){
+    const localModels=settings.allowed_models.length
+      ?[settings.default_model,...settings.allowed_models]
+      :privatePromptPolicy()?.destinations.filter(destination=>destination.provider==='musk').flatMap(destination=>destination.models)||[];
+    for(const available of await resolveMuskChatModels(settings,Array.from(new Set(localModels)))){
       if(available===model)continue;
       try{await assertSupplementaryModelEnabled('text',available);}
       catch(accessError){if(accessError instanceof AuthError && accessError.status===403)continue;throw accessError;}
       candidate=available;break;
     }
     if(!candidate)throw new ReviewError('默认验收模型没有可用通道，当前没有已获许可且开放的替代模型；本稿已保留',503);
+    const current=await getTask(owner,t.scope,t.id);
+    if(current.task.phase!=='judging' || current.task.version!==t.version)throw new ReviewError('这轮验收已暂停或更新，未发出替代模型请求',409);
     model=candidate;
     r=await complete(model);
   }
