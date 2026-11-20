@@ -4,7 +4,7 @@ const fixture=await createDirectoryFixture(),db=fixture.db;
 const seed=async(table,row)=>{const keys=Object.keys(row);await db.$executeRawUnsafe(`INSERT INTO "${table}" (${keys.map(key=>'"'+key+'"').join(',')}) VALUES (${keys.map(()=>'?').join(',')})`,...Object.values(row));};
 const category=(report,kind)=>report.categories.find(row=>row.kind===kind);
 try{
- const empty=await fixture.storage.readBridgeStorageUsage('empty');assert.equal(empty.totalBytes,0);assert.equal(empty.categories.length,6);console.log('ok a genuinely empty account reports zero confirmed plugin bytes');
+ const empty=await fixture.storage.readBridgeStorageUsage('empty');assert.equal(empty.totalBytes,0);assert.equal(empty.categories.length,7);console.log('ok a genuinely empty account reports zero confirmed plugin bytes');
  const k='bridge_gpt_directory_v1:'+'a'.repeat(64),v=JSON.stringify({name:'中文目录'});
  await db.userPreference.create({data:{user_id:'alice',key:k,value_json:v}});
  await db.userPreference.create({data:{user_id:'alice',key:k.replace(/a+$/,'b'.repeat(64)),value_json:'{}'}});

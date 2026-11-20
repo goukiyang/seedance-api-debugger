@@ -34,14 +34,32 @@ export async function reviewFixture(){
     const req=new next.NextRequest(grant.RESOURCE,{method:'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})});
     const r=await mcp.POST(req);return {status:r.status,challenge:r.headers.get('www-authenticate'),...await r.json()};
   }
-  async function authorize(user='review-a'){
+  async function authorize(user='review-a',redirect=grant.CALLBACK){
     const verifier=crypto.randomBytes(32).toString('base64url'),challenge=crypto.createHash('sha256').update(verifier).digest('base64url');
-    const params=new URLSearchParams({client_id:grant.CLIENT,resource:grant.RESOURCE,redirect_uri:grant.CALLBACK,response_type:'code',state:'fixture-state',scope:grant.SCOPE,code_challenge:challenge,code_challenge_method:'S256'});
-    const code=await grant.grantCode(user,grant.params(params));
-    const form=new URLSearchParams({grant_type:'authorization_code',code,client_id:grant.CLIENT,redirect_uri:grant.CALLBACK,resource:grant.RESOURCE,code_verifier:verifier});
+    const params=new URLSearchParams({client_id:grant.CLIENT,resource:grant.RESOURCE,redirect_uri:redirect,response_type:'code',state:'fixture-state',scope:grant.SCOPE,code_challenge:challenge,code_challenge_method:'S256'});
+    for(const invalid of ['https://example.com/callback',redirect+'?extra=1',redirect+'/', 'https://chatgpt.com/connector/oauth/*']){
+      const bad=new URLSearchParams(params);bad.set('redirect_uri',invalid);assert.throws(()=>grant.params(bad),grant.GrantError);
+    }
+    const duplicate=new URLSearchParams(params);duplicate.append('redirect_uri',redirect);assert.throws(()=>grant.params(duplicate),grant.GrantError);
+    let code;
+    if(user==='review-a'){
+      const endpoint=grant.ISSUER+'/api/bridge/review-connect/authorize?'+params;
+      const consent=await oauth.GET(new next.NextRequest(endpoint),{params:{action:'authorize'}});assert.equal(consent.status,200);
+      assert.ok(consent.headers.get('content-security-policy').includes(redirect));
+      const nonce=(await consent.text()).match(/name="nonce" value="([^"]+)"/)[1];
+      const allowed=await oauth.POST(new next.NextRequest(endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded',Origin:grant.ISSUER,Cookie:consent.headers.get('set-cookie').split(';')[0]},body:new URLSearchParams({nonce,choice:'allow'}).toString()}),{params:{action:'authorize'}});
+      assert.equal(allowed.status,303);const location=new URL(allowed.headers.get('location'));
+      assert.equal(location.origin+location.pathname,redirect);assert.equal(location.searchParams.get('state'),'fixture-state');assert.equal(location.searchParams.get('iss'),grant.ISSUER);
+      code=location.searchParams.get('code');assert.ok(code);
+    }else code=await grant.grantCode(user,grant.params(params));
+    const form=new URLSearchParams({grant_type:'authorization_code',code,client_id:grant.CLIENT,redirect_uri:redirect,resource:grant.RESOURCE,code_verifier:verifier});
     const endpoint=grant.ISSUER+'/api/bridge/review-connect/token';
     const exchange=async f=>oauth.POST(new next.NextRequest(endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:f.toString()}),{params:{action:'token'}});
     const wrong=new URLSearchParams(form);wrong.set('code_verifier',crypto.randomBytes(32).toString('base64url'));assert.ok(!(await exchange(wrong)).ok);
+    for(const invalid of [redirect===grant.CALLBACK?grant.CHATGPT_CALLBACK:grant.CALLBACK,'https://example.com/callback',redirect+'?extra=1','https://chatgpt.com/connector/oauth/*']){
+      const bad=new URLSearchParams(form);bad.set('redirect_uri',invalid);assert.ok(!(await exchange(bad)).ok);
+    }
+    const duplicateToken=new URLSearchParams(form);duplicateToken.append('redirect_uri',redirect);assert.ok(!(await exchange(duplicateToken)).ok);
     const answer=await exchange(form);assert.equal(answer.status,200);assert.ok(!(await exchange(form)).ok);
     return (await answer.json()).access_token;
   }
@@ -54,7 +72,8 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
   try{
     const init=await f.rpc('initialize',{protocolVersion:'2025-06-18'});assert.equal(init.result.capabilities.tools.constructor,Object);
     const list=await f.rpc('tools/list',{});assert.deepEqual(list.result.tools.map(t=>t.name),['link_review','submit_revision']);
-    const token=await f.authorize(),other=await f.authorize('review-b');
+    await f.authorize();
+    const token=await f.authorize('review-a',f.grant.CHATGPT_CALLBACK),other=await f.authorize('review-b');
     const id=crypto.randomUUID();const post=(op,more={},owner)=>f.api({...base,id,op,...more},owner);
     const first=await post('create');assert.equal(first.data.task.phase,'feedback');assert.equal((await post('create')).data.task.id,id);assert.equal(f.modelInputs.length,1);
     assert.equal((await post('get',{}, {user:'review-b'})).status,404);assert.equal((await post('get',{scope:'b'.repeat(64)})).status,404);
@@ -90,6 +109,6 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
     assert.ok((await f.storage.readBridgeStorageUsage('review-a')).categories.find(r=>r.kind==='reviews').bytes>0);
     assert.throws(()=>f.q.parseVerdict('这版应该可以了',false));assert.throws(()=>f.q.parseVerdict('{"decision":"revise","reason":"x","evidence":"x","change":"x"}',true));
     console.log('PASS scoped create / one record / judge / feedback / actual changed draft / pass; real SQLite; simulated model');
-    console.log('PASS two owners and workspaces with equal CID, other chat callback, pause/replay, three revisions and retrospective, storage projection, OAuth PKCE single use');
+    console.log('PASS two owners and workspaces with equal CID, other chat callback, pause/replay, three revisions and retrospective, storage projection, OAuth exact registered callbacks / bound redirects / PKCE single use');
   }finally{await f.close();}
 }

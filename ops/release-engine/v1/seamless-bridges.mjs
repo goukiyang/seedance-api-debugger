@@ -7,7 +7,7 @@ export default {
   },
   "src/app/api/bridge/review-connect/[action]/route.ts": {
     "previous": null,
-    "current": "e7ae9fe317c2026461fcef821507a352a67d31e07a831365b27b86a32bcefecd"
+    "current": "03c8ed4f0b92738788f3139588f7247bc0b6badcae622dedd41ce6c23c55f728"
   },
   "src/app/api/bridge/review-mcp/route.ts": {
     "previous": null,
@@ -19,7 +19,7 @@ export default {
   },
   "src/lib/bridge/review-oauth.ts": {
     "previous": null,
-    "current": "815d870524e158f610cdb28c90062f4812e41b6d770a98b97ff0a34ee3ea1eb4"
+    "current": "1f6411c340a089e6802f6614f73458feeaa8455557c02e6861ffddf6047be9b6"
   },
   "src/lib/bridge/review-pairing.ts": {
     "previous": null,
