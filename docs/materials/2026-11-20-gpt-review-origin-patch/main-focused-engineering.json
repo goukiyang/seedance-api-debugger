@@ -1,0 +1,256 @@
+{
+  "schema": "seamless-default-focused-engineering.v1",
+  "source": "206e67410c9c235c0e1bcf5bdc21a5e11a218d3e",
+  "passed": true,
+  "sourceSha256": {
+    "ops/release-engine/v1/seamless-bridges.mjs": "fcc87663d60fbc3940300d186b7be7fa9103ebd353b86ef5cdc15ccee2042272",
+    "package-lock.json": "2135237f29a086320db62ad4b65ccf4ac672064857a0c9b5d682d049bb63bc24",
+    "package.json": "8a7c39ccbeb13bc628709ca83f1ff11d18062f773f1645ce5ba670a72c87c037",
+    "scripts/check-image-studio-external-access.ts": "520f72d7673d041b05c9d1c0a31414bcf1804c794fdd64bee98d55faf0fa7b79",
+    "scripts/check-image-studio-external-freeze.ts": "3c2499a8cc93e5cfd38814ff8174cd455b06059f44c6a5884fa4c5f572449b1f",
+    "scripts/gpt-review-engineering.mjs": "60216f600cf60508191ed4daa60b77d4dfb80a4b00e0fe39dc0a6c678e0408d6",
+    "scripts/gpt-review-native-form.mjs": "dcf7709ee753bf3a7ca3801501909d35bdc7c0fadeb79346c8b2c3092a972b53",
+    "src/app/api/bridge/review-connect/[action]/route.ts": "db2d103955e42a704e31ee3ea67b2f75d93af7c4dfd78b2eb7d37cfaf09fd0e7",
+    "src/lib/bridge/gpt-review.ts": "8b929fe6e564dd32a10b61ae16f687e3e0bc9ddf8b4ea03af778e7c7762579f2",
+    "src/lib/release.ts": "34fb17cda0ab28a5d85a003590aaabb29a91f001f694b5c98f13ce75e6803281"
+  },
+  "results": [
+    {
+      "name": "focused-changed-lint",
+      "startedAt": "2026-11-20T10:19:21.580Z",
+      "finishedAt": "2026-11-20T10:19:24.904Z",
+      "exitCode": 0,
+      "log": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt05/focused-changed-lint.log",
+      "logSha256": "03a52e2742a512fd0d6e3602e84627a5c8ad163a72c8b18fe33f29b055c62b89"
+    },
+    {
+      "name": "external-access-engineering",
+      "startedAt": "2026-11-20T10:19:24.905Z",
+      "finishedAt": "2026-11-20T10:19:35.946Z",
+      "exitCode": 0,
+      "log": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt05/external-access-engineering.log",
+      "logSha256": "11ba0c9dea2ee948da818efe103c013c9dbcb5ba5e003cf8cfc177f33631fbf5"
+    },
+    {
+      "name": "external-freeze-engineering",
+      "startedAt": "2026-11-20T10:19:35.947Z",
+      "finishedAt": "2026-11-20T10:19:37.445Z",
+      "exitCode": 0,
+      "log": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt05/external-freeze-engineering.log",
+      "logSha256": "6974768950e3028c66a8d4f94fe950a77a3af5374b9e75ab893495889293c66f"
+    },
+    {
+      "name": "bridge-directory",
+      "startedAt": "2026-11-20T10:19:37.445Z",
+      "finishedAt": "2026-11-20T10:19:38.224Z",
+      "exitCode": 0,
+      "log": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt05/bridge-directory.log",
+      "logSha256": "d38cc7b7158631734bc0cab559becf93a182bb7024fad6b4c8f0d1111efc951b"
+    },
+    {
+      "name": "bridge-storage",
+      "startedAt": "2026-11-20T10:19:38.224Z",
+      "finishedAt": "2026-11-20T10:19:39.087Z",
+      "exitCode": 0,
+      "log": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt05/bridge-storage.log",
+      "logSha256": "b2f345fd762f0bc542660ef3db2e0b5a7bcb2b5ac6815bc76a77e3ea8e643c6c"
+    },
+    {
+      "name": "gpt-review",
+      "startedAt": "2026-11-20T10:19:39.087Z",
+      "finishedAt": "2026-11-20T10:19:40.885Z",
+      "exitCode": 0,
+      "log": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt05/gpt-review.log",
+      "logSha256": "33f8ce653e7d7846e727c4b087f49b0066b05c6dbb077d6d2ef78342e1a648aa"
+    },
+    {
+      "name": "reference-compatible-guard",
+      "startedAt": "2026-11-20T10:19:40.899Z",
+      "finishedAt": "2026-11-20T10:19:41.062Z",
+      "exitCode": 0,
+      "log": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt05/reference-compatible-guard.log",
+      "logSha256": "fd98e947c6019cf474a9ccdd59172f82109d721d1742517e1f935949d8b22477"
+    }
+  ],
+  "referenceMedia": {
+    "compatible-guard": {
+      "script": "scripts/seamless-compatible-guard-engineering.mjs",
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "sourceSha256": {
+        "scripts/seamless-compatible-guard-engineering.mjs": "fce193920f0f24171888ea6a2c4330f3699bf0c2bc3513166eb6d141700a4a11",
+        "ops/release-engine/v1/seamless-web.mjs": "0ee8927c336be39c500516036c1be0efd4a3f8fee1f78d331cc9af511aaa1634",
+        "ops/release-engine/v1/seamless-policy.mjs": "44059292d2eb80f0ffb26f2a303fea6cd379e7ad13287798d55aceb8f1cc56be",
+        "ops/release-engine/v1/seamless-bridges.mjs": "fcc87663d60fbc3940300d186b7be7fa9103ebd353b86ef5cdc15ccee2042272"
+      },
+      "log": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt05/reference-compatible-guard.log",
+      "logSha256": "fd98e947c6019cf474a9ccdd59172f82109d721d1742517e1f935949d8b22477"
+    }
+  },
+  "nativeForm": {
+    "schema": "sd2-gpt-review-native-form.v1",
+    "passed": true,
+    "browser": "Google Chrome",
+    "browserVersion": "157.0.8103.79",
+    "sourceSha256": {
+      "src/app/api/bridge/review-connect/[action]/route.ts": "db2d103955e42a704e31ee3ea67b2f75d93af7c4dfd78b2eb7d37cfaf09fd0e7",
+      "src/lib/bridge/review-oauth.ts": "1f6411c340a089e6802f6614f73458feeaa8455557c02e6861ffddf6047be9b6",
+      "scripts/gpt-review-native-form.mjs": "dcf7709ee753bf3a7ca3801501909d35bdc7c0fadeb79346c8b2c3092a972b53",
+      "scripts/gpt-directory-engineering.mjs": "3061b78a6de7948dac7737b1c0e809b851e74bcedb1c1bf33dc0f204357a8292"
+    },
+    "originHeaderOverridden": false,
+    "allNetworkIntercepted": true,
+    "callbackNavigationExercised": false,
+    "redirectAdapter": "Actual handler 303 and callback validated in process; browser receives isolated completion page",
+    "productionDatabaseOpened": false,
+    "productionWrites": 0,
+    "paidCalls": 0,
+    "results": [
+      {
+        "name": "old-policy-control",
+        "origin": "null",
+        "referer": null,
+        "fetchSite": null,
+        "choice": "allow",
+        "status": 403,
+        "codeIssued": false,
+        "pkceSingleUse": false
+      },
+      {
+        "name": "registered-legacy-callback",
+        "origin": "https://sd2.youdooart.com",
+        "referer": "https://sd2.youdooart.com/",
+        "fetchSite": null,
+        "choice": "allow",
+        "status": 303,
+        "codeIssued": true,
+        "pkceSingleUse": true
+      },
+      {
+        "name": "registered-actual-callback",
+        "origin": "https://sd2.youdooart.com",
+        "referer": "https://sd2.youdooart.com/",
+        "fetchSite": null,
+        "choice": "allow",
+        "status": 303,
+        "codeIssued": true,
+        "pkceSingleUse": true
+      },
+      {
+        "name": "nonce-mismatch",
+        "origin": "https://sd2.youdooart.com",
+        "referer": "https://sd2.youdooart.com/",
+        "fetchSite": null,
+        "choice": "allow",
+        "status": 403,
+        "codeIssued": false,
+        "pkceSingleUse": false
+      },
+      {
+        "name": "account-mismatch",
+        "origin": "https://sd2.youdooart.com",
+        "referer": "https://sd2.youdooart.com/",
+        "fetchSite": null,
+        "choice": "allow",
+        "status": 403,
+        "codeIssued": false,
+        "pkceSingleUse": false
+      }
+    ]
+  },
+  "realJudge": {
+    "sourceSha256": {
+      "src/lib/bridge/gpt-review.ts": "8b929fe6e564dd32a10b61ae16f687e3e0bc9ddf8b4ea03af778e7c7762579f2"
+    },
+    "preflight": {
+      "preflightPassed": true,
+      "model": "gpt-5.5",
+      "fetches": 0,
+      "productionTaskWrites": 0
+    },
+    "result": {
+      "passed": true,
+      "inMemoryClaimCopy": true,
+      "originalTaskUnchanged": true,
+      "directoryRequests": 0,
+      "transports": [
+        {
+          "operation": "chat/completions",
+          "model": "gpt-5.5",
+          "redirectPolicy": "error",
+          "status": 503
+        },
+        {
+          "operation": "chat/completions",
+          "model": "gpt-5.6-luna",
+          "redirectPolicy": "error",
+          "status": 200
+        }
+      ],
+      "sourceSha256": "8b929fe6e564dd32a10b61ae16f687e3e0bc9ddf8b4ea03af778e7c7762579f2",
+      "decision": "revise",
+      "missingB": true,
+      "model": "gpt-5.6-luna",
+      "fetches": 2,
+      "elapsedMs": 14761,
+      "productionTaskWrites": 0
+    },
+    "modelRequests": 2,
+    "catalogRequests": 0,
+    "defaultModelUnchanged": "gpt-5.5",
+    "testTaskUnmodified": true,
+    "functionalAcceptance": "windows-original-task-retry-pending"
+  },
+  "externalEngineering": {
+    "access": {
+      "script": "scripts/check-image-studio-external-access.ts",
+      "scriptSha256": "520f72d7673d041b05c9d1c0a31414bcf1804c794fdd64bee98d55faf0fa7b79",
+      "checks": [
+        "company_boundary_default_closed_and_admin_authorization",
+        "global_switch_new_accounts_and_templates_legacy_pilot_cas_receipts_no_directory_decryption",
+        "real_definition_executes_server_source_and_external_dto_is_private",
+        "full_shared_directory_exceeds_read_queue_without_rejection_or_private_rows",
+        "current_valid_dependencies_auto_apply_and_fixed_source_stays_server_only",
+        "actual_raw_media_route_allows_owner_and_denies_source_alias_other_and_anonymous",
+        "closed_keeps_owned_history_and_media_disabled_identity_rejected_no_network"
+      ],
+      "summary": {
+        "synthetic": true,
+        "checks": 7,
+        "supplierCalls": 0,
+        "database": "temporary-isolated"
+      }
+    },
+    "freeze": {
+      "script": "scripts/check-image-studio-external-freeze.ts",
+      "scriptSha256": "3c2499a8cc93e5cfd38814ff8174cd455b06059f44c6a5884fa4c5f572449b1f",
+      "checks": [
+        "final-child-id-private-bindings",
+        "source-skill-version-preserved",
+        "no-plaintext-prepared-persistence",
+        "two-child-consistency",
+        "wrong-id-rejected",
+        "global-and-legacy-admission-respect-closed-and-live-owner"
+      ],
+      "summary": {
+        "synthetic": true,
+        "checks": [
+          "final-child-id-private-bindings",
+          "source-skill-version-preserved",
+          "no-plaintext-prepared-persistence",
+          "two-child-consistency",
+          "wrong-id-rejected",
+          "global-and-legacy-admission-respect-closed-and-live-owner"
+        ],
+        "supplierCalls": 0,
+        "productionWrites": 0
+      }
+    }
+  },
+  "externalEngineeringExecuted": true,
+  "productionDatabaseOpened": false,
+  "productionWrites": 0,
+  "paidRequests": 0,
+  "browserAcceptance": false
+}

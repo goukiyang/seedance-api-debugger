@@ -61,3 +61,28 @@ Windows真实页面点击“允许交回新稿”仍403。已确认授权HTML的
 默认请求在途允许用户暂停；候选选定后立即按owner/scope/id重读，须仍judging且等于本次claim.version才发。已暂停/换版返回当前状态，不发候选；不声称撤回已发默认请求。真实SQLite回归包含默认挂起→pause完成→503后候选0/仍paused，以及pause/resume后被新轮领取、phase仍judging但version不同→旧轮候选0，均通过。
 
 最终实现真实小规模验证通过：仅两个chat/completions POST，gpt-5.5=503、gpt-5.6-luna=200，二者redirect:error；目录请求0。原材料内存judging副本判revise且缺乙，14.761秒；原生产任务逐字核同、写入0。调用实际runJudge和现有私密/启用门，不改全局默认、用户参数、通道、凭据或费用许可。原生Chrome相关源未变，复用已通过证据；R1–R3仍待Windows唯一原记录继续真实验收。
+
+
+## 0.150.1 最终冻结、构建与保护发布（dispatch11–12）
+
+已部署，待Windows手动验收。2026-11-20 18:32发布后检查完成：实际源码 `206e67410c9c235c0e1bcf5bdc21a5e11a218d3e`、版本0.150.1、BUILD `gcWweOyH29ArS-wghkXnE`；分支已推送并核同。只完成本批授权表单与验收内部模型接续修复，原R1–R3及唯一生产测试任务继续由Windows手验。
+
+### 输入失败与集中预检
+
+- attempt03在组装时发现两文档差量未入覆盖包；attempt04在输入门发现engineeringRoot仍指向attempt03。二者均exit1、未启动Next编译、未切换；目录、输入、日志及退出码原样保留。没有改应用实现或既有校验门迁就输入。
+- attempt05集中修正本次输入：staging、工程临时根及其输出/日志/manifest关联统一派生为attempt05，原基线与guard历史路径保留。先用现有`release_contract.py`的`verify_config(..., require_engineering=True)`无构建预检，再核2604个已选跟踪文件、10个准确Git差量（8运行文件＋docs/materials/index.md、tasks/todo.md）及覆盖包blob；完整包SHA256 `96c64d79bcbb259819725b9ad7c3677d85f065c4715360601a29cd9b89abb1f4`，服务器收包核同。未再次修改发布工具逻辑。
+- attempt05源相容预检、变更lint、定向工程、全量tsc、完整Next构建及最终相容准入全部通过，build-exit0。相关原生表单和真实判定证据字节绑定准确源，未重复发模型请求或重做已有原生浏览器验证。
+
+### 实际发布与公网验证
+
+发布窗口 `gpt-review-origin-20261120-206e674`；沿原1.1.2 seamless、automatic-same-plan，run `9120b04f-e87b-43fb-82a5-15878326a34f` 八步complete、publish-exit0。七个正式服务active且工作目录同源、同BUILD，双域版本0.150.1与health ok，实际静态资源字节核同。价格配置与三条旧未知请求全字段摘要不变；没有恢复数据库，没有扩大私密许可、模型开放、费用、通道或凭据。相容guard及旧页面资源保留；探针超时0，不冒称连续零中断已测量。
+
+两个OAuth发现接口HTTP200；POST `/api/bridge/review-mcp` initialize与tools/list均200，工具仅 `link_review`、`submit_revision`，均需OAuth2 `reviews.submit`。旧/新两个精确回调匿名302登录，错误地址、通配符与额外query400。原生Chrome证明只覆盖隔离页面真实form→真实处理器/内存换码，未外跳ChatGPT；真实Connect、原任务重试、双账号隔离及完整退回改稿循环仍待Windows。
+
+恢复入口沿 `/data/video-api-debugger/release-staging/9120b04f-e87b-43fb-82a5-15878326a34f/seamless-plan.json` 和原相容guard，仅回程序不回数据。旧0.150.0成功、attempt01失败及03/04失败历史均保留。
+
+证据：[实际部署](../../docs/materials/2026-11-20-gpt-review-origin-patch/public-deployed.json)、[公网OAuth和工具清单](../../docs/materials/2026-11-20-gpt-review-origin-patch/gpt-review-public-check.json)、[完整构建](../../docs/materials/2026-11-20-gpt-review-origin-patch/main-build-success.json)、[集中输入预检](../../docs/materials/2026-11-20-gpt-review-origin-patch/manual-input-preflight.json)、[原生表单](../../docs/materials/2026-11-20-gpt-review-origin-patch/native-form-proof.json)、[最终真实判定](../../docs/materials/2026-11-20-gpt-review-origin-patch/judge-real-proof.json)。完整原始相容合同留服务器，仓库仅存脱敏摘要及原文件hash，不发布策略内容。
+
+2026-11-20 18:34已通过原CX路由单次回执到Windows原会话；实际desktop-native steer、confirmed/received，未等待ACK，不把投递受理当Windows功能完成。见[回执受理结果](../../docs/materials/2026-11-20-gpt-review-origin-patch/windows-final-receipt.json)。
+
+本轮新发现的线索与问题：未新增任务外问题。

@@ -1,0 +1,43 @@
+{
+  "sourceSha256": {
+    "src/lib/bridge/gpt-review.ts": "8b929fe6e564dd32a10b61ae16f687e3e0bc9ddf8b4ea03af778e7c7762579f2"
+  },
+  "preflight": {
+    "preflightPassed": true,
+    "model": "gpt-5.5",
+    "fetches": 0,
+    "productionTaskWrites": 0
+  },
+  "result": {
+    "passed": true,
+    "inMemoryClaimCopy": true,
+    "originalTaskUnchanged": true,
+    "directoryRequests": 0,
+    "transports": [
+      {
+        "operation": "chat/completions",
+        "model": "gpt-5.5",
+        "redirectPolicy": "error",
+        "status": 503
+      },
+      {
+        "operation": "chat/completions",
+        "model": "gpt-5.6-luna",
+        "redirectPolicy": "error",
+        "status": 200
+      }
+    ],
+    "sourceSha256": "8b929fe6e564dd32a10b61ae16f687e3e0bc9ddf8b4ea03af778e7c7762579f2",
+    "decision": "revise",
+    "missingB": true,
+    "model": "gpt-5.6-luna",
+    "fetches": 2,
+    "elapsedMs": 14761,
+    "productionTaskWrites": 0
+  },
+  "modelRequests": 2,
+  "catalogRequests": 0,
+  "defaultModelUnchanged": "gpt-5.5",
+  "testTaskUnmodified": true,
+  "functionalAcceptance": "windows-original-task-retry-pending"
+}

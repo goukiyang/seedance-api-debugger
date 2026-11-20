@@ -1,0 +1,13 @@
+{
+  "exit": 1,
+  "stage": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt03",
+  "failure": "assemble-source Git blob mismatch for docs/materials/index.md",
+  "nextBuildStarted": false,
+  "cutoverStarted": false,
+  "artifacts": {
+    "build-exit.txt": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+    "controller.log": "73c724d4208db514214510b38cc7dae02c63a4168a229e121290800d110e33c0",
+    "main-git-tree.json": "7202fff5bcb3ca07cd577be9b8e545892c9a56f361bd7523dae0d07e98b77f8e",
+    "release-input.json": "c499205518e002fc1ffc6b3a28b72d452f4c1da755bfc317a55446a5a9215504"
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "schema": "sd2-source-pair-archival-summary.v1",
+  "originalSha256": "32d32cc72e53e4bf48419b5722067ef39bee2a4ad6f5a96b15256cda93b23018",
+  "originalRetainedAt": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt05/source-pair-contract.json",
+  "policyAndConfigurationOmitted": true,
+  "passed": true,
+  "baseline": {
+    "source": "ccc0474af5e2e41c561b3e8b4e2cc0691fa35791",
+    "version": "0.150.0",
+    "build": "TAQR8fhGfagEQj0l6mvrk"
+  },
+  "main": {
+    "source": "206e67410c9c235c0e1bcf5bdc21a5e11a218d3e",
+    "version": "0.150.1",
+    "build": "gcWweOyH29ArS-wghkXnE"
+  },
+  "guard": {
+    "readerContract": "works-method-reader.1",
+    "cutoutReaderContract": "cutout-owner-reader.1",
+    "bodyPairReaderContract": "character-body-pair-reader.1",
+    "recipeReaderContract": "character-lab-recipe-reader.1",
+    "contextReaderContract": "character-independent-context.1",
+    "gridReaderContract": "character-explicit-grid.1",
+    "version": "0.148.23+points-pricing-guard.1",
+    "source": "eacd05ecb8080166a71daccfa43fb63d8d23da60",
+    "build": "sQ39rb_c1TBf2KqmFxvUz"
+  },
+  "noSchemaChange": true,
+  "migrationsUnchanged": true,
+  "noDataFormatChange": true,
+  "oldPrismaModelsPreserved": true,
+  "noExistingRowsRewritten": true,
+  "programOnlyRecovery": true,
+  "thisReleaseNoSchemaChange": true,
+  "changedFiles": [
+    "docs/materials/index.md",
+    "ops/release-engine/v1/seamless-bridges.mjs",
+    "package-lock.json",
+    "package.json",
+    "scripts/gpt-review-engineering.mjs",
+    "scripts/gpt-review-native-form.mjs",
+    "src/app/api/bridge/review-connect/[action]/route.ts",
+    "src/lib/bridge/gpt-review.ts",
+    "src/lib/release.ts",
+    "tasks/todo.md"
+  ],
+  "nonRuntimeSourceFiles": [
+    "docs/materials/index.md",
+    "tasks/todo.md"
+  ],
+  "mainTypesProcessReceiptSha256": "ee170ed4ec02d0da7e39428aa5df39fee7e38790bc70f3724e5b646f568ec054",
+  "mainNextProcessReceiptSha256": "2f5a62e6edfe24d26405c0265ac54fa89d9f1bcc22146c6badc201fc4fc9c16b",
+  "guardWriteFlagsDisabled": 11,
+  "productionWritesByFixture": 0
+}

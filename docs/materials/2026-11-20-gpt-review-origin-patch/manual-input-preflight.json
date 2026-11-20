@@ -1,0 +1,15 @@
+{
+  "source": "206e67410c9c235c0e1bcf5bdc21a5e11a218d3e",
+  "offlineConfigPassed": true,
+  "directoryRelationPassed": true,
+  "gitDeltaCount": 10,
+  "runtimeDelta": 8,
+  "nonRuntimeDelta": [
+    "docs/materials/index.md",
+    "tasks/todo.md"
+  ],
+  "overrideGitBlobsPassed": true,
+  "sourceCount": 2604,
+  "releaseToolLogicChanged": false,
+  "sourceAndFunctionalProofsUnchanged": true
+}

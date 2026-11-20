@@ -1439,4 +1439,4 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 <!-- /MV-RECORDS02-20261113 -->
 
 
-- GPT 验收后台0.150.0已保护部署：ccc0474af / BUILD TAQR8fhGfagEQj0l6mvrk；七服务及双域健康、OAuth双发现和tools/list通过，attempt01失败历史/旧未知请求/价格保护保留。Windows真实账号原对话功能待用户手验。见 [发布原单](tasks/todo/2026-11-20-gpt-background-review-release.md)。
+- GPT 验收后台0.150.1已保护部署：206e67410 / BUILD gcWweOyH29ArS-wghkXnE；原生授权表单、有限模型接续及目录/暂停保护已补修，七服务、双域健康、OAuth双发现和tools/list通过。attempt03/04输入失败原证保留，attempt05集中预检与完整构建通过；Windows唯一原任务及R1–R3真实功能待手验。见 [发布原单](tasks/todo/2026-11-20-gpt-background-review-release.md)。
