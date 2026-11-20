@@ -681,3 +681,5 @@ v0.146.0已部署，待用户手动验收；原卡片与三批共用链、26组�
 
 最终v0.148.19 / 6766547cde553f7c07b40f705fd14764fa8a4168 / BUILD Nu4W4381UImPVWbQe9mgE，run f1bb7bbe-03c7-4817-967a-38f94229d89d；根目录收纳attempt03最终构建/八阶段发布、公网JS及history-css-public.json（双域CSS字节一致）、原unknown/价格与下载自然交接保护。attempt01保存v18原证，attempt02保存294d698d未部署候选的成功构建；原红/绿换帧复现及history-request.png保留。36项隔离工程零真实生成/生产写入，功能验收仍用户手动。
 <!-- /MV-RECORDS02-20261113 -->
+
+- GPT验收后台0.150.0保护发布：真实部署、OAuth/工具清单、完整构建与attempt01失败摘要；来源为服务器原attempt02，未含凭据或用户内容。见 [部署结果](2026-11-20-gpt-background-review/public-deployed.json)、[OAuth验证](2026-11-20-gpt-background-review/gpt-review-public-check.json)及 [原工单](../../tasks/todo/2026-11-20-gpt-background-review-release.md)。

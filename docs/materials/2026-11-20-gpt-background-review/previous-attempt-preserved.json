@@ -1,0 +1,15 @@
+{
+  "previousAttempt": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt01",
+  "newAttempt": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt02",
+  "previousSource": "efe282e5c574913887e7e06348848511add4f37d",
+  "failure": "bridge-storage engineering assertion expected 6 categories, actual 7",
+  "cutoverStarted": false,
+  "sha256": {
+    "build-controller.log": "03d45c7b56a538c98baedbd104fca3f36499b3745184941c9df8be6b0fcb2251",
+    "build-exit.txt": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+    "bridge-storage.log": "8e8899a5e6745e7fac6fee56effee93c739e4522ac58023d59fd2dabb9d90248",
+    "release-input.json": "8f021949289061b7ae52ab5cac2120b15ab0d1dcf428b17f64ccc401863ca561",
+    "main-source.json": "26cb9422546c2f448c4d87dffffe6ab47b936aec896596a3e2dfd24c522c9229",
+    "source-compatibility-preflight.json": "924aaae25dcf79c9e3b574dbded1f157b36c92ff59988de6a0deaa510d4952f4"
+  }
+}

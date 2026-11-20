@@ -1,0 +1,18 @@
+{
+  "kind": "main",
+  "source": "ccc0474af5e2e41c561b3e8b4e2cc0691fa35791",
+  "version": "0.150.0",
+  "build": "TAQR8fhGfagEQj0l6mvrk",
+  "completedAt": "2026-11-20T08:53:34.071919+00:00",
+  "fullNextBuildPassed": true,
+  "fullTypeAndLintIncluded": true,
+  "isolatedBuildDatabase": true,
+  "deployed": false,
+  "nextProcessReceiptSha256": "d398fe111a541e5ae8b6ccf1c0d4585b8d18983e3f3242a35c71f7efefca8f5f",
+  "typesProcessReceiptSha256": "b52959bf854a3bf9d6e820b1ba09f8c6035e36ef1c806c35a15fdfd4ce8749f6",
+  "stagingRoot": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt02",
+  "sourceManifestSha256": "eaee358710d4364600364f39972cfa9468244b7e18da583e494e84e70e699e57",
+  "nextBuildLogSha256": "859cf1f8f91839e7096f727a796935457cc2a3e29d8f7a5cc36007bbec0b5ad4",
+  "completeTypesLogSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "pricingPreparedSha256": "048799c76a2a8f7b33296f8254fb188fe25a789183e4b4baf78cedd22cfd36d4"
+}

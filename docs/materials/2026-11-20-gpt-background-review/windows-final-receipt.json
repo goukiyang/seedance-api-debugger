@@ -1,0 +1,21 @@
+{
+  "target": "win:01a1f724-18ef-77f0-945e-a92f765cf2fc",
+  "task_id": "sd2-gpt-background-review-20261120",
+  "dispatch_id": "sd2-review-real-callback-03",
+  "intent_id": "sd2-gpt-background-review-20261120-final-ccc0474af",
+  "result": {
+    "http_status": 200,
+    "body": {
+      "ok": true,
+      "thread_id": "01a1f724-18ef-77f0-945e-a92f765cf2fc",
+      "queued": true,
+      "delivery_state": "queued",
+      "queueId": "01a1f82e-f0b0-7362-be36-2a64f74a5aa4",
+      "clientUserMessageId": "e4112311-23ef-49ed-9d9b-2cb9c47dfde7",
+      "mode": "desktop-native",
+      "submitted": true,
+      "confirmed": true,
+      "intent_id": "sd2-gpt-background-review-20261120-final-ccc0474af"
+    }
+  }
+}
