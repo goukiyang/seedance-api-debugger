@@ -1,5 +1,38 @@
 // Exact additive bridges admitted from reviewed source pairs.
 export default {
+  // The review service uses separate, account-owned storage keys.
+  "src/app/api/bridge/gpt-reviews/route.ts": {
+    "previous": null,
+    "current": "698cd0ea346eb8772046d83a72279d05ccdf729adc23a9aca618ee806c43d367"
+  },
+  "src/app/api/bridge/review-connect/[action]/route.ts": {
+    "previous": null,
+    "current": "e7ae9fe317c2026461fcef821507a352a67d31e07a831365b27b86a32bcefecd"
+  },
+  "src/app/api/bridge/review-mcp/route.ts": {
+    "previous": null,
+    "current": "86de78b56b09153e661ef583616c8a348540448c9904e2ce04999ae476419796"
+  },
+  "src/lib/bridge/gpt-review.ts": {
+    "previous": null,
+    "current": "fd631a00a3d7e72d7cc76884a3f9c470b92672778fdaa54c7c8db75a941d5778"
+  },
+  "src/lib/bridge/review-oauth.ts": {
+    "previous": null,
+    "current": "815d870524e158f610cdb28c90062f4812e41b6d770a98b97ff0a34ee3ea1eb4"
+  },
+  "src/lib/bridge/review-pairing.ts": {
+    "previous": null,
+    "current": "33d9560bfaa7231081e7157274ac542c607a820c472e890da2e0bf7c82f5de67"
+  },
+  "src/lib/bridge/review-request.ts": {
+    "previous": null,
+    "current": "74c887a13b4ea4be07d49a2950adaf2b9dc7831a7ec7f7db9c2ebc857b05af51"
+  },
+  "src/lib/bridge/review-tool-image.ts": {
+    "previous": null,
+    "current": "d97523bd3fcad6809fa086762b9570099cb9379eb813f188ebe2ee054fc8730b"
+  },
   // New account-private UserPreference namespace; no schema or existing writer protocol changes.
   "src/app/api/bridge/gpt-directory/route.ts": {
     "previous": null,
@@ -15,8 +48,8 @@ export default {
     "current": "cf473257c8bbe4073029460651c3521215c2ce456d926007d832144e237e3e93"
   },
   "src/lib/bridge/storage-usage.ts": {
-    "previous": null,
-    "current": "783b956ce8f1d7ef59bf3aa6c4b92fc83ec7e287d60843bbb56987c5ffa82e74"
+    "previous": "783b956ce8f1d7ef59bf3aa6c4b92fc83ec7e287d60843bbb56987c5ffa82e74",
+    "current": "c628e1dd7abd604fadf10a513a2c883cfefd975985b4d32da71cb70a2626d105"
   },
   "src/app/api/image-studio/gallery/tags/route.ts": {
     "previous": null,

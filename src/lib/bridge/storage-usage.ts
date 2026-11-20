@@ -33,10 +33,10 @@ export async function readBridgeStorageUsage(userId: string) {
         json_each(CASE WHEN json_valid(n.metadata_json) THEN n.metadata_json ELSE '{}' END, '$.preparation.attachments.items') j
         WHERE n.type IN ('feedback_feishu_v1','feedback_ack_feishu_v1') AND j.type = 'object'
     ), payloads AS (
-      SELECT CASE WHEN substr(p.key,1,length('bridge_gpt_directory_v1:')) = 'bridge_gpt_directory_v1:' THEN 'directory' ELSE 'settings' END AS kind,
+      SELECT CASE WHEN substr(p.key,1,length('bridge_gpt_directory_v1:')) = 'bridge_gpt_directory_v1:' THEN 'directory' WHEN substr(p.key,1,18) = 'bridge_gpt_review_' THEN 'reviews' ELSE 'settings' END AS kind,
         length(CAST(p.key AS BLOB)) + length(CAST(p.value_json AS BLOB)) AS bytes
       FROM "UserPreference" p WHERE p.user_id = ${userId} AND
-        (substr(p.key,1,length('bridge_gpt_directory_v1:')) = 'bridge_gpt_directory_v1:' OR p.key IN ('bridge_devices_v1','bridge.feishu.rate.v1'))
+        (substr(p.key,1,length('bridge_gpt_directory_v1:')) = 'bridge_gpt_directory_v1:' OR substr(p.key,1,18) = 'bridge_gpt_review_' OR p.key IN ('bridge_devices_v1','bridge.feishu.rate.v1'))
       UNION ALL
       SELECT 'presets', length(CAST(p.id || p.owner_id || p.name || p.items_json || COALESCE(p.client_id,'') || COALESCE(p.team_id,'') || COALESCE(p.copied_from,'') AS BLOB))
         FROM "BridgeQueuePreset" p WHERE p.owner_id = ${userId}
@@ -94,7 +94,7 @@ export async function readBridgeStorageUsage(userId: string) {
     if (!Number.isSafeInteger(result) || result < 0) throw Error('storage_usage_invalid');
     return result;
   };
-  const categories = ['directory','presets','settings','reports','feedback','attachments'].map(kind => {
+  const categories = ['directory','reviews','presets','settings','reports','feedback','attachments'].map(kind => {
     const row = rows.find(value => value.kind === kind);
     return { kind, bytes: row ? safe(row.bytes) : 0, records: row ? safe(row.records) : 0 };
   });

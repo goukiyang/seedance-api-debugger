@@ -48,7 +48,7 @@ export async function createDirectoryFixture() {
     }catch(error){res.writeHead(500);res.end(JSON.stringify({ok:false,error:error.message}));}
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-  return {service,routes,storage,db,url:'http://127.0.0.1:'+server.address().port+'/api/bridge/gpt-directory',storageUrl:'http://127.0.0.1:'+server.address().port+'/api/bridge/storage-usage',database,close:async()=>{await new Promise(resolve=>server.close(resolve));await db.$disconnect();}};
+  return {service,routes,storage,db,load,url:'http://127.0.0.1:'+server.address().port+'/api/bridge/gpt-directory',storageUrl:'http://127.0.0.1:'+server.address().port+'/api/bridge/storage-usage',database,close:async()=>{await new Promise(resolve=>server.close(resolve));await db.$disconnect();}};
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   const fixture=await createDirectoryFixture(),scope='a'.repeat(64),project={id:'g-p-one',name:'项目一',color:'rgb(173,123,249)',icon:''};
