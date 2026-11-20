@@ -1,10 +1,10 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '对话后台验收',
+  title: '修复对话验收连接',
   outline: [
-    '每个验收任务保存原稿、历次修改和结论',
-    '退回意见交回原对话，三次修改仍未通过会给出方向复盘'
+    '修复授权确认后无法交回新稿的问题',
+    '验收模型无可用通道时有限接续，失败保留原稿和具体原因'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

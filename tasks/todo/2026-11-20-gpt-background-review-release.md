@@ -30,3 +30,12 @@
 本轮新发现的线索与问题：未新增任务外问题。
 
 Windows原会话最终回执已单次提交；原始受理结果见 [回执记录](../../docs/materials/2026-11-20-gpt-background-review/windows-final-receipt.json)。投递受理不代表Windows功能验收完成。
+
+
+## 0.150.1：原生授权表单来源修复（dispatch sd2-review-origin-form-05）
+
+Windows真实页面点击“允许交回新稿”仍403。已确认授权HTML的no-referrer策略使原生form POST生成Origin:null，而服务端精确要求ISSUER；先前工程用手工Origin遗漏此行为。用户明确要求仅修此链路并发布0.150.1；旧0.150.0工程/发布成功记录仍保留，未代表真实账号功能通过。
+
+方案：仅授权HTML响应改strict-origin，Referer只含来源域名；令牌与重定向响应继续no-referrer；原精确Origin、nonce/账号绑定、回调白名单、PKCE与单次码不变。使用现有Playwright和实际Google Chrome隔离上下文运行原生form，未经手工设置Origin的浏览器请求原样调用真实路由及临时SQLite；保留no-referrer负对照，并核对双回调、来源/nonce/账号拒绝。全拦截页面网络，不接触生产账号或业务数据。
+
+新attempt03以已部署ccc0474af/0.150.0/TAQR8fhGfagEQj0l6mvrk为基线，沿原完整构建、相容guard与seamless流程；不改旧成功记录，不回生产数据。当前修复与原生验证准备中，尚未发布0.150.1。参考 https://fetch.spec.whatwg.org/#append-a-request-origin-header 。

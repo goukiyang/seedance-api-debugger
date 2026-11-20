@@ -18,7 +18,7 @@ export async function GET(req:NextRequest,{params:route}:Context){
     if(!user){const login=new URL('/login',ISSUER);login.searchParams.set('next',req.nextUrl.pathname+req.nextUrl.search);return NextResponse.redirect(login,302);}
     const nonce=randomBytes(24).toString('base64url');
     const body='<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>连接 SD2 验收</title><main><h1>连接 SD2 验收</h1><p>使用 '+html(user.name)+' 的 SD2 账号。ChatGPT 可将你发起的验收任务的新稿交回复验，并收到本轮结论。</p><form method="post"><input type="hidden" name="nonce" value="'+nonce+'"><button type="submit" name="choice" value="allow">允许交回新稿</button> <button name="choice" value="deny">取消</button></form></main></html>';
-    const r=new NextResponse(body,{headers:{...headers,'Content-Type':'text/html; charset=utf-8','Content-Security-Policy':"default-src 'none'; form-action 'self' "+p.redirect+"; frame-ancestors 'none'; base-uri 'none'"}});
+    const r=new NextResponse(body,{headers:{...headers,'Referrer-Policy':'strict-origin','Content-Type':'text/html; charset=utf-8','Content-Security-Policy':"default-src 'none'; form-action 'self' "+p.redirect+"; frame-ancestors 'none'; base-uri 'none'"}});
     r.cookies.set(CONSENT,bind(nonce,user.id,p),{httpOnly:true,secure:true,sameSite:'strict',path:'/',maxAge:300});return r;
   }catch(e){return reply({error:e instanceof GrantError?e.code:'invalid_request'},400);}
 }

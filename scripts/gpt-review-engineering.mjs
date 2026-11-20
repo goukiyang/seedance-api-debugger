@@ -9,14 +9,22 @@ export async function reviewFixture(){
   const fx=await createDirectoryFixture(),{load,db}=fx,modelInputs=[];
   await db.$executeRawUnsafe('CREATE TABLE "User" (id TEXT PRIMARY KEY,status TEXT,expires_at DATETIME,password_hash TEXT)');
   for(const who of ['review-a','review-b'])await db.$executeRaw`INSERT INTO "User" (id,status,password_hash) VALUES (${who},'active','fixture-only')`;
-  const judge={getMuskApiSettings:async()=>({default_model:'isolated-judge'}),isMuskApiReady:()=>true,createMuskChatCompletion:async({messages})=>{
+  const privacy=load('src/lib/security/private-prompts.server.ts',{'server-only':{},'node:fs':require('node:fs'),'node:crypto':crypto,'node:path':path,'../image-studio/process-provenance':{}});
+  const auth=load('src/lib/auth/session.ts',{'crypto':crypto,'next/headers':{},'@/lib/prisma':{prisma:db},'./password':{},'./session-account-binding':{},'@/lib/security/private-prompt-identity.server':{}});
+  const musk=load('src/lib/integrations/musk.ts',{'node:timers/promises':{},'@/lib/prisma':{prisma:db},'@/lib/security/private-credentials.server':{},'@/lib/security/private-prompts.server':privacy,'@/lib/security/private-prompt-send.server':{}});
+  const control={failure:null,fallbackFailure:null,catalog:['isolated-fallback'],disabled:new Set()},modelCalls=[];
+  const judge={MuskApiError:musk.MuskApiError,getMuskApiSettings:async()=>({default_model:'isolated-judge'}),isMuskApiReady:()=>true,resolveMuskChatModels:async()=>control.catalog,createMuskChatCompletion:async({messages,model})=>{
+    modelCalls.push(model);
+    const failure=model==='isolated-judge'?control.failure:control.fallbackFailure;
+    if(failure)throw failure;
+
     const m=JSON.parse(messages[1].content[0].text);modelInputs.push(m);
     const decision=m.当前完整稿.includes('乙项已交付')?'pass':'revise',final=m.历轮结果.length===3;
     const v={decision,reason:decision==='pass'?'两个要求都已完成':'缺少乙项',evidence:m.当前完整稿,change:decision==='pass'?'':'请交付乙项'};
     if(final&&decision!=='pass')v.recap={goal:'同时交付甲乙',diagnosis:'反复只修改甲，方向偏离乙',direction:'先完成乙',experiment:'新增乙项说明',check:'核对甲乙各有一句成品'};
-    return {content:JSON.stringify(v),model:'isolated-judge'};
+    return {content:JSON.stringify(v),model};
   }};
-  const q=load('src/lib/bridge/gpt-review.ts',{'node:crypto':crypto,'@/lib/prisma':{prisma:db},'@/lib/integrations/musk':judge,'@/lib/pricing/model-access.server':{assertSupplementaryModelEnabled:async()=>{}}});
+  const q=load('src/lib/bridge/gpt-review.ts',{'node:crypto':crypto,'@/lib/prisma':{prisma:db},'@/lib/auth/session':auth,'@/lib/security/private-prompts.server':privacy,'@/lib/integrations/musk':judge,'@/lib/pricing/model-access.server':{assertSupplementaryModelEnabled:async(_kind,model)=>{if(control.disabled.has(model))throw new auth.AuthError('该模型已在费率页关闭',403);}}});
   const grant=load('src/lib/bridge/review-oauth.ts',{'node:crypto':crypto,'@/lib/prisma':{prisma:db}});
   const request=load('src/lib/bridge/review-request.ts',{'./gpt-review':q}),image=load('src/lib/bridge/review-tool-image.ts',{'./gpt-review':q});
   const pairing=load('src/lib/bridge/review-pairing.ts',{'node:crypto':crypto,'@/lib/prisma':{prisma:db},'./gpt-review':q});
@@ -46,7 +54,12 @@ export async function reviewFixture(){
       const endpoint=grant.ISSUER+'/api/bridge/review-connect/authorize?'+params;
       const consent=await oauth.GET(new next.NextRequest(endpoint),{params:{action:'authorize'}});assert.equal(consent.status,200);
       assert.ok(consent.headers.get('content-security-policy').includes(redirect));
+      assert.equal(consent.headers.get('referrer-policy'),'strict-origin');
       const nonce=(await consent.text()).match(/name="nonce" value="([^"]+)"/)[1];
+      for(const origin of [undefined,'null','https://attacker.invalid',grant.ISSUER+'.attacker.invalid']){
+        const denied=await oauth.POST(new next.NextRequest(endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded',...(origin?{Origin:origin}:{}),Cookie:consent.headers.get('set-cookie').split(';')[0]},body:new URLSearchParams({nonce,choice:'allow'}).toString()}),{params:{action:'authorize'}});
+        assert.equal(denied.status,403);
+      }
       const allowed=await oauth.POST(new next.NextRequest(endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded',Origin:grant.ISSUER,Cookie:consent.headers.get('set-cookie').split(';')[0]},body:new URLSearchParams({nonce,choice:'allow'}).toString()}),{params:{action:'authorize'}});
       assert.equal(allowed.status,303);const location=new URL(allowed.headers.get('location'));
       assert.equal(location.origin+location.pathname,redirect);assert.equal(location.searchParams.get('state'),'fixture-state');assert.equal(location.searchParams.get('iss'),grant.ISSUER);
@@ -65,7 +78,7 @@ export async function reviewFixture(){
   }
   const submit=(delivery,text,token,session='private-chat-A')=>rpc('tools/call',{name:'submit_revision',arguments:{delivery,text},_meta:{'openai/subject':'fixture-subject-'+session,'openai/session':session}},token);
   const link=(delivery,token,session='private-chat-A')=>rpc('tools/call',{name:'link_review',arguments:{delivery},_meta:{'openai/subject':'fixture-subject-'+session,'openai/session':session}},token);
-  return {...fx,modelInputs,q,grant,api,rpc,authorize,submit,link};
+  return {...fx,modelInputs,modelCalls,control,musk,auth,privacy,q,grant,api,rpc,authorize,submit,link};
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   const f=await reviewFixture(),scope='a'.repeat(64),base={scope,device:'test-device',cid:'same-conversation',messageId:'original-1',title:'交付甲乙',goal:'成品须含甲乙两项',text:'甲项已交付',images:[]};
@@ -108,6 +121,23 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
     assert.equal((await post('recaps')).data.rows[0].id,id2);assert.equal((await post('list')).data.total,2);
     assert.ok((await f.storage.readBridgeStorageUsage('review-a')).categories.find(r=>r.kind==='reviews').bytes>0);
     assert.throws(()=>f.q.parseVerdict('这版应该可以了',false));assert.throws(()=>f.q.parseVerdict('{"decision":"revise","reason":"x","evidence":"x","change":"x"}',true));
+    const unavailable=()=>new f.musk.MuskApiError('upstream private diagnostic',503,'musk_api_model_unavailable');
+    async function judged(){
+      const task=await f.q.startReview('review-a',{...base,id:crypto.randomUUID()});
+      const start=f.modelCalls.length;
+      const result=await f.q.judgeReview('review-a',await f.q.getTask('review-a',scope,task.id));
+      return {result,calls:f.modelCalls.slice(start)};
+    }
+    f.control.failure=unavailable();
+    let check=await judged();assert.equal(check.result.phase,'feedback');assert.equal(check.result.rounds[0].model,'isolated-fallback');assert.deepEqual(check.calls,['isolated-judge','isolated-fallback']);
+    f.control.disabled.add('isolated-fallback');check=await judged();assert.equal(check.result.phase,'error');assert.match(check.result.note,/没有已获许可/);assert.deepEqual(check.calls,['isolated-judge']);f.control.disabled.clear();
+    f.control.catalog=[];check=await judged();assert.equal(check.result.phase,'error');assert.deepEqual(check.calls,['isolated-judge']);
+    f.control.catalog=['isolated-fallback','never-attempted'];f.control.fallbackFailure=unavailable();check=await judged();assert.equal(check.result.phase,'error');assert.deepEqual(check.calls,['isolated-judge','isolated-fallback']);assert.ok(!check.result.note.includes('private diagnostic'));f.control.fallbackFailure=null;
+    for(const error of [new f.musk.MuskApiError('secret upstream body',502,'musk_api_empty_content'),new f.privacy.PrivatePromptError()]){
+      f.control.failure=error;check=await judged();assert.equal(check.result.phase,'error');assert.deepEqual(check.calls,['isolated-judge']);assert.ok(!check.result.note.includes('secret'));assert.notEqual(check.result.note,'验收服务暂时未返回完整结论，可重试当前稿件');
+    }
+    f.control.failure=null;f.control.disabled.add('isolated-judge');check=await judged();assert.equal(check.result.phase,'error');assert.deepEqual(check.calls,[]);assert.match(check.result.note,/关闭/);
+    console.log('PASS actual runJudge bounded approved-model fallback / actual model recorded / closed and empty catalog / no loop / specific safe errors; simulated model transport');
     console.log('PASS scoped create / one record / judge / feedback / actual changed draft / pass; real SQLite; simulated model');
     console.log('PASS two owners and workspaces with equal CID, other chat callback, pause/replay, three revisions and retrospective, storage projection, OAuth exact registered callbacks / bound redirects / PKCE single use');
   }finally{await f.close();}

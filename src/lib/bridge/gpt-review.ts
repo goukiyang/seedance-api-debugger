@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
+import { AuthError } from '@/lib/auth/session';
+import { isPrivatePromptError } from '@/lib/security/private-prompts.server';
 import { assertSupplementaryModelEnabled } from '@/lib/pricing/model-access.server';
-import { createMuskChatCompletion, getMuskApiSettings, isMuskApiReady, type MuskChatMessage } from '@/lib/integrations/musk';
+import { createMuskChatCompletion, getMuskApiSettings, isMuskApiReady, resolveMuskChatModels, MuskApiError, type MuskChatMessage } from '@/lib/integrations/musk';
 
 export const REVIEW_PREFIX = 'bridge_gpt_review_v1:';
 export const MAX_REVISIONS = 3;
@@ -127,7 +129,15 @@ export async function judgeReview(owner:string, saved:Saved, run=runJudge) {
     const phase:Phase=result.decision==='pass'?'passed':last>=MAX_REVISIONS?'retrospective':result.decision==='needs_user'?'input':'feedback';
     next={...claim.task,rounds,phase,note:''};
   } catch(error) {
-    next={...claim.task,phase:'error',note:error instanceof ReviewError?error.message:'验收服务暂时未返回完整结论，可重试当前稿件'};
+    let note='验收服务暂时未返回完整结论，可重试当前稿件';
+    if(error instanceof ReviewError || error instanceof AuthError || isPrivatePromptError(error))note=error.message;
+    else if(error instanceof MuskApiError){
+      note=error.code==='musk_api_model_unavailable'
+        ?'验收模型暂时没有可用通道，本稿已保留，可重试当前稿件'
+        :`验收模型调用失败（HTTP ${error.status}，${error.code}），本稿已保留，可重试当前稿件`;
+      console.error('[bridge/review] judge failed',{code:error.code,status:error.status,phase:error.diagnostics?.phase,model:error.diagnostics?.model});
+    }
+    next={...claim.task,phase:'error',note};
   }
   try {return (await replace(owner,claim,next)).task;}
   catch(error){if(error instanceof ReviewError && error.status===409)return (await getTask(owner,t.scope,t.id)).task;throw error;}
@@ -142,8 +152,23 @@ async function runJudge(t:ReviewTask) {
   const material=JSON.stringify({原要求:t.goal,历轮结果:t.rounds.slice(0,-1).map((r,i)=>({版本:i,摘录:r.draft.text.slice(0,1400),结论:r.result})),当前完整稿:last.draft.text,参考图数:t.reference.length,当前稿图片数:last.draft.images.length});
   const parts=[{type:'text' as const,text:material},...[...t.reference,...last.draft.images].map(p=>({type:'image_url' as const,image_url:{url:'data:'+p.mime+';base64,'+p.data}}))];
   const messages:MuskChatMessage[]=[{role:'system',content:instructions+retrospective},{role:'user',content:parts}];
-  const r=await createMuskChatCompletion({settings,messages,model:settings.default_model,temperature:0.15,jsonMode:true,timeoutMs:90000});
-  return {result:parseVerdict(r.content,final),model:r.model};
+  const complete=(model:string)=>createMuskChatCompletion({settings,messages,model,temperature:0.15,jsonMode:true,timeoutMs:90000});
+  let model=settings.default_model,r;
+  try{r=await complete(model);}
+  catch(error){
+    if(!(error instanceof MuskApiError) || error.code!=='musk_api_model_unavailable')throw error;
+    let candidate:string|undefined;
+    for(const available of await resolveMuskChatModels(settings)){
+      if(available===model)continue;
+      try{await assertSupplementaryModelEnabled('text',available);}
+      catch(accessError){if(accessError instanceof AuthError && accessError.status===403)continue;throw accessError;}
+      candidate=available;break;
+    }
+    if(!candidate)throw new ReviewError('默认验收模型没有可用通道，当前没有已获许可且开放的替代模型；本稿已保留',503);
+    model=candidate;
+    r=await complete(model);
+  }
+  return {result:parseVerdict(r.content,final),model:r.model||model};
 }
 export async function updateReview(owner:string, saved:Saved, b:Fields) {
   const t=saved.task;

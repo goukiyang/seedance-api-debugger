@@ -6,16 +6,16 @@ export default {
     "current": "698cd0ea346eb8772046d83a72279d05ccdf729adc23a9aca618ee806c43d367"
   },
   "src/app/api/bridge/review-connect/[action]/route.ts": {
-    "previous": null,
-    "current": "03c8ed4f0b92738788f3139588f7247bc0b6badcae622dedd41ce6c23c55f728"
+    "previous": "03c8ed4f0b92738788f3139588f7247bc0b6badcae622dedd41ce6c23c55f728",
+    "current": "db2d103955e42a704e31ee3ea67b2f75d93af7c4dfd78b2eb7d37cfaf09fd0e7"
   },
   "src/app/api/bridge/review-mcp/route.ts": {
     "previous": null,
     "current": "86de78b56b09153e661ef583616c8a348540448c9904e2ce04999ae476419796"
   },
   "src/lib/bridge/gpt-review.ts": {
-    "previous": null,
-    "current": "fd631a00a3d7e72d7cc76884a3f9c470b92672778fdaa54c7c8db75a941d5778"
+    "previous": "fd631a00a3d7e72d7cc76884a3f9c470b92672778fdaa54c7c8db75a941d5778",
+    "current": "5f94398a58264afe1e157e2e986da4268f320283cde5a9b64a2953b142e19180"
   },
   "src/lib/bridge/review-oauth.ts": {
     "previous": null,
