@@ -1,0 +1,10 @@
+{
+  "passed": true,
+  "source": "387145889ca78892cba4b86a545212b43f5b6f3a",
+  "archiveBytes": 557927,
+  "archiveSha256": "0def72b8960680f1bb557ce2213681772a8c22571a88f09bc7283dca3e09c8fb",
+  "verifiedInputFiles": 31,
+  "receivedAt": "2026-11-21T12:12:24.757664+00:00",
+  "buildStarted": false,
+  "cutoverStarted": false
+}

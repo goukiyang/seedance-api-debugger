@@ -1,0 +1,15 @@
+{
+  "source": "387145889ca78892cba4b86a545212b43f5b6f3a",
+  "passed": true,
+  "scope": "source-only preflight; final build-bound admission remains required",
+  "admission": {
+    "schema": "sd2-seamless-admission.v1",
+    "previousSource": "9615c566315e9c5aecc057970df0a2871348a8df",
+    "mainSource": "387145889ca78892cba4b86a545212b43f5b6f3a",
+    "guardSource": "eacd05ecb8080166a71daccfa43fb63d8d23da60",
+    "sameSchema": true,
+    "unchangedPersistedContracts": true,
+    "sqlExecuted": false,
+    "coldFallbackAllowed": false
+  }
+}

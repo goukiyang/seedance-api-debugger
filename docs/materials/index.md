@@ -693,3 +693,8 @@ v0.146.0已部署，待用户手动验收；原卡片与三批共用链、26组�
 ## 2026-11-21 GPT验收公共链路0.151.1
 
 [发布原单](../../tasks/todo/2026-11-20-gpt-background-review-release.md)为统一状态入口；[本批安全证据](2026-11-21-gpt-generic-flow/evidence-manifest.json)覆盖准确源9615c566、BUILD S5apHEsgkwm2yI0I3mizD、attempt07构建/准入、七服务双域、OAuth/MCP、价格/旧未知请求和回退。原始私密策略与完整日志留原服务器；原参考图继续沿2026-11-20私有归档和原receipt，不公开、不进发布包。工程部署已完成，Windows真实文字/原图功能待验。
+
+
+### 2026-11-21 GPT执行终态公共断链0.151.2
+
+[原发布工单](../../tasks/todo/2026-11-20-gpt-background-review-release.md)为状态入口。[本批脱敏证据清单](2026-11-21-gpt-executor-stop/evidence-manifest.json)绑定准确源387145889、BUILD HXp7sptwsqY7VINWiKUKI、attempt08预检/完整构建、20组实际SQLite/Sharp、七服务双域及OAuth/MCP/价格/三旧未知请求和程序回退。完整私密策略与原日志只留服务器；原参考图仍沿2026-11-20私有索引，不公开不入包。后台已部署，Windows真实终态反馈和原图成品未验；R1桌面正式清单仍按最新指令hold在0.6.32。

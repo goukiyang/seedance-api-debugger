@@ -1,0 +1,15 @@
+{
+  "source": "387145889ca78892cba4b86a545212b43f5b6f3a",
+  "version": "0.151.2",
+  "allInputSyntaxPassed": true,
+  "derivedDirectoryRelationsPassed": true,
+  "mutablePreviousAttemptPathsAbsent": true,
+  "artGroupsRequired": 20,
+  "storageImplementationUnchanged": true,
+  "inputFiles": 31,
+  "archive": "/private/tmp/sd2-gpt-executor-stop-release-20261121/attempt08-inputs.tar.gz",
+  "archiveSize": 557927,
+  "archiveSha256": "0def72b8960680f1bb557ce2213681772a8c22571a88f09bc7283dca3e09c8fb",
+  "buildStarted": false,
+  "cutoverStarted": false
+}

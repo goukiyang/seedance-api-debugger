@@ -1442,3 +1442,7 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 - GPT验收后台I1美术自动流0.151.0已保护部署：准确源71ea8e565 / BUILD d_gTKdW48NfIpvCQgxAA9，完整12文件/17组美术工程/全量类型-lint-Next及准入通过；七服务双域健康、OAuth双发现/两工具/合法回调核同，价格与三旧未知请求保留。attempt06旧封装失败保留、接续0且未重编译；原0.150.1及旧失败记录不动。Windows0.21.0实装与真实成图/独立图审、原R1–R3仍待Windows手验；单次原CX回执请求超时，送达unknown未重发。见 [发布原单](tasks/todo/2026-11-20-gpt-background-review-release.md)。
 
 - GPT验收公共链路0.151.1已保护部署，待Windows真实验收：donor2755206聚焦合并源9615c566315e9c5aecc057970df0a2871348a8df / BUILD S5apHEsgkwm2yI0I3mizD；attempt07完整文字/17组艺术/全量类型-lint-Next与最终准入exit0，原seamless1.1.2八步complete，七服务双域健康、OAuth双发现/两工具/精确回调通过，价格和三旧未知请求核同。旧attempt与本次准备/探针失败保留，原图私有；R1 latest仍0.6.32且hash不变。Windows0.21.2安装、真实文字及原图闭环仍待其原负责人继续，不冒功能通过。[原发布工单](todo/2026-11-20-gpt-background-review-release.md#01511-最终发布与公网核对)。
+
+- GPT验收公共断链0.151.2保护发布接续：准确源387145889ca78892cba4b86a545212b43f5b6f3a已从原origin取得、六文件核同，attempt08冻结输入上传核同，无构建预检中，旧站仍0.151.1。本源按20组艺术/7类存储及文字、全量类型/lint/Next、相容准入统一验证后沿原seamless发布；Windows真实文字闭环已通过，原图服务拒绝不重试，成品未通过。R1 latest0.6.32继续hold，0.21.1五候选保留，R1–R3/I1未完成项不删。[原单](todo/2026-11-20-gpt-background-review-release.md#01512-mac保护发布窗口与准确输入)。
+
+- GPT验收0.151.2已保护部署，待Windows原唯一任务终态反馈：准确源387145889ca78892cba4b86a545212b43f5b6f3a / BUILD HXp7sptwsqY7VINWiKUKI，attempt08预检/20图审/文字/全量类型-lint-Next/最终准入和原seamless八步均exit0。七服务双域健康、静态资源、OAuth双发现/两工具/精确回调通过；价格/三旧未知请求核同，无DB恢复/新DDL/付费图片请求。桌面latest0.6.32继续hold，0.21.1五签名候选完整私有上传核同，R1–R3/I1未完成项保留，原图拒绝不重试，不冒成品通过。[发布原单](todo/2026-11-20-gpt-background-review-release.md#01512-最终保护发布与公网核对)。

@@ -186,3 +186,33 @@ R1五包候选仍保留。正式生产桥latest仍0.6.32，原始SHA256 d6d8dd89
 首轮集中复盘：文字和18组艺术真实SQLite/Sharp/lint通过；原Windows全量tsc因已确认P1/P2逻辑修正需淘汰旧批次，精确自有进程停止，未称通过，最终正式输入仍须完整tsc/Next准入。独立复核发现历史D1可用新version停止D2；现改为current delivery精确匹配，并仅向客户端投影当前单号SHA256摘要供关联，不暴露新单号。补旧分析已交/D2新轮对两种停止报告均409回归。details在未派发准备态另外给当前builder结果，新发行票据更新当前stage指令；已发行/不确定/拒绝的原文不可变，无自动重组或重发。新增实际SQLite旧unissued/issued相容回归，图审组数由18变为20；新执行停止字段仍放既有JSON，无DDL或空间类别变化。客户端同步补真实完成栏、整块iframe和异步再检查/引用误判边界，统一batch2尚待。
 
 最终统一batch2及无传输包装艺术Chromium已通过，产品只读审查P1/P2为0。最终源全量tsc也已exit0，证据generic-flow-stop/backend-types-final.log；20组真实临时SQLite/Sharp与文字/旧OAuth/许可、lint保留原证据。只修夹具有效回执统计，同wake核对不冒新增发送，严格native发送次数和单任务计数断言不变。下一阶段沿原Mac发布0.151.2，生产任务写0、付费图片调用0；Windows仅观察原已拒绝任务停止，不重试生成。
+
+
+### 0.151.2 Mac保护发布窗口与准确输入
+
+接续dispatch sd2-gpt-executor-stop-backend-3871458-20261121-01。原origin已fetch并核对准确对象387145889ca78892cba4b86a545212b43f5b6f3a及父794dd3e8f0242b99a683e63b2cfbd638e85fd34c，原隔离发布分支fast-forward至该源，六个文件逐blob核同；正式根和其他工作区脏改保持。唯一运行实现为gpt-review.ts，原OAuth、模型/费用/许可、数据库DDL不改。原Windows报告文字真实自动退回/改稿/同条复验通过；原图原生服务明确拒绝，成品未通过，不重试该生成。
+
+attempt08从同一根派生staging、工程临时根、日志、输出与manifest，基线0.151.1/9615c566315e9c5aecc057970df0a2871348a8df/BUILD S5apHEsgkwm2yI0I3mizD；2676个选定Git文件、2794个完整跟踪库存和118个继承排除项分别核对。35项差量含5运行/工程文件和30项既有记录，准确源保留全部历史。31份冻结输入集中离线预检通过，557927字节输入包SHA256 0def72b8960680f1bb557ce2213681772a8c22571a88f09bc7283dca3e09c8fb，服务器收包核同后开始无构建预检；当前尚未切流。艺术封装按本源20组、storage7类核验，未沿用旧17组断言。
+
+原01–07输入、失败日志、退出码和成功证据保留；本次候选不依赖私有原图。原参考图仍按既有私有索引保存，不公开、不入包。原R1–R3/I1及未完成项继续：按最新用户指令，正式桌面latest维持0.6.32，0.21.1五包保留候选，不切正式清单；客户端0.21.3保护安装和原唯一任务终态反馈由Windows负责。服务器工程部署不代真实功能验收。
+
+
+### 0.151.2 最终保护发布与公网核对
+
+已部署，待Windows观察原唯一任务终态反馈。准确应用源`387145889ca78892cba4b86a545212b43f5b6f3a`，版本`0.151.2`，BUILD `HXp7sptwsqY7VINWiKUKI`。原origin donor和父794dd3e均核同，未用散文件覆盖；原隔离发布分支保留全部0.151.1成功记录。attempt08输入预检、完整构建和发布各只执行一次，均exit0；无覆盖旧尝试或重跑未知切换。
+
+本源文字真实临时SQLite、20组实际SQLite/Sharp艺术、7类storage、旧文字/OAuth/PKCE/Origin/许可模型回退、变更lint、全量tsc与完整Next均通过；lint只有既有非本批警告。GPT_DIRECTORY_QA明确使用attempt08自己的服务器工程目录。原生form相关字节未变，原浏览器证据hash绑定复用。模型/ChatGPT传输为隔离夹具，工程生产写0、付费图片调用0，不当作真实原生账号闭环。最终准入确认sameSchema/unchangedPersistedContracts、sqlExecuted=false、coldFallbackAllowed=false；原guard及封存引擎逻辑保持，仅登记准确新旧实现hash。
+
+窗口`gpt-executor-stop-20261121-3871458`，run `66b91905-4cf4-4a8e-b583-864637b4bc28`，沿seamless1.1.2/automatic-same-plan八步complete，publish-exit0，无活动controller。七服务sd2-gray/image-studio/hd-derivatives/multiview-works/role-coordinator/template-prompts/periodic-credits全部active、WorkingDirectory同源，实际BUILD核同。双域sd2.youdooart.com、sd2-server.youdoodesign.com release=0.151.2、health=true，实际CSS/JS完整字节摘要核同；旧页面静态资源保留，候选自然退出forcedKill=false。探针超时0，不冒称测量了连续零中断。
+
+两个OAuth发现接口HTTP200：`/.well-known/oauth-authorization-server`和`/.well-known/oauth-protected-resource/api/bridge/review-mcp`。POST `/api/bridge/review-mcp` initialize与tools/list均200，工具仅`link_review`、`submit_revision`，scope `reviews.submit`。旧回调及实际`https://chatgpt.com/connector/oauth/lrPNES-xwBHJ`匿名302到登录，错误域/通配/额外query400；Origin/nonce/账号、PKCE、精确回调和私密模型许可均未放宽。
+
+价格及三条旧unknown请求全字段摘要核同，原业务DB/队列/原号/guard保持，无新DDL、数据库恢复或默认模型/费率/许可改动。回退入口`/data/video-api-debugger/release-staging/66b91905-4cf4-4a8e-b583-864637b4bc28/seamless-plan.json`，沿原固定相容guard只回程序，不回业务数据库。旧attempt01–07全部输入、成功/失败日志、退出码保留，完整新原始日志和私密合同仍在服务器attempt08；仓库只留脱敏证据与原文件hash。
+
+最新桌面协调边界维持：正式latest仍0.6.32、SHA d6d8dd898fb0ce7bbe23f6a932ec7934830daa9a67d20b3f3763d20b8c9888ad不变；0.21.1五包现在已完整构建同源、原钥签名并上传私有候选目录，服务器五包摘要全通过。按本dispatch要求hold，未移动公开版本目录或原子切latest。R1正式下载/新版登录页/签名自动更新仍未完成，不用本次后台部署代替R1。客户端0.21.3由Windows保护安装；原图服务明确拒绝不重试，Mac不写原任务、不人工回传，真实终态反馈与成品仍待Windows，本批停止修复不冒成品通过。原R1–R3/I1未完成项保留。
+
+原参考图继续沿既有job3ecb381a-f617-4493-b278-989c81e50663私有归档`/Volumes/Data/Projects/video-api-debugger/materials/2026-11-20-gpt-world-review/codex-clipboard-d5cca489-9430-4eb2-bfb1-d25e4477fe14.png`；1617194字节、1280×915、SHA066a0bad574ea7087f6699c69edd7cdd2d273874d5e6e1c94d48d98f29f35899沿原已核证据，不重传/公开/入包，不是成品。
+
+证据：[实际部署](../../docs/materials/2026-11-21-gpt-executor-stop/public-deployed.json)、[窗口和回退](../../docs/materials/2026-11-21-gpt-executor-stop/publication-closure.json)、[OAuth/MCP](../../docs/materials/2026-11-21-gpt-executor-stop/gpt-review-public-check.json)、[完整构建](../../docs/materials/2026-11-21-gpt-executor-stop/main-build-success.json)、[统一工程](../../docs/materials/2026-11-21-gpt-executor-stop/main-focused-engineering.json)、[相容安全摘要](../../docs/materials/2026-11-21-gpt-executor-stop/source-pair-public-summary.json)、[证据清单](../../docs/materials/2026-11-21-gpt-executor-stop/evidence-manifest.json)。
+
+本轮新发现的线索与问题：未新增任务外问题。

@@ -1,0 +1,32 @@
+{
+  "source": "387145889ca78892cba4b86a545212b43f5b6f3a",
+  "version": "0.151.2",
+  "build": "HXp7sptwsqY7VINWiKUKI",
+  "attempt": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt08",
+  "publicSafeEvidenceOnly": true,
+  "fullPrivateContractsAndLogsRetainedOnServer": true,
+  "files": {
+    "build-exit.txt": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "publish-exit.txt": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "main-build-success.json": "9bbc64773ea2216a835281bf2063031d3ef00e68be1bb7602bd36afd7e130bf2",
+    "main-focused-engineering.json": "aeae89659e5c17007ed629970dd6d224917d59507577a27a43682d5c9b72ec8a",
+    "main-types-process.json": "762ec230536e76b7ab4111cf7b21e3511832f10e6b867dbdc4b9adaa74d433be",
+    "main-next-process.json": "0c057299812d13a78f5c9fb21a619e0a3e80c2558652bc1e5fd14af2b10251ff",
+    "manual-input-preflight.json": "472d98a84e0306a9eaca58650dddd939347ecfed95eeae6eb59adedf70611562",
+    "input-inventory.json": "23df20671a9e2921d573f760d2057b750a997fd6b64d0da51c30053a6a2c1c5b",
+    "input-preflight-binding.json": "3c95bf6406b6d0c78b7ba85d6f308d7c08b818fea2a5ebd99370072142c0e5e4",
+    "input-transfer-proof.json": "3d671a624146c80da09d9bce2abdb894eda8dcea123bb76d0f3be3fe29749abc",
+    "source-compatibility-preflight.json": "ee2cf47ddf485c43ab3d9b1d6691f8d04d66f903658a8f330f1441cf4879c6ec",
+    "native-form-proof.json": "380f1bea13265251e14300836a8c459314e7f69ad90c561372d55227f85ccdab",
+    "previous-attempts-preserved.json": "2c7c0699dcca5d659f63b2c1f0b3f47261b4bb23c0039d2a3aaa0540fd6eeb3b",
+    "reviewed-bridge-registration.json": "1826e343060532babe4cdffb153443ea752f4e94e241f80c11f3e007bd0fae1e",
+    "policy.json": "1f9ca718190ef09a65e0b426be8aee0ffab7018d4623b774b4df2e548bfd5aba",
+    "publication-window.json": "ceb8e35f77fa91bafddfe5cc794691a486ed2f622c9a570271e30f6672c5e75c",
+    "plan-reference.json": "ef3ffa3aae3a579bda6c819629d8c7d97b99c2d652c6218a3c1e22ff4b524ed9",
+    "public-deployed.json": "f80faeb3bc233b5fa7eb1e9a04d3f86a92ba71c9e0e286f8bbe921e03860d8c6",
+    "gpt-review-public-check.json": "c87573ec4585039a7109219ed4104579d7c4d5a30987816f1058d590e32adb48",
+    "publication-closure.json": "59d206bf9930d720b43afba18088f75be6f6cd0f33eebce2cd6e5632eaa7ca55",
+    "source-pair-public-summary.json": "ac104eaa161178431473bd8dd5d9abaebaa39b711082128ee500ff9040a436cb",
+    "engine-compatibility-public-summary.json": "e56b8ba67907aefb1d3a9694b6b0c7c627261148735db8b3b18ab5318303ca09"
+  }
+}

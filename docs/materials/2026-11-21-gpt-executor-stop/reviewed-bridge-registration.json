@@ -1,0 +1,13 @@
+{
+  "baseline": "9615c566315e9c5aecc057970df0a2871348a8df",
+  "source": "387145889ca78892cba4b86a545212b43f5b6f3a",
+  "files": {
+    "src/lib/bridge/gpt-review.ts": {
+      "previous": "552e12fc093736862a52e79bdceb63885a37e5ba5d87107b40125a057033a86b",
+      "current": "6cae39c924c127ac35da4e63423004d994c16267e5424420d3806f58cb61e930"
+    }
+  },
+  "tableSha256": "b3fcab611bb2c6864ae67219df47aaed57dfd5e2adc8beb0c22ea9d57fb690be",
+  "engineLogicChanged": false,
+  "applicationSourceUnchanged": true
+}

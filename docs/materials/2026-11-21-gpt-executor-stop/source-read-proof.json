@@ -1,0 +1,35 @@
+{
+  "source": "387145889ca78892cba4b86a545212b43f5b6f3a",
+  "parent": "794dd3e8f0242b99a683e63b2cfbd638e85fd34c",
+  "files": {
+    "package-lock.json": {
+      "blob": "c6b8be847667b1ddd762f99e6d02ac28fcbe66fa",
+      "sha256": "aae2acc06a60a9403425cd76ef008458951257703079b8825cd5b242f9aec470"
+    },
+    "package.json": {
+      "blob": "f3f7a09878e42444e630f94a9f52891252f2a02c",
+      "sha256": "20abac1e9fbc9a0b4486ad000df15dc13b9e40593cf5a6b210de37773d8857f4"
+    },
+    "scripts/gpt-art-review-engineering.mjs": {
+      "blob": "63ed0373fa04e743d31ce4af210898c663e662a7",
+      "sha256": "4e5daccf5e8a23ca9a0bcd8cf7c46db93ab14279cb0f2e7b1ffd73647a0ebb8f"
+    },
+    "scripts/gpt-review-engineering.mjs": {
+      "blob": "c2649a21b94cd3e59fccffdcd5f3a6217d6b508d",
+      "sha256": "0f3a0dbb1c1ad58bf13e75383d32a0fe88c194988412f81f0bd582e73577f059"
+    },
+    "src/lib/bridge/gpt-review.ts": {
+      "blob": "dc741271b4cf91bdb49e0ca3a25bac7366759519",
+      "sha256": "6cae39c924c127ac35da4e63423004d994c16267e5424420d3806f58cb61e930"
+    },
+    "tasks/todo/2026-11-20-gpt-background-review-release.md": {
+      "blob": "331ff91fcdb95409aea361f87274d6633c6918a9",
+      "sha256": "effe182bb10256f5af59836583d0830d4d9dfb362378f737241f10a7810b36e6"
+    }
+  },
+  "runtimeImplementationFiles": [
+    "src/lib/bridge/gpt-review.ts"
+  ],
+  "version": "0.151.2",
+  "trackedWorktreeCleanBeforeIntegration": true
+}

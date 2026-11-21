@@ -1,0 +1,48 @@
+{
+  "windowId": "gpt-executor-stop-20261121-3871458",
+  "checkedAt": "2026-11-21T12:27:43.647938+00:00",
+  "baseline": {
+    "source": "9615c566315e9c5aecc057970df0a2871348a8df",
+    "version": "0.151.1",
+    "build": "S5apHEsgkwm2yI0I3mizD"
+  },
+  "candidate": {
+    "source": "387145889ca78892cba4b86a545212b43f5b6f3a",
+    "version": "0.151.2",
+    "build": "HXp7sptwsqY7VINWiKUKI"
+  },
+  "sevenBaselineRoles": {
+    "sd2-gray": {
+      "WorkingDirectory": "/data/video-api-debugger/managed-releases/9615c566315e9c5aecc057970df0a2871348a8df",
+      "ActiveState": "active"
+    },
+    "sd2-image-studio": {
+      "WorkingDirectory": "/data/video-api-debugger/managed-releases/9615c566315e9c5aecc057970df0a2871348a8df",
+      "ActiveState": "active"
+    },
+    "sd2-hd-derivatives": {
+      "WorkingDirectory": "/data/video-api-debugger/managed-releases/9615c566315e9c5aecc057970df0a2871348a8df",
+      "ActiveState": "active"
+    },
+    "sd2-multiview-works": {
+      "WorkingDirectory": "/data/video-api-debugger/managed-releases/9615c566315e9c5aecc057970df0a2871348a8df",
+      "ActiveState": "active"
+    },
+    "sd2-role-coordinator": {
+      "WorkingDirectory": "/data/video-api-debugger/managed-releases/9615c566315e9c5aecc057970df0a2871348a8df",
+      "ActiveState": "active"
+    },
+    "sd2-template-prompts": {
+      "WorkingDirectory": "/data/video-api-debugger/managed-releases/9615c566315e9c5aecc057970df0a2871348a8df",
+      "ActiveState": "active"
+    },
+    "sd2-periodic-credits": {
+      "WorkingDirectory": "/data/video-api-debugger/managed-releases/9615c566315e9c5aecc057970df0a2871348a8df",
+      "ActiveState": "active"
+    }
+  },
+  "sharedControllerAbsent": true,
+  "desktopLatestSha256": "d6d8dd898fb0ce7bbe23f6a932ec7934830daa9a67d20b3f3763d20b8c9888ad",
+  "desktopLatestVersion": "0.6.32",
+  "databaseRestore": false
+}
