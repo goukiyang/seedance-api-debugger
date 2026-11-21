@@ -1,0 +1,49 @@
+{
+  "project": "SD2 GPT 验收后台与生产桥",
+  "date": "2026-11-21",
+  "task": "I1 原创图片自动闭环",
+  "client": "0.21.4",
+  "backendObserved": "0.151.2",
+  "cid": "6b01d7f7-72e0-83ea-9a79-9fad8a1f82a8",
+  "taskId": "b9e19e80-b3cf-424c-bc09-934fb671284f",
+  "delivery": "7e7d9621-65ed-4c79-8f1a-94549ac3cfe4",
+  "realObservation": {
+    "analysisWrittenInNativeConversation": true,
+    "linkRequestedBeforeSubmission": true,
+    "submissionRejectedBeforeConfirmation": true,
+    "laterOriginalExtensionVerified": true,
+    "phase": "awaiting",
+    "stage": "analysis",
+    "totalChanges": 0,
+    "recapCount": 0,
+    "operatorRevisionSubmissions": 0,
+    "actualArtAcceptancePassed": false
+  },
+  "localSourceEvidence": [
+    "D:/MYDR/cdoex/sd2/.cache/qa/original-art-flow-20261121/bsk-assistant-after-reconnect-13.json",
+    "D:/MYDR/cdoex/sd2/.cache/qa/original-art-flow-20261121/native-scoped-task-state-30.json"
+  ],
+  "originalInput": {
+    "name": "exec-87d2fd2f-5c42-41c4-9cf4-0dc80b17e187.png",
+    "use": "原创河畔小屋测试输入，不是成品；服务端补修不需要读取图片",
+    "windowsArchive": "D:/MYDR/cdoex/sd2/materials/2026-11-21-original-art-flow/exec-87d2fd2f-5c42-41c4-9cf4-0dc80b17e187.png",
+    "bytes": 2541733,
+    "width": 1448,
+    "height": 1086,
+    "sha256": "4bc9930813f8f3f49ce6c862bc5051ee33d461b9defd636877d9abaa5cd445d2",
+    "macAccessible": false,
+    "publicOrGitUpload": false
+  },
+  "engineering": {
+    "sourcePendingGroups": 8,
+    "artRegressionGroups": 20,
+    "textOauthPkceRegression": "passed",
+    "fullTypes": "passed",
+    "changedLint": "passed",
+    "productionWrites": 0,
+    "paidImageCalls": 0,
+    "transport": "isolated fixtures, real temporary SQLite and Sharp"
+  },
+  "independentReview": "P2 pre-confirmation stage/count disclosure removed; read-only re-review closed; no open P1/P2",
+  "status": "candidate; final types/lint and 8 groups passed; protected deployment and real continuation remain"
+}

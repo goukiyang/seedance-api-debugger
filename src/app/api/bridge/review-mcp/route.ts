@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { NextRequest,NextResponse } from 'next/server';
-import { pairSource, componentHTML, reviewResource } from '@/lib/bridge/review-pairing';
+import { pairSource, awaitSourceConfirmation, componentHTML, reviewResource } from '@/lib/bridge/review-pairing';
 import { toolOwner, DISCOVERY, SCOPE, GrantError } from '@/lib/bridge/review-oauth';
 import { reviewImage, type FileRef } from '@/lib/bridge/review-tool-image';
 import { boundedJson } from '@/lib/bridge/review-request';
@@ -51,6 +51,8 @@ export async function POST(req:NextRequest){
     if(typeof a.text!=='string'||a.text.length>20000)throw new ReviewError('请提供完整成品正文');
     const inputFiles=files.filter(name=>a[name]).map(name=>a[name] as FileRef);
     if(inputFiles.some(x=>!x||typeof x.file_id!=='string'||!x.file_id))throw new ReviewError('附件尚未完整收到');
+    const pending=await awaitSourceConfirmation(owner,a.delivery,connection);
+    if(pending)return response(id,{content:[{type:'text',text:JSON.stringify(pending)}],structuredContent:pending});
     const result=await revisionForTool(owner,a.delivery,a.text,inputFiles.map(x=>x.file_id!),async()=>{
       const images:string[]=[];let bytes=0;
       for(const name of files){if(!a[name])continue;const pic=await reviewImage(a[name] as FileRef,2097152-bytes);images.push(pic.src);bytes+=pic.bytes;}

@@ -82,7 +82,7 @@ export async function reviewFixture(){
   }
   const submit=(delivery,text,token,session='private-chat-A')=>rpc('tools/call',{name:'submit_revision',arguments:{delivery,text},_meta:{'openai/subject':'fixture-subject-'+session,'openai/session':session}},token);
   const link=(delivery,token,session='private-chat-A')=>rpc('tools/call',{name:'link_review',arguments:{delivery},_meta:{'openai/subject':'fixture-subject-'+session,'openai/session':session}},token);
-  return {...fx,modelInputs,modelCalls,control,musk,auth,privacy,q,grant,api,rpc,authorize,submit,link};
+  return {...fx,modelInputs,modelCalls,control,musk,auth,privacy,q,grant,pairing,api,rpc,authorize,submit,link};
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   const f=await reviewFixture(),scope='a'.repeat(64),base={scope,device:'test-device',cid:'same-conversation',messageId:'original-1',title:'交付甲乙',goal:'成品须含甲乙两项',text:'甲项已交付',images:[]};
@@ -105,7 +105,9 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
     const paused=await post('pause',{version:ack.data.task.version});assert.equal((await f.submit(delivery,'乙项已交付',token)).result.isError,true);
     await post('resume',{version:paused.data.task.version});
     const secondChat=await f.link(delivery,token,'wrong-chat');assert.ok(secondChat.result._meta.sd2ReviewProof);
-    assert.ok((await f.submit(delivery,'乙项已交付',token,'wrong-chat')).result.isError);
+    const waitingOtherChat=(await f.submit(delivery,'乙项已交付',token,'wrong-chat')).result;
+    assert.equal(waitingOtherChat.structuredContent.status,'pending');
+    assert.equal((await f.q.getTask('review-a',scope,id)).task.connected,undefined,'a pending link never authorizes another chat');
     const pair=await f.link(delivery,token);assert.ok(!JSON.stringify(pair.result.content).includes(pair.result._meta.sd2ReviewProof.nonce));
     assert.equal((await post('confirm',{...pair.result._meta.sd2ReviewProof,cid:'somewhere-else'})).status,409);
     assert.ok((await post('confirm',pair.result._meta.sd2ReviewProof)).ok);

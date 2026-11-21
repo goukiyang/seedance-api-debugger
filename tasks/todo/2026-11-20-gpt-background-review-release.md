@@ -187,6 +187,18 @@ R1五包候选仍保留。正式生产桥latest仍0.6.32，原始SHA256 d6d8dd89
 
 最终统一batch2及无传输包装艺术Chromium已通过，产品只读审查P1/P2为0。最终源全量tsc也已exit0，证据generic-flow-stop/backend-types-final.log；20组真实临时SQLite/Sharp与文字/旧OAuth/许可、lint保留原证据。只修夹具有效回执统计，同wake核对不冒新增发送，严格native发送次数和单任务计数断言不变。下一阶段沿原Mac发布0.151.2，生产任务写0、付费图片调用0；Windows仅观察原已拒绝任务停止，不重试生成。
 
+### I1 原创输入：原页面异步确认与提交竞态（0.151.3候选，2026-11-21）
+
+沿原I1继续，原被拒任务保留且不重试；本次另用原创河畔小屋。新CID6b01d7f7-72e0-83ea-9a79-9fad8a1f82a8，任务b9e19e80-b3cf-424c-bc09-934fb671284f，分析单号7e7d9621-65ed-4c79-8f1a-94549ac3cfe4。ChatGPT真实分析已完成，先调用link_review，再交分析时收到未连接409并停止；随后本机真实扩展上下文读到verified=true，任务仍awaiting/analysis，实际改稿0、复盘0。这证明组件确认与模型提交的异步竞态，不是nonce/CID校验失败，不能以此放宽来源核对。源证据见同目录资料索引的source-confirmation-race.json；Windows私有原件.cache/qa/original-art-flow-20261121/的bsk-assistant-after-reconnect-13.json及native-scoped-task-state-30.json，无人工提交稿件。
+
+本批从实际线上3871458/0.151.2及远端纯记录8ffa4414安全接续，补已有MCP提交入口：同owner/delivery/connection且已有未过期配对记录、当前仍等待确认时，最多等2秒再返回pending和原单号。未确认前不读图片、不接稿、不调用模型、不增加计数；确认后再走原revisionForTool严格核对与CAS。无配对/错账号/绑定别的连接/过期/暂停或换单仍拒绝；确认仍只能由原页面的nonce/CID/device证明完成。复用已有pending重试语义，不安装新框架。核读MCP官方schema/2025-06-18/schema.ts的CallToolResult/structuredContent/isError，来源https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/schema/2025-06-18/schema.ts；pending是本项目业务状态，不冒协议原生异步任务。
+
+整批实现与配套测试完成后统一检查：8组真实临时SQLite专项、旧文字/OAuth/PKCE/许可、20组SQLite/Sharp美术、全量tsc和变更lint均exit0；模型/传输仍隔离夹具，生产写0、付费图片0。专项首批2组失败为新增夹具problem不足原有8字符要求，原日志保留，整批修夹具及错误断言后8组全过，未改业务门槛。Windows证据根D:/MYDR/cdoex/sd2/.cache/qa/source-pending-01513-20261121/，不能当Mac已读的附件。独立只读审查和保护部署待接续；Windows客户端仍0.21.4，正式0.6.32/R1 HOLD，真实图片退回→修改→复验仍未通过。部署后仅经产品已有技术恢复入口继续原新任务，不手工交分析/图片或逐轮提示；不恢复原被拒任务，不改许可、费用、默认模型、数据库或旧未知请求。
+
+独立只读审查未发现P1，发现1项P2：确认前pending回执不应透出stage/changes，避免同账号其他对话拿到单号后读到任务进展。本批已去除这两个字段，新增精确公开键集合断言；原稿接收/计数规则未改，专项与类型/lint复核待接续，同交付不再次抬版本。真实原生模型对pending的自动重试仍须实测，不能用工程测试替代。
+
+最终复核：8组专项再次全过，P2经独立只读审查关闭，无新增P1/P2；全量tsc、变更lint最终exit0。旧文字/OAuth/20组艺术未受去除未确认元信息影响，复用同批通过证据。线上仍0.151.2，0.151.3尚未发布，当前客户端任务继续awaiting/analysis，原稿和计数未变。发布原Mac线程01a1c73b-3458-77b1-9c6b-81cf82439d06、cwd/Volumes/Data/Projects/video-api-debugger身份可回读，但最新control.available/loadedInApp为false；先保留准确候选与原发布记录，不冒部署完成或绕过未连接状态。
+
 
 ### 0.151.2 Mac保护发布窗口与准确输入
 

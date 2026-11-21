@@ -33,6 +33,26 @@ export async function confirmSource(owner:string,task:ReviewTask,b:Record<string
   if(proof.nonce!==b.nonce||proof.delivery!==task.delivery||proof.expires<=Date.now())throw new ReviewError('来源确认已过期，请在原对话重新连接',409);
   return bindReviewConnection(owner,task.scope,task.id,b.delivery,proof.connection);
 }
+// The tool component and the model run independently. A valid link request can
+// still be waiting for its original page when the model submits the same draft.
+// Waiting is not authorization: only confirmSource may bind the connection.
+export async function awaitSourceConfirmation(owner:string,delivery:string,connection:string,waitMs=2000){
+  if(!uuid.test(delivery)||!connection)throw new ReviewError('验收来源无效',409);
+  const ticket=await prisma.userPreference.findUnique({where:{user_id_key:{user_id:owner,key:'bridge_gpt_review_ticket:'+delivery}}});
+  if(!ticket)throw new ReviewError('本账号没有对应的退回意见',404);
+  const ref=JSON.parse(ticket.value_json),deadline=Date.now()+Math.min(2000,Math.max(0,waitMs));
+  for(;;){
+    const {task}=await getTask(owner,ref.scope,ref.id);
+    if(task.connected===connection)return;
+    if(task.connected||task.delivery!==delivery||!['delivering','awaiting'].includes(task.phase))throw new ReviewError('请在发起本轮的原对话中确认',409);
+    const row=await prisma.userPreference.findUnique({where:{user_id_key:{user_id:owner,key:PREFIX+digest(delivery+':'+connection)}}});
+    const proof=row&&JSON.parse(row.value_json);
+    if(!proof||proof.delivery!==delivery||proof.connection!==connection||!Number.isFinite(proof.expires)||proof.expires<=Date.now())throw new ReviewError('请先在原对话调用 link_review，完成原页面核对后再交回同一稿件。',409);
+    if(Date.now()>=deadline)return {status:'pending',delivery,retryAfterMs:2000,
+      message:'原页面仍在确认连接。本稿尚未接收，请保留完全相同的单号、正文和附件，稍后重试本次提交；不要重新分析或出图，也不要结束自动流程。'};
+    await new Promise(resolve=>setTimeout(resolve,Math.min(250,deadline-Date.now())));
+  }
+}
 export const componentHTML=`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><body><small>SD2 正在核对发起验收的原对话</small><script>
 const origins=['https://chatgpt.com','https://chat.openai.com'];
 let proof;
