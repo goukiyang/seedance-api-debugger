@@ -1,0 +1,10 @@
+{
+  "intent_id": "sd2-generic-flow-backend-2755206-20261121-final",
+  "delivery_state": "received",
+  "httpStatus": 200,
+  "ok": true,
+  "submitted": true,
+  "confirmed": true,
+  "input_mode": "steer",
+  "turn_id": "01a1fd00-62db-71b0-9074-1e97bc9fa2c3"
+}

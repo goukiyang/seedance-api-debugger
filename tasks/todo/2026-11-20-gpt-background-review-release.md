@@ -171,3 +171,5 @@ R1五包候选仍保留。正式生产桥latest仍0.6.32，原始SHA256 d6d8dd89
 证据：[实际部署](../../docs/materials/2026-11-21-gpt-generic-flow/public-deployed.json)、[窗口与回退](../../docs/materials/2026-11-21-gpt-generic-flow/publication-closure.json)、[OAuth/MCP](../../docs/materials/2026-11-21-gpt-generic-flow/gpt-review-public-check.json)、[完整构建](../../docs/materials/2026-11-21-gpt-generic-flow/main-build-success.json)、[统一工程](../../docs/materials/2026-11-21-gpt-generic-flow/main-focused-engineering.json)、[源相容摘要](../../docs/materials/2026-11-21-gpt-generic-flow/source-pair-public-summary.json)、[证据清单](../../docs/materials/2026-11-21-gpt-generic-flow/evidence-manifest.json)。本次单独阶段查询已原CX answer单次steer，received/confirmed，见[阶段回执](../../docs/materials/2026-11-21-gpt-generic-flow/stage-query-receipt-response.json)；最终发布回执另按原请求单次发送。
 
 本轮新发现的线索与问题：未新增任务外问题。
+
+0.151.1最终发布回执已通过原CX answer向Windows「GPT验收设计」原会话win:01a1f724-18ef-77f0-945e-a92f765cf2fc单次提交，HTTP200、submitted/confirmed、delivery_state=received，实际input_mode=steer，原turn_id记录在[最终回执](../../docs/materials/2026-11-21-gpt-generic-flow/windows-final-receipt.json)。没有等待ACK或重发；受理不等于Windows功能验收。阶段查询另有独立单次回执，未把其当最终发布回执。
