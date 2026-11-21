@@ -299,3 +299,5 @@ attempt10统一派生staging、工程根、日志/输出和manifest，完整2836
 自动审批拒绝了原验证日志stdout/stderr回传，理由是可能含敏感内部数据，原调用未执行。已改为原验证器输出和异常全留服务器私有日志，仅返回严格白名单状态和不可逆摘要，安全替代获准并完成；没有换工具下载被拒原件。完整日志/计划/私密合同/业务快照留原服务器attempt10，仓库只含脱敏摘要。证据：[服务器实际回执](../../docs/materials/2026-11-21-gpt-queue-continuation/server-safe-receipt.json)、[Mac独立公网检查](../../docs/materials/2026-11-21-gpt-queue-continuation/mac-public-verification.json)、[准确输入预检](../../docs/materials/2026-11-21-gpt-queue-continuation/manual-input-preflight.json)、[冻结输入库存](../../docs/materials/2026-11-21-gpt-queue-continuation/input-inventory.json)、[核验安全边界](../../docs/materials/2026-11-21-gpt-queue-continuation/evidence-handling.json)。
 
 本轮新发现的线索与问题：未新增任务外问题。
+
+0.151.4最终回执已向原Windows“GPT验收设计”主对话单次普通发送，HTTP200、submitted/confirmed、delivery_state=queued；目标正在运行，因此排队未引导，无ACK/未重发，queueId未返回不造。218字正文只含大白话、正常名称/版本和可读链接；准确应用源、实际BUILD与健康/回退证据在已推送记录26cfc428dbdf89d1285707f36e8950e130a2c3d9，必要标识另留元数据与文档。见[实际回执](../../docs/materials/2026-11-21-gpt-queue-continuation/windows-final-receipt.json)。入队不冒对端已读取/安装或真实业务通过；原R1–R3/I1及桌面hold保持，本次后台保护部署完成。

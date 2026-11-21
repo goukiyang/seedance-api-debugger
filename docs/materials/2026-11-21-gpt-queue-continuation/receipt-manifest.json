@@ -1,0 +1,9 @@
+{
+  "applicationSource": "b31e0ca70a69d9bf0ff0f073e35a54662c29ee77",
+  "version": "0.151.4",
+  "build": "2KpVPgX99TaRY9QDkA97z",
+  "publicEvidenceCommit": "26cfc428dbdf89d1285707f36e8950e130a2c3d9",
+  "receiptSha256": "61040229689a0874909964ad28746f5bf14f9f6b49838070b13ed7b06c8d1ad1",
+  "delivery": "ordinary send accepted and queued; no steer or repeated ACK",
+  "queueId": "not returned; not inferred"
+}
