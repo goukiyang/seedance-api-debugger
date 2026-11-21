@@ -173,3 +173,16 @@ R1五包候选仍保留。正式生产桥latest仍0.6.32，原始SHA256 d6d8dd89
 本轮新发现的线索与问题：未新增任务外问题。
 
 0.151.1最终发布回执已通过原CX answer向Windows「GPT验收设计」原会话win:01a1f724-18ef-77f0-945e-a92f765cf2fc单次提交，HTTP200、submitted/confirmed、delivery_state=received，实际input_mode=steer，原turn_id记录在[最终回执](../../docs/materials/2026-11-21-gpt-generic-flow/windows-final-receipt.json)。没有等待ACK或重发；受理不等于Windows功能验收。阶段查询另有独立单次回执，未把其当最终发布回执。
+
+
+### Windows原生版本复盘后的执行端停止补修（2026-11-21）
+
+0.151.1/9615c5已发布、0.21.2/044041b实装。新文字CID6b0169e9-3860-83ea-a2e0-a909a181dc4d已真实一次启动自动退回、改稿、工具交回、独立通过，原同条保存两轮、自动修改1次。接着原图CID6b004899-46ac-83e9-aca8-0361bc5ddbfe仅一次启动，初始单号0f5c8312-f4df-4c20-a38d-e0939be08fbc；原生GPT未交分析便直接出图，被原服务third-party content相似性规则拒绝，原生回复已结束，SD2仍等待分析且误提示需要启用连接。图像及分析均未接收，改稿/复盘0，不能冒称原图通过。Windows材料在D:/MYDR/cdoex/sd2/materials/2026-11-21-generic-flow/的text-native-page-pass.json、text-native-task-record.json、art-native-version-review.json及原始observation；Mac原参考图仍沿materials/2026-11-20-gpt-world-review/codex-clipboard-d5cca489-9430-4eb2-bfb1-d25e4477fe14.png，原SHA066a0bad574ea7087f6699c69edd7cdd2d273874d5e6e1c94d48d98f29f35899，不公开/不重传/不入发布包。
+
+本批0.151.2/客户端0.21.3仅补公共阶段调度与执行端终态反馈：当前阶段指令不混入未来出图动作；已结束且严格匹配原命令/回复的拒绝或超时未交回，沿原账号/工作区/设备/CID/原稿/单号链及CAS版本停止，保存原因、不接受为稿、不增加次数、不自动重试。原暂停、新结果、其他账号/页面、旧版本优先；不恢复被拒绝的图像请求，不换工具或改目标绕过限制。复用既有UserPreference，无DDL、权限/默认模型/费率/许可/媒体通道变更，2MB疑点未触发故不修改。先完成全批实现和配套回归，再统一检查，L4只读审查后沿原部署链接续。当前原唯一受阻任务保持，没有手工催稿、回传或新建原图任务；测试/发布/真实停止反馈尚待。
+
+复用Temporal SDK failure.ts的nonRetryable语义（https://github.com/temporalio/sdk-typescript/blob/main/packages/common/src/failure.ts，已读实际实现），不安装框架。0.151.1正式源与donor运行文件相同，已fast-forward到远端纯证据HEAD794dd3e8f0242b99a683e63b2cfbd638e85fd34c并保留原发布材料后补修，不以旧donor盖掉Mac记录。
+
+首轮集中复盘：文字和18组艺术真实SQLite/Sharp/lint通过；原Windows全量tsc因已确认P1/P2逻辑修正需淘汰旧批次，精确自有进程停止，未称通过，最终正式输入仍须完整tsc/Next准入。独立复核发现历史D1可用新version停止D2；现改为current delivery精确匹配，并仅向客户端投影当前单号SHA256摘要供关联，不暴露新单号。补旧分析已交/D2新轮对两种停止报告均409回归。details在未派发准备态另外给当前builder结果，新发行票据更新当前stage指令；已发行/不确定/拒绝的原文不可变，无自动重组或重发。新增实际SQLite旧unissued/issued相容回归，图审组数由18变为20；新执行停止字段仍放既有JSON，无DDL或空间类别变化。客户端同步补真实完成栏、整块iframe和异步再检查/引用误判边界，统一batch2尚待。
+
+最终统一batch2及无传输包装艺术Chromium已通过，产品只读审查P1/P2为0。最终源全量tsc也已exit0，证据generic-flow-stop/backend-types-final.log；20组真实临时SQLite/Sharp与文字/旧OAuth/许可、lint保留原证据。只修夹具有效回执统计，同wake核对不冒新增发送，严格native发送次数和单任务计数断言不变。下一阶段沿原Mac发布0.151.2，生产任务写0、付费图片调用0；Windows仅观察原已拒绝任务停止，不重试生成。

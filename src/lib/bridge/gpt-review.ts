@@ -23,10 +23,11 @@ type Recap = { goal: string; diagnosis: string; direction: string; experiment: s
 type Verdict = { decision: 'pass' | 'revise' | 'needs_user'; reason: string; evidence: string; change: string; recap?: Recap; actualImage?: boolean; better?: boolean };
 type Round = { key: string; receipt?: string; requestKey?:string; draft: Draft; receivedAt: number; result?: Verdict; model?: string };
 type Phase = 'ready' | 'judging' | 'feedback' | 'delivering' | 'awaiting' | 'passed' | 'input' | 'retrospective' | 'paused' | 'error';
+type ExecutionStop = {code:'provider_refused'|'result_missing';excerpt:string;recordedAt:number};
 type Binding = { device: string; cid: string; sourceId: string };
 type ArtReceipt = { delivery:string; requestKey:string; stage:'analysis'|'image'|'recap'; receivedAt:number; round?:number };
 type ArtState = { stage:'analysis'|'image'|'recap'|'done'; cycle:0|1|2; cycleChanges:number; totalChanges:number; analysis:string; recaps:string[]; bestRound?:number; instructions:string; receipts:ArtReceipt[]; referencePrints:string[]; imagePrints:string[]; invalidVisuals?:number; invalid?:{delivery:string;requests:string[]}; wake?:{id:string;delivery?:string;requestVersion?:string;op?:'resume'|'retry'} };
-export type ReviewTask = { id: string; scope: string; binding: Binding; title: string; goal: string; reference: Picture[]; createdAt: number; updatedAt: number; version: string; phase: Phase; rounds: Round[]; delivery?: string; connected?: string; note: string; resumePhase?: Phase; kind?:'art'; art?:ArtState };
+export type ReviewTask = { id: string; scope: string; binding: Binding; title: string; goal: string; reference: Picture[]; createdAt: number; updatedAt: number; version: string; phase: Phase; rounds: Round[]; delivery?: string; connected?: string; note: string; resumePhase?: Phase; kind?:'art'; art?:ArtState; executionStop?:ExecutionStop };
 type Fields = Record<string, unknown>;
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const validSource = /^[\w.:-]{1,190}$/;
@@ -79,20 +80,20 @@ function artSummary(a:ArtState) {
   return {stage:a.stage,cycle:a.cycle,cycleChanges:a.cycleChanges,totalChanges:a.totalChanges,recapCount:a.recaps.length,bestRound:a.bestRound,...(a.wake?{wakeId:a.wake.id,wakeVersion:a.wake.requestVersion}:{})};
 }
 const pictureURLs=(images:Picture[])=>images.map(p=>'data:'+p.mime+';base64,'+p.data);
-export const summary = (t: ReviewTask) => ({id:t.id,title:t.title,cid:t.binding.cid,sourceId:t.binding.sourceId,sourceConfirmed:!!t.connected,phase:t.phase,createdAt:t.createdAt,updatedAt:t.updatedAt,version:t.version,changes:t.art?.totalChanges??t.rounds.length-1,note:t.note,...(t.art?{kind:'art' as const,art:artSummary(t.art)}:{})});
+export const summary = (t: ReviewTask) => ({id:t.id,title:t.title,cid:t.binding.cid,sourceId:t.binding.sourceId,sourceConfirmed:!!t.connected,deliveryKey:t.delivery?stamp(t.delivery):'',phase:t.phase,createdAt:t.createdAt,updatedAt:t.updatedAt,version:t.version,changes:t.art?.totalChanges??t.rounds.length-1,note:t.note,...(t.executionStop?{executionStop:t.executionStop}:{}),...(t.art?{kind:'art' as const,art:artSummary(t.art)}:{})});
 export function details(t: ReviewTask) {
-  return {...summary(t),goal:t.goal,...(t.art?{reference:pictureURLs(t.reference),bestImages:pictureURLs(t.art.bestRound===undefined?[]:t.rounds[t.art.bestRound]?.draft.images||[]),art:{...artSummary(t.art),analysis:t.art.analysis,recaps:t.art.recaps,instructions:t.art.instructions}}:{}),rounds:t.rounds.map((r,i)=>({number:i,messageId:r.draft.messageId,text:r.draft.text,images:pictureURLs(r.draft.images),receivedAt:r.receivedAt,result:r.result,model:r.model,...(t.art?{actualImage:r.result?.actualImage===true}:{}),...(t.art&&i===0?{baseline:true}:{})}))};
+  return {...summary(t),goal:t.goal,...(t.art?{reference:pictureURLs(t.reference),bestImages:pictureURLs(t.art.bestRound===undefined?[]:t.rounds[t.art.bestRound]?.draft.images||[]),art:{...artSummary(t.art),analysis:t.art.analysis,recaps:t.art.recaps,instructions:t.art.instructions,...(['feedback','delivering'].includes(t.phase)?{unsentInstructions:artInstructions(t)}:{})}}:{}),rounds:t.rounds.map((r,i)=>({number:i,messageId:r.draft.messageId,text:r.draft.text,images:pictureURLs(r.draft.images),receivedAt:r.receivedAt,result:r.result,model:r.model,...(t.art?{actualImage:r.result?.actualImage===true}:{}),...(t.art&&i===0?{baseline:true}:{})}))};
 }
 export async function reviewStatus(owner:string,scope:string,id:string){
   const k=key(scope,id);
-  const rows=await prisma.$queryRaw<Array<{phase:string;version:string;connected:string|null;wakeId:string|null;wakeVersion:string|null;kind:string|null;stage:string|null;cycle:number|null;cycleChanges:number|null;totalChanges:number|null;recapCount:number|null;bestRound:number|null}>>`SELECT json_extract(value_json,'$.phase') AS phase, json_extract(value_json,'$.version') AS version,
-    json_extract(value_json,'$.connected') AS connected, json_extract(value_json,'$.art.wake.id') AS wakeId, json_extract(value_json,'$.art.wake.requestVersion') AS wakeVersion,
+  const rows=await prisma.$queryRaw<Array<{phase:string;version:string;delivery:string|null;connected:string|null;wakeId:string|null;wakeVersion:string|null;kind:string|null;stage:string|null;cycle:number|null;cycleChanges:number|null;totalChanges:number|null;recapCount:number|null;bestRound:number|null;stopCode:string|null}>>`SELECT json_extract(value_json,'$.phase') AS phase, json_extract(value_json,'$.version') AS version,
+    json_extract(value_json,'$.connected') AS connected, json_extract(value_json,'$.delivery') AS delivery, json_extract(value_json,'$.art.wake.id') AS wakeId, json_extract(value_json,'$.art.wake.requestVersion') AS wakeVersion,
     json_extract(value_json,'$.kind') AS kind, json_extract(value_json,'$.art.stage') AS stage,
     json_extract(value_json,'$.art.cycle') AS cycle, json_extract(value_json,'$.art.cycleChanges') AS cycleChanges,
     json_extract(value_json,'$.art.totalChanges') AS totalChanges, json_array_length(value_json,'$.art.recaps') AS recapCount,
-    json_extract(value_json,'$.art.bestRound') AS bestRound FROM "UserPreference" WHERE user_id=${owner} AND key=${k} LIMIT 1`;
+    json_extract(value_json,'$.art.bestRound') AS bestRound, json_extract(value_json,'$.executionStop.code') AS stopCode FROM "UserPreference" WHERE user_id=${owner} AND key=${k} LIMIT 1`;
   if(!rows.length)throw new ReviewError('当前账号没有这条验收任务',404);
-  const r=rows[0];return {id,phase:r.phase,version:r.version,sourceConfirmed:!!r.connected,...(r.kind==='art'?{kind:'art',changes:Number(r.totalChanges||0),art:{stage:r.stage,cycle:Number(r.cycle||0),cycleChanges:Number(r.cycleChanges||0),totalChanges:Number(r.totalChanges||0),recapCount:Number(r.recapCount||0),bestRound:r.bestRound==null?undefined:Number(r.bestRound),...(r.wakeId?{wakeId:r.wakeId,wakeVersion:r.wakeVersion||undefined}:{})}}:{})};
+  const r=rows[0];return {id,phase:r.phase,version:r.version,sourceConfirmed:!!r.connected,deliveryKey:r.delivery?stamp(r.delivery):'',...(r.stopCode?{executionStop:{code:r.stopCode}}:{}),...(r.kind==='art'?{kind:'art',changes:Number(r.totalChanges||0),art:{stage:r.stage,cycle:Number(r.cycle||0),cycleChanges:Number(r.cycleChanges||0),totalChanges:Number(r.totalChanges||0),recapCount:Number(r.recapCount||0),bestRound:r.bestRound==null?undefined:Number(r.bestRound),...(r.wakeId?{wakeId:r.wakeId,wakeVersion:r.wakeVersion||undefined}:{})}}:{})};
 }
 export async function pendingRecaps(owner:string,scope:string){
   const prefix=REVIEW_PREFIX+checkedScope(scope)+':';
@@ -103,17 +104,17 @@ export async function listReviews(owner: string, scope: string, skip: number) {
   const where = {user_id:owner,key:{startsWith:REVIEW_PREFIX+checkedScope(scope)+':'}};
   // Use JSON projection so list pages never read or transfer full drafts/images.
   const prefix = where.key.startsWith;
-  const rows = await prisma.$queryRaw<Array<{id:string; title:string; phase:Phase; updatedAt:bigint|number; changes:bigint|number;kind:string|null;stage:string|null;cycle:number|null;cycleChanges:number|null;totalChanges:number|null;recapCount:number|null;bestRound:number|null}>>`
+  const rows = await prisma.$queryRaw<Array<{id:string; title:string; phase:Phase; updatedAt:bigint|number; changes:bigint|number;kind:string|null;stage:string|null;cycle:number|null;cycleChanges:number|null;totalChanges:number|null;recapCount:number|null;bestRound:number|null;stopCode:string|null}>>`
     SELECT json_extract(value_json,'$.id') AS id, json_extract(value_json,'$.title') AS title,
       json_extract(value_json,'$.phase') AS phase, json_extract(value_json,'$.updatedAt') AS updatedAt,
       json_array_length(value_json,'$.rounds')-1 AS changes,
       json_extract(value_json,'$.kind') AS kind, json_extract(value_json,'$.art.stage') AS stage,
       json_extract(value_json,'$.art.cycle') AS cycle, json_extract(value_json,'$.art.cycleChanges') AS cycleChanges,
       json_extract(value_json,'$.art.totalChanges') AS totalChanges, json_array_length(value_json,'$.art.recaps') AS recapCount,
-      json_extract(value_json,'$.art.bestRound') AS bestRound FROM "UserPreference"
+      json_extract(value_json,'$.art.bestRound') AS bestRound, json_extract(value_json,'$.executionStop.code') AS stopCode FROM "UserPreference"
     WHERE user_id=${owner} AND substr(key,1,length(${prefix}))=${prefix}
     ORDER BY updated_at DESC, key ASC LIMIT 15 OFFSET ${skip}`;
-  return {rows:rows.map(r=>({id:r.id,title:r.title,phase:r.phase,updatedAt:Number(r.updatedAt),changes:Number(r.kind==='art'?r.totalChanges||0:r.changes),...(r.kind==='art'?{kind:'art',art:{stage:r.stage,cycle:Number(r.cycle||0),cycleChanges:Number(r.cycleChanges||0),totalChanges:Number(r.totalChanges||0),recapCount:Number(r.recapCount||0),bestRound:r.bestRound==null?undefined:Number(r.bestRound)}}:{})})),total:await prisma.userPreference.count({where})};
+  return {rows:rows.map(r=>({id:r.id,title:r.title,phase:r.phase,updatedAt:Number(r.updatedAt),changes:Number(r.kind==='art'?r.totalChanges||0:r.changes),...(r.stopCode?{executionStop:{code:r.stopCode}}:{}),...(r.kind==='art'?{kind:'art',art:{stage:r.stage,cycle:Number(r.cycle||0),cycleChanges:Number(r.cycleChanges||0),totalChanges:Number(r.totalChanges||0),recapCount:Number(r.recapCount||0),bestRound:r.bestRound==null?undefined:Number(r.bestRound)}}:{})})),total:await prisma.userPreference.count({where})};
 }
 export async function startReview(owner:string,b:Fields) {
   const scope=checkedScope(b.scope), id=checkedId(b.id,uuid), art=b.kind==='art';
@@ -134,14 +135,14 @@ export async function startReview(owner:string,b:Fields) {
 }
 function artInstructions(t:ReviewTask):string {
   const a=t.art!;
-  const shared='这是用户一次启动的完整美术自动流，保持原图、原始目标、人物/构图等明确保留项。请只在本原对话使用已连接的 SD2 验收工具，先 link_review 核对本轮单号，再用 submit_revision 交回本步骤实际产物。收到 continue 或 revise 就按新单号和指令继续，分析、首次出图、审稿与两次复盘后重试之间不等待人工点击；pass 或 stop 才结束。原要求：\n'+t.goal;
+  const shared='只执行当前步骤，保留原图、原目标和已确认的进展。先用已连接的 SD2 验收工具 link_review 核对单号，再用 submit_revision 交回本步骤产物。后续步骤只以工具返回的新单号和指令为准，不提前执行。执行能力不可用、服务拒绝或安全限制时停止，不改写要求绕过限制。\n冻结的最终目标（背景，不是本轮动作）：\n'+t.goal;
   const textFormat='交回 text 使用 JSON 对象，problem、cause、direction、check 四个字段分别写具体画面问题、原因判断、下一步方向、看图核验办法，每项必须有实质内容；可另加 preserve 写保留项。不能只写收到、已分析或空泛承诺。';
-  if(a.stage==='analysis')return shared+'\n当前仅执行前置看图分析：对照原图讨论具体问题、原因、修改方向、必须保留内容以及可看图核验的标准。把完整分析写在当前对话，并作为 text 交回 submit_revision，image 留空。'+textFormat+'分析完成不等于任务完成，交回后按工具返回指令继续真正改图。';
+  if(a.stage==='analysis')return '当前步骤：原图设计分析。只看图讨论，不生成或编辑图片。\n'+shared+'\n本轮产物：对照原图写具体问题、原因、修改方向、必须保留内容及看图核验标准。把完整分析写在原对话，并作为 text 交回 submit_revision，所有 image 参数留空。'+textFormat+'交回后等待工具给出下一步骤，不自行跳到图片制作。';
   const last=t.rounds.at(-1)?.result;
   const history='\n前置分析：'+a.analysis.slice(0,3000)+(a.recaps.length?'\n最近一次复盘：'+a.recaps.at(-1)!.slice(0,3000):'')+(last?'\n本版原因：'+last.reason+'\n画面依据：'+last.evidence+'\n具体改法：'+last.change:'');
-  if(a.stage==='recap')return shared+history+'\n现在执行第 '+(a.recaps.length+1)+' 次方向复盘。结合本轮所有图片和退回意见，检查原方向、逻辑和方法是否成立，指出证据、应保留的进展、为什么没有接近目标，以及下一组具体改变什么策略和怎样核验。不能只重复上次改法，也不能降低原要求。把完整复盘作为 text 交回，image 留空。'+textFormat+'problem需对照已生成图片指出卡在哪里，cause需反思原方向/逻辑/方法，direction需给出与上组不同的具体策略；工具会返回新单号，自动开启下一组改图。';
+  if(a.stage==='recap')return '当前步骤：第 '+(a.recaps.length+1)+' 次方向复盘。只复盘，不生成或编辑图片。\n'+shared+history+'\n结合本组图片和退回意见，检查原方向、逻辑和方法，指出证据、应保留的进展、未接近目标的原因及下一组策略，不能降低原要求。完整复盘作为 text 交回，所有 image 参数留空。'+textFormat+'problem对照图片指出卡点，cause反思方法，direction给出与上组不同的具体策略。下一步只按工具返回的新指令执行。';
   if(a.stage==='done')return '本任务自动步骤已结束，请保留当前结果，由用户选择。';
-  return shared+history+'\n现在执行第 '+(a.cycle+1)+' 组真实图像制作（本组已修改 '+a.cycleChanges+'/3 次）。'+(a.bestRound?'优先从当前对话第 '+a.bestRound+' 张已提交改图继续，保护之前已改善部分。':'先真正生成第一张修改后的场景图。')+'必须调用实际图像生成/编辑能力并在当前对话展示图片；文字说明、SVG结构示意、文字截图、原图副本都不是成品。每轮只用 submit_revision 的 image 参数交回一张主成品（可下载的 PNG/JPEG/WebP），不要同时提交参考图或示意图，text 仅作简短改动说明。审稿附件最多2MB；完整生成原图留在本对话供用户下载，必要时另交同内容、完整构图的清晰缩略副本供审稿，不裁切、不替换内容，不把缩略副本冒充原始大图。原图、当前图和最好版本都要对应原目标。首张经确认的真实改图不计修改次数，每组最多3次，自动复盘后另开一组，最多2次复盘重试。示意图等无效视觉产物不计修改，但整个自动流累计3次就停止等待恢复，不允许无限尝试；不要自行停止在分析阶段。';
+  return '当前步骤：第 '+(a.cycle+1)+' 组真实图像制作（本组已修改 '+a.cycleChanges+'/3 次）。\n'+shared+history+'\n'+(a.bestRound?'优先从当前对话第 '+a.bestRound+' 张已提交改图继续，保护之前已改善部分。':'先真正生成第一张修改后的场景图。')+'必须调用实际图像生成/编辑能力并在当前对话展示图片；文字说明、SVG结构示意、文字截图、原图副本都不是成品。每轮只用 submit_revision 的 image 参数交回一张主成品（可下载的 PNG/JPEG/WebP），不要同时提交参考图或示意图，text 仅作简短改动说明。审稿附件最多2MB；完整生成原图留在本对话供用户下载，必要时另交同内容、完整构图的清晰缩略副本供审稿，不裁切、不替换内容，不把缩略副本冒充原始大图。原图、当前图和最好版本都要对应原目标。首张经确认的真实改图不计修改次数，每组最多3次，自动复盘后另开一组，最多2次复盘重试。示意图等无效视觉产物不计修改，但整个自动流累计3次就停止等待恢复，不允许无限尝试。';
 }
 function artText(text:string) {
   const content=field(text,20000),names=[['problem','问题'],['cause','原因'],['direction','方向'],['check','核验']];
@@ -258,6 +259,16 @@ export async function updateReview(owner:string, saved:Saved, b:Fields) {
   if((b.op==='resume'||b.op==='retry')&&t.art?.wake?.op===b.op&&t.art.wake.requestVersion===b.version)return t;
   if(b.op==='claim'&&t.phase==='delivering'&&b.delivery===t.delivery&&b.cid===t.binding.cid&&b.device===t.binding.device)return t;
   if(b.version!==t.version)throw new ReviewError('这版记录已更新，请重新读取',409);
+  if(b.op==='execution-stop'){
+    // A browser may stop its own executor, but cannot submit a draft or verdict here.
+    if(t.phase!=='awaiting'||b.device!==t.binding.device||b.cid!==t.binding.cid||b.messageId!==t.binding.sourceId)throw new ReviewError('原执行步骤已变化，未覆盖当前任务',409);
+    const delivery=checkedId(b.delivery,uuid);
+    if(delivery!==t.delivery)throw new ReviewError('原执行单号已有新进展，旧回复不能停止当前步骤',409);
+    if(b.code!=='provider_refused'&&b.code!=='result_missing')throw new ReviewError('执行停止原因无效');
+    const executionStop:ExecutionStop={code:b.code,excerpt:field(b.excerpt,1200,true),recordedAt:Date.now()};
+    const note=b.code==='provider_refused'?'原 GPT 已拒绝执行本轮请求，自动流程已停止，未重试。请查看原对话的限制说明，确认可处理的素材或方向后另行发起。':'原 GPT 已结束回复，但未交回本轮结果，自动流程已停止，原任务和已有稿件保留。请到原对话核对本轮产物与连接。';
+    return (await replace(owner,saved,{...t,phase:'input',note,executionStop,resumePhase:undefined,...(t.art?{art:{...t.art,wake:undefined}}:{})})).task;
+  }
   if(b.op==='pause' && ['ready','judging','feedback','awaiting','delivering'].includes(t.phase))return (await replace(owner,saved,{...t,phase:'paused',resumePhase:t.phase==='judging'?'ready':t.phase})).task;
   if(b.op==='resume' && t.phase==='paused')return (await replace(owner,saved,{...t,phase:t.resumePhase||'ready',resumePhase:undefined,...(t.art?{art:{...t.art,wake:{id:randomUUID(),requestVersion:t.version,op:'resume' as const}}}:{})})).task;
   if(b.op==='retry'&&t.phase==='error'&&t.art?.invalid&&typeof t.delivery==='string'&&t.delivery.length>0&&t.art.invalid.delivery===t.delivery){
@@ -305,7 +316,7 @@ async function recoverArtReview(owner:string,saved:Saved,b:Fields):Promise<Revie
 }
 const TICKET_PREFIX = 'bridge_gpt_review_ticket:';
 async function issueDelivery(owner:string, saved:Saved, phase:'delivering'|'awaiting',delivery=randomUUID() as string) {
-  const t={...saved.task,phase,delivery,version:randomUUID(),updatedAt:Date.now()};
+  const t:ReviewTask={...saved.task,...(saved.task.art?{art:{...saved.task.art,instructions:artInstructions(saved.task)}}:{}),phase,delivery,version:randomUUID(),updatedAt:Date.now()};
   await prisma.$transaction(async db=>{
     const result=await db.userPreference.updateMany({where:{user_id:owner,key:key(t.scope,t.id),value_json:saved.raw},data:{value_json:JSON.stringify(t)}});
     if(!result.count)throw new ReviewError('本轮已由其他窗口处理',409);

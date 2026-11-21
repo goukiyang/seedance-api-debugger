@@ -27,6 +27,30 @@ async function recover(n,op='resume'){
   return {args,result};
 }
 try{
+  await check('completed analysis ticket cannot stop the newer image step even with its latest version',async()=>{
+    const n=await task(),next=await n.submit(n.delivery,analysis),current=(await n.get()).task;assert.equal(next.stage,'image');assert.notEqual(next.delivery,n.delivery);
+    const status=(await n.post('status')).data.task;assert.equal(status.deliveryKey,f.q.summary(current).deliveryKey);assert.notEqual(status.deliveryKey,f.q.summary({...current,delivery:n.delivery}).deliveryKey);
+    for(const code of ['provider_refused','result_missing']){const result=await n.post('execution-stop',{version:current.version,delivery:n.delivery,code,excerpt:'来自已结束的旧分析步骤'});assert.equal(result.status,409);}
+    const after=(await n.get()).task;assert.equal(after.phase,'awaiting');assert.equal(after.delivery,next.delivery);assert.equal(after.version,current.version);assert.equal(after.executionStop,undefined);assert.equal(after.art.totalChanges,0);
+  });
+  await check('legacy unissued stage gets current preparation while already issued command evidence stays immutable',async()=>{
+    const base={id:randomUUID(),scope,device:'legacy-stage-device',cid:'legacy-stage-cid',messageId:'legacy-stage-source',kind:'art',title:'旧待发步骤',goal:'保留原目标',text:'原问题',images:[],reference:[original]},post=(op,more={})=>f.api({...base,op,...more});
+    await post('create');let saved=await f.q.getTask('review-a',scope,base.id);saved.task.art.instructions='旧版完整自动流：先生成第一张，再分析';
+    const where={user_id:'review-a',key:f.q.REVIEW_PREFIX+scope+':'+base.id};await f.db.userPreference.updateMany({where,data:{value_json:JSON.stringify(saved.task)}});
+    const preview=(await post('get')).data.task;assert.equal(preview.art.instructions,saved.task.art.instructions);assert.match(preview.art.unsentInstructions,/^当前步骤：原图设计分析/);assert.equal(preview.goal,base.goal);
+    const delivery=randomUUID(),claimed=await post('claim',{version:saved.task.version,delivery});assert.ok(claimed.ok);saved=await f.q.getTask('review-a',scope,base.id);assert.match(saved.task.art.instructions,/^当前步骤：原图设计分析/);
+    saved.task.art.instructions='已发行单号的旧原文，保持作为发送证据';await f.db.userPreference.updateMany({where,data:{value_json:JSON.stringify(saved.task)}});assert.ok((await post('ack',{version:saved.task.version,delivery})).ok);
+    const issued=(await post('get')).data.task;assert.equal(issued.art.unsentInstructions,undefined);assert.equal(issued.art.instructions,saved.task.art.instructions);assert.equal(issued.art.totalChanges,0);
+  });
+  await check('unpaired executor refusal records a terminal cause without accepting analysis or retrying generation',async()=>{
+    const base={id:randomUUID(),scope,device:'art-refusal-device',cid:'refusal-original-cid',messageId:'refusal-user-original',kind:'art',title:'受阻的原任务',goal:'原样保留用户目标，不修改内容躲避限制',text:'用户原提问',images:[],reference:[original]},post=(op,more={})=>f.api({...base,op,...more});
+    const created=await post('create'),delivery=randomUUID();assert.ok(created.ok);const initial=(await f.q.getTask('review-a',scope,base.id)).task;assert.match(initial.art.instructions,/^当前步骤：原图设计分析。只看图讨论，不生成或编辑图片。/);
+    const claim=await post('claim',{version:created.data.task.version,delivery});const ack=await post('ack',{version:claim.data.task.version,delivery});assert.ok(ack.ok);assert.equal(ack.data.task.sourceConfirmed,false);
+    const calls=f.modelCalls.length,halted=await post('execution-stop',{version:ack.data.task.version,delivery,code:'provider_refused',excerpt:'We’re so sorry, but the image we created may violate our guardrails concerning similarity to third-party content.'});assert.ok(halted.ok,halted.data.error);
+    const saved=(await f.q.getTask('review-a',scope,base.id)).task;assert.equal(saved.phase,'input');assert.equal(saved.executionStop.code,'provider_refused');assert.equal(saved.art.totalChanges,0);assert.equal(saved.art.recaps.length,0);assert.equal(saved.rounds.length,1);assert.equal(saved.art.analysis,'');assert.equal(saved.goal,base.goal);assert.equal(f.modelCalls.length,calls);
+    assert.equal((await post('resume',{version:saved.version})).status,409);assert.equal((await post('retry',{version:saved.version})).status,409);await assert.rejects(f.q.bindReviewConnection('review-a',scope,base.id,delivery,'late-connection'),/已经变化/);
+    const status=(await post('status')).data.task;assert.equal(status.executionStop.code,'provider_refused');assert.equal(status.art.totalChanges,0);
+  });
   await check('analysis -> initial image -> nine revisions -> two automatic recaps -> user decision in one task',async()=>{
     const calls=f.modelCalls.length,n=await task();assert.equal(f.modelCalls.length,calls,'initial create must not judge the source text');
     let next=await n.submit(n.delivery,analysis);assert.equal(next.status,'continue');assert.equal(next.stage,'image');assert.match(next.instructions,/真正生成第一张/);

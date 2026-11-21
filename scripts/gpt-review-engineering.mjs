@@ -174,6 +174,24 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
       return {id,delivery,saved:await f.q.getTask('review-a',scope,id)};
     }
     {
+      const name='executor-completed-without-return',n=await boundText(name),calls=f.modelCalls.length;
+      const stop={id:n.id,version:n.saved.task.version,messageId:name,delivery:n.delivery,code:'result_missing',excerpt:'原对话已结束，但没有交回本轮产物。'};
+      for(const bad of [{device:'another-device'},{cid:'another-cid'},{messageId:'another-source'},{delivery:crypto.randomUUID()}])assert.equal((await post('execution-stop',{...stop,...bad})).status,409);
+      const halted=await post('execution-stop',stop);assert.ok(halted.ok,halted.data.error);assert.equal(halted.data.task.phase,'input');assert.equal(halted.data.task.executionStop.code,'result_missing');
+      const full=(await f.q.getTask('review-a',scope,n.id)).task;assert.equal(full.rounds.length,1);assert.equal(full.rounds[0].result.decision,'revise');assert.equal(f.modelCalls.length,calls);
+      const current=(await f.api({...base,op:'status',id:n.id})).data.task;assert.equal(current.executionStop.code,'result_missing');
+      const listing=(await f.api({...base,op:'list'})).data.rows.find(r=>r.id===n.id);assert.equal(listing.executionStop.code,'result_missing');
+      assert.equal((await post('retry',{id:n.id,version:full.version})).status,409);assert.equal((await post('resume',{id:n.id,version:full.version})).status,409);
+      const late=await f.submit(n.delivery,'甲项已交付。\n乙项已交付。',token);assert.ok(late.result.isError||late.result.structuredContent?.status==='stop');assert.equal((await f.q.getTask('review-a',scope,n.id)).task.rounds.length,1);
+      const paused=await boundText('executor-pause-wins'),p=await post('pause',{id:paused.id,version:paused.saved.task.version});assert.ok(p.ok);
+      assert.equal((await post('execution-stop',{...stop,id:paused.id,version:paused.saved.task.version,messageId:'executor-pause-wins',delivery:paused.delivery})).status,409);
+      assert.equal((await f.q.getTask('review-a',scope,paused.id)).task.phase,'paused');
+      const progressed=await boundText('executor-new-result-wins');await f.q.receiveRevision('review-a',progressed.saved,{delivery:progressed.delivery,messageId:'new-result',text:'新稿已交回',images:[],requestKey:'new-result-request'},progressed.saved.task.connected);
+      assert.equal((await post('execution-stop',{...stop,id:progressed.id,version:progressed.saved.task.version,messageId:'executor-new-result-wins',delivery:progressed.delivery})).status,409);
+      assert.equal((await f.q.getTask('review-a',scope,progressed.id)).task.rounds.length,2);
+      console.log('PASS real SQLite executor stop is scoped, non-retrying, preserves rounds, and loses to pause/new result');
+    }
+    {
       const {id,delivery,saved}=await boundText('simultaneous-first-receipt'),text='甲项并发修订';
       let inputCount=0,inputsReady,releaseInputs,judgeReady,releaseJudge;
       const bothInputs=new Promise(resolve=>{inputsReady=resolve;}),inputGate=new Promise(resolve=>{releaseInputs=resolve;});
