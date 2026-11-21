@@ -143,3 +143,31 @@ attempt06完整编译成功后，旧`finalize-pair.py`仍要求上一批`referen
 scripts/gpt-review-engineering.mjs新增judging重复、pause/pass/revise、pause→resume旧结果晚到、同时首交和同时公布下一单检查均通过；17组真实临时SQLite/Sharp美术回归、全量tsc及lint也通过，lint仅已有非本批警告。配套客户端0.21.2文字/美术隔离浏览器链路、worker账号/窗口/暂停/晚到回执、共享结果页忙状态检查通过。独立只读复核本批产品P1/P2已关闭。全部模型/ChatGPT传输仍为隔离夹具，不能当成原生真实闭环通过。
 
 发布请求沿原Mac线程及seamless1.1.2，执行前必须重核当前有效源与共享发布窗口，保护正在推进的0.21.1五包/R1静态资产及其他已上线变更。此分支是从71ea8e5导出的聚焦补修，不允许整树覆盖更高现网；必要时把本批准确差异合入当前安全源，重新冻结统一构建/准入，保留原数据库/价格/三旧未知请求/旧guard与回退，不恢复DB。原始失败日志均保留。上线回执给本原Windows任务，仅声明工程部署；真实文字任务与原图验证由Windows按一次启动、后续只观察的规则继续。
+
+### 0.151.1 Mac保护发布窗口
+
+窗口`gpt-generic-flow-20261121-9615c56`沿原任务执行。donor27552066101fc72da4c167503d3739e8664d854d已从原origin核同；保留既有纯记录0e3c705后，合并应用源9615c566315e9c5aecc057970df0a2871348a8df已推原origin的codex/gpt-generic-flow-release-20261121。四个运行文件blob严格等于donor，其余旧发布历史保留，美术/OAuth/许可未变。
+
+attempt07全部目录由同一新尝试派生，输入包SHA256 2c434e451620e61900962ee0c52450cf434f7e8406aedae2b1205210227555bf。完整Git库存、2649个选定源逐blob、本地与服务器无构建预检通过；继承118个不变历史媒体/证据/.env示例排除项。49项差量中4运行文件，45项为旧发布记录及原单。版本只改package/lock，release.ts继续从package读取，未为迁就输入改应用或放宽门。
+
+本地一次Git库存断言失败如实保留：原选定归档不等于所有历史Git文件，修正为完整库存与原选定源分别核对，未因此启动服务器构建/切换。旧attempt01–06、06封装exit1与接续exit0均保留。attempt07完整工程与Next构建exit0，BUILD S5apHEsgkwm2yI0I3mizD；文字新回归、旧文字/OAuth/PKCE/许可回退、17组实际SQLite/Sharp美术、改动lint与全量tsc/lint通过。GPT_DIRECTORY_QA显式使用本次服务器工程根，模型均为隔离夹具，生产写0、付费调用0。原生form源字节未改、既有原生浏览器证据核hash复用；工程不代真实账号闭环。封存1.1.2只登记gpt-review.ts准确新旧hash，原引擎逻辑与guard保持，最终准入通过。切换前核当前七服务、双域与共享占用，实际结果随后追加。
+
+### 0.151.1 最终发布与公网核对
+
+已部署，待Windows手动验收。准确应用源`9615c566315e9c5aecc057970df0a2871348a8df`，版本`0.151.1`，BUILD `S5apHEsgkwm2yI0I3mizD`。donor2755206的四个运行文件逐blob保持，其余源继承线上71ea8e5，只额外保留旧发布记录。窗口`gpt-generic-flow-20261121-9615c56`，实际run `79676cb8-a8ea-4fb6-ba13-00d320ae047f`，原seamless1.1.2/automatic-same-plan八步complete，构建与publish均exit0。全批只构建、发布一次，没有覆盖或重跑旧尝试。
+
+七服务active且WorkingDirectory同源，实际BUILD核同；双域sd2.youdooart.com和sd2-server.youdoodesign.com的release=0.151.1、health=true，相关静态CSS/JS全文摘要核同。价格配置与三条旧未知请求全字段摘要保持。原DB/队列/原号、默认模型/费率/许可和相容guard保留，未执行DDL或业务数据恢复，验证生产写0、付费调用0。候选及原writer交接沿原引擎完成，当前无活动发布controller；探针超时0不冒称测量了连续零中断。
+
+两OAuth发现HTTP200：`/.well-known/oauth-authorization-server`和`/.well-known/oauth-protected-resource/api/bridge/review-mcp`；POST `/api/bridge/review-mcp` initialize和tools/list均200，只返回link_review、submit_revision，OAuth2 scope reviews.submit。旧ChatGPT回调和实际`https://chatgpt.com/connector/oauth/lrPNES-xwBHJ`均匿名302到登录，错误域/通配/额外query400；未放宽Origin、nonce、PKCE、码绑定或许可边界。原生form相关源未变，既有真实原生表单证据绑定hash复用，本批未冒称重新真实Connect。
+
+额外发布前探针曾出现urllib HTTP403，原curl复核双域均200；另一次只读记录误读签名清单顶层version而KeyError。两次均在window写入与publish启动之前，真实失败记录保留。回到原shared/release.js核JSON.parse(envelope.payload)后修正额外记录，未改应用、冻结输入或原发布器，未绕过实际准入。另一本地文档写入编码失败及一次误猜payload编码的只读失败保留执行记录；正确按原实现写入和读取后继续，无二次构建/部署。
+
+回退沿本run的`/data/video-api-debugger/release-staging/79676cb8-a8ea-4fb6-ba13-00d320ae047f/seamless-plan.json`及原固定相容guard，只回程序，不回业务数据库。attempt01–06原成功/失败输入、日志、退出码和06封装接续均保留；本次attempt07全部原始日志仍在服务器同名staging。新源Git库存/选定归档/输入摘要、工程日志和原生成时间均有对应证据，不将完整私密策略入仓库。
+
+R1五包候选仍保留。正式生产桥latest仍0.6.32，原始SHA256 d6d8dd898fb0ce7bbe23f6a932ec7934830daa9a67d20b3f3763d20b8c9888ad发布前后相同；没有签名上传新桌面清单或切换R1。Windows0.21.2保护安装与真实文字自动退回→修改→复验及原图闭环由原Windows继续，工程部署不代功能通过，R1–R3/I1未完成边界不删。
+
+备用zip原job181e9ea3-1578-46b8-af85-c7eaaf50bc8d在本轮Mac正式收件列表仍未见saved/path，未重发/重启桥传或动剪贴板；准确Git已可取，未阻断构建。原参考图沿job3ecb381a-f617-4493-b278-989c81e50663既有私有归档及receipt，Mac实际路径`/Volumes/Data/Projects/video-api-debugger/materials/2026-11-20-gpt-world-review/codex-clipboard-d5cca489-9430-4eb2-bfb1-d25e4477fe14.png`，1617194字节、1280×915、SHA066a0bad574ea7087f6699c69edd7cdd2d273874d5e6e1c94d48d98f29f35899。未重传、公开或加入发布包，不是成品。
+
+证据：[实际部署](../../docs/materials/2026-11-21-gpt-generic-flow/public-deployed.json)、[窗口与回退](../../docs/materials/2026-11-21-gpt-generic-flow/publication-closure.json)、[OAuth/MCP](../../docs/materials/2026-11-21-gpt-generic-flow/gpt-review-public-check.json)、[完整构建](../../docs/materials/2026-11-21-gpt-generic-flow/main-build-success.json)、[统一工程](../../docs/materials/2026-11-21-gpt-generic-flow/main-focused-engineering.json)、[源相容摘要](../../docs/materials/2026-11-21-gpt-generic-flow/source-pair-public-summary.json)、[证据清单](../../docs/materials/2026-11-21-gpt-generic-flow/evidence-manifest.json)。本次单独阶段查询已原CX answer单次steer，received/confirmed，见[阶段回执](../../docs/materials/2026-11-21-gpt-generic-flow/stage-query-receipt-response.json)；最终发布回执另按原请求单次发送。
+
+本轮新发现的线索与问题：未新增任务外问题。

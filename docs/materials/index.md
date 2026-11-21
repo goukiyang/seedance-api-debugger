@@ -689,3 +689,7 @@ v0.146.0已部署，待用户手动验收；原卡片与三批共用链、26组�
 - I1美术自动流用户参考原图：Mac mini正式桥传原job已核saved/receipt、1617194字节、1280×915和SHA256；PNG私有归档并排除Git及发布包，仅作参考。见 [接收核对](../../materials/2026-11-20-gpt-world-review/receipt.json)及 [原工单](../../tasks/todo/2026-11-20-gpt-background-review-release.md)。
 
 - GPT验收I1美术自动流0.151.0保护发布：71ea8e565 / BUILD d_gTKdW48NfIpvCQgxAA9，attempt06完整构建/17组工程/相容准入，双域七服务与OAuth两工具核同；原封装失败和接续凭据保留，Windows真实成图待手验。见 [部署结果](2026-11-20-gpt-art-autoflow/public-deployed.json)、[OAuth与工具](2026-11-20-gpt-art-autoflow/gpt-review-public-check.json)、[原工单](../../tasks/todo/2026-11-20-gpt-background-review-release.md)。
+
+## 2026-11-21 GPT验收公共链路0.151.1
+
+[发布原单](../../tasks/todo/2026-11-20-gpt-background-review-release.md)为统一状态入口；[本批安全证据](2026-11-21-gpt-generic-flow/evidence-manifest.json)覆盖准确源9615c566、BUILD S5apHEsgkwm2yI0I3mizD、attempt07构建/准入、七服务双域、OAuth/MCP、价格/旧未知请求和回退。原始私密策略与完整日志留原服务器；原参考图继续沿2026-11-20私有归档和原receipt，不公开、不进发布包。工程部署已完成，Windows真实文字/原图功能待验。

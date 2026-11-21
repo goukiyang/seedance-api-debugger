@@ -1,0 +1,14 @@
+{
+  "checkedAt": "2026-11-21T09:00:14.382683+00:00",
+  "matchingReceipts": [],
+  "notPresent": [
+    "181e9ea3-1578-46b8-af85-c7eaaf50bc8d",
+    "26bc4aad-4a70-44ee-91db-40412799aed5",
+    "3a1f4417-addf-4bba-8944-9b2353ac0bef",
+    "5a87743e-1977-48d2-b749-4f1ecfbbcee4",
+    "90bc4ebd-b085-46f8-babd-3dbdbcc4b75b",
+    "ba034601-ba8a-45d0-867f-b67f625acd62"
+  ],
+  "existingJobsOnly": true,
+  "resend": false
+}

@@ -1,0 +1,6 @@
+{
+  "stage": "offline Git inventory assertion",
+  "buildStarted": false,
+  "cutoverStarted": false,
+  "reason": "Previous approved archive intentionally excluded unchanged historical media/evidence and .env.example; complete Git inventory is separate from inherited source selection."
+}

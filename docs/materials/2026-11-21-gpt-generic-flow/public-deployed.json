@@ -1,0 +1,80 @@
+{
+  "schema": "sd2-public-deployed.v1",
+  "source": "9615c566315e9c5aecc057970df0a2871348a8df",
+  "version": "0.151.1",
+  "build": "S5apHEsgkwm2yI0I3mizD",
+  "completedAt": "2026-11-21T09:10:21.217204+00:00",
+  "runId": "79676cb8-a8ea-4fb6-ba13-00d320ae047f",
+  "public": {
+    "sd2.youdooart.com": "0.151.1",
+    "sd2-server.youdoodesign.com": "0.151.1"
+  },
+  "health": {
+    "sd2.youdooart.com": true,
+    "sd2-server.youdoodesign.com": true
+  },
+  "roles": {
+    "sd2-gray": {
+      "WorkingDirectory": "/data/video-api-debugger/managed-releases/9615c566315e9c5aecc057970df0a2871348a8df",
+      "ActiveState": "active"
+    },
+    "sd2-image-studio": {
+      "WorkingDirectory": "/data/video-api-debugger/managed-releases/9615c566315e9c5aecc057970df0a2871348a8df",
+      "ActiveState": "active"
+    },
+    "sd2-hd-derivatives": {
+      "WorkingDirectory": "/data/video-api-debugger/managed-releases/9615c566315e9c5aecc057970df0a2871348a8df",
+      "ActiveState": "active"
+    },
+    "sd2-multiview-works": {
+      "WorkingDirectory": "/data/video-api-debugger/managed-releases/9615c566315e9c5aecc057970df0a2871348a8df",
+      "ActiveState": "active"
+    },
+    "sd2-role-coordinator": {
+      "WorkingDirectory": "/data/video-api-debugger/managed-releases/9615c566315e9c5aecc057970df0a2871348a8df",
+      "ActiveState": "active"
+    },
+    "sd2-template-prompts": {
+      "WorkingDirectory": "/data/video-api-debugger/managed-releases/9615c566315e9c5aecc057970df0a2871348a8df",
+      "ActiveState": "active"
+    },
+    "sd2-periodic-credits": {
+      "WorkingDirectory": "/data/video-api-debugger/managed-releases/9615c566315e9c5aecc057970df0a2871348a8df",
+      "ActiveState": "active"
+    }
+  },
+  "targetStaticResources": [
+    {
+      "file": "static/chunks/5885-7cc400c694229cad.js",
+      "sha256": "f5fbdb830f397f9911a2b60ffa188d8a4f18eab9e15ed9a673cdb179cff4cc8c",
+      "containsAssetPickerUI": true
+    },
+    {
+      "file": "static/css/8e61d14c71b52e56.css",
+      "sha256": "28576f2c91e99523d83c4819860b486b4a7dd4b584a8aa5f95f3d1e7e7e37138",
+      "containsAssetPickerUI": true
+    }
+  ],
+  "releaseCompletedSteps": [
+    "preflight",
+    "prepare",
+    "cutToCandidate",
+    "drainOriginal",
+    "publishCanonical",
+    "startCanonical",
+    "cutToCanonical",
+    "retireCandidate"
+  ],
+  "databaseRestored": false,
+  "oldUnknownsUnchanged": true,
+  "oldUnknownCount": 3,
+  "oldUnknownsSha256": "02076ef9f09af64c80fcfea08981f9ac431d744adaa131320686508ad060d828",
+  "pricingUnchanged": true,
+  "engineInstall": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt07/engine-install-picker.json",
+  "functionalAcceptance": "user-manual-pending",
+  "anonymousPrivatePickerRead": 401,
+  "paidGenerationCallsByAgent": 0,
+  "productionRowsWrittenByVerification": 0,
+  "observedProbeTimeoutCount": 0,
+  "continuousZeroInterruptionMeasured": false
+}

@@ -1,0 +1,29 @@
+{
+  "completedAt": "2026-11-21T09:11:34.549288+00:00",
+  "windowId": "gpt-generic-flow-20261121-9615c56",
+  "source": "9615c566315e9c5aecc057970df0a2871348a8df",
+  "version": "0.151.1",
+  "build": "S5apHEsgkwm2yI0I3mizD",
+  "status": "complete",
+  "runId": "79676cb8-a8ea-4fb6-ba13-00d320ae047f",
+  "completed": [
+    "preflight",
+    "prepare",
+    "cutToCandidate",
+    "drainOriginal",
+    "publishCanonical",
+    "startCanonical",
+    "cutToCanonical",
+    "retireCandidate"
+  ],
+  "databaseRestored": false,
+  "rollbackPlan": "/data/video-api-debugger/release-staging/79676cb8-a8ea-4fb6-ba13-00d320ae047f/seamless-plan.json",
+  "rollbackPolicy": "fixed compatible guard; program only; no business database restore",
+  "desktopLatestUnchanged": true,
+  "desktopLatestSha256": "d6d8dd898fb0ce7bbe23f6a932ec7934830daa9a67d20b3f3763d20b8c9888ad",
+  "desktopLatestVersion": "0.6.32",
+  "originalBuildAndPublishCompletedOnce": true,
+  "controllerInactive": true,
+  "buildExit": 0,
+  "publishExit": 0
+}

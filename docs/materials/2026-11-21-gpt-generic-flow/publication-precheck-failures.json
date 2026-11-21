@@ -1,0 +1,16 @@
+{
+  "prechecks": [
+    {
+      "probe": "urllib public baseline",
+      "status": 403
+    },
+    {
+      "probe": "desktop latest top-level version",
+      "error": "KeyError"
+    }
+  ],
+  "bothBeforeWindowAndPublish": true,
+  "originalCurlDualDomainsPassed": true,
+  "correctOriginalFormat": "JSON.parse(envelope.payload)",
+  "buildRepeated": false
+}

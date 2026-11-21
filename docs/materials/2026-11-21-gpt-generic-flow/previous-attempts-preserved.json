@@ -1,0 +1,23 @@
+{
+  "stages01Through06Unmodified": true,
+  "successfulBaseline": {
+    "source": "71ea8e565ddb1da559aeaec1d2e1b49e88f003a5",
+    "version": "0.151.0",
+    "build": "d_gTKdW48NfIpvCQgxAA9"
+  },
+  "baselineStage": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt06",
+  "originalBuildWrapperExit": 1,
+  "successfulFinalizationContinuationExit": 0,
+  "artifacts": {
+    "previous-attempts-preserved.json": "b546759f14f1242b4458b63a99cba96e891d604071faa63c4fe727ffeb27f56c",
+    "finalization-continuation.json": "de04c88e30d02af8d4df5b69dd6adfed0523c56bb3e4c40f860a0adac4230669",
+    "build-exit.txt": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+    "build-registry-continuation-exit.txt": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "publish-exit.txt": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "release-input.json": "e6941d0649b79cdac08d5cf3f3e67407b5f309fcde435e14808597eb12b63ef3",
+    "controller.log": "18692467ddd05606db90b5ef27f63088d15e6ffc27e3fe64ffe715d0fb61c8ba",
+    "build-registry-continuation.log": "c43ff090805e635eea0ddc5e10cdbac75c754d307748c8414d55387498ce9a98",
+    "release.log": "bfd9c7d7f57a3de92927eae14d8f7bfd88d753ec7c6f743b640f8878210ee618",
+    "public-deployed.json": "db34ed878a507a57ee54da9a7603e391cbad3ed1ff607c476eb481d31cbfdb96"
+  }
+}

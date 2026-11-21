@@ -1,0 +1,29 @@
+{
+  "source": "9615c566315e9c5aecc057970df0a2871348a8df",
+  "files": {
+    "manual-input-preflight.json": "cce8fd3d4d1190e14e764a2feb43a98d1df00028e46fd61f561c87e12d59f102",
+    "input-inventory.json": "a858bf6145767f5aa44f8ac6c5d2d9a9e8643a44bb78880d19e3d696c806348b",
+    "input-preflight-binding.json": "66259033112e4b69fa4c2bddf3d4e2f1fbeec3185f7896d7197d6c360e90ce6d",
+    "reviewed-bridge-registration.json": "a887270ee3682678866492f6df91e02ed2ace9cf8ba94aa8391fead424ce2719",
+    "native-form-proof.json": "380f1bea13265251e14300836a8c459314e7f69ad90c561372d55227f85ccdab",
+    "previous-attempts-preserved.json": "dea33e71e145edfd4e991fda763a7b72c7f27afb3060adc6e35e8861c39c5532",
+    "main-build-success.json": "500333d94c0e317402edbdd3933fa080d29d1eacaaeea5d5375dd3b426c310ca",
+    "main-focused-engineering.json": "d028a1db3a72285ae2995cd44cd930b0217795e7dcd11fc2b9973068b48995ad",
+    "main-types-process.json": "600485d4363a3fd362b292b4ed0eccc6cdaff56340d3c70d919c6c80c2709d06",
+    "main-next-process.json": "6b62b02434b82c131b6182e145921b4155b223708f962728d61018e468b3fe0a",
+    "build-exit.txt": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "publish-exit.txt": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "publication-window.json": "ad14f3c26b7c02364bd2898db400ada175b9fea0d9e86a4a0016fe9fd4762174",
+    "publication-precheck-failures.json": "6e976f45d9f49f5ecaf09d755b4b5038fb7dce797974b8dc1e459810c391ee18",
+    "input-preparation-failure01.json": "7b02dc5553b273214959a4d7ce1d44965e0fbc1666067c3205d46c7202146717",
+    "plan-reference.json": "968c9fb496bd5892ab964ca244294000fbf99a2667390db5d14d393e3a3c08c3",
+    "policy.json": "1f9ca718190ef09a65e0b426be8aee0ffab7018d4623b774b4df2e548bfd5aba",
+    "public-deployed.json": "1a4514bfff210f826c0d2b1bbc8fda85c683dc612a1bd6aebee8c36b13389c47",
+    "gpt-review-public-check.json": "6d41c9c0166d80f465549e91110d1cbf906cc8ab5f38dc480a57248b874f0630",
+    "source-compatibility-preflight.json": "5677e0a80376f82efd792f372a43c9a4636a059477ce1053786b1470021c5b26",
+    "source-pair-public-summary.json": "1af848562d509c78a0c4116e090eb70259f08f09da197ea76db2a4e7622b3b13",
+    "engine-compatibility-public-summary.json": "2ec4b4c9994ce0b80a3d849c7128cd9cd3c494c65264e03d51cfa9a5edff7e44",
+    "publication-closure.json": "8d92b0efb74c3b53a7101b1d839904bb6000f3ad37ac9c8bcdfc9c12f3d68621"
+  },
+  "privatePolicyAndUserContentsIncluded": false
+}
