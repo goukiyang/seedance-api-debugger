@@ -343,16 +343,33 @@ export async function revisionForTool(owner:string, delivery:string, text:string
   }else{
     const images=await readImages();
     if(saved.task.rounds[0].draft.images.length&&!images.length)throw new ReviewError('本次验收需要看到改好的图片，请附实际成品后再复验');
-    task=await receiveRevision(owner,saved,{delivery,messageId:'revision-'+delivery,text,images,requestKey},connection);
+    try{task=await receiveRevision(owner,saved,{delivery,messageId:'revision-'+delivery,text,images,requestKey},connection);}
+    catch(error){
+      if(!(error instanceof ReviewError)||error.status!==409)throw error;
+      const current=(await getTask(owner,target.scope,target.id)).task;
+      if(current.connected!==connection||!current.rounds.some(r=>r.receipt===delivery&&r.requestKey===requestKey))throw error;
+      task=current;
+    }
   }
   saved=await getTask(owner,task.scope,task.id);
-  if(saved.task.phase==='ready')await judgeReview(owner,saved);
+  if(saved.task.phase==='ready'){
+    try{await judgeReview(owner,saved);}
+    catch(error){if(!(error instanceof ReviewError)||error.status!==409)throw error;}
+  }
   saved=await getTask(owner,task.scope,task.id);
   task=saved.task;
   const row=task.rounds.find(r=>r.receipt===delivery);
   if(task.connected!==connection || !row)return {status:'stop',message:task.note||'未接收新稿，请在 SD2 查看当前任务。'};
-  if(task.phase==='feedback' && row===task.rounds.at(-1))task=await issueDelivery(owner,saved,'awaiting');
+  if(task.phase==='feedback' && row===task.rounds.at(-1)){
+    try{task=await issueDelivery(owner,saved,'awaiting');}
+    catch(error){
+      if(!(error instanceof ReviewError)||error.status!==409)throw error;
+      task=(await getTask(owner,target.scope,target.id)).task;
+    }
+  }
+  if(task.connected!==connection)return {status:'stop',message:'原对话连接已变化，请按当前任务核对。'};
   if(row.receipt!==task.rounds.at(-1)?.receipt)return {status:'stop',message:'这一版已处理，请按最新一轮结果继续。',review:row.result,changes:task.rounds.length-1};
+  if(['ready','judging'].includes(task.phase))return {status:'pending',delivery,changes:task.rounds.length-1,message:'本稿正在验收。稍后用相同单号、正文及附件重试本次提交，不要重复制作稿件。'};
   const next=task.phase==='awaiting' && row.receipt===task.rounds.at(-1)?.receipt && task.delivery!==delivery;
   return {status:next?'revise':task.phase==='passed'?'pass':'stop',review:row.result,changes:task.rounds.length-1,
     ...(next?{delivery:task.delivery,message:'请在本对话给出完整修改稿，用新的单号交回复验。'}:{message:task.note||'本轮结束，请在 SD2 查看验收记录。'})};
