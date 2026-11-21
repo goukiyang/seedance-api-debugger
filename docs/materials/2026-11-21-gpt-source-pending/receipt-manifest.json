@@ -1,0 +1,7 @@
+{
+  "applicationSource": "90e6d9a1daa1e8958007aaf1510f3c000f0e72f3",
+  "publicEvidenceCommit": "98210457fa10b5ecc8df606f54764175f9411b29",
+  "receiptSha256": "e3953866b7c4a6de8b911f0b5d36c15b19de0c10131ac873ab6fe4c38e9fb069",
+  "delivery": "ordinary send accepted and queued; no steer or repeated ACK",
+  "queueId": "not returned; not inferred"
+}

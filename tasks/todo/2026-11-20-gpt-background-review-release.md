@@ -256,3 +256,5 @@ attempt09所有staging、工程临时根、输出、日志与manifest由同一�
 自动审批拒绝批量下载原日志/计划，理由是可能带敏感内部数据；未执行该传输，也未换工具下载相同原件。改用明确固定字段断言及不可逆摘要的安全替代，已获准完成。仓库只归档脱敏核验摘要，详细原件仍在服务器attempt09；没有把未复制原件说成已归档。证据：[服务器限定字段实际回执](../../docs/materials/2026-11-21-gpt-source-pending/server-safe-receipt.json)、[Mac独立公网核对](../../docs/materials/2026-11-21-gpt-source-pending/mac-public-verification.json)、[准确输入预检](../../docs/materials/2026-11-21-gpt-source-pending/manual-input-preflight.json)、[输入库存摘要](../../docs/materials/2026-11-21-gpt-source-pending/input-inventory.json)、[原准备失败](../../docs/materials/2026-11-21-gpt-source-pending/input-preparation-failures.json)、[资料边界](../../docs/materials/2026-11-21-gpt-source-pending/evidence-handling.json)。
 
 本轮新发现的线索与问题：未新增任务外问题。
+
+0.151.3最终回执已按本轮短消息规则向原Windows“GPT验收设计”会话单次普通发送，HTTP200、submitted/confirmed、delivery_state=queued。目标正在运行，因此按最新规则排队，未引导或打断；无ACK、未重发，queueId未返回不编造。准确源、BUILD、工程/公网与回退细节链接到已推送的固定发布记录98210457fa10b5ecc8df606f54764175f9411b29；221字正文只含自然语言、版本和可读链接，没有任务号/会话号/哈希正文。见[实际回执](../../docs/materials/2026-11-21-gpt-source-pending/windows-final-receipt.json)。入队不等于对端已读取或业务验收完成；原R1–R3/I1继续保留，Mac本次保护部署已完成。

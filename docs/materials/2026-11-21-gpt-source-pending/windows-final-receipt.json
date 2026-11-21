@@ -1,0 +1,11 @@
+{
+  "intent_id": "sd2-gpt-source-pending-01513-final",
+  "bodyCharacters": 221,
+  "transport": "ordinary turn",
+  "httpStatus": 200,
+  "ok": true,
+  "submitted": true,
+  "confirmed": true,
+  "delivery_state": "queued",
+  "queued": true
+}
