@@ -230,3 +230,29 @@ attempt08从同一根派生staging、工程临时根、日志、输出与manifes
 本轮新发现的线索与问题：未新增任务外问题。
 
 0.151.2最终回执已向Windows「GPT验收设计」原会话win:01a1f724-18ef-77f0-945e-a92f765cf2fc通过原CX answer单次提交，HTTP200、submitted/confirmed、delivery_state=received、input_mode=steer，原turn_id见[最终回执](../../docs/materials/2026-11-21-gpt-executor-stop/windows-final-receipt.json)。无ACK、未重发；回执受理不代表Windows功能验收。R1新增五包签名/完整私有上传且继续hold的事实已另向其原会话单次更新，未复发旧final。
+
+
+### 0.151.3 Mac保护发布：准确源与构建窗口
+
+接续source-pending-01513-01，原origin准确源90e6d9a1daa1e8958007aaf1510f3c000f0e72f3已取得，父8ffa4414与原隔离发布分支核同后fast-forward，无覆盖正式根脏改。服务器现网仍3871458/0.151.2/BUILD HXp7sptwsqY7VINWiKUKI，未见活动发布controller。仅MCP提交入口与来源配对等待实现变化，原nonce/CID/device确认、OAuth/PKCE/Origin/许可/默认模型/费用不改；未确认不接稿/下载/判定/增加次数。独立审查结果沿Windows原证，本Mac工程部署不代真实原生自动重试验收。
+
+attempt09所有staging、工程临时根、输出、日志与manifest由同一根派生。完整2824项Git库存、2706个选定源、118项继承排除、38项差量（6运行/工程与32既有记录）核同；31份冻结输入本地集中预检、服务器包SHA及无构建预检均通过，输入包SHA256 5c64e4838b9f932a8f6f606f1b0b9bee02785377c2bcca464724192f5d53bd09。source-only准入确认sameSchema/unchangedPersistedContracts、sqlExecuted=false、coldFallbackAllowed=false。只登记两个实际server contract的新旧hash，未改封存引擎逻辑。原01–08输入/日志/退出码保持。
+
+本地准备出现Python3.9不支持安全解包filter参数、生成器精确非运行差量替换未命中两项错误，均在服务器构建前保留原件并修正；后者被原输入验证器挡住，未放宽门、未改应用、未另开attempt。当前仅在attempt09启动一次构建，含新增8组确认竞态、原文字/20组艺术/7类storage、类型lint/Next和最终准入，尚未切流。GPT_DIRECTORY_QA明确使用本次服务器工程根。原R1–R3/I1、任务、数据/费用、原guard及程序回退保留；正式桌面latest继续hold，Mac不代跑业务，不重试原拒绝图像请求。
+
+
+### 0.151.3 最终保护发布与公网核对
+
+已部署，待Windows真实原流程验收。准确应用源`90e6d9a1daa1e8958007aaf1510f3c000f0e72f3`，版本`0.151.3`，BUILD `FvZqDYtrsby-4Dfcz6k6K`。attempt09输入预检、完整构建和发布均只运行一次、exit0，沿原seamless1.1.2/automatic-same-plan八步complete，run `abc95d24-d01d-4bce-856c-ed5155c0dd58`。所有旧成功/失败与本地准备错误原件保留，未改应用字节迁就发布门或重跑未知切换。
+
+服务器新增8组真实SQLite来源确认竞态、旧文字/OAuth/PKCE/许可回退、20组实际SQLite/Sharp美术、7类storage、变更lint、全量类型与完整Next均通过；原生form依赖字节未改，旧原生表单证据绑定hash复用。新统一工程保留原七项并加确认专项，共八项结果，日志摘要核同；模型/ChatGPT传输为隔离夹具，工程生产写0、付费调用0。实际pending自动重试、原生图片退回→修改→复验不冒工程通过，仍由Windows独立观察。
+
+七服务全部active，逐个MainPID实际/proc cwd核同本源，.deployed-commit与实际BUILD一致。双域sd2.youdooart.com和sd2-server.youdoodesign.com的release=0.151.3、health=true，服务器与Mac独立公网读取核同；两份目标CSS/JS在双域完整字节摘要匹配，匿名私有资源入口401。两OAuth发现、MCP initialize和tools/list均200，工具仅link_review、submit_revision，scope reviews.submit；旧及真实精确回调302到登录，错误域/通配/额外query400。Origin/nonce/CID/device、PKCE、原账号与许可边界不变。
+
+价格配置和三条旧unknown请求全字段摘要保持，sameSchema/unchangedPersistedContracts通过，sqlExecuted=false、coldFallbackAllowed=false；无业务DB恢复、新DDL、默认模型/费率/许可变更，不代写原任务或重试被拒图像。回退入口`/data/video-api-debugger/release-staging/abc95d24-d01d-4bce-856c-ed5155c0dd58/seamless-plan.json`，沿原相容guard仅回程序，不回业务数据。原控制器已退出，探针超时0不冒称实测连续零中断。
+
+正式生产桥latest仍0.6.32，原SHA d6d8dd898fb0ce7bbe23f6a932ec7934830daa9a67d20b3f3763d20b8c9888ad保持；0.21.1五候选和R1自动同步修订保留，本次后台发布不代桌面发布，也不解除最终准确源/同源五包与R1/I1验收条件。原R1–R3/I1全部有效未完项、原创新任务与原被拒任务、私有原图及账号/CID隔离继续。
+
+自动审批拒绝批量下载原日志/计划，理由是可能带敏感内部数据；未执行该传输，也未换工具下载相同原件。改用明确固定字段断言及不可逆摘要的安全替代，已获准完成。仓库只归档脱敏核验摘要，详细原件仍在服务器attempt09；没有把未复制原件说成已归档。证据：[服务器限定字段实际回执](../../docs/materials/2026-11-21-gpt-source-pending/server-safe-receipt.json)、[Mac独立公网核对](../../docs/materials/2026-11-21-gpt-source-pending/mac-public-verification.json)、[准确输入预检](../../docs/materials/2026-11-21-gpt-source-pending/manual-input-preflight.json)、[输入库存摘要](../../docs/materials/2026-11-21-gpt-source-pending/input-inventory.json)、[原准备失败](../../docs/materials/2026-11-21-gpt-source-pending/input-preparation-failures.json)、[资料边界](../../docs/materials/2026-11-21-gpt-source-pending/evidence-handling.json)。
+
+本轮新发现的线索与问题：未新增任务外问题。

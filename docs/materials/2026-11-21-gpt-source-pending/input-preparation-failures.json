@@ -1,0 +1,6 @@
+{
+  "readOnlyExtractionError": "Mac Python3.9 does not support extractall(filter=); original tar reused after strict member checks",
+  "offlineInputError": "Nonruntime exact delta line did not match generator regex; old exact list rejected before upload/build. Generator now replaces the exact known line; failed generated inputs and log retained.",
+  "serverBuildStarted": false,
+  "productionCutover": false
+}

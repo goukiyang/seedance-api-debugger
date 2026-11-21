@@ -1446,3 +1446,7 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 - GPT验收公共断链0.151.2保护发布接续：准确源387145889ca78892cba4b86a545212b43f5b6f3a已从原origin取得、六文件核同，attempt08冻结输入上传核同，无构建预检中，旧站仍0.151.1。本源按20组艺术/7类存储及文字、全量类型/lint/Next、相容准入统一验证后沿原seamless发布；Windows真实文字闭环已通过，原图服务拒绝不重试，成品未通过。R1 latest0.6.32继续hold，0.21.1五候选保留，R1–R3/I1未完成项不删。[原单](todo/2026-11-20-gpt-background-review-release.md#01512-mac保护发布窗口与准确输入)。
 
 - GPT验收0.151.2已保护部署，待Windows原唯一任务终态反馈：准确源387145889ca78892cba4b86a545212b43f5b6f3a / BUILD HXp7sptwsqY7VINWiKUKI，attempt08预检/20图审/文字/全量类型-lint-Next/最终准入和原seamless八步均exit0。七服务双域健康、静态资源、OAuth双发现/两工具/精确回调通过；价格/三旧未知请求核同，无DB恢复/新DDL/付费图片请求。桌面latest0.6.32继续hold，0.21.1五签名候选完整私有上传核同，R1–R3/I1未完成项保留，原图拒绝不重试，不冒成品通过。[发布原单](todo/2026-11-20-gpt-background-review-release.md#01512-最终保护发布与公网核对)。
+
+- GPT验收后台0.151.3保护发布进行中：准确源与attempt09输入预检通过，旧站0.151.2持续服务；工程/切换/公网结果沿[原固定发布工单](todo/2026-11-20-gpt-background-review-release.md#01513-mac保护发布准确源与构建窗口)，原R1–R3/I1及桌面正式hold不变。
+
+- GPT验收后台0.151.3已保护部署，七服务实际进程与双域版本/健康、OAuth/MCP核对通过，原任务/价格/三旧unknown/回退保持；真实原流程待Windows验收，桌面正式继续hold。完整结果沿[原发布工单](todo/2026-11-20-gpt-background-review-release.md#01513-最终保护发布与公网核对)。

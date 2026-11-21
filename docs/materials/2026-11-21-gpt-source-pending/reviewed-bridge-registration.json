@@ -1,0 +1,17 @@
+{
+  "baseline": "387145889ca78892cba4b86a545212b43f5b6f3a",
+  "source": "90e6d9a1daa1e8958007aaf1510f3c000f0e72f3",
+  "files": {
+    "src/app/api/bridge/review-mcp/route.ts": {
+      "previous": "df3c201fe5b03edfc195aaa2739f61f65576e379c1c15b63c536405f07c15e43",
+      "current": "977e5b78973e73d2ba805f0f20676c44676cc9e938d620edbe828ae2d218139d"
+    },
+    "src/lib/bridge/review-pairing.ts": {
+      "previous": "0953790811ca67f6f67177fa80e2ba4ab039983082182df2b1b0493cd8ef304f",
+      "current": "93aec0e6057eb78cec7a4a110d7c237cca9212ee22b544abc8392851281ef89d"
+    }
+  },
+  "tableSha256": "dabf173c04bfe4df9618dd13e8831c1ec8a8f4700fc424fb564b3301c9adcef1",
+  "engineLogicChanged": false,
+  "applicationSourceUnchanged": true
+}

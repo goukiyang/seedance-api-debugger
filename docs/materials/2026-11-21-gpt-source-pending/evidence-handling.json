@@ -1,0 +1,7 @@
+{
+  "rawLogDownload": "not performed; automatic approval rejected the bulk transfer because logs could contain sensitive internal data",
+  "safeAlternative": "Fixed-field assertions and irreversible digests only; accepted and completed. Raw logs, plans, private contracts, unknown-request snapshots and business data stay on original server.",
+  "serverOriginals": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt09",
+  "deploymentBlocked": false,
+  "additionalUserApprovalNeeded": false
+}

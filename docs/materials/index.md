@@ -700,3 +700,5 @@ v0.146.0已部署，待用户手动验收；原卡片与三批共用链、26组�
 [原发布工单](../../tasks/todo/2026-11-20-gpt-background-review-release.md)为状态入口。[本批脱敏证据清单](2026-11-21-gpt-executor-stop/evidence-manifest.json)绑定准确源387145889、BUILD HXp7sptwsqY7VINWiKUKI、attempt08预检/完整构建、20组实际SQLite/Sharp、七服务双域及OAuth/MCP/价格/三旧未知请求和程序回退。完整私密策略与原日志只留服务器；原参考图仍沿2026-11-20私有索引，不公开不入包。后台已部署，Windows真实终态反馈和原图成品未验；R1桌面正式清单仍按最新指令hold在0.6.32。
 
 0.151.3候选追加[原页面确认竞态](2026-11-21-gpt-executor-stop/source-confirmation-race.json)：2026-11-21 Windows原生原创图分析提交先于来源确认，随后verified=true而任务仍等待的脱敏实证，以及新增8组等待/隔离/暂停/并发工程检查。原图名称、用途、Windows私有归档与完整性值已登记，Mac尚不可读且后台补修不需取图，不外发或入包。P2确认前进度字段泄露已移除并独立只读复核关闭；全量tsc/lint最终exit0。部署与真实成图自动闭环待接续，不替代0.151.2历史证据。
+
+- GPT来源异步确认0.151.3保护发布：准确源、输入预检、原失败与最终构建/发布证据见[本批目录](2026-11-21-gpt-source-pending/manual-input-preflight.json)及原GPT后台发布工单；不含业务DB或用户原图。
