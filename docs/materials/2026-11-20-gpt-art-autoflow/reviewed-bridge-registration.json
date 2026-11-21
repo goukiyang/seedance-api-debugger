@@ -1,0 +1,33 @@
+{
+  "baseline": "206e67410c9c235c0e1bcf5bdc21a5e11a218d3e",
+  "source": "71ea8e565ddb1da559aeaec1d2e1b49e88f003a5",
+  "files": {
+    "src/app/api/bridge/gpt-reviews/route.ts": {
+      "previous": "698cd0ea346eb8772046d83a72279d05ccdf729adc23a9aca618ee806c43d367",
+      "current": "22f7599d68f72cc10a83a63638c0122231b5fcb05d7098036e25b287a7a32bb5"
+    },
+    "src/app/api/bridge/review-mcp/route.ts": {
+      "previous": "86de78b56b09153e661ef583616c8a348540448c9904e2ce04999ae476419796",
+      "current": "df3c201fe5b03edfc195aaa2739f61f65576e379c1c15b63c536405f07c15e43"
+    },
+    "src/lib/bridge/gpt-art-image.ts": {
+      "previous": null,
+      "current": "c8613a4403411acb1bf35fccc44fa50e4fc75214257088d45f2c252fed9df3ea"
+    },
+    "src/lib/bridge/gpt-review.ts": {
+      "previous": "8b929fe6e564dd32a10b61ae16f687e3e0bc9ddf8b4ea03af778e7c7762579f2",
+      "current": "7a09477179ab3223d065df12b8be067089e5e06296269f5b49236616d6bd3c42"
+    },
+    "src/lib/bridge/review-pairing.ts": {
+      "previous": "33d9560bfaa7231081e7157274ac542c607a820c472e890da2e0bf7c82f5de67",
+      "current": "0953790811ca67f6f67177fa80e2ba4ab039983082182df2b1b0493cd8ef304f"
+    },
+    "src/lib/bridge/review-tool-image.ts": {
+      "previous": "d97523bd3fcad6809fa086762b9570099cb9379eb813f188ebe2ee054fc8730b",
+      "current": "fd74cc05464f857b922c005172945badc7d4508e5243d9978af82aecdcba327f"
+    }
+  },
+  "tableSha256": "09f4056155ee566ed534b4a25abece4c8cac546de195fe7baf5de4a689eb6fea",
+  "engineLogicChanged": false,
+  "applicationSourceUnchanged": true
+}

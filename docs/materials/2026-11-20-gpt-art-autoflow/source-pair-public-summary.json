@@ -1,0 +1,117 @@
+{
+  "schema": "sd2-art-source-pair-public-summary.v1",
+  "baseline": {
+    "source": "206e67410c9c235c0e1bcf5bdc21a5e11a218d3e",
+    "version": "0.150.1",
+    "build": "gcWweOyH29ArS-wghkXnE"
+  },
+  "main": {
+    "source": "71ea8e565ddb1da559aeaec1d2e1b49e88f003a5",
+    "version": "0.151.0",
+    "build": "d_gTKdW48NfIpvCQgxAA9"
+  },
+  "guard": {
+    "readerContract": "works-method-reader.1",
+    "cutoutReaderContract": "cutout-owner-reader.1",
+    "bodyPairReaderContract": "character-body-pair-reader.1",
+    "recipeReaderContract": "character-lab-recipe-reader.1",
+    "contextReaderContract": "character-independent-context.1",
+    "gridReaderContract": "character-explicit-grid.1",
+    "version": "0.148.23+points-pricing-guard.1",
+    "source": "eacd05ecb8080166a71daccfa43fb63d8d23da60",
+    "build": "sQ39rb_c1TBf2KqmFxvUz"
+  },
+  "guardBase": {
+    "source": "382f820466236a6a6beaf75713a935890a69a383",
+    "version": "0.148.23",
+    "build": "RJX8TPvX3-zOKqvV5dvvf"
+  },
+  "passed": true,
+  "noSchemaChange": true,
+  "migrationsUnchanged": true,
+  "thisReleaseNoSchemaChange": true,
+  "migrationInheritedOnly": true,
+  "noExistingRowsRewritten": true,
+  "programOnlyRecovery": true,
+  "noDataFormatChange": true,
+  "changedFiles": [
+    "package-lock.json",
+    "package.json",
+    "scripts/gpt-art-review-engineering.mjs",
+    "scripts/gpt-review-engineering.mjs",
+    "src/app/api/bridge/gpt-reviews/route.ts",
+    "src/app/api/bridge/review-mcp/route.ts",
+    "src/lib/bridge/gpt-art-image.ts",
+    "src/lib/bridge/gpt-review.ts",
+    "src/lib/bridge/review-pairing.ts",
+    "src/lib/bridge/review-tool-image.ts",
+    "src/lib/release.ts",
+    "tasks/todo/2026-11-20-gpt-background-review-release.md"
+  ],
+  "changedSourceFiles": [
+    "package-lock.json",
+    "package.json",
+    "scripts/gpt-art-review-engineering.mjs",
+    "scripts/gpt-review-engineering.mjs",
+    "src/app/api/bridge/gpt-reviews/route.ts",
+    "src/app/api/bridge/review-mcp/route.ts",
+    "src/lib/bridge/gpt-art-image.ts",
+    "src/lib/bridge/gpt-review.ts",
+    "src/lib/bridge/review-pairing.ts",
+    "src/lib/bridge/review-tool-image.ts",
+    "src/lib/release.ts"
+  ],
+  "nonRuntimeSourceFiles": [
+    "tasks/todo/2026-11-20-gpt-background-review-release.md"
+  ],
+  "mainBuildCompletedAt": "2026-11-21T04:07:41.010601+00:00",
+  "mainBuildReused": false,
+  "mainTypesProcessReceiptSha256": "3099f0bbf3705795ca3733bc8fccb1f35c464809768231bd403738c6f586a4be",
+  "mainNextProcessReceiptSha256": "43c41f94bdf7fb3ccb5e6160bf64876fa50fb84bdef9aadd6e3a58b374b5147c",
+  "mainFocusedEngineeringProofSha256": "740f6434167b61f9c6eacc2fc535ca48525ffb49fa9fc7f97170fa9eed4cd9ff",
+  "mainArtEngineeringGroupCount": 17,
+  "mainArtEngineeringSummary": {
+    "ok": true,
+    "completed": [
+      "analysis -> initial image -> nine revisions -> two automatic recaps -> user decision in one task",
+      "real OAuth source binding and MCP file callback can pass the first actual image",
+      "missing, undecodable, SVG, original re-encoding and duplicate bitmaps never add revisions",
+      "three distinct invalid submissions stop; exact retry and unknown transfer do not exhaust quota",
+      "account/workspace/session mismatch and pause during upload preserve original state",
+      "concurrent receipt while judging returns pending; a newer pause wins over late verdict",
+      "a diagram cannot pass and an unverified visual verdict is not accepted",
+      "semantic non-art images have a separate cross-ticket bound and the first actual image remains draft zero",
+      "real MCP distinguishes oversized and unsupported images from unknown transfers and deduplicates invalid receipts",
+      "art accepts one main deliverable while retaining multiple original references and legacy multi-image drafts",
+      "analysis and recap reject empty acknowledgements without accepting receipts or consuming cycles",
+      "pause during judge then explicit resume rejudges once and issues a fresh idempotent original-session ticket",
+      "a new pause wins over a recovery judge and retry uses the retained actual image without a new generation",
+      "pause before first dispatch still follows initial source proof instead of bypassing connection checks",
+      "an already bound paused task returns structured MCP stop even before its first receipt",
+      "initial command paused before pairing recovers with a new unbound ticket and still requires real source confirmation",
+      "lost resume and retry responses can be reconciled only against the exact original action version"
+    ],
+    "productionWrites": 0,
+    "paidImageCalls": 0,
+    "judgeTransport": "isolated fixture",
+    "imageDecode": "actual Sharp",
+    "storage": "actual temporary SQLite"
+  },
+  "finalizationContinuationProofSha256": "de04c88e30d02af8d4df5b69dd6adfed0523c56bb3e4c40f860a0adac4230669",
+  "externalEngineeringCheckCounts": {
+    "access": 7,
+    "freeze": 6
+  },
+  "restoredEngineeringCheckCount": 36,
+  "guardBuildReused": true,
+  "guardBuildCompletedAt": "2026-11-14T20:47:30.786031+00:00",
+  "guardSourceContractSha256": "56b14c4b12f483f1d1aaf8e857b1c4235bdea7d019e1b0b9d5b524659ce17fec",
+  "guardWriteFlagsDisabled": 11,
+  "functionalAcceptance": false,
+  "productionWritesByFixture": 0,
+  "paidRequests": 0,
+  "browserRuns": 0,
+  "originalServerFile": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt06/source-pair-contract.json",
+  "originalSha256": "ed77c752116170d311d6f09d3a3522e370e5f6e40c6883492a665231e7a0ad3f",
+  "privatePolicyContentOmitted": true
+}

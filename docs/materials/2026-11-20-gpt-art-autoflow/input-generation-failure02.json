@@ -1,0 +1,11 @@
+{
+  "exitCode": 1,
+  "stage": "local preparation only",
+  "cause": "JavaScript table has internal comments; JSON parsing unsuitable",
+  "review": "Existing precheck imports table as module; actual Node import verified successfully before manual continuation",
+  "engineLogicChanged": false,
+  "serverAttemptStarted": false,
+  "compilationStarted": false,
+  "cutoverStarted": false,
+  "partialInputsPreserved": "attempt06-preparation-failure02"
+}

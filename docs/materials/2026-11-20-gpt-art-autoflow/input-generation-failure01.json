@@ -1,0 +1,9 @@
+{
+  "stage": "local preparation only",
+  "exitCode": 1,
+  "cause": "JSON reader did not strip leading source comment before export default",
+  "serverAttemptStarted": false,
+  "compilationStarted": false,
+  "cutoverStarted": false,
+  "partialInputsPreserved": "attempt06-preparation-failure01"
+}

@@ -1,0 +1,228 @@
+{
+  "schema": "seamless-default-focused-engineering.v1",
+  "source": "71ea8e565ddb1da559aeaec1d2e1b49e88f003a5",
+  "passed": true,
+  "sourceSha256": {
+    "package-lock.json": "242eb4c654c95ef4df5026a517a1fa795aab0ece230f9b98adaa182eb3668548",
+    "package.json": "b2b3f150347f33de4e6ee5b8d3a26cd4938e959aaa3314e1b5ff21b0faf05f1f",
+    "scripts/check-image-studio-external-access.ts": "520f72d7673d041b05c9d1c0a31414bcf1804c794fdd64bee98d55faf0fa7b79",
+    "scripts/check-image-studio-external-freeze.ts": "3c2499a8cc93e5cfd38814ff8174cd455b06059f44c6a5884fa4c5f572449b1f",
+    "scripts/gpt-art-review-engineering.mjs": "057b0a1802da2a75a4e6097f4e42b3535984cd88228d3b67c0bc93e46a8682f6",
+    "scripts/gpt-review-engineering.mjs": "8cbbf56cae73df3c196e0988f74f98f2aa035bcf3b0432b90e76c9caf3185de3",
+    "src/app/api/bridge/gpt-reviews/route.ts": "22f7599d68f72cc10a83a63638c0122231b5fcb05d7098036e25b287a7a32bb5",
+    "src/app/api/bridge/review-mcp/route.ts": "df3c201fe5b03edfc195aaa2739f61f65576e379c1c15b63c536405f07c15e43",
+    "src/lib/bridge/gpt-art-image.ts": "c8613a4403411acb1bf35fccc44fa50e4fc75214257088d45f2c252fed9df3ea",
+    "src/lib/bridge/gpt-review.ts": "7a09477179ab3223d065df12b8be067089e5e06296269f5b49236616d6bd3c42",
+    "src/lib/bridge/review-pairing.ts": "0953790811ca67f6f67177fa80e2ba4ab039983082182df2b1b0493cd8ef304f",
+    "src/lib/bridge/review-tool-image.ts": "fd74cc05464f857b922c005172945badc7d4508e5243d9978af82aecdcba327f",
+    "src/lib/release.ts": "7aed03c4653536e2d952f7b990fc993eb6e6e4bb6c752423937cc323fa0a9e1f"
+  },
+  "results": [
+    {
+      "name": "focused-changed-lint",
+      "startedAt": "2026-11-21T03:59:25.802Z",
+      "finishedAt": "2026-11-21T03:59:28.676Z",
+      "exitCode": 0,
+      "log": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt06/focused-changed-lint.log",
+      "logSha256": "03a52e2742a512fd0d6e3602e84627a5c8ad163a72c8b18fe33f29b055c62b89"
+    },
+    {
+      "name": "external-access-engineering",
+      "startedAt": "2026-11-21T03:59:28.677Z",
+      "finishedAt": "2026-11-21T03:59:38.964Z",
+      "exitCode": 0,
+      "log": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt06/external-access-engineering.log",
+      "logSha256": "b67c7cca4552dc41f2d8aa62c95df9f0de581ca717c3f0f1f388906e4b3aab61"
+    },
+    {
+      "name": "external-freeze-engineering",
+      "startedAt": "2026-11-21T03:59:38.965Z",
+      "finishedAt": "2026-11-21T03:59:40.301Z",
+      "exitCode": 0,
+      "log": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt06/external-freeze-engineering.log",
+      "logSha256": "6974768950e3028c66a8d4f94fe950a77a3af5374b9e75ab893495889293c66f"
+    },
+    {
+      "name": "bridge-directory",
+      "startedAt": "2026-11-21T03:59:40.301Z",
+      "finishedAt": "2026-11-21T03:59:41.004Z",
+      "exitCode": 0,
+      "log": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt06/bridge-directory.log",
+      "logSha256": "d38cc7b7158631734bc0cab559becf93a182bb7024fad6b4c8f0d1111efc951b"
+    },
+    {
+      "name": "bridge-storage",
+      "startedAt": "2026-11-21T03:59:41.004Z",
+      "finishedAt": "2026-11-21T03:59:41.852Z",
+      "exitCode": 0,
+      "log": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt06/bridge-storage.log",
+      "logSha256": "b2f345fd762f0bc542660ef3db2e0b5a7bcb2b5ac6815bc76a77e3ea8e643c6c"
+    },
+    {
+      "name": "gpt-review",
+      "startedAt": "2026-11-21T03:59:41.852Z",
+      "finishedAt": "2026-11-21T03:59:43.669Z",
+      "exitCode": 0,
+      "log": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt06/gpt-review.log",
+      "logSha256": "90327381407a38a88cb2fc16e9bb51e8aab4e2e71e70c106d9b606a374ca7edc"
+    },
+    {
+      "name": "gpt-art-review",
+      "startedAt": "2026-11-21T03:59:43.669Z",
+      "finishedAt": "2026-11-21T03:59:48.066Z",
+      "exitCode": 0,
+      "log": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt06/gpt-art-review.log",
+      "logSha256": "1021e58611d6ee122c7acd6fd29a1b7b579d54bfd5d8e8bc673c837ec857289a"
+    }
+  ],
+  "referenceMedia": {},
+  "nativeForm": {
+    "schema": "sd2-gpt-review-native-form.v1",
+    "passed": true,
+    "browser": "Google Chrome",
+    "browserVersion": "157.0.8103.79",
+    "sourceSha256": {
+      "src/app/api/bridge/review-connect/[action]/route.ts": "db2d103955e42a704e31ee3ea67b2f75d93af7c4dfd78b2eb7d37cfaf09fd0e7",
+      "src/lib/bridge/review-oauth.ts": "1f6411c340a089e6802f6614f73458feeaa8455557c02e6861ffddf6047be9b6",
+      "scripts/gpt-review-native-form.mjs": "dcf7709ee753bf3a7ca3801501909d35bdc7c0fadeb79346c8b2c3092a972b53",
+      "scripts/gpt-directory-engineering.mjs": "3061b78a6de7948dac7737b1c0e809b851e74bcedb1c1bf33dc0f204357a8292"
+    },
+    "originHeaderOverridden": false,
+    "allNetworkIntercepted": true,
+    "callbackNavigationExercised": false,
+    "redirectAdapter": "Actual handler 303 and callback validated in process; browser receives isolated completion page",
+    "productionDatabaseOpened": false,
+    "productionWrites": 0,
+    "paidCalls": 0,
+    "results": [
+      {
+        "name": "old-policy-control",
+        "origin": "null",
+        "referer": null,
+        "fetchSite": null,
+        "choice": "allow",
+        "status": 403,
+        "codeIssued": false,
+        "pkceSingleUse": false
+      },
+      {
+        "name": "registered-legacy-callback",
+        "origin": "https://sd2.youdooart.com",
+        "referer": "https://sd2.youdooart.com/",
+        "fetchSite": null,
+        "choice": "allow",
+        "status": 303,
+        "codeIssued": true,
+        "pkceSingleUse": true
+      },
+      {
+        "name": "registered-actual-callback",
+        "origin": "https://sd2.youdooart.com",
+        "referer": "https://sd2.youdooart.com/",
+        "fetchSite": null,
+        "choice": "allow",
+        "status": 303,
+        "codeIssued": true,
+        "pkceSingleUse": true
+      },
+      {
+        "name": "nonce-mismatch",
+        "origin": "https://sd2.youdooart.com",
+        "referer": "https://sd2.youdooart.com/",
+        "fetchSite": null,
+        "choice": "allow",
+        "status": 403,
+        "codeIssued": false,
+        "pkceSingleUse": false
+      },
+      {
+        "name": "account-mismatch",
+        "origin": "https://sd2.youdooart.com",
+        "referer": "https://sd2.youdooart.com/",
+        "fetchSite": null,
+        "choice": "allow",
+        "status": 403,
+        "codeIssued": false,
+        "pkceSingleUse": false
+      }
+    ]
+  },
+  "artSummary": {
+    "ok": true,
+    "completed": [
+      "analysis -> initial image -> nine revisions -> two automatic recaps -> user decision in one task",
+      "real OAuth source binding and MCP file callback can pass the first actual image",
+      "missing, undecodable, SVG, original re-encoding and duplicate bitmaps never add revisions",
+      "three distinct invalid submissions stop; exact retry and unknown transfer do not exhaust quota",
+      "account/workspace/session mismatch and pause during upload preserve original state",
+      "concurrent receipt while judging returns pending; a newer pause wins over late verdict",
+      "a diagram cannot pass and an unverified visual verdict is not accepted",
+      "semantic non-art images have a separate cross-ticket bound and the first actual image remains draft zero",
+      "real MCP distinguishes oversized and unsupported images from unknown transfers and deduplicates invalid receipts",
+      "art accepts one main deliverable while retaining multiple original references and legacy multi-image drafts",
+      "analysis and recap reject empty acknowledgements without accepting receipts or consuming cycles",
+      "pause during judge then explicit resume rejudges once and issues a fresh idempotent original-session ticket",
+      "a new pause wins over a recovery judge and retry uses the retained actual image without a new generation",
+      "pause before first dispatch still follows initial source proof instead of bypassing connection checks",
+      "an already bound paused task returns structured MCP stop even before its first receipt",
+      "initial command paused before pairing recovers with a new unbound ticket and still requires real source confirmation",
+      "lost resume and retry responses can be reconciled only against the exact original action version"
+    ],
+    "productionWrites": 0,
+    "paidImageCalls": 0,
+    "judgeTransport": "isolated fixture",
+    "imageDecode": "actual Sharp",
+    "storage": "actual temporary SQLite"
+  },
+  "externalEngineering": {
+    "access": {
+      "script": "scripts/check-image-studio-external-access.ts",
+      "scriptSha256": "520f72d7673d041b05c9d1c0a31414bcf1804c794fdd64bee98d55faf0fa7b79",
+      "checks": [
+        "company_boundary_default_closed_and_admin_authorization",
+        "global_switch_new_accounts_and_templates_legacy_pilot_cas_receipts_no_directory_decryption",
+        "real_definition_executes_server_source_and_external_dto_is_private",
+        "full_shared_directory_exceeds_read_queue_without_rejection_or_private_rows",
+        "current_valid_dependencies_auto_apply_and_fixed_source_stays_server_only",
+        "actual_raw_media_route_allows_owner_and_denies_source_alias_other_and_anonymous",
+        "closed_keeps_owned_history_and_media_disabled_identity_rejected_no_network"
+      ],
+      "summary": {
+        "synthetic": true,
+        "checks": 7,
+        "supplierCalls": 0,
+        "database": "temporary-isolated"
+      }
+    },
+    "freeze": {
+      "script": "scripts/check-image-studio-external-freeze.ts",
+      "scriptSha256": "3c2499a8cc93e5cfd38814ff8174cd455b06059f44c6a5884fa4c5f572449b1f",
+      "checks": [
+        "final-child-id-private-bindings",
+        "source-skill-version-preserved",
+        "no-plaintext-prepared-persistence",
+        "two-child-consistency",
+        "wrong-id-rejected",
+        "global-and-legacy-admission-respect-closed-and-live-owner"
+      ],
+      "summary": {
+        "synthetic": true,
+        "checks": [
+          "final-child-id-private-bindings",
+          "source-skill-version-preserved",
+          "no-plaintext-prepared-persistence",
+          "two-child-consistency",
+          "wrong-id-rejected",
+          "global-and-legacy-admission-respect-closed-and-live-owner"
+        ],
+        "supplierCalls": 0,
+        "productionWrites": 0
+      }
+    }
+  },
+  "externalEngineeringExecuted": true,
+  "productionDatabaseOpened": false,
+  "productionWrites": 0,
+  "paidRequests": 0,
+  "browserAcceptance": false
+}

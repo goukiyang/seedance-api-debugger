@@ -1,0 +1,31 @@
+{
+  "schema": "sd2-art-release-public-evidence.v1",
+  "source": "71ea8e565ddb1da559aeaec1d2e1b49e88f003a5",
+  "build": "d_gTKdW48NfIpvCQgxAA9",
+  "files": {
+    "public-deployed.json": "db34ed878a507a57ee54da9a7603e391cbad3ed1ff607c476eb481d31cbfdb96",
+    "gpt-review-public-check.json": "02e11255b6383137123b74853c3c18baa49847e41c6ead1ae01c4fc685f483e5",
+    "main-build-success.json": "a6071aadc8d455fefd5e06ce099afd89efc4b30147bb1f8eb88db651592da84f",
+    "main-types-process.json": "3099f0bbf3705795ca3733bc8fccb1f35c464809768231bd403738c6f586a4be",
+    "main-next-process.json": "43c41f94bdf7fb3ccb5e6160bf64876fa50fb84bdef9aadd6e3a58b374b5147c",
+    "manual-input-preflight.json": "ea25c381394614d8b3892ea29d78f6c7ed9330611345660e061786ffbebef459",
+    "reviewed-bridge-registration.json": "3682b3739b8f1c84e7da84cf01bd4de71e052ddee52e1579915abfa74e8bd835",
+    "native-form-proof.json": "380f1bea13265251e14300836a8c459314e7f69ad90c561372d55227f85ccdab",
+    "main-focused-engineering.json": "740f6434167b61f9c6eacc2fc535ca48525ffb49fa9fc7f97170fa9eed4cd9ff",
+    "previous-attempts-preserved.json": "b546759f14f1242b4458b63a99cba96e891d604071faa63c4fe727ffeb27f56c",
+    "input-generation-failure01.json": "68f437b8a2a8016a605c553d61550d59a9bbe25b9a8a02850e30efe119808ea9",
+    "input-generation-failure02.json": "505b9351c9bc3a7f3ddf72a406224c95372826fff2f10502f38b732f790733c9",
+    "policy.json": "1f9ca718190ef09a65e0b426be8aee0ffab7018d4623b774b4df2e548bfd5aba",
+    "plan-reference.json": "f0dc34da7fdd5363414fcad84cabfbf00e7411e9497db211ef11b38c34d52c61",
+    "source-pair-public-summary.json": "e81c3070091d189ec70042130f5e84e14b37b2765e8ac49be2c2ea20566a0388",
+    "source-compatibility-public-summary.json": "ff38bd8fa98880363d6c57b16ad13bc77114683f606fecb6115b1d5fbbe40f6e",
+    "engine-compatibility-public-summary.json": "08d7af8c42632c926ad4c3997c19f3befabc0c8d90940e0f6a0faebd51ed5089",
+    "finalization-continuation.json": "de04c88e30d02af8d4df5b69dd6adfed0523c56bb3e4c40f860a0adac4230669",
+    "build-exit.txt": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+    "build-registry-continuation-exit.txt": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "publish-exit.txt": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+  },
+  "originalStagingRoot": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt06",
+  "privateReferenceImageIncluded": false,
+  "originalPrivatePoliciesIncluded": false
+}

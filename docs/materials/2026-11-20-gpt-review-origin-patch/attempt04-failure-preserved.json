@@ -1,0 +1,12 @@
+{
+  "stage": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt04",
+  "exitCode": 1,
+  "failure": "engineeringRoot input mismatch, before source preparation",
+  "nextBuildStarted": false,
+  "cutoverStarted": false,
+  "artifacts": {
+    "build-exit.txt": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+    "controller.log": "25153c7e22a5801502f5bcf326b12772c877be46207445a09e95c93bc7453e90",
+    "release-input.json": "6c1bd0f4b825ab2172a8c3dffd0ed74b629a87b68d538e5549f09e98cedb8549"
+  }
+}

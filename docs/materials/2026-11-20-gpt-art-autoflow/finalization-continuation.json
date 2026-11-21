@@ -1,0 +1,19 @@
+{
+  "schema": "sd2-art-finalization-continuation.v1",
+  "source": "71ea8e565ddb1da559aeaec1d2e1b49e88f003a5",
+  "recordedAt": "2026-11-21T04:10:39.013206+00:00",
+  "originalBuildExit": 1,
+  "originalFailure": "finalize-pair.py old focused-result name set; full compiler processes already exit 0",
+  "originalFinalizerSha256": "35d3471af2f28af83ee7c2b496c9122a1a81552e2e33c02baa535eae94e494f8",
+  "originalControllerLogSha256": "18692467ddd05606db90b5ef27f63088d15e6ffc27e3fe64ffe715d0fb61c8ba",
+  "originalBuildExitSha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+  "fullBuildReceiptSha256": "a6071aadc8d455fefd5e06ce099afd89efc4b30147bb1f8eb88db651592da84f",
+  "focusedReceiptSha256": "740f6434167b61f9c6eacc2fc535ca48525ffb49fa9fc7f97170fa9eed4cd9ff",
+  "newFinalizerSha256": "e8491341fba4433e44187d9ea2198628b8c1529590797ad1c5d3c6fced4841b6",
+  "continuationScriptSha256": "0db305ff05076563c580d3123e3a06eeb79b5b1b82df9d9317f82f15505a98c5",
+  "compilerRerun": false,
+  "originalFilesOverwritten": false,
+  "applicationChanged": false,
+  "releaseEngineLogicChanged": false,
+  "checks": "Exact seven actual focused checks, 17 original structured art groups and all log hashes; existing source/build/guard/reference-media admission retained"
+}

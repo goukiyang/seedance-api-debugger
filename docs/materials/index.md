@@ -683,3 +683,9 @@ v0.146.0已部署，待用户手动验收；原卡片与三批共用链、26组�
 <!-- /MV-RECORDS02-20261113 -->
 
 - GPT验收后台0.150.0保护发布：真实部署、OAuth/工具清单、完整构建与attempt01失败摘要；来源为服务器原attempt02，未含凭据或用户内容。见 [部署结果](2026-11-20-gpt-background-review/public-deployed.json)、[OAuth验证](2026-11-20-gpt-background-review/gpt-review-public-check.json)及 [原工单](../../tasks/todo/2026-11-20-gpt-background-review-release.md)。
+
+- GPT验收后台0.150.1保护发布：attempt05准确源206e67410、BUILD gcWweOyH29ArS-wghkXnE；集中输入预检、完整构建、原生表单、无目录请求的真实判定、实际部署与OAuth/工具清单，保留03/04失败。见 [部署结果](2026-11-20-gpt-review-origin-patch/public-deployed.json)、[OAuth验证](2026-11-20-gpt-review-origin-patch/gpt-review-public-check.json)及 [原工单](../../tasks/todo/2026-11-20-gpt-background-review-release.md)。
+
+- I1美术自动流用户参考原图：Mac mini正式桥传原job已核saved/receipt、1617194字节、1280×915和SHA256；PNG私有归档并排除Git及发布包，仅作参考。见 [接收核对](../../materials/2026-11-20-gpt-world-review/receipt.json)及 [原工单](../../tasks/todo/2026-11-20-gpt-background-review-release.md)。
+
+- GPT验收I1美术自动流0.151.0保护发布：71ea8e565 / BUILD d_gTKdW48NfIpvCQgxAA9，attempt06完整构建/17组工程/相容准入，双域七服务与OAuth两工具核同；原封装失败和接续凭据保留，Windows真实成图待手验。见 [部署结果](2026-11-20-gpt-art-autoflow/public-deployed.json)、[OAuth与工具](2026-11-20-gpt-art-autoflow/gpt-review-public-check.json)、[原工单](../../tasks/todo/2026-11-20-gpt-background-review-release.md)。

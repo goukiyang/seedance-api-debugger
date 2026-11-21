@@ -1,0 +1,71 @@
+{
+  "schema": "sd2-gpt-review-native-form.v1",
+  "passed": true,
+  "browser": "Google Chrome",
+  "browserVersion": "157.0.8103.79",
+  "sourceSha256": {
+    "src/app/api/bridge/review-connect/[action]/route.ts": "db2d103955e42a704e31ee3ea67b2f75d93af7c4dfd78b2eb7d37cfaf09fd0e7",
+    "src/lib/bridge/review-oauth.ts": "1f6411c340a089e6802f6614f73458feeaa8455557c02e6861ffddf6047be9b6",
+    "scripts/gpt-review-native-form.mjs": "dcf7709ee753bf3a7ca3801501909d35bdc7c0fadeb79346c8b2c3092a972b53",
+    "scripts/gpt-directory-engineering.mjs": "3061b78a6de7948dac7737b1c0e809b851e74bcedb1c1bf33dc0f204357a8292"
+  },
+  "originHeaderOverridden": false,
+  "allNetworkIntercepted": true,
+  "callbackNavigationExercised": false,
+  "redirectAdapter": "Actual handler 303 and callback validated in process; browser receives isolated completion page",
+  "productionDatabaseOpened": false,
+  "productionWrites": 0,
+  "paidCalls": 0,
+  "results": [
+    {
+      "name": "old-policy-control",
+      "origin": "null",
+      "referer": null,
+      "fetchSite": null,
+      "choice": "allow",
+      "status": 403,
+      "codeIssued": false,
+      "pkceSingleUse": false
+    },
+    {
+      "name": "registered-legacy-callback",
+      "origin": "https://sd2.youdooart.com",
+      "referer": "https://sd2.youdooart.com/",
+      "fetchSite": null,
+      "choice": "allow",
+      "status": 303,
+      "codeIssued": true,
+      "pkceSingleUse": true
+    },
+    {
+      "name": "registered-actual-callback",
+      "origin": "https://sd2.youdooart.com",
+      "referer": "https://sd2.youdooart.com/",
+      "fetchSite": null,
+      "choice": "allow",
+      "status": 303,
+      "codeIssued": true,
+      "pkceSingleUse": true
+    },
+    {
+      "name": "nonce-mismatch",
+      "origin": "https://sd2.youdooart.com",
+      "referer": "https://sd2.youdooart.com/",
+      "fetchSite": null,
+      "choice": "allow",
+      "status": 403,
+      "codeIssued": false,
+      "pkceSingleUse": false
+    },
+    {
+      "name": "account-mismatch",
+      "origin": "https://sd2.youdooart.com",
+      "referer": "https://sd2.youdooart.com/",
+      "fetchSite": null,
+      "choice": "allow",
+      "status": 403,
+      "codeIssued": false,
+      "pkceSingleUse": false
+    }
+  ]
+}

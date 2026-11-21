@@ -1,0 +1,8 @@
+{
+  "source": "71ea8e565ddb1da559aeaec1d2e1b49e88f003a5",
+  "passed": true,
+  "scope": "source-only preflight; final build-bound admission remains required",
+  "originalServerFile": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt06/source-compatibility-preflight.json",
+  "originalSha256": "f831a6e44475f9cb471b06d7585a62e07860ee7de5fed64a2e2e7a1af3c55529",
+  "privateAdmissionContentOmitted": true
+}

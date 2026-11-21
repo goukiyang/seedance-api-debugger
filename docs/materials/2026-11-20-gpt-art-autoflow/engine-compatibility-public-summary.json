@@ -1,0 +1,31 @@
+{
+  "passed": true,
+  "newSealedEngine": true,
+  "oldInstalledEngineUnchanged": true,
+  "registryOnlyUpdateToActualInstalledPublisher": true,
+  "originalEngine": {
+    "schema": "sd2-release-engine.v1",
+    "version": "1.1.2",
+    "controllerSetSha256": "72f485ab9433f5ca46634334c6fdd6d813e06e08dd7792276af00568aabd1ed3",
+    "root": "/data/video-api-debugger/release-engines/1.1.2-72f485ab9433f5ca46634334c6fdd6d813e06e08dd7792276af00568aabd1ed3"
+  },
+  "engine": {
+    "schema": "sd2-release-engine.v1",
+    "version": "1.1.2",
+    "controllerSetSha256": "e9d2f905015e1957de89bc1a37376f1e5bd6d01bf5e26231d5e194eeb2c588a9",
+    "root": "/data/video-api-debugger/release-engines/1.1.2-e9d2f905015e1957de89bc1a37376f1e5bd6d01bf5e26231d5e194eeb2c588a9"
+  },
+  "installed": {
+    "installed": true,
+    "reused": false,
+    "engine": {
+      "schema": "sd2-release-engine.v1",
+      "version": "1.1.2",
+      "controllerSetSha256": "e9d2f905015e1957de89bc1a37376f1e5bd6d01bf5e26231d5e194eeb2c588a9",
+      "root": "/data/video-api-debugger/release-engines/1.1.2-e9d2f905015e1957de89bc1a37376f1e5bd6d01bf5e26231d5e194eeb2c588a9"
+    }
+  },
+  "originalServerFile": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt06/engine-compatibility-picker.json",
+  "originalSha256": "faafe83bd4b1296616fb3faad4079377ac67ca78e279aff7e0d62af152ed6a2f",
+  "privateAdmissionContentOmitted": true
+}

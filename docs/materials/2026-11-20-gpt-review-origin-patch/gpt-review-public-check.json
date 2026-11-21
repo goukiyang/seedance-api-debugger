@@ -1,0 +1,343 @@
+{
+  "schema": "sd2-gpt-review-public-check.v1",
+  "source": "206e67410c9c235c0e1bcf5bdc21a5e11a218d3e",
+  "version": "0.150.1",
+  "build": "gcWweOyH29ArS-wghkXnE",
+  "checkedAt": "2026-11-20T10:32:14.441102+00:00",
+  "passed": true,
+  "oauthAuthorizationServer": {
+    "status": 200,
+    "body": {
+      "issuer": "https://sd2.youdooart.com",
+      "authorization_endpoint": "https://sd2.youdooart.com/api/bridge/review-connect/authorize",
+      "token_endpoint": "https://sd2.youdooart.com/api/bridge/review-connect/token",
+      "response_types_supported": [
+        "code"
+      ],
+      "grant_types_supported": [
+        "authorization_code"
+      ],
+      "scopes_supported": [
+        "reviews.submit"
+      ],
+      "code_challenge_methods_supported": [
+        "S256"
+      ],
+      "token_endpoint_auth_methods_supported": [
+        "none"
+      ],
+      "authorization_response_iss_parameter_supported": true
+    },
+    "sha256": "9d1f58971a247f88db6c090a5308292d6f2ff9e9c1405cebcf2c44e47dfd0f2c"
+  },
+  "oauthProtectedResource": {
+    "status": 200,
+    "body": {
+      "resource": "https://sd2.youdooart.com/api/bridge/review-mcp",
+      "authorization_servers": [
+        "https://sd2.youdooart.com"
+      ],
+      "scopes_supported": [
+        "reviews.submit"
+      ],
+      "bearer_methods_supported": [
+        "header"
+      ]
+    },
+    "sha256": "7b847b9b0a65498a79d06b75c59168e38e504ada77a614d9ec9e61ddcc093827"
+  },
+  "initialize": {
+    "status": 200,
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {
+          "tools": {},
+          "resources": {}
+        },
+        "serverInfo": {
+          "name": "sd2-review",
+          "version": "1.0.0"
+        }
+      }
+    },
+    "sha256": "b9b7a0fdd224fee85026296897215524fe08722b434275f8dce063064d71403a"
+  },
+  "toolsList": {
+    "status": 200,
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "tools": [
+          {
+            "name": "link_review",
+            "title": "核对验收原对话",
+            "description": "首次交回前，请先在用户点验收的原对话调用本工具。SD2 会自动核对原对话。",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "delivery": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "delivery"
+              ],
+              "additionalProperties": false
+            },
+            "securitySchemes": [
+              {
+                "type": "oauth2",
+                "scopes": [
+                  "reviews.submit"
+                ]
+              }
+            ],
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "openWorldHint": false,
+              "idempotentHint": true
+            },
+            "_meta": {
+              "securitySchemes": [
+                {
+                  "type": "oauth2",
+                  "scopes": [
+                    "reviews.submit"
+                  ]
+                }
+              ],
+              "ui": {
+                "resourceUri": "ui://sd2-review/confirm-source-v1.html"
+              },
+              "openai/outputTemplate": "ui://sd2-review/confirm-source-v1.html"
+            }
+          },
+          {
+            "name": "submit_revision",
+            "title": "交回本轮改稿",
+            "description": "在用户发起验收的原对话中交回本次完整成品。若返回 revise，按具体改法在本对话修改再用新单号交回。pass 或 stop 即停止。",
+            "securitySchemes": [
+              {
+                "type": "oauth2",
+                "scopes": [
+                  "reviews.submit"
+                ]
+              }
+            ],
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "delivery": {
+                  "type": "string",
+                  "description": "本轮验收单号"
+                },
+                "text": {
+                  "type": "string",
+                  "maxLength": 20000,
+                  "description": "本轮实际交付的完整正文，纯图用空字符串"
+                },
+                "image": {
+                  "type": "object",
+                  "properties": {
+                    "file_id": {
+                      "type": "string"
+                    },
+                    "download_url": {
+                      "type": "string"
+                    },
+                    "mime_type": {
+                      "type": "string"
+                    },
+                    "file_name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "file_id",
+                    "download_url"
+                  ]
+                },
+                "image2": {
+                  "type": "object",
+                  "properties": {
+                    "file_id": {
+                      "type": "string"
+                    },
+                    "download_url": {
+                      "type": "string"
+                    },
+                    "mime_type": {
+                      "type": "string"
+                    },
+                    "file_name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "file_id",
+                    "download_url"
+                  ]
+                },
+                "image3": {
+                  "type": "object",
+                  "properties": {
+                    "file_id": {
+                      "type": "string"
+                    },
+                    "download_url": {
+                      "type": "string"
+                    },
+                    "mime_type": {
+                      "type": "string"
+                    },
+                    "file_name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "file_id",
+                    "download_url"
+                  ]
+                },
+                "image4": {
+                  "type": "object",
+                  "properties": {
+                    "file_id": {
+                      "type": "string"
+                    },
+                    "download_url": {
+                      "type": "string"
+                    },
+                    "mime_type": {
+                      "type": "string"
+                    },
+                    "file_name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "file_id",
+                    "download_url"
+                  ]
+                },
+                "image5": {
+                  "type": "object",
+                  "properties": {
+                    "file_id": {
+                      "type": "string"
+                    },
+                    "download_url": {
+                      "type": "string"
+                    },
+                    "mime_type": {
+                      "type": "string"
+                    },
+                    "file_name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "file_id",
+                    "download_url"
+                  ]
+                },
+                "image6": {
+                  "type": "object",
+                  "properties": {
+                    "file_id": {
+                      "type": "string"
+                    },
+                    "download_url": {
+                      "type": "string"
+                    },
+                    "mime_type": {
+                      "type": "string"
+                    },
+                    "file_name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "file_id",
+                    "download_url"
+                  ]
+                }
+              },
+              "required": [
+                "delivery",
+                "text"
+              ],
+              "additionalProperties": false
+            },
+            "annotations": {
+              "readOnlyHint": false,
+              "destructiveHint": false,
+              "openWorldHint": false,
+              "idempotentHint": true
+            },
+            "_meta": {
+              "securitySchemes": [
+                {
+                  "type": "oauth2",
+                  "scopes": [
+                    "reviews.submit"
+                  ]
+                }
+              ],
+              "openai/fileParams": [
+                "image",
+                "image2",
+                "image3",
+                "image4",
+                "image5",
+                "image6"
+              ],
+              "openai/toolInvocation/invoking": "正在复验新稿",
+              "openai/toolInvocation/invoked": "本轮验收已返回"
+            }
+          }
+        ]
+      }
+    },
+    "sha256": "b7c31dcae35f985c6ef6227bd60d85cb0faa4936c96b6eff42b30ca5ed10e11a"
+  },
+  "tools": [
+    "link_review",
+    "submit_revision"
+  ],
+  "anonymousAuthorizationChecks": [
+    {
+      "callback": "https://chatgpt.com/connector_platform_oauth_redirect",
+      "status": 302,
+      "expected": 302
+    },
+    {
+      "callback": "https://chatgpt.com/connector/oauth/lrPNES-xwBHJ",
+      "status": 302,
+      "expected": 302
+    },
+    {
+      "callback": "https://example.com/callback",
+      "status": 400,
+      "expected": 400
+    },
+    {
+      "callback": "https://chatgpt.com/connector/oauth/*",
+      "status": 400,
+      "expected": 400
+    },
+    {
+      "callback": "https://chatgpt.com/connector/oauth/lrPNES-xwBHJ?extra=1",
+      "status": 400,
+      "expected": 400
+    }
+  ],
+  "productionRowsWritten": 0,
+  "paidRequests": 0,
+  "functionalAcceptance": "Windows real account and real conversation pending"
+}

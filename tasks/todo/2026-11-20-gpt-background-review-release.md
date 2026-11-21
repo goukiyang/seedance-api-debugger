@@ -62,6 +62,32 @@ Windows真实页面点击“允许交回新稿”仍403。已确认授权HTML的
 
 最终实现真实小规模验证通过：仅两个chat/completions POST，gpt-5.5=503、gpt-5.6-luna=200，二者redirect:error；目录请求0。原材料内存judging副本判revise且缺乙，14.761秒；原生产任务逐字核同、写入0。调用实际runJudge和现有私密/启用门，不改全局默认、用户参数、通道、凭据或费用许可。原生Chrome相关源未变，复用已通过证据；R1–R3仍待Windows唯一原记录继续真实验收。
 
+
+## 0.150.1 最终冻结、构建与保护发布（dispatch11–12）
+
+已部署，待Windows手动验收。2026-11-20 18:32发布后检查完成：实际源码 `206e67410c9c235c0e1bcf5bdc21a5e11a218d3e`、版本0.150.1、BUILD `gcWweOyH29ArS-wghkXnE`；分支已推送并核同。只完成本批授权表单与验收内部模型接续修复，原R1–R3及唯一生产测试任务继续由Windows手验。
+
+### 输入失败与集中预检
+
+- attempt03在组装时发现两文档差量未入覆盖包；attempt04在输入门发现engineeringRoot仍指向attempt03。二者均exit1、未启动Next编译、未切换；目录、输入、日志及退出码原样保留。没有改应用实现或既有校验门迁就输入。
+- attempt05集中修正本次输入：staging、工程临时根及其输出/日志/manifest关联统一派生为attempt05，原基线与guard历史路径保留。先用现有`release_contract.py`的`verify_config(..., require_engineering=True)`无构建预检，再核2604个已选跟踪文件、10个准确Git差量（8运行文件＋docs/materials/index.md、tasks/todo.md）及覆盖包blob；完整包SHA256 `96c64d79bcbb259819725b9ad7c3677d85f065c4715360601a29cd9b89abb1f4`，服务器收包核同。未再次修改发布工具逻辑。
+- attempt05源相容预检、变更lint、定向工程、全量tsc、完整Next构建及最终相容准入全部通过，build-exit0。相关原生表单和真实判定证据字节绑定准确源，未重复发模型请求或重做已有原生浏览器验证。
+
+### 实际发布与公网验证
+
+发布窗口 `gpt-review-origin-20261120-206e674`；沿原1.1.2 seamless、automatic-same-plan，run `9120b04f-e87b-43fb-82a5-15878326a34f` 八步complete、publish-exit0。七个正式服务active且工作目录同源、同BUILD，双域版本0.150.1与health ok，实际静态资源字节核同。价格配置与三条旧未知请求全字段摘要不变；没有恢复数据库，没有扩大私密许可、模型开放、费用、通道或凭据。相容guard及旧页面资源保留；探针超时0，不冒称连续零中断已测量。
+
+两个OAuth发现接口HTTP200；POST `/api/bridge/review-mcp` initialize与tools/list均200，工具仅 `link_review`、`submit_revision`，均需OAuth2 `reviews.submit`。旧/新两个精确回调匿名302登录，错误地址、通配符与额外query400。原生Chrome证明只覆盖隔离页面真实form→真实处理器/内存换码，未外跳ChatGPT；真实Connect、原任务重试、双账号隔离及完整退回改稿循环仍待Windows。
+
+恢复入口沿 `/data/video-api-debugger/release-staging/9120b04f-e87b-43fb-82a5-15878326a34f/seamless-plan.json` 和原相容guard，仅回程序不回数据。旧0.150.0成功、attempt01失败及03/04失败历史均保留。
+
+证据：[实际部署](../../docs/materials/2026-11-20-gpt-review-origin-patch/public-deployed.json)、[公网OAuth和工具清单](../../docs/materials/2026-11-20-gpt-review-origin-patch/gpt-review-public-check.json)、[完整构建](../../docs/materials/2026-11-20-gpt-review-origin-patch/main-build-success.json)、[集中输入预检](../../docs/materials/2026-11-20-gpt-review-origin-patch/manual-input-preflight.json)、[原生表单](../../docs/materials/2026-11-20-gpt-review-origin-patch/native-form-proof.json)、[最终真实判定](../../docs/materials/2026-11-20-gpt-review-origin-patch/judge-real-proof.json)。完整原始相容合同留服务器，仓库仅存脱敏摘要及原文件hash，不发布策略内容。
+
+2026-11-20 18:34已通过原CX路由单次回执到Windows原会话；实际desktop-native steer、confirmed/received，未等待ACK，不把投递受理当Windows功能完成。见[回执受理结果](../../docs/materials/2026-11-20-gpt-review-origin-patch/windows-final-receipt.json)。
+
+本轮新发现的线索与问题：未新增任务外问题。
+
+
 ## I1 美术自动流 0.151.0候选（Windows续接，2026-11-20）
 
 用户已确认：原图和目标一次启动，原GPT先看图分析，再自动真实改图和独立图审。首张真图不算修改，每组最多3次修改，最多两次复盘后重试，共9次修改；任意一组通过即结束，仍不成仅提报未决方向，不把失败稿当成品交付。制作和判定分开；方案文字、示意图、原图副本不能当改好成品。保持原目标、保留项、原账号/工作区/设备/对话归属与旧文字三次验收；不新增计费图片通道、私密许可、模型默认、费率或权限。已授权保护部署、自动安装与真实实测，待独立通过后才给用户看。
@@ -75,3 +101,35 @@ Windows统一工程验证结果：scripts/gpt-art-review-engineering.mjs 17组�
 原图资料：codex-clipboard-d5cca489-9430-4eb2-bfb1-d25e4477fe14.png，用户本次马里奥式开放世界案例，1280×915、1617194字节，SHA256=066a0bad574ea7087f6699c69edd7cdd2d273874d5e6e1c94d48d98f29f35899；Windows固定归档D:/MYDR/cdoex/sd2/materials/2026-11-20-gpt-world-review/同名文件。已通过本人正式桥传交Mac mini，job=3ecb381a-f617-4493-b278-989c81e50663（状态与接收路径需Mac查询该原job，勿重发），供理解/后续查证，不公开上传图片，不加入公开源码包。真实出图/同会话工具交回/退回改图/复验及Windows效果仍在I1原单继续，不用本工程验证代替。原方案评审任务f57a98d6-ecd0-4dcc-8a27-b6ca26f8425f仅历史诊断方案；原文字任务743b2b34-199f-41b9-8f97-1eb6f6d5e23a及原R1–R3记录保留，不覆盖结论、不重发原未知任务。
 
 发布沿原seamless1.1.2流程，冻结准确提交，核现网源/BUILD及共享发布占用后，完整Next/类型/lint/准入再切换，保留原数据库、价格/旧未知请求与相容guard，不回业务库。候选构建失败保留旧站，旧尝试不覆盖；上线后回执只说明工程部署，不代Windows真实美术验收。对应发起Windows原会话01a1f724-18ef-77f0-945e-a92f765cf2fc。
+
+
+### I1 Mac发布接力：准确源已冻结，构建中
+
+准确应用提交71ea8e565ddb1da559aeaec1d2e1b49e88f003a5已fetch并核同完整12文件，新增gpt-art-image.ts和艺术工程脚本均在；现网仍206e67410/0.150.1/BUILD gcWweOyH29ArS-wghkXnE。复用隔离worktree，正式根其它任务脏改保持。
+
+attempt06为本次首个服务器构建尝试。集中离线预检与服务器无构建预检已通过：2607个Git blob、11运行文件＋原工单差量、目录映射及完整覆盖包核同，包SHA256 22e19cb40089a1fdc6c99a794e3800d370b886060b4e819e50f47f26fc448b80。沿封存1.1.2实际引擎，仅为六个已审服务端文件登记准确旧/新hash，不改71ea8e5应用字节或引擎逻辑，不取消相容门；SQL未执行，guard仍原artifact。先完成source-only，再接原构建剩余步骤，避免覆盖已生成预检。
+
+本地输入生成两次失败均是把带注释的JS登记表当JSON读取；保留两份部分输入和失败记录，集中复盘后沿原预检的Node模块加载方式手工接完输入，未改正在运行的发布器。服务器未因此重开attempt，旧01–05成功/失败输入与日志不动。服务器17组真实SQLite/Sharp美术工程、旧文字/OAuth/许可回退、改动lint和全量tsc已通过；模型为隔离夹具，生产写入0、付费图片调用0。完整Next和最终准入仍在进行，未切换。
+
+桥传原job3ecb381a-f617-4493-b278-989c81e50663已在正式运行的Mac mini原服务查到saved/received/receiptSent，实际文件1617194字节、PNG1280×915与SHA256全部核同。私有原图归档materials/2026-11-20-gpt-world-review/，该目录PNG已由自身.gitignore排除，未入Git/发布包。仅是用户参考原图，不是成品。收件凭据留本机；索引只登记不含凭据的接收证据。
+
+
+### I1 0.151.0最终保护发布与公网核对
+
+已部署，待Windows手动验收。实际应用源`71ea8e565ddb1da559aeaec1d2e1b49e88f003a5`，版本0.151.0，BUILD `d_gTKdW48NfIpvCQgxAA9`。沿原seamless1.1.2/automatic-same-plan，窗口`gpt-art-autoflow-20261120-71ea8e5`，实际run `cfbf8fd5-ca91-4c02-8bf4-034348bae014`，八步complete、publish-exit0。发布前确认基线仍206e67410/0.150.1/gcWweOyH29ArS-wghkXnE、无活动controller或其它发布占用，没有覆盖并行新源。
+
+准确12文件全部冻结，含新增`src/lib/bridge/gpt-art-image.ts`；2607个选定跟踪文件与覆盖包逐blob核同。服务器执行本源17组真实临时SQLite/Sharp美术工程、旧文字/OAuth/PKCE/模型准入与有限回退，变更lint、全量tsc、完整Next与原生/计价/相容准入均通过。原生form相关源字节未改，绑定原隔离Chrome证据复用；没有声称本次已经浏览器真实Connect。所有模型为隔离夹具，Mac本批付费图片调用0、验证生产任务写入0；新原图未进编译输入。
+
+attempt06完整编译成功后，旧`finalize-pair.py`仍要求上一批`reference-compatible-guard`检查名，实际原policy按本次差量返回参考媒体检查空集，runner新增`gpt-art-review`，故最终封装断言exit1。保留原脚本、controller.log、build-exit1及全部已生成构建，未覆盖旧attempt或重跑Next。只追加本次`finalize-art-pair.py`和封装接续：精确核七项实际检查的成功/日志hash、17组原结构化美术结果、真实SQLite/Sharp及零生产写入/付费图片调用，原源/BUILD/依赖/schema/相容guard核验不删；随后原独立准入再次通过，接续exit0。应用71源和封存引擎逻辑未改，仅六个已审server contract的准确新旧hash登记随新封存表使用。原01–05输入/日志/退出码、本地两次JS-as-JSON输入生成失败、此次封装失败完整保留，未把失败改成成功。
+
+七个正式服务active且工作目录同源，实际`.next-prod/BUILD_ID`核同；双域`sd2.youdooart.com`、`sd2-server.youdoodesign.com`的release=0.151.0、health ok，目标静态CSS/JS字节核同。价格配置与三条旧未知请求全字段摘要不变，无DB恢复、新DDL、默认模型/费率/许可变更；原相容guard与旧页面资源保留，候选自然退出forcedKill=false。恢复入口沿本run的`/data/video-api-debugger/release-staging/cfbf8fd5-ca91-4c02-8bf4-034348bae014/seamless-plan.json`及原guard，仅回程序，不回业务数据库。探针超时0，不冒称已测量连续零中断。
+
+两OAuth发现HTTP200：`/.well-known/oauth-authorization-server`、`/.well-known/oauth-protected-resource/api/bridge/review-mcp`；POST `/api/bridge/review-mcp` initialize与tools/list均200，工具仅`link_review`、`submit_revision`，OAuth2 scope `reviews.submit`。旧`https://chatgpt.com/connector_platform_oauth_redirect`与本次`https://chatgpt.com/connector/oauth/lrPNES-xwBHJ`均匿名302到登录；错误域、通配与额外query400。Origin/nonce/账号、PKCE、精确码绑定、私密准入与暂停CAS保护沿准确源，不放宽。
+
+用户参考原图在Mac正式桥传原job的saved/received/receiptSent、实际字节/PNG尺寸/SHA已核同，私有归档与索引已完成；PNG排除Git且未公开、未入发布包。只保存安全接收metadata，参考原图不是成品。Windows客户端0.21.0实装、原生ChatGPT真实出图→MCP交回→独立看图→退回修改→复验及最终成品，原R1–R3和唯一文字生产记录均由Windows继续，不以工程与部署通过冒真实成图验收。
+
+本批已通过原CX `/api/answer`、原Windows会话`win:01a1f724-18ef-77f0-945e-a92f765cf2fc`单次提交final，稳定intent `sd2-art-autoflow-release-71ea8e5-final`。原会话在现有列表核同GPT验收设计、Windows项目与codex来源，状态running且未静音/忽略；详情与turn_status读取超时，发送亦超时，最小原队列查询503，故送达保持unknown。未重复发、未换会话或路线重投、未等待ACK；后台发布成功与回执送达未确认分开记录。
+
+证据：[实际部署](../../docs/materials/2026-11-20-gpt-art-autoflow/public-deployed.json)、[OAuth与工具](../../docs/materials/2026-11-20-gpt-art-autoflow/gpt-review-public-check.json)、[完整构建](../../docs/materials/2026-11-20-gpt-art-autoflow/main-build-success.json)、[准确输入预检](../../docs/materials/2026-11-20-gpt-art-autoflow/manual-input-preflight.json)、[美术与旧流程工程](../../docs/materials/2026-11-20-gpt-art-autoflow/main-focused-engineering.json)、[源相容摘要](../../docs/materials/2026-11-20-gpt-art-autoflow/source-pair-public-summary.json)、[封装失败与接续](../../docs/materials/2026-11-20-gpt-art-autoflow/finalization-continuation.json)、[回执尝试](../../docs/materials/2026-11-20-gpt-art-autoflow/windows-final-receipt.json)。原始私密策略、准入完整合同与失败日志留服务器，仓库仅存脱敏摘要和hash。
+
+本轮新发现的线索与问题：未新增任务外问题。

@@ -1,0 +1,9 @@
+{
+  "tid": "win:01a1f724-18ef-77f0-945e-a92f765cf2fc",
+  "intent_id": "sd2-art-autoflow-release-71ea8e5-final",
+  "apiRequestAttempted": true,
+  "endpoint": "/api/answer",
+  "recordedAt": "2026-11-21T04:19:26.980742+00:00",
+  "outcome": "unknown",
+  "errorType": "timeout"
+}

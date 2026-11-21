@@ -1,0 +1,38 @@
+{
+  "passed": true,
+  "newSealedEngine": true,
+  "oldInstalledEngineUnchanged": true,
+  "registryOnlyUpdateToActualInstalledPublisher": true,
+  "originalEngine": {
+    "schema": "sd2-release-engine.v1",
+    "version": "1.1.2",
+    "controllerSetSha256": "a373582db9369543b73560fde98849d4f92852114f3ab1230bc463d74c559f42",
+    "root": "/data/video-api-debugger/release-engines/1.1.2-a373582db9369543b73560fde98849d4f92852114f3ab1230bc463d74c559f42"
+  },
+  "engine": {
+    "schema": "sd2-release-engine.v1",
+    "version": "1.1.2",
+    "controllerSetSha256": "72f485ab9433f5ca46634334c6fdd6d813e06e08dd7792276af00568aabd1ed3",
+    "root": "/data/video-api-debugger/release-engines/1.1.2-72f485ab9433f5ca46634334c6fdd6d813e06e08dd7792276af00568aabd1ed3"
+  },
+  "admission": {
+    "schema": "sd2-seamless-admission.v1",
+    "previousSource": "ccc0474af5e2e41c561b3e8b4e2cc0691fa35791",
+    "mainSource": "206e67410c9c235c0e1bcf5bdc21a5e11a218d3e",
+    "guardSource": "eacd05ecb8080166a71daccfa43fb63d8d23da60",
+    "sameSchema": true,
+    "unchangedPersistedContracts": true,
+    "sqlExecuted": false,
+    "coldFallbackAllowed": false
+  },
+  "installed": {
+    "installed": true,
+    "reused": false,
+    "engine": {
+      "schema": "sd2-release-engine.v1",
+      "version": "1.1.2",
+      "controllerSetSha256": "72f485ab9433f5ca46634334c6fdd6d813e06e08dd7792276af00568aabd1ed3",
+      "root": "/data/video-api-debugger/release-engines/1.1.2-72f485ab9433f5ca46634334c6fdd6d813e06e08dd7792276af00568aabd1ed3"
+    }
+  }
+}

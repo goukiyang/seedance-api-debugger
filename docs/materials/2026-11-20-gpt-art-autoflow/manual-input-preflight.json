@@ -1,0 +1,32 @@
+{
+  "source": "71ea8e565ddb1da559aeaec1d2e1b49e88f003a5",
+  "baseline": "206e67410c9c235c0e1bcf5bdc21a5e11a218d3e",
+  "offlineConfigPassed": true,
+  "directoryRelationPassed": true,
+  "sourceCount": 2607,
+  "gitDeltaCount": 12,
+  "runtimeDelta": 11,
+  "nonRuntimeDelta": [
+    "tasks/todo/2026-11-20-gpt-background-review-release.md"
+  ],
+  "completeTwelveFileDelta": [
+    "package-lock.json",
+    "package.json",
+    "scripts/gpt-art-review-engineering.mjs",
+    "scripts/gpt-review-engineering.mjs",
+    "src/app/api/bridge/gpt-reviews/route.ts",
+    "src/app/api/bridge/review-mcp/route.ts",
+    "src/lib/bridge/gpt-art-image.ts",
+    "src/lib/bridge/gpt-review.ts",
+    "src/lib/bridge/review-pairing.ts",
+    "src/lib/bridge/review-tool-image.ts",
+    "src/lib/release.ts",
+    "tasks/todo/2026-11-20-gpt-background-review-release.md"
+  ],
+  "overrideGitBlobsPassed": true,
+  "engineLogicChanged": false,
+  "applicationSourceUnchanged": true,
+  "nativeFormProofReusedWithMatchingBytes": true,
+  "manualInputContinuationAfterRecordedParserFailure": true,
+  "windowsFunctionalAcceptancePending": true
+}

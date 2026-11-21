@@ -1,0 +1,18 @@
+{
+  "schema": "sd2-private-reference-receipt.v1",
+  "jobId": "3ecb381a-f617-4493-b278-989c81e50663",
+  "deviceId": "9222b663-5a1f-46c3-85f0-12db39a29bdb",
+  "device": "Mac mini",
+  "saved": true,
+  "receiptSent": true,
+  "bytes": 1617194,
+  "size": 1617194,
+  "sha256": "066a0bad574ea7087f6699c69edd7cdd2d273874d5e6e1c94d48d98f29f35899",
+  "width": 1280,
+  "height": 915,
+  "privateProjectPath": "/Volumes/Data/Projects/video-api-debugger/materials/2026-11-20-gpt-world-review/codex-clipboard-d5cca489-9430-4eb2-bfb1-d25e4477fe14.png",
+  "referenceOnly": true,
+  "notFinalArtwork": true,
+  "publicUpload": false,
+  "includedInRelease": false
+}
