@@ -273,3 +273,29 @@ attempt09所有staging、工程临时根、输出、日志与manifest由同一�
 第七批复盘：队列专项9组、确认等待8组、文字/OAuth与类型/lint通过；旧艺术首条恢复兼容场景失败。已将尚未领单的恢复严格限定 queue-v1，旧连续工具模式仍必须走原首次连接证明；既有已领有效单号分支保持。客户端审查集中修复同单命令重复追加、未真正清空输入及测试短暂提示竞态。整批修改后统一第八批验证，不弱化原测试、不改生产业务任务。源与部署候选仍0.151.4，尚未发布。
 2026-11-21 队列接续候选最终工程核对：后台第八批新增队列9组、旧艺术20组、确认等待8组、文字/OAuth及全量类型/lint全部通过。客户端第十一批完整15场景和既有3组测试文件全部通过，包含一次启动自动分析→首稿→真实夹具判退→自动修改→通过、清空已发队列、纯图完成、回复迟到拒绝、原账号/原对话/原图与新提问保护、首单及已领未发暂停恢复、响应丢失、旧票据和明确未点击恢复。独立只读审查通过发送边界、账号/原对话及空段修正，未以源码审查替代真实出图。证据位于主仓 .cache/qa/queued-art-01514-0215-20261121/attempt08 与 attempt11；旧attempt保留。本次后台仅package版本、MCP描述、原流程库与新增隔离工程脚本，不改费用/模型/权限/DDL/业务数据，正式桌面latest 0.6.32继续HOLD。
 部署输入为本次Git完整源与工程夹具；原图不属发布包。Windows新原创测试图沿主仓 materials/2026-11-21-original-art-flow/exec-87d2fd2f-5c42-41c4-9cf4-0dc80b17e187.png 私有保存；原拒绝任务与Mac原素材归档保留。真实新测试对话混入无关NAS命令，已停止业务写入，禁止以人工拼接或改稿冒充闭环。安装与重新选择独立测试页面仍待Windows接续，不宣称成图通过。
+
+
+### 0.151.4 Mac保护发布：准确队列接续源与唯一构建
+
+用户授权仅发布后台，原origin准确b31e0ca70a69d9bf0ff0f073e35a54662c29ee77已取回，父9863fbc与原隔离分支核同后安全快进，保留全部0.151.3发布记录。仅MCP说明/原流程库、九组隔离工程及package版本变化；queue-v1为可选执行方式，旧模式和文字继续，旧任务只在原设备/CID/source显式恢复升级，原来源确认、nonce/OAuth/PKCE/Origin、模型/费率/许可与暂停CAS不变。无DDL，不写生产任务，原图不入包，原R1–R3/I1和正式桌面hold保持。
+
+attempt10统一派生staging、工程根、日志/输出和manifest，完整2836个Git库存、2718个选定文件、118项不变继承排除核同；19项差量含5运行/工程与14项既有记录。31份冻结输入、本地语法与原验证器集中预检、服务器包hash及无构建预检均一次通过，输入包SHA256 a6dd3d077f3b9c30a3510f6eabc2c6fa69e5b4081d81d902a05835a65d71fc64。仅登记两个实际server contract准确旧新hash，封存1.1.2逻辑不变，源级准入sameSchema/unchangedPersistedContracts、sqlExecuted=false、coldFallbackAllowed=false。全部旧attempt01–09输入/日志/退出码保留。
+
+服务器基线仍90e6d9a/0.151.3/BUILD FvZqDYtrsby-4Dfcz6k6K，无活动发布占用；本次仅启动attempt10一次构建，新增九组队列与旧二十组艺术、八组确认等待、文字/OAuth/许可、类型lint/Next和最终准入统一接续。GPT_DIRECTORY_QA使用本次服务器工程目录；原生表单相关依赖字节未改，沿原证据hash复用。Windows客户端15场景及独立审查为来源方证据，本Mac不冒称客户端真实出图已验。
+
+
+### 0.151.4 最终保护发布与公网核对
+
+已部署，待Windows真实队列自动流验收。准确应用源`b31e0ca70a69d9bf0ff0f073e35a54662c29ee77`，版本`0.151.4`，BUILD `2KpVPgX99TaRY9QDkA97z`。原隔离分支安全快进，全部旧发布记录保留。attempt10输入预检、完整构建和切换各一次、均exit0，窗口gpt-queue-continuation-20261121-b31e0ca，run `8a77c842-dc6a-4646-9ba7-977e06a2ec85`；原seamless1.1.2/automatic-same-plan八步complete。未重开/覆盖旧attempt，也未回业务数据。
+
+本源九组实际SQLite/Sharp队列专项、二十组旧艺术、八组确认等待、旧文字/OAuth/PKCE/许可回退、七类storage、变更lint、全量类型及完整Next全部通过，九项统一工程结果和原日志摘要核同。原生form依赖字节未变，旧原生表单证据按hash复用。所有模型/ChatGPT传输均隔离夹具，工程生产写0、付费调用0；Windows客户端15场景及独立审查是来源方工程证据，不冒Mac实装或原生出图通过。真实原对话自动分析→出图→退回修改→复验仍待Windows，Mac未写生产任务或人工交稿/判定。
+
+七服务全部active，每个MainPID实际/proc cwd与准确应用源核同，.deployed-commit及实际BUILD一致。双域sd2.youdooart.com和sd2-server.youdoodesign.com的release=0.151.4、health=true；服务器与Mac独立公网读取均通过。两份目标CSS/JS在双域全文摘要相同，匿名私有资源入口401。两OAuth发现、MCP initialize与tools/list均200，工具仍仅link_review、submit_revision、reviews.submit；实际线上submit_revision说明已含handoff=queue及旧模式接续语义，未以仅版本号冒已加载。两个合法精确回调302到登录，错误域/通配/额外query400。
+
+价格及三条旧unknown请求全字段摘要保持，sameSchema/unchangedPersistedContracts通过，sqlExecuted=false、coldFallbackAllowed=false；无新DDL、数据库恢复、默认模型/费率/许可变化。原任务/计数、账号/设备/CID/source绑定、nonce/Origin/PKCE、一次性原单和暂停CAS均沿准确源保持。回退沿`/data/video-api-debugger/release-staging/8a77c842-dc6a-4646-9ba7-977e06a2ec85/seamless-plan.json`及原固定相容guard，仅回程序，不回业务数据。原控制器已结束，探针超时0不冒称已测量连续零中断。
+
+正式桌面latest仍0.6.32，SHA d6d8dd898fb0ce7bbe23f6a932ec7934830daa9a67d20b3f3763d20b8c9888ad核同；0.21.1五候选、自动同步工具和R1–R3/I1未完成项均保留，本批后台发布不替代桌面正式交付或解除hold。原被拒请求不重试；所有原图沿既有私有归档及Windows固定素材索引保存，未公开、重传或加入本次Git构建包，新原创原件也未冒称已复制到Mac。
+
+自动审批拒绝了原验证日志stdout/stderr回传，理由是可能含敏感内部数据，原调用未执行。已改为原验证器输出和异常全留服务器私有日志，仅返回严格白名单状态和不可逆摘要，安全替代获准并完成；没有换工具下载被拒原件。完整日志/计划/私密合同/业务快照留原服务器attempt10，仓库只含脱敏摘要。证据：[服务器实际回执](../../docs/materials/2026-11-21-gpt-queue-continuation/server-safe-receipt.json)、[Mac独立公网检查](../../docs/materials/2026-11-21-gpt-queue-continuation/mac-public-verification.json)、[准确输入预检](../../docs/materials/2026-11-21-gpt-queue-continuation/manual-input-preflight.json)、[冻结输入库存](../../docs/materials/2026-11-21-gpt-queue-continuation/input-inventory.json)、[核验安全边界](../../docs/materials/2026-11-21-gpt-queue-continuation/evidence-handling.json)。
+
+本轮新发现的线索与问题：未新增任务外问题。

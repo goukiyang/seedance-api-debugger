@@ -1,0 +1,175 @@
+{
+  "source": "b31e0ca70a69d9bf0ff0f073e35a54662c29ee77",
+  "version": "0.151.4",
+  "build": "2KpVPgX99TaRY9QDkA97z",
+  "runId": "8a77c842-dc6a-4646-9ba7-977e06a2ec85",
+  "completedAt": "2026-11-21T21:36:13.284871+00:00",
+  "stage": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt10",
+  "status": "complete",
+  "buildExit": 0,
+  "publishExit": 0,
+  "originalBuildAndPublishCompletedOnce": true,
+  "completed": [
+    "preflight",
+    "prepare",
+    "cutToCandidate",
+    "drainOriginal",
+    "publishCanonical",
+    "startCanonical",
+    "cutToCanonical",
+    "retireCandidate"
+  ],
+  "rolesActiveAndActualCwdVerified": 7,
+  "public": {
+    "sd2.youdooart.com": "0.151.4",
+    "sd2-server.youdoodesign.com": "0.151.4"
+  },
+  "health": {
+    "sd2.youdooart.com": true,
+    "sd2-server.youdoodesign.com": true
+  },
+  "staticResourcesVerified": 2,
+  "staticResourcesSha256": [
+    "f5fbdb830f397f9911a2b60ffa188d8a4f18eab9e15ed9a673cdb179cff4cc8c",
+    "28576f2c91e99523d83c4819860b486b4a7dd4b584a8aa5f95f3d1e7e7e37138"
+  ],
+  "anonymousPrivatePickerRead": 401,
+  "oauthAuthorizationServer": {
+    "url": "https://sd2.youdooart.com/.well-known/oauth-authorization-server",
+    "status": 200
+  },
+  "oauthProtectedResource": {
+    "url": "https://sd2.youdooart.com/.well-known/oauth-protected-resource/api/bridge/review-mcp",
+    "status": 200
+  },
+  "mcp": {
+    "initialize": 200,
+    "toolsList": 200,
+    "tools": [
+      "link_review",
+      "submit_revision"
+    ],
+    "scope": "reviews.submit"
+  },
+  "exactCallbackChecks": [
+    302,
+    302,
+    400,
+    400,
+    400
+  ],
+  "sameSchema": true,
+  "unchangedPersistedContracts": true,
+  "sqlExecuted": false,
+  "coldFallbackAllowed": false,
+  "databaseRestored": false,
+  "oldUnknownsUnchanged": true,
+  "oldUnknownCount": 3,
+  "oldUnknownsAllFieldsSha256": "02076ef9f09af64c80fcfea08981f9ac431d744adaa131320686508ad060d828",
+  "pricingUnchanged": true,
+  "queuedArtEngineeringGroups": 9,
+  "mcpQueueDescriptionVerified": true,
+  "sourcePendingEngineeringGroups": 8,
+  "artEngineeringGroups": 20,
+  "storageCategories": 7,
+  "checks": [
+    {
+      "name": "focused-changed-lint",
+      "exitCode": 0,
+      "logSha256": "03a52e2742a512fd0d6e3602e84627a5c8ad163a72c8b18fe33f29b055c62b89"
+    },
+    {
+      "name": "external-access-engineering",
+      "exitCode": 0,
+      "logSha256": "15bef4c093a203e87a22f34422fcaa67a7bfdefaa3a06398ae4370138e3f67e0"
+    },
+    {
+      "name": "external-freeze-engineering",
+      "exitCode": 0,
+      "logSha256": "6974768950e3028c66a8d4f94fe950a77a3af5374b9e75ab893495889293c66f"
+    },
+    {
+      "name": "bridge-directory",
+      "exitCode": 0,
+      "logSha256": "d38cc7b7158631734bc0cab559becf93a182bb7024fad6b4c8f0d1111efc951b"
+    },
+    {
+      "name": "bridge-storage",
+      "exitCode": 0,
+      "logSha256": "b2f345fd762f0bc542660ef3db2e0b5a7bcb2b5ac6815bc76a77e3ea8e643c6c"
+    },
+    {
+      "name": "gpt-review",
+      "exitCode": 0,
+      "logSha256": "35beff680efc9559897d24f44095bec5ab1312259c8e784e93d07b4394465486"
+    },
+    {
+      "name": "gpt-art-queue",
+      "exitCode": 0,
+      "logSha256": "28433d99c03fa71ba6289a78c38d56a16d95527f0d4efb1cfb57be2775c20680"
+    },
+    {
+      "name": "gpt-source-pending",
+      "exitCode": 0,
+      "logSha256": "fca792d46a9e0df0ae53db935284dcac7bd4005688db5e4ec9e7271b967c14e9"
+    },
+    {
+      "name": "gpt-art-review",
+      "exitCode": 0,
+      "logSha256": "ebd2e487cb6fe8d4e0a4bf482cd29773a0e7e6be56158f1876aa314c847e6e44"
+    }
+  ],
+  "processes": {
+    "main-types-process.json": {
+      "source": "b31e0ca70a69d9bf0ff0f073e35a54662c29ee77",
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "receiptSha256": "c9b1b3eccb3655f4c5a41e5dc2db7f848c4d7ca632c0b3ee2428e1a0bfd22c5b"
+    },
+    "main-next-process.json": {
+      "source": "b31e0ca70a69d9bf0ff0f073e35a54662c29ee77",
+      "exitCode": 0,
+      "signal": null,
+      "error": null,
+      "receiptSha256": "0817faebd4cdb2a5972ff4ffd8e71cde98917d102de2b6faa21fd8a9bc2d81f8"
+    }
+  },
+  "productionWritesByVerification": 0,
+  "paidRequestsByVerification": 0,
+  "functionalAcceptance": "Windows real-account automatic queue and art flow remain unverified",
+  "rollbackPlan": "/data/video-api-debugger/release-staging/8a77c842-dc6a-4646-9ba7-977e06a2ec85/seamless-plan.json",
+  "rollbackPolicy": "original compatible guard; program only; no database restoration",
+  "desktopLatestVersion": "0.6.32",
+  "desktopLatestSha256": "d6d8dd898fb0ce7bbe23f6a932ec7934830daa9a67d20b3f3763d20b8c9888ad",
+  "controllerInactive": true,
+  "observedProbeTimeoutCount": 0,
+  "continuousZeroInterruptionMeasured": false,
+  "serverOriginalsSha256": {
+    "publication-closure.json": "dd9af83624c8f20138b1d37572f61fc0555212d30e001ba398fab62a372ac9c8",
+    "public-deployed.json": "43be589f28ff377157970fa48ce2ce3c000a203411953a9400e4b0e860c05521",
+    "gpt-review-public-check.json": "fc7cf8e2801a78eafa696694fac134f26d7f91b0b142b2b097834fc8ffec740e",
+    "main-focused-engineering.json": "082aea429faa069a33ece33841519fc8b658d1ed7e024359583f949903f887a4",
+    "main-build-success.json": "77f5b12d745dbdf43591707bae3e4d10b67e246de21a69eb1db5423dd7ed673f",
+    "main-types-process.json": "c9b1b3eccb3655f4c5a41e5dc2db7f848c4d7ca632c0b3ee2428e1a0bfd22c5b",
+    "main-next-process.json": "0817faebd4cdb2a5972ff4ffd8e71cde98917d102de2b6faa21fd8a9bc2d81f8",
+    "source-pair-contract.json": "1aee44488da39460bed8f66034f1846aea10fff41bfcdca38b2ef271491275ba",
+    "runtime-processes.json": "569d74bff3971ff6abe7585048595ae8c43152995732f7a0b0416e39a3710a35",
+    "input-preflight-binding.json": "cf26af591b6addf0729a2478ed0fe68fa166a0aedd1d86bfea887f7915e47039",
+    "previous-attempts-preserved.json": "7c106ef0a4d4c78a2ead6cb3bfd8cc8bc8a1052d62bd40cffdb40389bb12bdcb",
+    "source-compatibility-preflight.json": "ecb3413bbcb4afe0a672bdf8c925669f1e3507d3211f13327f7a3f6724675d9b",
+    "native-form-proof.json": "380f1bea13265251e14300836a8c459314e7f69ad90c561372d55227f85ccdab",
+    "publication-window.json": "9889bfeaa5a6832471db9011d875991a1937d237e1d9e1b48fb5f9ac58ecbbd9",
+    "plan-reference.json": "429dd05e8f7d72015864ecda7f0c06d45ba458e8bc72feae02f4a1f7c54f8dd6",
+    "policy.json": "1f9ca718190ef09a65e0b426be8aee0ffab7018d4623b774b4df2e548bfd5aba",
+    "controller.log": "bce5f313642de1786b28685d0601550cf59e02ac7e2c75f22b0db164ab1463d6",
+    "main-next-build.log": "53b46043745640022a1a34b2a6f5c37d280ea9a7ce88e5b9bcb37f3bc6d051dd",
+    "main-complete-types.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "evidenceHandling": "Only this whitelisted summary and digests are returned; no raw logs, plans, private contracts, credentials or user data are downloaded.",
+  "storageCategoryCountBasis": {
+    "script": "scripts/bridge-storage-engineering.mjs",
+    "sha256": "3b74d1e567d529df9578fc87d79badc4ca90d1e4e0375b035961dbb48f9b4452",
+    "assertion": "empty.categories.length equals 7; actual script exit0 recorded in checks"
+  }
+}

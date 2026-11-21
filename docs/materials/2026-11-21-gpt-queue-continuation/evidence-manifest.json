@@ -1,0 +1,16 @@
+{
+  "source": "b31e0ca70a69d9bf0ff0f073e35a54662c29ee77",
+  "version": "0.151.4",
+  "build": "2KpVPgX99TaRY9QDkA97z",
+  "evidenceSha256": {
+    "reviewed-bridge-registration.json": "32331943dfdfc600d5d039348a17206bce0c3fe12188a54524ece4c91724f194",
+    "input-inventory.json": "c8326334cbf1a60a5438534a4055632ccdc8173c6bf826d573d5afeafee5e81f",
+    "manual-input-preflight.json": "f1aa8da6de9eeb05ccc21cb8cc2abf3b95d3d8c9ee3bc7b7a92fe34569886243",
+    "evidence-handling.json": "a22e2b7362b3b5d979993ea67f624f3a3c989eeeb42c568970f6ff4d487051bf",
+    "codegraph-result.json": "f785a3a0da44e88196f7488a824be743a7d03890c8a74172dd3e77eb65224a35",
+    "post-verification-safe-status.json": "41afbb67489aecc85dcfd59cc35aa6541cc37669070470674f004964a3c56164",
+    "server-safe-receipt.json": "758d7a6f02202d704198ec723c19030b2c469d2e3071114dd909fb01975e923f",
+    "mac-public-verification.json": "fc1b0ede7007a208dcd93976c9acfd5b2d903ace0bb28f1deafaa603b60e734e"
+  },
+  "serverOriginalsNotDownloaded": true
+}

@@ -1,0 +1,17 @@
+{
+  "baseline": "90e6d9a1daa1e8958007aaf1510f3c000f0e72f3",
+  "source": "b31e0ca70a69d9bf0ff0f073e35a54662c29ee77",
+  "files": {
+    "src/app/api/bridge/review-mcp/route.ts": {
+      "previous": "977e5b78973e73d2ba805f0f20676c44676cc9e938d620edbe828ae2d218139d",
+      "current": "cbc077785d44c946f01429925505cdccf79bfb5033eb45f1dad078a95ef35602"
+    },
+    "src/lib/bridge/gpt-review.ts": {
+      "previous": "6cae39c924c127ac35da4e63423004d994c16267e5424420d3806f58cb61e930",
+      "current": "09a585e95798671ab1c94e509705f7fb6dea0bfcefcd48cc56bb73670371eb3a"
+    }
+  },
+  "tableSha256": "1db0c9359c3b6b4eb5d3b2d33997162025de9a1de5ececccc7018523ce4e41ad",
+  "engineLogicChanged": false,
+  "applicationSourceUnchanged": true
+}

@@ -1,0 +1,34 @@
+{
+  "checkedAt": "2026-11-21T21:36:47.247985+00:00",
+  "observer": "Mac direct public HTTPS",
+  "public": {
+    "sd2.youdooart.com": {
+      "release": {
+        "status": 200,
+        "version": "0.151.4",
+        "ok": null,
+        "sha256": "8dbb3327c97b3459fa45513eafda907fdaeedfb6a71eb272019254226f8a8db5"
+      },
+      "health": {
+        "status": 200,
+        "version": null,
+        "ok": true,
+        "sha256": "6babc3221777c4cf3b162208f3a273960989027659cf15c65915c5047a9a96a3"
+      }
+    },
+    "sd2-server.youdoodesign.com": {
+      "release": {
+        "status": 200,
+        "version": "0.151.4",
+        "ok": null,
+        "sha256": "8dbb3327c97b3459fa45513eafda907fdaeedfb6a71eb272019254226f8a8db5"
+      },
+      "health": {
+        "status": 200,
+        "version": null,
+        "ok": true,
+        "sha256": "d15155b5855dbcb32eadfa0fe5044b07029cb5ab4fb4cb4c037b1573813252b9"
+      }
+    }
+  }
+}

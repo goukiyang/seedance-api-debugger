@@ -1,0 +1,15 @@
+{
+  "tool": "ensure-codegraph.sh",
+  "projectPath": "/Volumes/Data/Projects/video-api-debugger-worktrees/gpt-background-review-20261120",
+  "source": "b31e0ca70a69d9bf0ff0f073e35a54662c29ee77",
+  "sourceFingerprint": "cb1e7187d85f9b5a87969533f83439dadfa7b86238b0a1a8a867600cdf622f95",
+  "files": 2163,
+  "pendingChanges": {
+    "added": 0,
+    "modified": 0,
+    "removed": 0
+  },
+  "parseErrors": [],
+  "checkedAt": "2026-11-21T21:19:18Z",
+  "result": "CODEGRAPH_READY; exact worktree synchronized; focused source relationships checked"
+}

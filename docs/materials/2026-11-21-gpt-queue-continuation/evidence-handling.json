@@ -1,0 +1,8 @@
+{
+  "initialRawVerificationOutputTransfer": "not executed; automatic approval rejected stdout/stderr log return due to potential sensitive internal data",
+  "safeAlternative": "All original verifier stdout/stderr and exceptions redirected into private server log. Only explicitly asserted status fields and irreversible digests returned; accepted and completed.",
+  "serverOriginals": "/data/video-api-debugger/release-staging/gpt-background-review-20261120/attempt10",
+  "rawLogsPlansContractsUserDataDownloaded": false,
+  "deploymentBlocked": false,
+  "additionalUserApprovalNeeded": false
+}

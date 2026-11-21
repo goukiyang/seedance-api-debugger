@@ -1,0 +1,41 @@
+{
+  "source": "b31e0ca70a69d9bf0ff0f073e35a54662c29ee77",
+  "donor": "b31e0ca70a69d9bf0ff0f073e35a54662c29ee77",
+  "baseline": "90e6d9a1daa1e8958007aaf1510f3c000f0e72f3",
+  "offlineConfigPassed": true,
+  "directoryRelationPassed": true,
+  "sourceCount": 2718,
+  "completeTrackedGitInventory": true,
+  "trackedFileCount": 2836,
+  "inheritedExclusionsUnchanged": true,
+  "excludedCount": 118,
+  "gitDeltaCount": 19,
+  "runtimeDelta": [
+    "package-lock.json",
+    "package.json",
+    "scripts/gpt-art-queue-engineering.mjs",
+    "src/app/api/bridge/review-mcp/route.ts",
+    "src/lib/bridge/gpt-review.ts"
+  ],
+  "nonRuntimeDelta": [
+    "docs/materials/2026-11-21-gpt-source-pending/codegraph-result.json",
+    "docs/materials/2026-11-21-gpt-source-pending/evidence-handling.json",
+    "docs/materials/2026-11-21-gpt-source-pending/evidence-manifest.json",
+    "docs/materials/2026-11-21-gpt-source-pending/input-inventory.json",
+    "docs/materials/2026-11-21-gpt-source-pending/input-preparation-failures.json",
+    "docs/materials/2026-11-21-gpt-source-pending/mac-public-verification.json",
+    "docs/materials/2026-11-21-gpt-source-pending/manual-input-preflight.json",
+    "docs/materials/2026-11-21-gpt-source-pending/receipt-manifest.json",
+    "docs/materials/2026-11-21-gpt-source-pending/reviewed-bridge-registration.json",
+    "docs/materials/2026-11-21-gpt-source-pending/server-safe-receipt.json",
+    "docs/materials/2026-11-21-gpt-source-pending/windows-final-receipt.json",
+    "docs/materials/index.md",
+    "tasks/todo.md",
+    "tasks/todo/2026-11-20-gpt-background-review-release.md"
+  ],
+  "overrideGitBlobsPassed": true,
+  "runtimeBlobsMatchDonor": true,
+  "engineLogicChanged": false,
+  "nativeFormProofReusedWithMatchingBytes": true,
+  "windowsFunctionalAcceptancePending": true
+}
