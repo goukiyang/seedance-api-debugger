@@ -124,6 +124,81 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
     const recap=(await post('get',{id:id2})).data.task;assert.equal(recap.phase,'retrospective');assert.equal(recap.rounds.length,4);
     assert.equal((await post('recaps')).data.rows[0].id,id2);assert.equal((await post('list')).data.total,2);
     assert.ok((await f.storage.readBridgeStorageUsage('review-a')).categories.find(r=>r.kind==='reviews').bytes>0);
+    for(const outcome of ['revise','pass','paused','resumed']){
+      const pendingId=crypto.randomUUID(),pendingDelivery=crypto.randomUUID();
+      const created=await post('create',{id:pendingId,messageId:'inflight-'+outcome});
+      const sent=await post('claim',{id:pendingId,version:created.data.task.version,delivery:pendingDelivery});
+      assert.ok((await post('ack',{id:pendingId,version:sent.data.task.version,delivery:pendingDelivery})).ok);
+      const proof=(await f.link(pendingDelivery,token)).result._meta.sd2ReviewProof;
+      assert.ok((await post('confirm',{...proof,id:pendingId})).ok);
+      let entered,release;
+      const inJudge=new Promise(resolve=>{entered=resolve;});
+      f.control.defaultGate=new Promise(resolve=>{release=resolve;});f.control.onDefault=entered;
+      const text=outcome==='pass'?'甲项已交付。乙项已交付。':'甲项已修订',calls=f.modelCalls.length;
+      const original=f.submit(pendingDelivery,text,token);
+      try{
+        await inJudge;
+        const judging=(await f.q.getTask('review-a',scope,pendingId)).task;assert.equal(judging.phase,'judging');
+        const repeated=(await f.submit(pendingDelivery,text,token)).result.structuredContent;
+        assert.equal(repeated.status,'pending');assert.equal(repeated.delivery,pendingDelivery);
+        assert.equal(f.modelCalls.length,calls+1);assert.equal(judging.rounds.length,2);
+        assert.ok((await f.submit(pendingDelivery,text+' changed',token)).result.isError,'same ticket cannot replace its accepted revision');
+        assert.ok((await f.submit(pendingDelivery,text,token,'other-chat')).result.isError);
+        if(outcome==='paused'||outcome==='resumed'){
+          const paused=await post('pause',{id:pendingId,version:judging.version});assert.ok(paused.ok);
+          if(outcome==='resumed')assert.ok((await post('resume',{id:pendingId,version:paused.data.task.version})).ok);
+        }
+        release();
+        const result=(await original).result.structuredContent;
+        assert.equal(result.status,outcome==='paused'?'stop':outcome==='resumed'?'pending':outcome);
+        if(outcome==='revise')assert.notEqual(result.delivery,pendingDelivery);
+        const final=(await f.q.getTask('review-a',scope,pendingId)).task;
+        assert.equal(final.rounds.length,2);assert.equal(final.phase,outcome==='paused'?'paused':outcome==='resumed'?'ready':outcome==='pass'?'passed':'awaiting');
+        assert.equal(f.modelCalls.length,calls+1);
+        if(outcome==='resumed'){
+          assert.equal(result.delivery,pendingDelivery);assert.equal(final.rounds.at(-1).result,undefined,'late pre-pause verdict cannot be adopted after resume');
+          f.control.defaultGate=null;
+          const continued=(await f.submit(pendingDelivery,text,token)).result.structuredContent;
+          assert.equal(continued.status,'revise');assert.equal(continued.changes,1);assert.equal(f.modelCalls.length,calls+2);
+        }
+      }finally{release();f.control.defaultGate=null;f.control.onDefault=null;await original;}
+    }
+    console.log('PASS text in-flight same-ticket replay stays pending; one judge and revision; final revise/pass and pause remain authoritative');
+    async function boundText(name){
+      const id=crypto.randomUUID(),delivery=crypto.randomUUID();
+      const created=await post('create',{id,messageId:name});
+      const sent=await post('claim',{id,version:created.data.task.version,delivery});
+      assert.ok((await post('ack',{id,version:sent.data.task.version,delivery})).ok);
+      const proof=(await f.link(delivery,token)).result._meta.sd2ReviewProof;
+      assert.ok((await post('confirm',{...proof,id})).ok);
+      return {id,delivery,saved:await f.q.getTask('review-a',scope,id)};
+    }
+    {
+      const {id,delivery,saved}=await boundText('simultaneous-first-receipt'),text='甲项并发修订';
+      let inputCount=0,inputsReady,releaseInputs,judgeReady,releaseJudge;
+      const bothInputs=new Promise(resolve=>{inputsReady=resolve;}),inputGate=new Promise(resolve=>{releaseInputs=resolve;});
+      const entered=new Promise(resolve=>{judgeReady=resolve;});f.control.onDefault=judgeReady;f.control.defaultGate=new Promise(resolve=>{releaseJudge=resolve;});
+      const readImages=async()=>{if(++inputCount===2)inputsReady();await inputGate;return [];};
+      const calls=f.modelCalls.length,run=()=>f.q.revisionForTool('review-a',delivery,text,[],readImages,saved.task.connected);
+      const a=run(),b=run();
+      try{
+        await bothInputs;releaseInputs();await entered;
+        const waiting=await Promise.race([a,b]);assert.equal(waiting.status,'pending');assert.equal(waiting.delivery,delivery);
+        releaseJudge();const results=await Promise.all([a,b]);assert.deepEqual(results.map(r=>r.status).sort(),['pending','revise']);
+        const final=(await f.q.getTask('review-a',scope,id)).task;assert.equal(final.rounds.length,2);assert.equal(f.modelCalls.length,calls+1);
+      }finally{releaseInputs();releaseJudge();f.control.defaultGate=null;f.control.onDefault=null;await Promise.allSettled([a,b]);}
+    }
+    {
+      const {id,delivery,saved}=await boundText('simultaneous-next-ticket'),text='甲项等待下一轮';
+      const requestKey=crypto.createHash('sha256').update(JSON.stringify([delivery,text,[]])).digest('hex');
+      await f.q.receiveRevision('review-a',saved,{delivery,messageId:'revision-'+delivery,text,images:[],requestKey},saved.task.connected);
+      await f.q.judgeReview('review-a',await f.q.getTask('review-a',scope,id));
+      const calls=f.modelCalls.length,replies=await Promise.all([f.submit(delivery,text,token),f.submit(delivery,text,token)]);
+      const outcomes=replies.map(r=>r.result.structuredContent);assert.ok(outcomes.every(r=>r?.status==='revise'));
+      assert.equal(outcomes[0].delivery,outcomes[1].delivery);assert.notEqual(outcomes[0].delivery,delivery);
+      assert.equal((await f.q.getTask('review-a',scope,id)).task.rounds.length,2);assert.equal(f.modelCalls.length,calls);
+    }
+    console.log('PASS text concurrent first receipt and next-ticket publication reuse the accepted draft and authoritative ticket');
     assert.throws(()=>f.q.parseVerdict('这版应该可以了',false));assert.throws(()=>f.q.parseVerdict('{"decision":"revise","reason":"x","evidence":"x","change":"x"}',true));
     const retryId=crypto.randomUUID();
     f.control.failure=new f.musk.MuskApiError('fixture first-draft failure',502,'musk_api_empty_content');

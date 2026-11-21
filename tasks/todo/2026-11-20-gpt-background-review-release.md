@@ -133,3 +133,13 @@ attempt06完整编译成功后，旧`finalize-pair.py`仍要求上一批`referen
 证据：[实际部署](../../docs/materials/2026-11-20-gpt-art-autoflow/public-deployed.json)、[OAuth与工具](../../docs/materials/2026-11-20-gpt-art-autoflow/gpt-review-public-check.json)、[完整构建](../../docs/materials/2026-11-20-gpt-art-autoflow/main-build-success.json)、[准确输入预检](../../docs/materials/2026-11-20-gpt-art-autoflow/manual-input-preflight.json)、[美术与旧流程工程](../../docs/materials/2026-11-20-gpt-art-autoflow/main-focused-engineering.json)、[源相容摘要](../../docs/materials/2026-11-20-gpt-art-autoflow/source-pair-public-summary.json)、[封装失败与接续](../../docs/materials/2026-11-20-gpt-art-autoflow/finalization-continuation.json)、[回执尝试](../../docs/materials/2026-11-20-gpt-art-autoflow/windows-final-receipt.json)。原始私密策略、准入完整合同与失败日志留服务器，仓库仅存脱敏摘要和hash。
 
 本轮新发现的线索与问题：未新增任务外问题。
+
+## 通用自动闭环补修0.151.1（2026-11-21 Windows）
+
+用户明确本项目是通用服务工具，先跑通文字自动退回/修改/复验，再用原图验证；Codex只修公共链路断点，不人工逐轮催、转发或补结果，改完自动安装，独立验收通过才交结果，Computer Use/CUA及间接调用禁止。旧R1–R3、743b2b34文字任务和f57a98d6旧方案任务保留。原图仍沿既有私有归档及桥传job3ecb381a-f617-4493-b278-989c81e50663，不重传、不入发布包。
+
+现网2026-11-21 UTC Windows公共HTTP核对双域0.151.0/health=true。已用当前71ea8e5真实临时SQLite＋实际MCP处理器确定复现：文字改稿正在judging时，同单号/同正文重试收到stop，原请求随后revise；外部fetch禁用，生产写0，付费调用0。当前补修只改普通文字回执与并发收口：ready/judging返回pending和原单号；同号并发首交只在相同owner/connection/requestKey已受理时读回；领取下一单CAS冲突复用权威单号并重新核连接。暂停/恢复后旧判定写入继续由CAS拒绝，不能假报结束；不同账号/稿件/原生会话继续拒绝。美术原指令/次数/图片准入和OAuth/PKCE/Origin/许可/默认模型/费率均未变。package/lock为0.151.1，同一补修测试重试不再抬版本。
+
+scripts/gpt-review-engineering.mjs新增judging重复、pause/pass/revise、pause→resume旧结果晚到、同时首交和同时公布下一单检查均通过；17组真实临时SQLite/Sharp美术回归、全量tsc及lint也通过，lint仅已有非本批警告。配套客户端0.21.2文字/美术隔离浏览器链路、worker账号/窗口/暂停/晚到回执、共享结果页忙状态检查通过。独立只读复核本批产品P1/P2已关闭。全部模型/ChatGPT传输仍为隔离夹具，不能当成原生真实闭环通过。
+
+发布请求沿原Mac线程及seamless1.1.2，执行前必须重核当前有效源与共享发布窗口，保护正在推进的0.21.1五包/R1静态资产及其他已上线变更。此分支是从71ea8e5导出的聚焦补修，不允许整树覆盖更高现网；必要时把本批准确差异合入当前安全源，重新冻结统一构建/准入，保留原数据库/价格/三旧未知请求/旧guard与回退，不恢复DB。原始失败日志均保留。上线回执给本原Windows任务，仅声明工程部署；真实文字任务与原图验证由Windows按一次启动、后续只观察的规则继续。
