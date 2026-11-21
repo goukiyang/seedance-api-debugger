@@ -11,7 +11,7 @@ export const maxDuration=150;
 const scopes=[{type:'oauth2',scopes:[SCOPE]}];
 const files=['image','image2','image3','image4','image5','image6'];
 const artifact={type:'object',properties:{file_id:{type:'string'},download_url:{type:'string'},mime_type:{type:'string'},file_name:{type:'string'}},required:['file_id','download_url']};
-const tool={name:'submit_revision',title:'交回本轮实际产物',description:'在用户发起任务的原对话交回本步骤实际产物。美术自动流先交包含 problem/cause/direction/check 实质内容的分析正文，再按 instructions 真正编辑出图，每轮只以 image 交回一张主成品，不附参考图或示意图；复盘步骤交同样四项的复盘正文。旧文字任务仍可交多图。continue 或 revise 必须在本对话自动继续新步骤，用返回的新 delivery 交回，不等用户再点按钮。pending 时保留相同 delivery、正文和附件，稍后重试本次提交，不再出图。只有 pass 或 stop 才结束。',securitySchemes:scopes,
+const tool={name:'submit_revision',title:'交回本轮实际产物',description:'在用户发起任务的原对话交回本步骤实际产物。美术自动流先交包含 problem/cause/direction/check 实质内容的分析正文，图片步骤以 image 交回一张实际编辑的主成品，不附参考图或示意图；复盘交同样四项正文。旧文字任务仍可交多图。若返回 handoff=queue，本步骤已接收，请结束本次回复；SD2将自动在原对话发送下一步，无需用户操作，不自行跨阶段或重复制作。没有 handoff=queue 时，continue 或 revise 按新 delivery 和 instructions 自动继续。pending 保留相同 delivery、正文和附件，稍后重试本次提交，不再出图。pass 或 stop 结束自动流。',securitySchemes:scopes,
   inputSchema:{type:'object',properties:{delivery:{type:'string',description:'本轮验收单号'},text:{type:'string',maxLength:20000,description:'本轮实际交付的完整正文，纯图用空字符串'},...Object.fromEntries(files.map(f=>[f,artifact]))},required:['delivery','text'],additionalProperties:false},
   annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:false,idempotentHint:true},
   _meta:{securitySchemes:scopes,'openai/fileParams':files,'openai/toolInvocation/invoking':'正在复验新稿','openai/toolInvocation/invoked':'本轮验收已返回'}};

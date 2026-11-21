@@ -26,7 +26,7 @@ type Phase = 'ready' | 'judging' | 'feedback' | 'delivering' | 'awaiting' | 'pas
 type ExecutionStop = {code:'provider_refused'|'result_missing';excerpt:string;recordedAt:number};
 type Binding = { device: string; cid: string; sourceId: string };
 type ArtReceipt = { delivery:string; requestKey:string; stage:'analysis'|'image'|'recap'; receivedAt:number; round?:number };
-type ArtState = { stage:'analysis'|'image'|'recap'|'done'; cycle:0|1|2; cycleChanges:number; totalChanges:number; analysis:string; recaps:string[]; bestRound?:number; instructions:string; receipts:ArtReceipt[]; referencePrints:string[]; imagePrints:string[]; invalidVisuals?:number; invalid?:{delivery:string;requests:string[]}; wake?:{id:string;delivery?:string;requestVersion?:string;op?:'resume'|'retry'} };
+type ArtState = { stage:'analysis'|'image'|'recap'|'done'; cycle:0|1|2; cycleChanges:number; totalChanges:number; analysis:string; recaps:string[]; bestRound?:number; instructions:string; receipts:ArtReceipt[]; referencePrints:string[]; imagePrints:string[]; executor?:'queue-v1'; invalidVisuals?:number; invalid?:{delivery:string;requests:string[]}; wake?:{id:string;delivery?:string;requestVersion?:string;op?:'resume'|'retry'|'advance'} };
 export type ReviewTask = { id: string; scope: string; binding: Binding; title: string; goal: string; reference: Picture[]; createdAt: number; updatedAt: number; version: string; phase: Phase; rounds: Round[]; delivery?: string; connected?: string; note: string; resumePhase?: Phase; kind?:'art'; art?:ArtState; executionStop?:ExecutionStop };
 type Fields = Record<string, unknown>;
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -77,7 +77,7 @@ async function replace(owner: string, saved: Saved, next: ReviewTask) {
   return {raw:data,task:next};
 }
 function artSummary(a:ArtState) {
-  return {stage:a.stage,cycle:a.cycle,cycleChanges:a.cycleChanges,totalChanges:a.totalChanges,recapCount:a.recaps.length,bestRound:a.bestRound,...(a.wake?{wakeId:a.wake.id,wakeVersion:a.wake.requestVersion}:{})};
+  return {stage:a.stage,cycle:a.cycle,cycleChanges:a.cycleChanges,totalChanges:a.totalChanges,recapCount:a.recaps.length,bestRound:a.bestRound,...(a.executor?{executor:a.executor}:{}),...(a.wake?{wakeId:a.wake.id,wakeVersion:a.wake.requestVersion,...(a.wake.op==='advance'?{wakeOp:a.wake.op}:{})}:{})};
 }
 const pictureURLs=(images:Picture[])=>images.map(p=>'data:'+p.mime+';base64,'+p.data);
 export const summary = (t: ReviewTask) => ({id:t.id,title:t.title,cid:t.binding.cid,sourceId:t.binding.sourceId,sourceConfirmed:!!t.connected,deliveryKey:t.delivery?stamp(t.delivery):'',phase:t.phase,createdAt:t.createdAt,updatedAt:t.updatedAt,version:t.version,changes:t.art?.totalChanges??t.rounds.length-1,note:t.note,...(t.executionStop?{executionStop:t.executionStop}:{}),...(t.art?{kind:'art' as const,art:artSummary(t.art)}:{})});
@@ -86,14 +86,14 @@ export function details(t: ReviewTask) {
 }
 export async function reviewStatus(owner:string,scope:string,id:string){
   const k=key(scope,id);
-  const rows=await prisma.$queryRaw<Array<{phase:string;version:string;delivery:string|null;connected:string|null;wakeId:string|null;wakeVersion:string|null;kind:string|null;stage:string|null;cycle:number|null;cycleChanges:number|null;totalChanges:number|null;recapCount:number|null;bestRound:number|null;stopCode:string|null}>>`SELECT json_extract(value_json,'$.phase') AS phase, json_extract(value_json,'$.version') AS version,
+  const rows=await prisma.$queryRaw<Array<{phase:string;version:string;delivery:string|null;connected:string|null;wakeId:string|null;wakeVersion:string|null;wakeOp:string|null;executor:string|null;kind:string|null;stage:string|null;cycle:number|null;cycleChanges:number|null;totalChanges:number|null;recapCount:number|null;bestRound:number|null;stopCode:string|null}>>`SELECT json_extract(value_json,'$.phase') AS phase, json_extract(value_json,'$.version') AS version,
     json_extract(value_json,'$.connected') AS connected, json_extract(value_json,'$.delivery') AS delivery, json_extract(value_json,'$.art.wake.id') AS wakeId, json_extract(value_json,'$.art.wake.requestVersion') AS wakeVersion,
-    json_extract(value_json,'$.kind') AS kind, json_extract(value_json,'$.art.stage') AS stage,
+    json_extract(value_json,'$.kind') AS kind, json_extract(value_json,'$.art.stage') AS stage, json_extract(value_json,'$.art.executor') AS executor, json_extract(value_json,'$.art.wake.op') AS wakeOp,
     json_extract(value_json,'$.art.cycle') AS cycle, json_extract(value_json,'$.art.cycleChanges') AS cycleChanges,
     json_extract(value_json,'$.art.totalChanges') AS totalChanges, json_array_length(value_json,'$.art.recaps') AS recapCount,
     json_extract(value_json,'$.art.bestRound') AS bestRound, json_extract(value_json,'$.executionStop.code') AS stopCode FROM "UserPreference" WHERE user_id=${owner} AND key=${k} LIMIT 1`;
   if(!rows.length)throw new ReviewError('当前账号没有这条验收任务',404);
-  const r=rows[0];return {id,phase:r.phase,version:r.version,sourceConfirmed:!!r.connected,deliveryKey:r.delivery?stamp(r.delivery):'',...(r.stopCode?{executionStop:{code:r.stopCode}}:{}),...(r.kind==='art'?{kind:'art',changes:Number(r.totalChanges||0),art:{stage:r.stage,cycle:Number(r.cycle||0),cycleChanges:Number(r.cycleChanges||0),totalChanges:Number(r.totalChanges||0),recapCount:Number(r.recapCount||0),bestRound:r.bestRound==null?undefined:Number(r.bestRound),...(r.wakeId?{wakeId:r.wakeId,wakeVersion:r.wakeVersion||undefined}:{})}}:{})};
+  const r=rows[0];return {id,phase:r.phase,version:r.version,sourceConfirmed:!!r.connected,deliveryKey:r.delivery?stamp(r.delivery):'',...(r.stopCode?{executionStop:{code:r.stopCode}}:{}),...(r.kind==='art'?{kind:'art',changes:Number(r.totalChanges||0),art:{stage:r.stage,cycle:Number(r.cycle||0),cycleChanges:Number(r.cycleChanges||0),totalChanges:Number(r.totalChanges||0),recapCount:Number(r.recapCount||0),bestRound:r.bestRound==null?undefined:Number(r.bestRound),...(r.executor==='queue-v1'?{executor:r.executor}:{}),...(r.wakeId?{wakeId:r.wakeId,wakeVersion:r.wakeVersion||undefined,...(r.wakeOp==='advance'?{wakeOp:r.wakeOp}:{})}:{})}}:{})};
 }
 export async function pendingRecaps(owner:string,scope:string){
   const prefix=REVIEW_PREFIX+checkedScope(scope)+':';
@@ -126,6 +126,10 @@ export async function startReview(owner:string,b:Fields) {
   let referencePrints:string[]=[];
   if(art){try{referencePrints=await artImageFingerprints(reference);}catch{throw new ReviewError('原图未完整解码，暂不能开始自动改图');}}
   const now=Date.now(), initial:ReviewTask={id,scope,binding,title,goal,reference,createdAt:now,updatedAt:now,version:randomUUID(),phase:art?'feedback':'ready',rounds:[{key:stamp(draft),draft,receivedAt:now}],note:'',...(art?{kind:'art' as const,art:{stage:'analysis' as const,cycle:0 as const,cycleChanges:0,totalChanges:0,analysis:'',recaps:[],instructions:'',receipts:[],referencePrints,imagePrints:[]}}:{})};
+  if(art&&b.executor!==undefined){
+    if(b.executor!=='queue-v1')throw new ReviewError('当前自动优化执行方式不受支持');
+    initial.art!.executor='queue-v1';
+  }
   if(initial.art)initial.art.instructions=artInstructions(initial);
   const params={user_id:owner,key:key(scope,id)};
   const row=await prisma.userPreference.upsert({where:{user_id_key:params},update:{},create:{...params,value_json:JSON.stringify(initial)}});
@@ -133,9 +137,14 @@ export async function startReview(owner:string,b:Fields) {
   if (task.kind!==initial.kind||stamp(task.binding)!==stamp(binding) || task.rounds[0].key!==initial.rounds[0].key || goal!==task.goal || stamp(task.reference)!==stamp(reference)) throw new ReviewError('这次点击对应的稿件已变化，请重新选取',409);
   return task;
 }
+function queueAdvance(t:ReviewTask):ReviewTask {
+  if(t.art?.executor!=='queue-v1'||t.phase!=='feedback')return t;
+  if(t.art.wake&&t.art.wake.op!=='advance'&&!t.art.wake.delivery)return t;
+  return {...t,art:{...t.art,wake:{id:randomUUID(),op:'advance'}}};
+}
 function artInstructions(t:ReviewTask):string {
   const a=t.art!;
-  const shared='只执行当前步骤，保留原图、原目标和已确认的进展。先用已连接的 SD2 验收工具 link_review 核对单号，再用 submit_revision 交回本步骤产物。后续步骤只以工具返回的新单号和指令为准，不提前执行。执行能力不可用、服务拒绝或安全限制时停止，不改写要求绕过限制。\n冻结的最终目标（背景，不是本轮动作）：\n'+t.goal;
+  const shared=(a.executor==='queue-v1'?'SD2 负责自动接续全部步骤。本次回复只完成当前步骤；交回后若工具返回 handoff=queue，本步已接收，请结束本次回复，SD2 会自动在原对话发送下一条，不需要用户操作，也不要自行执行尚未收到的新步骤。':'只执行当前步骤，后续步骤以工具返回的新单号和指令为准，不提前执行。')+'保留原图、原目标和已确认的进展。先用已连接的 SD2 验收工具 link_review 核对单号，再用 submit_revision 交回本步骤产物。执行能力不可用、服务拒绝或安全限制时停止，不改写要求绕过限制。\n冻结的最终目标（背景，不是本轮动作）：\n'+t.goal;
   const textFormat='交回 text 使用 JSON 对象，problem、cause、direction、check 四个字段分别写具体画面问题、原因判断、下一步方向、看图核验办法，每项必须有实质内容；可另加 preserve 写保留项。不能只写收到、已分析或空泛承诺。';
   if(a.stage==='analysis')return '当前步骤：原图设计分析。只看图讨论，不生成或编辑图片。\n'+shared+'\n本轮产物：对照原图写具体问题、原因、修改方向、必须保留内容及看图核验标准。把完整分析写在原对话，并作为 text 交回 submit_revision，所有 image 参数留空。'+textFormat+'交回后等待工具给出下一步骤，不自行跳到图片制作。';
   const last=t.rounds.at(-1)?.result;
@@ -161,7 +170,7 @@ function afterArtJudge(t:ReviewTask,rounds:Round[],result:Verdict):ReviewTask {
   if(!result.actualImage){
     art.invalidVisuals=(art.invalidVisuals||0)+1;art.stage='image';
     const limit=art.invalidVisuals>=3,note=limit?'累计三次未产出可用的真实改图，自动制作已停止。'+(art.bestRound===undefined?'尚无可保留的改图，请核对制作能力与方向后恢复。':'已保留此前最好版，请核对制作能力与方向后恢复。'):'';
-    const next:ReviewTask={...t,rounds,art,phase:limit?'error':'feedback',note};art.instructions=artInstructions(next);return next;
+    const next:ReviewTask={...t,rounds,art,phase:limit?'error':'feedback',note};art.instructions=artInstructions(next);return queueAdvance(next);
   }
   // Count only a semantically verified actual edit. The first genuine image is
   // the draft even when diagrams preceded it. A paused or failed judge counts 0.
@@ -174,7 +183,7 @@ function afterArtJudge(t:ReviewTask,rounds:Round[],result:Verdict):ReviewTask {
     if(art.recaps.length<2)art.stage='recap';
     else {art.stage='done';phase='input';note='两次复盘后仍有未解决问题，'+(art.bestRound===undefined?'尚无可保留的改图':'已保留目前最好版本')+'，请你决定下一步。';}
   }
-  const next={...t,rounds,art,phase,note};art.instructions=artInstructions(next);return next;
+  const next={...t,rounds,art,phase,note};art.instructions=artInstructions(next);return queueAdvance(next);
 }
 export function parseVerdict(text:string, last:boolean,art=false): Verdict {
   let v: Fields;
@@ -255,6 +264,8 @@ async function runJudge(owner:string,t:ReviewTask) {
 }
 export async function updateReview(owner:string, saved:Saved, b:Fields) {
   const t=saved.task;
+  if(b.executor!==undefined&&(b.executor!=='queue-v1'||!t.art||!['resume','retry'].includes(String(b.op))||b.device!==t.binding.device||b.cid!==t.binding.cid||b.messageId!==t.binding.sourceId))throw new ReviewError('请在原账号、原设备和原对话继续自动优化',409);
+  const executorArt=t.art&&b.executor==='queue-v1'?{...t.art,executor:'queue-v1' as const}:t.art;
   if(b.op==='recover')return recoverArtReview(owner,saved,b);
   if((b.op==='resume'||b.op==='retry')&&t.art?.wake?.op===b.op&&t.art.wake.requestVersion===b.version)return t;
   if(b.op==='claim'&&t.phase==='delivering'&&b.delivery===t.delivery&&b.cid===t.binding.cid&&b.device===t.binding.device)return t;
@@ -270,13 +281,13 @@ export async function updateReview(owner:string, saved:Saved, b:Fields) {
     return (await replace(owner,saved,{...t,phase:'input',note,executionStop,resumePhase:undefined,...(t.art?{art:{...t.art,wake:undefined}}:{})})).task;
   }
   if(b.op==='pause' && ['ready','judging','feedback','awaiting','delivering'].includes(t.phase))return (await replace(owner,saved,{...t,phase:'paused',resumePhase:t.phase==='judging'?'ready':t.phase})).task;
-  if(b.op==='resume' && t.phase==='paused')return (await replace(owner,saved,{...t,phase:t.resumePhase||'ready',resumePhase:undefined,...(t.art?{art:{...t.art,wake:{id:randomUUID(),requestVersion:t.version,op:'resume' as const}}}:{})})).task;
+  if(b.op==='resume' && t.phase==='paused')return (await replace(owner,saved,{...t,phase:t.resumePhase||'ready',resumePhase:undefined,...(executorArt?{art:{...executorArt,wake:{id:randomUUID(),requestVersion:t.version,op:'resume' as const}}}:{})})).task;
   if(b.op==='retry'&&t.phase==='error'&&t.art?.invalid&&typeof t.delivery==='string'&&t.delivery.length>0&&t.art.invalid.delivery===t.delivery){
-    return (await replace(owner,saved,{...t,phase:'feedback',note:'已恢复当前出图步骤，等待原对话核对后继续。',art:{...t.art,invalid:undefined,wake:{id:randomUUID(),requestVersion:t.version,op:'retry'}}})).task;
+    return (await replace(owner,saved,{...t,phase:'feedback',note:'已恢复当前出图步骤，等待原对话核对后继续。',art:{...executorArt!,invalid:undefined,wake:{id:randomUUID(),requestVersion:t.version,op:'retry'}}})).task;
   }
   if(b.op==='retry' && (t.phase==='error'||t.phase==='judging'&&Date.now()-t.updatedAt>4*60000)){
     const visualStop=!!t.art&&(t.art.invalidVisuals||0)>=3;
-    return (await replace(owner,saved,{...t,phase:visualStop?'feedback':'ready',note:'',...(t.art?{art:{...t.art,...(visualStop?{invalidVisuals:0}:{}),wake:{id:randomUUID(),requestVersion:t.version,op:'retry' as const}}}:{})})).task;
+    return (await replace(owner,saved,{...t,phase:visualStop?'feedback':'ready',note:'',...(executorArt?{art:{...executorArt,...(visualStop?{invalidVisuals:0}:{}),wake:{id:randomUUID(),requestVersion:t.version,op:'retry' as const}}}:{})})).task;
   }
   if(b.op==='claim' && t.phase==='feedback' && b.device===t.binding.device && b.cid===t.binding.cid){
     if(t.art?.wake&&t.connected)throw new ReviewError('请先核对原对话并恢复本次自动流',409);
@@ -289,7 +300,7 @@ export async function updateReview(owner:string, saved:Saved, b:Fields) {
 }
 async function recoverArtReview(owner:string,saved:Saved,b:Fields):Promise<ReviewTask> {
   const t=saved.task,wake=t.art?.wake;
-  const awaitingInitialProof=!t.connected&&t.art?.stage==='analysis'&&t.art.receipts.length===0&&typeof t.delivery==='string'&&uuid.test(t.delivery);
+  const awaitingInitialProof=!t.connected&&t.art?.stage==='analysis'&&t.art.receipts.length===0&&t.rounds.length===1&&(t.delivery===undefined&&t.art.executor==='queue-v1'||typeof t.delivery==='string'&&uuid.test(t.delivery));
   if(!wake||b.wakeId!==wake.id||(!t.connected&&!awaitingInitialProof)||b.device!==t.binding.device||b.cid!==t.binding.cid||b.messageId!==t.binding.sourceId)throw new ReviewError('请在已核对的原账号、原对话恢复本任务',409);
   if(!['ready','judging','feedback','awaiting','delivering'].includes(t.phase)||t.art?.stage==='done')throw new ReviewError('当前任务不能继续，请先核对任务状态',409);
   if(wake.delivery){
@@ -399,7 +410,7 @@ async function artRevisionForTool(owner:string,saved:Saved,delivery:string,text:
     const receipt=a.receipts.find(r=>r.delivery===delivery&&r.requestKey===requestKey),passed=t.phase==='passed'&&!!receipt;
     return {status:passed?'pass':'stop',stage:a.stage,changes:a.totalChanges,cycle:a.cycle,cycleChanges:a.cycleChanges,bestRound:a.bestRound,message:t.note||(passed?'本版已通过实际改图检查，请保留当前结果。':'本任务已暂停或结束，请在SD2核对后显式恢复，不要重试旧单号或重新出图。')};
   }
-  if(a.wake&&a.wake.delivery!==delivery)return {status:'stop',stage:a.stage,changes:a.totalChanges,message:'本任务已显式恢复，正在等待原客户端核对并领取新单号；不要沿旧单号继续或重新出图。'};
+  if(a.wake&&a.wake.delivery!==delivery&&!(a.wake.op==='advance'&&!a.wake.delivery))return {status:'stop',stage:a.stage,changes:a.totalChanges,message:'本任务已显式恢复，正在等待原客户端核对并领取新单号；不要沿旧单号继续或重新出图。'};
   const existing=a.receipts.find(r=>r.delivery===delivery);
   if(existing&&existing.requestKey!==requestKey)throw new ReviewError('该单号已经交回了不同的内容，请核对原提交',409);
   if(!existing){
@@ -449,7 +460,7 @@ async function artRevisionForTool(owner:string,saved:Saved,delivery:string,text:
       if(!received||received.requestKey!==requestKey)throw new ReviewError('当前步骤已暂停或更新，未采用迟到材料',409);
       saved=current;
     }else{
-      try{saved=await replace(owner,saved,next);}
+      try{saved=await replace(owner,saved,queueAdvance(next));}
       catch(error){
         if(!(error instanceof ReviewError)||error.status!==409)throw error;
         saved=await getTask(owner,t.scope,t.id);
@@ -465,12 +476,13 @@ async function artRevisionForTool(owner:string,saved:Saved,delivery:string,text:
   }
   saved=await getTask(owner,t.scope,t.id);
   let task=saved.task;
-  if(task.art!.wake&&task.art!.wake.delivery!==delivery)return {status:'stop',stage:task.art!.stage,changes:task.art!.totalChanges,message:'恢复请求已更新，请等待原客户端交出新单号，不沿旧单号继续。'};
+  if(task.art!.wake&&!(task.art!.wake.op==='advance'&&!task.art!.wake.delivery)&&task.art!.wake.delivery!==delivery)return {status:'stop',stage:task.art!.stage,changes:task.art!.totalChanges,message:'恢复请求已更新，请等待原客户端交出新单号，不沿旧单号继续。'};
   const receipt=task.art!.receipts.find(r=>r.delivery===delivery),latest=task.art!.receipts.at(-1);
   if(!receipt||receipt.requestKey!==requestKey)throw new ReviewError('未找到本次实际交回记录',409);
   const base={changes:task.art!.totalChanges,cycle:task.art!.cycle,cycleChanges:task.art!.cycleChanges,stage:task.art!.stage,bestRound:task.art!.bestRound};
   if(latest?.delivery!==delivery)return {status:'stop',...base,message:'这一版已处理，请沿最新步骤继续。'};
   if(task.phase==='judging')return {status:'pending',...base,delivery,message:'本稿正在验收。稍后用相同单号、正文及附件重试本次提交，不要重复生成图片。'};
+  if(task.phase==='feedback'&&task.art!.executor==='queue-v1')return {status:task.art!.stage==='image'&&receipt.stage==='image'?'revise':'continue',...base,handoff:'queue',review:task.rounds.at(-1)?.result,message:'本步骤已接收。请结束本次回复，SD2 会自动在本原对话发送下一步，无需用户点击。不要重复交稿，不自行生成下一张图片。'};
   if(task.phase==='feedback'){
     try{task=await issueDelivery(owner,saved,'awaiting');}
     catch(error){
