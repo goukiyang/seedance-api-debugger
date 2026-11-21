@@ -1,0 +1,10 @@
+{
+  "intent_id": "sd2-gpt-executor-stop-backend-3871458-20261121-final",
+  "httpStatus": 200,
+  "ok": true,
+  "submitted": true,
+  "confirmed": true,
+  "delivery_state": "received",
+  "input_mode": "steer",
+  "turn_id": "01a1fd00-62db-71b0-9074-1e97bc9fa2c3"
+}

@@ -1,0 +1,18 @@
+{
+  "source": "387145889ca78892cba4b86a545212b43f5b6f3a",
+  "worktree": "/Volumes/Data/Projects/video-api-debugger-worktrees/gpt-background-review-20261120",
+  "preparation": "ensure-codegraph.sh",
+  "index": "/Users/Shared/codegraph-projects/worktree-indexes/ad1a058187ded49a7115",
+  "indexedFiles": 2161,
+  "nodes": 41714,
+  "edges": 159504,
+  "mismatches": 0,
+  "pending": 0,
+  "queries": [
+    "codegraph_context",
+    "codegraph_callers"
+  ],
+  "result": "Index prepared at exact source; context returned type reference, best-effort callers included engineering tests but missed API alias. Verified actual API caller directly in src/app/api/bridge/gpt-reviews/route.ts; no claim of exhaustive graph coverage.",
+  "rawPreparationLogRetainedAt": "/private/tmp/sd2-gpt-executor-stop-release-20261121/codegraph-prepare.log",
+  "runtimeSourceUnchangedByFinalDocumentation": true
+}

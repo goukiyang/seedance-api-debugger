@@ -1,0 +1,11 @@
+{
+  "source": "387145889ca78892cba4b86a545212b43f5b6f3a",
+  "runtimeSourceUnchanged": true,
+  "originalServerManifestUnmodified": true,
+  "files": {
+    "source-read-proof.json": "99bbdd953d16d2b9a04211661116d3adf51b73ad8136f8b06063fbb9785ac760",
+    "frozen-input-package.json": "3e25c00cf9ce865c51ece4561946bcbd994016991d365e03a1193c969fab69f8",
+    "codegraph-summary.json": "3934dde629e73e12093e226721eb7075054423034b11cf133613ba14803a5826",
+    "windows-final-receipt.json": "91cadb1e4c8d0ed170c28a51ac6c54b26ea8c26bb60d405b1ff5cd7a3d3bae91"
+  }
+}

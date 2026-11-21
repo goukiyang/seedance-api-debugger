@@ -216,3 +216,5 @@ attempt08从同一根派生staging、工程临时根、日志、输出与manifes
 证据：[实际部署](../../docs/materials/2026-11-21-gpt-executor-stop/public-deployed.json)、[窗口和回退](../../docs/materials/2026-11-21-gpt-executor-stop/publication-closure.json)、[OAuth/MCP](../../docs/materials/2026-11-21-gpt-executor-stop/gpt-review-public-check.json)、[完整构建](../../docs/materials/2026-11-21-gpt-executor-stop/main-build-success.json)、[统一工程](../../docs/materials/2026-11-21-gpt-executor-stop/main-focused-engineering.json)、[相容安全摘要](../../docs/materials/2026-11-21-gpt-executor-stop/source-pair-public-summary.json)、[证据清单](../../docs/materials/2026-11-21-gpt-executor-stop/evidence-manifest.json)。
 
 本轮新发现的线索与问题：未新增任务外问题。
+
+0.151.2最终回执已向Windows「GPT验收设计」原会话win:01a1f724-18ef-77f0-945e-a92f765cf2fc通过原CX answer单次提交，HTTP200、submitted/confirmed、delivery_state=received、input_mode=steer，原turn_id见[最终回执](../../docs/materials/2026-11-21-gpt-executor-stop/windows-final-receipt.json)。无ACK、未重发；回执受理不代表Windows功能验收。R1新增五包签名/完整私有上传且继续hold的事实已另向其原会话单次更新，未复发旧final。
