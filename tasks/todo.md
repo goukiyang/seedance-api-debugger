@@ -1454,3 +1454,8 @@ MV13–MV17已于2026-10-19 15:13:19Z保护部署v0.98.0，待用户手动验收
 - GPT验收后台0.151.4保护发布进行中：准确队列接续源已冻结，attempt10输入预检通过并启动唯一构建；原清单/数据/费用/许可/回退和桌面hold保持，详细结果沿[原GPT发布工单](todo/2026-11-20-gpt-background-review-release.md#01514-mac保护发布准确队列接续源与唯一构建)。
 
 - GPT验收后台0.151.4已保护部署，七实际进程/双域健康与版本、OAuth/MCP新队列说明核对通过；数据/费用/许可/旧请求/回退保持。真实队列业务待Windows验收，正式桌面继续hold；详情见[原发布工单](todo/2026-11-20-gpt-background-review-release.md#01514-最终保护发布与公网核对)。
+
+
+## UIUX-ART-API01 分享系统下载与 API 接入评估（2026-11-22）
+
+已接受 `zhouh231-lang/uiux-art` 分享、下载完整源码归档并核 SHA-256，原仓库本地分支 `codex/sd2-api-assessment-20261122`。已对照明确版本源码完成分析／生图／登录／素材／原号与归档的接入映射；推荐保留结构库和设计规范，以本站服务替换本机 Codex、Lovart 和手工 Youdoo 交接。实际业务尚未接入、未运行生成或部署，后续步骤与协议差异见[本次评估](todo/2026-11-22-uiux-art-integration-assessment.md)。本项目文档分支 `codex/uiux-art-api-assessment-20261122`，仅含报告与本索引，未带原根脏改或外部私有源包。
