@@ -244,3 +244,10 @@ SEAMLESS01本次标准curl等待阶段1854条采样中有16次在8秒内没有HT
 
 服务器现有受保护文本接口的默认gpt-5.5实际返回503“无可用通道”；鲜读合法目录存在gpt-5.6-luna，用户授权自测中明确选择该型号后成功。未改生产默认、权限或供应商配置；本次按显式选择完成，默认配置维护留原项目后续处理。该现象不能证明整个供应商离线。原证见[自测记录](todo/2026-11-22-uiux-art-integration-assessment.md#uiux-art-api02-selftest)。
 <!-- /UIUX-ART-API02-MODEL-20261122 -->
+
+
+<!-- UIUX-ART-API02-AUDIT01 -->
+## UIUX ART / AUDIT01 定向回归补验
+
+已确认5项、未修：AUDIT01-1删除对话串当前/后继工作区项目和参数；AUDIT01-2删除结构方案阻断历史重开；AUDIT01-3已受理待核对被画成运行、失败原因丢失；AUDIT01-4保存失败刷新丢参考选择；AUDIT01-5真实48MB工作台导入触发4MB拒绝。前两项P1，其余P2，原单§10含复现、影响、证据与最小修法。原主流程通过不覆盖这些分支。待核线索：导入后的个人planId与原库图件定位不一致，尚未实走报价；其他非文本草稿字段仅有同因线索。事务内共享use/撤权和旧新快照reader通过；现有4任务/180余额/冻结0保持。未改业务、未调用真实API、未发布或重启旧任务。见[审查原单](todo/2026-11-22-uiux-art-integration-assessment.md#uiux-art-api02-regression-audit)。
+<!-- /UIUX-ART-API02-AUDIT01 -->
