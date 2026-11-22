@@ -41,7 +41,7 @@ const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCA
 await fs.mkdir(path.join(root, 'storage'), { recursive: true, mode: 0o700 });
 try {
   await check('session admission, origin and account binding ignore legacy identity headers', async () => {
-    const request = headers => new NextRequest('http://local/api/tools/ui-design/workspace', { method: 'POST', headers });
+    const request = headers => new NextRequest('http://internal-server/api/tools/ui-design/workspace', { method: 'POST', headers: { host: 'local', ...headers } });
     assert.equal((await uiUser(request({ origin: 'http://local', 'x-uiux-user': other.id }), async () => user)).id, user.id);
     for (const [session, headers, status] of [[null, { origin: 'http://local' }, 401], [{ ...user, account_type: 'external' }, { origin: 'http://local' }, 403], [{ ...user, status: 'disabled' }, { origin: 'http://local' }, 403], [user, { origin: 'http://elsewhere' }, 403], [user, { origin: 'http://local', 'x-ui-design-account': other.id }, 409]]) {
       await assert.rejects(() => uiUser(request(headers), async () => session), error => error.status === status);
@@ -105,6 +105,22 @@ try {
     assert.equal(parts.filter(part => part.type === 'image_url').length, 2);
     assert.deepEqual(messages.filter(message => typeof message.content === 'string').map(message => message.content), prepared.request.input.filter(item => item.type === 'text').map(item => item.text));
     await assert.rejects(() => media.uiImageBytes(other, registered.assetId));
+    const node = { textContent: '', dataset: {}, closest() { return this; } };
+    context.document.getElementById = () => node;
+    context.document.querySelectorAll = () => [];
+    let importedCurrent, importedHistory;
+    await adapter.bind({ get: () => ({ state: { runs: [] } }), persist: async () => {},
+      importRecord: async record => { importedCurrent = record; await adapter.save({ state: record.state, conversationId: randomUUID(), structureLibrary: record.library }); },
+      history: async records => { importedHistory = records; } });
+    const beforeIds = A.librarySnapshot(restored).map(plan => plan.id);
+    const legacy = structuredClone(state);
+    legacy.runs = [{ id: 'original-external-run', provider: 'lovart', requestId: 'original-external-request', jobs: [] }];
+    await adapter.importArchive({ schema: 1, state, structureLibrary: A.librarySnapshot(state), conversations: [{ id: 'old-conversation', state: legacy }] }, 'Imported copy');
+    assert.ok(beforeIds.every(id => importedCurrent.library.some(plan => plan.id === id)));
+    assert.equal(importedHistory.length, 1); assert.notEqual(importedHistory[0].id, 'old-conversation');
+    const importedSaved = (await adapter.open(importedHistory[0].id)).state;
+    assert.equal(importedSaved.runs[0].provider, 'lovart'); assert.equal(importedSaved.runs[0].requestId, 'original-external-request');
+    assert.ok(!JSON.stringify((await store.readUiDocument(user.id, 'workspace', importedHistory[0].id)).data).includes('data:image/'));
   });
   await check('shared use does not grant copy or original export, and revoke blocks new use', async () => {
     const asset = await prisma.asset.findUniqueOrThrow({ where: { id: registered.assetId } });

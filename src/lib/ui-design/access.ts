@@ -6,7 +6,12 @@ export async function uiUser(request?: NextRequest, loadSession: typeof getSessi
   const user = await loadSession();
   if (!user) throw new AuthError('请先登录', 401);
   if (user.status !== 'active' || user.account_type !== 'internal' || !canUseCompanyTemplates(user)) throw new AuthError('当前账号无权使用 UI 界面设计', 403);
-  if (request && !['GET', 'HEAD'].includes(request.method) && request.headers.get('origin') !== request.nextUrl.origin) throw new AuthError('请从本站页面提交', 403);
+  if (request && !['GET', 'HEAD'].includes(request.method)) {
+    const origin = request.headers.get('origin');
+    let sameOrigin = false;
+    try { sameOrigin = Boolean(origin && new URL(origin).host === request.headers.get('host')); } catch {}
+    if (!sameOrigin || request.headers.get('sec-fetch-site') === 'cross-site') throw new AuthError('请从本站页面提交', 403);
+  }
   const expected = request?.headers.get('x-ui-design-account');
   if (expected && expected !== user.id) throw new AuthError('账号已变化，当前草稿保留在原账号', 409);
   return user;
