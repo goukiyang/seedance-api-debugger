@@ -67,10 +67,25 @@ try {
   let restored, registered;
   await check('actual adapter persistence restores uploaded structure and analysis input', async () => {
     const library = (await runtime.sourceLibrary()).map(plan => JSON.parse(JSON.stringify(plan).replaceAll('/api/figma-assets/', '/api/tools/ui-design/library?asset=')));
-    const local = new Map(), source = SI.createSource('Own interaction', [{ name: 'Own.png', width: 1, height: 1, dataUrl: png }]);
+    const local = new Map(), drafts = new Map(), source = SI.createSource('Own interaction', [{ name: 'Own.png', width: 1, height: 1, dataUrl: png }]);
+    // Only the IndexedDB transport is substituted here; real browser storage is checked separately.
+    const indexedDB = { open() {
+      const request = { result: { transaction() {
+        const transaction = { pending: 0 };
+        const schedule = operation => {
+          const request = {}; transaction.pending++;
+          setTimeout(() => { request.result = structuredClone(operation()); request.onsuccess?.(); if (!--transaction.pending) transaction.oncomplete?.(); }, 0);
+          return request;
+        };
+        transaction.objectStore = () => ({ get: key => schedule(() => drafts.get(key)), put: (value, key) => schedule(() => { drafts.set(key, structuredClone(value)); return key; }), delete: key => schedule(() => drafts.delete(key)) });
+        return transaction;
+      } } };
+      setTimeout(() => request.onsuccess?.(), 0); return request;
+    } };
     const state = { provider: 'sd2', source: null, structurePlans: [], messages: [], runs: [], brief: 'Own UI brief', visual: { samples: [], sources: [] }, designIntent: { mode: 'redesign', guidance: '' } };
     A.importSource(state, source, '');
     const id = randomUUID();
+    let workspaceUnavailable = false;
     const fetcher = async (url, init = {}) => {
       const parsed = new URL(url, 'http://local'), body = init.body ? JSON.parse(init.body) : undefined;
       let result;
@@ -78,11 +93,14 @@ try {
         if (parsed.pathname.endsWith('/bootstrap')) result = { user, sourceVersion: manifest.sourceSha256, history: { records: [], nextCursor: null } };
         else if (parsed.pathname.endsWith('/media')) { registered = await media.registerUiImage(user, body); result = registered; }
         else if (parsed.pathname.endsWith('/library')) result = body ? await store.saveUiDocument(user.id, 'library', body.id, body.revision, body.data) : parsed.searchParams.has('id') ? await store.readUiDocument(user.id, 'library', parsed.searchParams.get('id')) : { library };
-        else result = body ? await store.saveUiDocument(user.id, 'workspace', body.id, body.revision, body.data) : await store.readUiDocument(user.id, 'workspace', parsed.searchParams.get('id'));
+        else {
+          if (body && workspaceUnavailable) throw new Error('isolated workspace outage');
+          result = body ? await store.saveUiDocument(user.id, 'workspace', body.id, body.revision, body.data) : await store.readUiDocument(user.id, 'workspace', parsed.searchParams.get('id'));
+        }
         return new Response(JSON.stringify(result));
       } catch (error) { return new Response(JSON.stringify({ error: error.message }), { status: error.status || 503 }); }
     };
-    const context = { crypto: webcrypto, structuredClone, URL, Response, setTimeout, clearTimeout, queueMicrotask, console,
+    const context = { indexedDB, crypto: webcrypto, structuredClone, URL, Response, setTimeout, clearTimeout, queueMicrotask, console,
       location: { origin: 'http://local' }, document: { getElementById: () => null }, addEventListener() {}, fetch: fetcher,
       localStorage: { getItem: key => local.get(key) || null, setItem: (key, value) => local.set(key, value), removeItem: key => local.delete(key) },
       FrameformStructurePlans: A, parent: { postMessage() {} } };
@@ -108,9 +126,9 @@ try {
     const node = { textContent: '', dataset: {}, closest() { return this; } };
     context.document.getElementById = id => id.startsWith('sd2-') ? null : node;
     context.document.querySelectorAll = () => [];
-    let importedCurrent, importedHistory;
+    let importedCurrent, importedHistory, importedWorkspaceId;
     await adapter.bind({ get: () => ({ state: { runs: [] } }), persist: async () => {},
-      importRecord: async record => { importedCurrent = record; await adapter.save({ state: record.state, conversationId: randomUUID(), structureLibrary: record.library }); },
+      importRecord: async record => { importedCurrent = record; importedWorkspaceId = randomUUID(); await adapter.save({ state: record.state, conversationId: importedWorkspaceId, structureLibrary: record.library }); },
       history: async records => { importedHistory = records; } });
     const beforeIds = A.librarySnapshot(restored).map(plan => plan.id);
     const legacy = structuredClone(state);
@@ -121,6 +139,35 @@ try {
     const importedSaved = (await adapter.open(importedHistory[0].id)).state;
     assert.equal(importedSaved.runs[0].provider, 'lovart'); assert.equal(importedSaved.runs[0].requestId, 'original-external-request');
     assert.ok(!JSON.stringify((await store.readUiDocument(user.id, 'workspace', importedHistory[0].id)).data).includes('data:image/'));
+    adapter.restoreBinding({ projectId: 'captured-project', controls: { analysisModel: 'captured-text', settings: { model: 'captured-image' } } });
+    const capturedId = randomUUID(), saving = adapter.save({ state: restored, conversationId: capturedId, structureLibrary: A.librarySnapshot(restored) });
+    adapter.restoreBinding({ projectId: 'other-project', controls: { settings: { model: 'other-image' } } });
+    await saving;
+    const captured = await store.readUiDocument(user.id, 'workspace', capturedId);
+    assert.equal(captured.data.projectId, 'captured-project'); assert.equal(captured.data.controls.settings.model, 'captured-image');
+    workspaceUnavailable = true;
+    const draftState = structuredClone(restored); draftState.brief = 'failed save retained'; draftState.visual.samples = [{ assetId: registered.assetId, dataUrl: registered.url }];
+    await assert.rejects(() => adapter.save({ state: draftState, conversationId: capturedId, structureLibrary: A.librarySnapshot(restored) }));
+    assert.equal((await adapter.open(capturedId)).state.visual.samples[0].assetId, registered.assetId);
+    workspaceUnavailable = false;
+    const fresh = await store.readUiDocument(user.id, 'workspace', capturedId);
+    await store.saveUiDocument(user.id, 'workspace', capturedId, fresh.revision, { ...fresh.data, name: 'other page' });
+    await assert.rejects(() => adapter.save({ state: draftState, conversationId: capturedId, structureLibrary: A.librarySnapshot(restored) }), error => error.statusCode === 409);
+    await adapter.open(capturedId);
+    await assert.rejects(() => adapter.save({ state: draftState, conversationId: capturedId, structureLibrary: A.librarySnapshot(restored) }), error => error.statusCode === 409);
+    assert.equal((await store.readUiDocument(user.id, 'workspace', capturedId)).data.name, 'other page');
+    checks.push('queued save freezes controls; failed full draft and persistent CAS conflict retained');
+    const originalPlan = library[0], originalFrame = originalPlan.source.frames[0];
+    for (const info of [{ planId: originalPlan.id }, { planId: randomUUID(), sourceId: originalPlan.source.id, version: manifest.sourceSha256 }]) {
+      const restoredFigma = await adapter.deserialize({ __uiFramePart: { ...info, frameId: originalFrame.id, field: 'figma' } });
+      assert.deepEqual(restoredFigma, originalFrame.figma);
+    }
+    const missing = await adapter.deserialize({ __uiFramePart: { planId: randomUUID(), frameId: 'missing', field: 'figma' } });
+    assert.equal(missing, null);
+    checks.push('old and immutable frame markers survive mutable-library removal; unavailable source preserves document');
+    await adapter.importArchive(JSON.parse((await runtime.packageFile('library/UIUX-ART.uiuxworkspace')).toString()), 'Real original import');
+    assert.ok(JSON.stringify((await store.readUiDocument(user.id, 'workspace', importedWorkspaceId)).data).length < 4_000_000);
+    checks.push('real original workspace import remains under 4 MB without resource-ID duplication');
   });
   await check('shared use does not grant copy or original export, and revoke blocks new use', async () => {
     const asset = await prisma.asset.findUniqueOrThrow({ where: { id: registered.assetId } });
@@ -198,6 +245,20 @@ try {
     assert.deepEqual((await integration.captureImageGenerationChannel('gpt-image-2.5-sunburst', 'original', prisma, expected)).qualityRoute, expected);
     assert.ok(!('qualityRoute' in await integration.captureImageGenerationRequestChannel('gpt-image-2', 'medium', 'shared')));
     assert.equal(await prisma.imageStudioTask.count(), 0);
+  });
+  await check('UI task query preserves public uncertainty and worker failure detail without resubmission', async () => {
+    const requestId = randomUUID(), batchId = createHash('sha256').update(`${user.id}:${requestId}`).digest('hex');
+    await store.saveUiDocument(user.id, 'request', requestId, 0, { id: requestId, state: 'accepted', body: { requestId } });
+    const task = await prisma.imageStudioTask.create({ data: { id: `${batchId}-0`, batch_id: batchId, owner_id: user.id, ordinal: 0,
+      fingerprint: 'ui-query-fixture', prompt: 'fixture', context: '', revision: 1, model: 'gpt-image-2', reference_ids: '[]',
+      unit_credits: 5, status: 'sr_uncertain', error: 'Original fee awaits reconciliation' } });
+    const uncertain = await generation.uiJobStatus(user, requestId);
+    assert.equal(uncertain.tasks[0].status, 'uncertain'); assert.equal(uncertain.tasks[0].error, task.error);
+    await prisma.imageStudioTask.update({ where: { id: task.id }, data: { status: 'failed', error: 'Output validation failed' } });
+    const failed = await generation.uiJobStatus(user, requestId);
+    assert.equal(failed.tasks[0].status, 'failed'); assert.equal(failed.tasks[0].error, 'Output validation failed');
+    assert.equal(await prisma.imageStudioTask.count(), 1);
+    assert.equal(await prisma.creditLedger.count(), 0); assert.equal(await prisma.costLedger.count(), 0);
   });
   const pdfEvidence = JSON.parse(await fs.readFile(path.join(root, '.private/ui-design/pdf-evidence.json'), 'utf8'));
   assert.deepEqual(pdfEvidence.dependencyHashes, Object.fromEntries(Object.entries(manifest.files).filter(([name]) => name.startsWith('node_modules/'))));

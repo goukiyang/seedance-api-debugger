@@ -6,11 +6,12 @@ import { prisma } from '@/lib/prisma';
 import { assertCanGenerateInProject } from '@/lib/projects/permissions';
 import { getImageStudioSettings } from '@/lib/image-studio/settings';
 import { prepareImageBillingQuote } from '@/lib/image-studio/billing-quote-service';
-import { submitStudioBatch, studioBusinessErrorStatus, StudioError } from '@/lib/image-studio/tasks';
+import { submitStudioBatch, studioBusinessErrorStatus, StudioError, publicImageTaskStatus } from '@/lib/image-studio/tasks';
+import { externalStudioTaskError } from '@/lib/image-studio/external-task-projection';
 import { readStudioSubmitReceipt, closeStudioSubmission, rejectStudioSubmission, studioSubmitFailureDetail } from '@/lib/image-studio/submit-receipts.server';
 import { sumCredits } from '@/lib/credits/precision';
 import { defaultStudioReferencePolicy } from '@/lib/image-studio/reference-policy';
-import { studioTaskHasViewableOutput } from '@/lib/image-studio/dimension-mismatch';
+import { studioTaskHasViewableOutput, studioOutputIssue } from '@/lib/image-studio/dimension-mismatch';
 import { privateModule } from './runtime';
 import { readUiDocument, saveUiDocument, uiId, uiKey } from './store';
 import { uiUseAsset, registerUiImage } from './media';
@@ -108,8 +109,10 @@ export async function uiJobStatus(user: SessionUser, id: string) {
   const record = await readUiDocument(user.id, 'request', uiId(id)), job = record.data as UiJob;
   const receipt = job.state === 'prepared' ? null : await readStudioSubmitReceipt(user.id, job.id);
   const batchId = createHash('sha256').update(`${user.id}:${job.id}`).digest('hex');
-  const tasks = await prisma.imageStudioTask.findMany({ where: { owner_id: user.id, batch_id: batchId }, select: { id: true, asset_id: true, status: true, usage_json: true } });
-  return { job, receipt, tasks: tasks.map(task => ({ id: task.id, status: task.status, assetId: studioTaskHasViewableOutput(task) ? task.asset_id : null,
+  const tasks = await prisma.imageStudioTask.findMany({ where: { owner_id: user.id, batch_id: batchId }, select: { id: true, asset_id: true, status: true, error: true, usage_json: true } });
+  return { job, receipt, tasks: tasks.map(task => ({ id: task.id, status: publicImageTaskStatus(task.status),
+    error: user.account_type === 'external' ? externalStudioTaskError(task.error, publicImageTaskStatus(task.status)) : task.error,
+    outputIssue: studioOutputIssue(task), assetId: studioTaskHasViewableOutput(task) ? task.asset_id : null,
     url: studioTaskHasViewableOutput(task) && task.asset_id ? `/api/tools/ui-design/media?id=${task.asset_id}` : null })) };
 }
 export async function stopUiBatch(user: SessionUser, id: string) {
