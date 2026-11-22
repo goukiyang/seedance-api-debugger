@@ -75,7 +75,7 @@ try {
       const parsed = new URL(url, 'http://local'), body = init.body ? JSON.parse(init.body) : undefined;
       let result;
       try {
-        if (parsed.pathname.endsWith('/bootstrap')) result = { user, sourceVersion: manifest.digest, history: { records: [], nextCursor: null } };
+        if (parsed.pathname.endsWith('/bootstrap')) result = { user, sourceVersion: manifest.sourceSha256, history: { records: [], nextCursor: null } };
         else if (parsed.pathname.endsWith('/media')) { registered = await media.registerUiImage(user, body); result = registered; }
         else if (parsed.pathname.endsWith('/library')) result = body ? await store.saveUiDocument(user.id, 'library', body.id, body.revision, body.data) : parsed.searchParams.has('id') ? await store.readUiDocument(user.id, 'library', parsed.searchParams.get('id')) : { library };
         else result = body ? await store.saveUiDocument(user.id, 'workspace', body.id, body.revision, body.data) : await store.readUiDocument(user.id, 'workspace', parsed.searchParams.get('id'));

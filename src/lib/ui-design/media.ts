@@ -31,7 +31,7 @@ export async function registerUiImage(user: SessionUser, input: JsonObject) {
   let bytes: Buffer, name = '设计参考.png';
   if (input.library) {
     const manifest = await privateManifest();
-    if (input.library.sourceVersion !== manifest.digest) throw new AuthError('来源库版本已变化，请重新读取', 409);
+    if (input.library.sourceVersion !== manifest.sourceSha256) throw new AuthError('来源库版本已变化，请重新读取', 409);
     const plan = (await sourceLibrary()).find(item => item.id === input.library.planId);
     const url = plan?.previews?.[input.library.frameId];
     const match = /^\/api\/figma-assets\/([a-f0-9]{64}\.png)$/.exec(url || '');
