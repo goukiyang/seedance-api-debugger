@@ -1,3 +1,4 @@
+import { resolveUiTaskSource, type UiTaskSource } from '@/lib/ui-design/task-source';
 import { releaseWorkerKey } from './process-provenance';
 import { createHash, randomUUID } from 'node:crypto';
 import { parseStudioCurrentInputs } from './current-inputs';
@@ -523,7 +524,7 @@ function parseHistoricalFixedReferences(value: unknown): StudioFixedReference[] 
   catch { throw new StudioError('历史固定参考图快照无效', 409); }
 }
 
-export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { quoteOnly?: boolean; save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void>; batchItem?: boolean; frozenContract?: ImageBillingContract; sizePolicyVersion?: StudioSizePolicyVersion; imageFeishuFrozen?: FrozenImageFeishuChoice | null }, canvasUse?: { user: SessionUser; referenceImageIds: string[]; projectId?: string | null; referenceInput?: Record<string, unknown> }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }, roleMedia?: RoleMediaSubmission, currentPricing?: StudioCurrentPricingSubmission, characterLabPlanId?: string) {
+export async function submitStudioBatch(ownerId: string, body: Record<string, unknown>, avatar?: { layout?: AvatarLayout; candidates: AvatarCandidate[]; onQueued?: (tx: Prisma.TransactionClient, batchId: string) => Promise<void> }, preparation?: { quoteOnly?: boolean; save: (tx: Prisma.TransactionClient, data: Prisma.ImageStudioTaskUncheckedCreateInput) => Promise<void>; batchItem?: boolean; frozenContract?: ImageBillingContract; sizePolicyVersion?: StudioSizePolicyVersion; imageFeishuFrozen?: FrozenImageFeishuChoice | null }, canvasUse?: { user: SessionUser; referenceImageIds: string[]; projectId?: string | null; referenceInput?: Record<string, unknown> }, canvasPrompt?: { mentions: unknown; referenceAssets: Record<string, string> }, roleMedia?: RoleMediaSubmission, currentPricing?: StudioCurrentPricingSubmission, characterLabPlanId?: string, uiDesignSource?: UiTaskSource) {
   let submissionStage = 'accepted-lookup';
   try {
   if (typeof body?.requestId === 'string' && /^[a-zA-Z0-9-]{16,80}$/.test(body.requestId)) {
@@ -578,6 +579,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
   const billingQuoteId = typeof body.billingQuoteId === 'string' ? body.billingQuoteId : undefined;
   const rawCanvasPrompt = input.prompt;
   const moduleId = body.moduleId;
+  if (uiDesignSource && (moduleId !== undefined || characterLabPlanId || avatar || canvasUse || canvasPrompt || roleMedia || currentPricing || input.currentInputs || input.taskSettings || input.sharedLive || input.restoredSettings || input.reproduceFromTaskId)) throw new StudioError('UI 设计不能继承其他业务入口', 403);
   if (characterLabPlanId !== undefined && (characterLabPlanId !== input.requestId || moduleId !== undefined
     || avatar || canvasUse || canvasPrompt || roleMedia || currentPricing || input.sharedLive || input.restoredSettings || input.reproduceFromTaskId)) {
     throw new StudioError('角色工具来源与本次原提交不匹配，输入与原号保留', 409);
@@ -602,7 +604,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     fingerprintInput.channelId = requestedChannelId;
   }
   const requestFingerprint = createHash('sha256').update(JSON.stringify({ ...fingerprintInput,
-    requestId: undefined, ...(characterLabPlanId ? { characterLab: { version: 1, planId: characterLabPlanId } } : {}), ...(moduleId ? { moduleId } : {}), ...(canvasUse ? { canvasReferenceImageIds: canvasUse.referenceImageIds } : {}),
+    requestId: undefined, ...(uiDesignSource ? { uiDesign: { requestId: uiDesignSource.requestId } } : {}), ...(characterLabPlanId ? { characterLab: { version: 1, planId: characterLabPlanId } } : {}), ...(moduleId ? { moduleId } : {}), ...(canvasUse ? { canvasReferenceImageIds: canvasUse.referenceImageIds } : {}),
     ...(canvasUse?.referenceInput?.canvas_references === undefined ? {} : { canvas_references: canvasUse.referenceInput.canvas_references }),
     ...(canvasPrompt ? { canvasPromptMentions: parseCanvasPromptMentions(canvasPrompt.mentions), canvasPromptAssets: canvasPrompt.referenceAssets } : {}),
     ...(roleContextFingerprint ? { roleMediaContext: roleContextFingerprint } : {}),
@@ -672,6 +674,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       throw new StudioError('图片飞书选择仅用于模板图片生成', 400);
     }
     const imageFeishu = preparation ? preparation.imageFeishuFrozen ?? null : await freezeImageFeishuChoice(tx, ownerId, imageFeishuChoice);
+    const uiSource = uiDesignSource ? await resolveUiTaskSource(uiDesignSource, ownerId, body, tx) : null;
     const canvasInput = canvasUse?.referenceInput ? await resolveCanvasReferenceInputs(canvasUse.user, canvasUse.referenceInput, tx, { target: 'image' }) : null;
     const canvasReferenceOwners = canvasUse ? await resolveCanvasStudioReferenceUse(canvasUse.user, canvasUse.referenceImageIds, tx) : new Map<string, string>();
     for (const item of canvasInput?.references.items || []) {
@@ -682,6 +685,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     submissionStage = 'private-definition';
     const storedWorkspace = moduleId ? await tx.imageStudioModule.findFirst({ where: { id: moduleId as string, owner_id: ownerId } }) : null;
     const workspace = storedWorkspace ? readPrivateStudioDefinition('image-module', storedWorkspace) : null;
+    if (uiSource) for (const [id, owner] of Array.from(uiSource.owners)) canvasReferenceOwners.set(id, owner);
     const canvasExpectedIds = new Set(canvasReferenceOwners.keys());
     if (canvasInput && workspace) for (const id of JSON.parse(workspace.reference_ids) as string[]) canvasExpectedIds.add(id);
     if (canvasUse && (canvasExpectedIds.size !== new Set(input.referenceIds).size || input.referenceIds.some(id => !canvasExpectedIds.has(id)))) throw new StudioError('画布参考图与持久请求不匹配', 403);
@@ -860,8 +864,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     creditCents(price);
     const quotedUnitCredits = price;
     if (!currentPricing && !billingQuoteId && input.maxEstimatedCost !== undefined && sumCredits(Array.from({ length: input.count }, () => quotedUnitCredits)) > input.maxEstimatedCost) throw new StudioError('图片价格已变化，请重新确认点数', 409);
-    let snapshotGlobalContext = avatar || characterLabPlanId ? '' : user.role === 'admin' && input.draft?.globalContext !== undefined ? input.draft.globalContext : settings.context;
-    let snapshotModuleContext = characterLabPlanId ? '' : input.draft?.moduleContext !== undefined ? input.draft.moduleContext : workspace?.context || '';
+    let snapshotGlobalContext = avatar || characterLabPlanId || uiDesignSource ? '' : user.role === 'admin' && input.draft?.globalContext !== undefined ? input.draft.globalContext : settings.context;
+    let snapshotModuleContext = characterLabPlanId || uiDesignSource ? '' : input.draft?.moduleContext !== undefined ? input.draft.moduleContext : workspace?.context || '';
     if (sharedDefinition) {
       snapshotModuleContext = sharedDefinition.reproduction?.moduleContext ?? sharedDefinition.context;
       if (sharedDefinition.reproduction && contextMode === 'historical') {
@@ -1043,7 +1047,8 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
       }
     }
     if (input.draft?.skillVersions && skills.some(skill => input.draft!.skillVersions![skill.id] !== publicSkillVersion(skill))) throw new StudioError('skills文字已更新，请重新选择后生成', 409);
-    if (avatar) referencePolicy = { ...defaultStudioReferencePolicy(referenceIds), primaryIds: avatar.candidates[0]?.baselineAssetId ? [avatar.candidates[0].baselineAssetId] : [], useFixedReferences: false };
+    if (uiSource) referencePolicy = { ...defaultStudioReferencePolicy(referenceIds), primaryIds: [...referenceIds], useFixedReferences: false };
+    else if (avatar) referencePolicy = { ...defaultStudioReferencePolicy(referenceIds), primaryIds: avatar.candidates[0]?.baselineAssetId ? [avatar.candidates[0].baselineAssetId] : [], useFixedReferences: false };
     else if (input.currentInputs && input.draft?.referencePolicy && (!sharedDefinition
       || sharedUse?.binding.mode === 'publisher' && sharedDefinition.sourceOwnerId === ownerId)) referencePolicy = input.draft.referencePolicy;
     else if (sharedDefinition && !restored) {
@@ -1120,7 +1125,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     }) : null;
     const frozenLabContext: unknown = characterLabRecord ? JSON.parse(characterLabRecord.value_json).frozenReferenceContext : undefined;
     if (frozenLabContext !== undefined && typeof frozenLabContext !== 'string') throw new StudioError('原角色上下文无法确认，请沿用当前设置继续创作', 409);
-    const context = typeof frozenLabContext === 'string' ? frozenLabContext : [baseContext.trim(), evolution ? evolutionInstructions(evolution) : '', referenceInstructions ? `${roleInstructions}\n\n参考图顺序与作用（编号与实际发送次序一致）：\n${referenceInstructions}` : '',
+    const context = uiSource ? uiSource.job.context : typeof frozenLabContext === 'string' ? frozenLabContext : [baseContext.trim(), evolution ? evolutionInstructions(evolution) : '', referenceInstructions ? `${roleInstructions}\n\n参考图顺序与作用（编号与实际发送次序一致）：\n${referenceInstructions}` : '',
       styleNoteInstructions ? `风格组补充说明：\n${styleNoteInstructions}` : '',
       skills.length ? `补充文字skills（仅补充本次未指定部分；本次手写要求优先；多个组冲突时后组优先）：\n${skills.map((skill, index) => `${index + 1}. ${JSON.stringify(skill.prompt)}`).join('\n')}` : '']
       .filter(Boolean).join('\n\n---\n');
@@ -1261,6 +1266,7 @@ export async function submitStudioBatch(ownerId: string, body: Record<string, un
     const snapshot = JSON.stringify({
       version: 1,
       personalPrompt,
+      ...(uiSource ? { uiDesign: { version: 1, requestId: uiSource.job.id, workspaceId: uiSource.job.workspaceId, frameId: uiSource.job.frameId, runId: uiSource.job.runId, inputHash: uiSource.job.inputHash, references: uiSource.job.references } } : {}),
       ...(characterLabPlanId ? { characterLab: { version: 1, planId: characterLabPlanId,
         ...(input.personalPrompt !== undefined ? { personalPromptSeparated: 1 } : {}) } } : {}),
       ...(imageFeishu ? { imageFeishu } : {}),

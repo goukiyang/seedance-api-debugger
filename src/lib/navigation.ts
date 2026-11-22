@@ -68,7 +68,7 @@ export const shellRoutes = [
   '/admin/feedback',
 ] as const;
 
-const topbarOnlyShellRoutes = ['/tools/ultimate-canvas', '/tools/character-lab', '/tools/character-fusion', '/tools/chrome-extension', '/multiview', '/works'] as const;
+const topbarOnlyShellRoutes = ['/tools/ultimate-canvas', '/tools/ui-design', '/tools/character-lab', '/tools/character-fusion', '/tools/chrome-extension', '/multiview', '/works'] as const;
 
 const shellRoutePrefixes = [
   '/tasks',
@@ -96,7 +96,7 @@ export const topbarQuickItems: NavItem[] = [
   { label: '资产', href: '/assets', match: ['/assets'], prefixMatch: true },
   { label: 'IP生成', href: '/generate/ip', match: ['/generate/ip'], prefixMatch: true },
   { label: '无限画布', href: '/tools/ultimate-canvas', match: ['/tools/ultimate-canvas'], prefixMatch: true, externalHidden: true },
-  { label: '工具', href: '/tools/avatar-studio', match: ['/cutout', '/tools/avatar-studio', '/tools/character-lab', '/tools/character-fusion', '/tools/chrome-extension', '/multiview'], prefixMatch: true },
+  { label: '工具', href: '/tools/avatar-studio', match: ['/cutout', '/tools/avatar-studio', '/tools/character-lab', '/tools/character-fusion', '/tools/chrome-extension', '/tools/ui-design', '/multiview'], prefixMatch: true },
   { label: '管理中心', href: '/admin', match: ['/admin'], prefixMatch: true, adminOnly: true },
 ];
 
@@ -131,6 +131,7 @@ export const userNavGroups: NavGroup[] = [
   {
     title: '工具',
     items: [
+      { label: 'UI 界面设计', href: '/tools/ui-design', prefixMatch: true, externalHidden: true, imageStudioOnly: true },
       { label: '人物生成', href: '/tools/avatar-studio', prefixMatch: true, imageStudioOnly: true },
       { label: '角色参考图', href: '/tools/character-lab', prefixMatch: true, imageStudioOnly: true },
       { label: '角色融合提示词', href: '/tools/character-fusion', prefixMatch: true },

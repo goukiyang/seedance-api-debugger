@@ -1,3 +1,4 @@
+import type { UiTaskSource } from '@/lib/ui-design/task-source';
 import { randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -140,13 +141,13 @@ async function resolveQuoteSettings(model: string, channel: ImageGenerationChann
 }
 
 export async function prepareImageBillingQuote(owner: string, body: Record<string, unknown>, avatar?: Parameters<typeof submitStudioBatch>[2],
-  canvasUse?: Parameters<typeof submitStudioBatch>[4], canvasPrompt?: Parameters<typeof submitStudioBatch>[5], additionalInputCharacters = 0, characterLabPlanId?: string): Promise<PreparedImageQuoteResult> {
+  canvasUse?: Parameters<typeof submitStudioBatch>[4], canvasPrompt?: Parameters<typeof submitStudioBatch>[5], additionalInputCharacters = 0, characterLabPlanId?: string, uiDesignSource?: UiTaskSource): Promise<PreparedImageQuoteResult> {
   let phase = 'cleanup_previews';
   try {
     await tracePhase('quote.store', () => cleanupExpiredImageQuotePreviews(owner));
     phase = 'prepare_tasks';
     return await prepareImageBillingQuoteOnce(owner, body, avatar, canvasUse, canvasPrompt, additionalInputCharacters,
-      next => { phase = next; }, characterLabPlanId);
+      next => { phase = next; }, characterLabPlanId, uiDesignSource);
   } catch (error) {
     if (error && typeof error === 'object') quoteFailureStages.set(error, phase);
     throw error;
@@ -155,10 +156,10 @@ export async function prepareImageBillingQuote(owner: string, body: Record<strin
 
 async function prepareImageBillingQuoteOnce(owner: string, body: Record<string, unknown>, avatar: Parameters<typeof submitStudioBatch>[2],
   canvasUse: Parameters<typeof submitStudioBatch>[4], canvasPrompt: Parameters<typeof submitStudioBatch>[5], additionalInputCharacters: number,
-  phase: (value: string) => void, characterLabPlanId?: string): Promise<PreparedImageQuoteResult> {
+  phase: (value: string) => void, characterLabPlanId?: string, uiDesignSource?: UiTaskSource): Promise<PreparedImageQuoteResult> {
   const prepared: Prisma.ImageStudioTaskUncheckedCreateInput[] = [];
   await tracePhase('quote.prepare', () => submitStudioBatch(owner, { ...body, billingQuoteId: undefined, maxEstimatedCost: undefined }, avatar,
-    { quoteOnly: true, batchItem: additionalInputCharacters > 0, save: async (_tx, data) => { prepared.push(data); } }, canvasUse, canvasPrompt, undefined, undefined, characterLabPlanId));
+    { quoteOnly: true, batchItem: additionalInputCharacters > 0, save: async (_tx, data) => { prepared.push(data); } }, canvasUse, canvasPrompt, undefined, undefined, characterLabPlanId, uiDesignSource));
   if (!prepared.length) throw new StudioError('本次提交已存在，请直接查询生成记录', 409);
 
   phase('prepared_snapshot');

@@ -42,6 +42,7 @@
     "node_modules",
     ".role-tests",
     "docs",
-    ".next-reactions-candidate"
+    ".next-reactions-candidate",
+    ".private"
   ]
 }
