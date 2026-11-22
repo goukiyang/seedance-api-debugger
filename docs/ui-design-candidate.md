@@ -1,6 +1,6 @@
 # UI 界面设计 API02 v1.1 支线候选
 
-**当前支线补验见[原工单§12](../tasks/todo/2026-11-22-uiux-art-integration-assessment.md#uiux-art-branch-validation)。** AUDIT01 五项已修。Linux x64 构建、Linux arm64 私有 PDF、隔离原号恢复、故障提示实页、真实标题屏效果及浏览器窄屏触摸预览通过。实体机与正式环境待验。恢复 Mac 候选时使用 `delivery/AUDIT01-fixed` 的最终包及回执，见[原工单§11](../tasks/todo/2026-11-22-uiux-art-integration-assessment.md#uiux-art-audit01-fixed)。
+**当前上线前补验见[原工单§13](../tasks/todo/2026-11-22-uiux-art-integration-assessment.md#uiux-art-release-acceptance)。** AUDIT01 五项已修。Linux x64 构建、同机隔离的 x64 私有工作台和原生 PDF、真实供应商原号恢复均通过。实体机和正式无感相容准入待完成。故障提示实页、标题屏视觉和小屏浏览器触摸证据见[原工单§12](../tasks/todo/2026-11-22-uiux-art-integration-assessment.md#uiux-art-branch-validation)。恢复 Mac 候选时使用 `delivery/AUDIT01-fixed` 的最终包及回执，见[原工单§11](../tasks/todo/2026-11-22-uiux-art-integration-assessment.md#uiux-art-audit01-fixed)。
 
 本支线在现有 SD2 内部账号、模型目录、项目、素材权限、报价、原请求和 Asset 链上接入完整 ART 工作台。用户本轮已授权自测：真实分析、单屏返图、刷新显示、PNG/ZIP及测试账本结算跑通；源码已推支线，未合主线或部署。临时桥接的异步回调需修复接续，不当作正式自动恢复验收；完整结果和剩余边界见原工单§9。
 
