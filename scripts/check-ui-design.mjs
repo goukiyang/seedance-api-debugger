@@ -106,7 +106,7 @@ try {
     assert.deepEqual(messages.filter(message => typeof message.content === 'string').map(message => message.content), prepared.request.input.filter(item => item.type === 'text').map(item => item.text));
     await assert.rejects(() => media.uiImageBytes(other, registered.assetId));
     const node = { textContent: '', dataset: {}, closest() { return this; } };
-    context.document.getElementById = () => node;
+    context.document.getElementById = id => id.startsWith('sd2-') ? null : node;
     context.document.querySelectorAll = () => [];
     let importedCurrent, importedHistory;
     await adapter.bind({ get: () => ({ state: { runs: [] } }), persist: async () => {},
@@ -184,6 +184,20 @@ try {
     assert.ok(ordinary.context.includes('ORDINARY_GLOBAL'));
     assert.equal(await prisma.imageStudioTask.count(), 0);
     assert.equal((await prisma.creditAccount.findUniqueOrThrow({ where: { user_id: user.id } })).balance, 100);
+  });
+  await check('legacy image capture retains selected quality route without changing ordinary snapshots', async () => {
+    const integration = await import('../src/lib/integrations/image-generation.ts');
+    const defaults = await import('../src/lib/integrations/image-generation-defaults.ts');
+    const settings = await import('../src/lib/image-studio/settings.ts');
+    const row = await prisma.platformSetting.findUniqueOrThrow({ where: { key: settings.IMAGE_STUDIO_SETTING_KEY } });
+    const config = JSON.parse(row.value_json); config.prices['gpt-image-2.5-sunburst'] = 5;
+    await prisma.platformSetting.update({ where: { key: row.key }, data: { value_json: JSON.stringify(config) } });
+    await prisma.platformSetting.create({ data: { key: 'image_generation_model_defaults_v1', value_json: JSON.stringify({ version: 2, revision: 3, models: {}, qualityRoutes: { 'gpt-image-2.5-sunburst': { max: 'shared' } } }) } });
+    const expected = (await defaults.resolveImageGenerationRequestRoute('gpt-image-2.5-sunburst', 'max', 'shared')).qualityRoute;
+    assert.deepEqual((await integration.captureImageGenerationRequestChannel('gpt-image-2.5-sunburst', 'max', 'shared')).qualityRoute, expected);
+    assert.deepEqual((await integration.captureImageGenerationChannel('gpt-image-2.5-sunburst', 'original', prisma, expected)).qualityRoute, expected);
+    assert.ok(!('qualityRoute' in await integration.captureImageGenerationRequestChannel('gpt-image-2', 'medium', 'shared')));
+    assert.equal(await prisma.imageStudioTask.count(), 0);
   });
   const pdfEvidence = JSON.parse(await fs.readFile(path.join(root, '.private/ui-design/pdf-evidence.json'), 'utf8'));
   assert.deepEqual(pdfEvidence.dependencyHashes, Object.fromEntries(Object.entries(manifest.files).filter(([name]) => name.startsWith('node_modules/'))));

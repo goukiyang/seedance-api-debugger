@@ -1531,7 +1531,7 @@ export async function captureImageGenerationChannel(
       modelApiKeys: resolved.modelApiKeys,
     };
     await writePrivateChannelVersion(tx, version, 'image-generation-task');
-    return { channelId, configRevision };
+    return { channelId, configRevision, ...(qualityRoute ? { qualityRoute } : {}) };
   }
   const configRevision = randomUUID();
   const version: PrivateImageGenerationChannelVersion = {
@@ -1551,7 +1551,7 @@ export async function captureImageGenerationChannel(
     modelCapabilities: resolved.modelCapabilities,
   };
   await writePrivateChannelVersion(tx, version, 'image-generation-task');
-  return { channelId, configRevision };
+  return { channelId, configRevision, ...(qualityRoute ? { qualityRoute } : {}) };
 }
 
 export async function resolveImageGenerationChannelSnapshot(
