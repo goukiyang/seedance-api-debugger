@@ -163,7 +163,8 @@ try {
       assert.deepEqual(restoredFigma, originalFrame.figma);
     }
     const missing = await adapter.deserialize({ __uiFramePart: { planId: randomUUID(), frameId: 'missing', field: 'figma' } });
-    assert.equal(missing, null);
+    assert.equal(missing.__uiFramePart.frameId, 'missing');
+    assert.equal(JSON.stringify(await adapter.serialize(missing)), JSON.stringify(missing));
     checks.push('old and immutable frame markers survive mutable-library removal; unavailable source preserves document');
     await adapter.importArchive(JSON.parse((await runtime.packageFile('library/UIUX-ART.uiuxworkspace')).toString()), 'Real original import');
     assert.ok(JSON.stringify((await store.readUiDocument(user.id, 'workspace', importedWorkspaceId)).data).length < 4_000_000);
