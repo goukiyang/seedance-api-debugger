@@ -704,3 +704,9 @@ v0.146.0已部署，待用户手动验收；原卡片与三批共用链、26组�
 - GPT来源异步确认0.151.3保护发布：准确源、输入预检、原失败与最终构建/发布证据见[本批目录](2026-11-21-gpt-source-pending/manual-input-preflight.json)及原GPT后台发布工单；不含业务DB或用户原图。
 
 - GPT队列接续0.151.4保护发布：本批准确输入和后续脱敏核验摘要见[资料入口](2026-11-21-gpt-queue-continuation/manual-input-preflight.json)，详细状态沿原GPT后台发布工单；原图沿既有私有索引，不下载/公开/入包。
+
+<!-- UIUX-ART-API02-MATERIALS-20261122 -->
+## 2026-11-22 UIUX ART 支线私有依赖与工程候选
+
+[原工单 API02](../../tasks/todo/2026-11-22-uiux-art-integration-assessment.md#8-api02-实施记录)维护实际实施、工程和手验状态。原私有 ZIP 保留在 `/Volumes/Data/Downloads/uiux-art-20261122/UIUX-ART-2026-11-22-complete.zip`，SHA256 `ec22430289417474f6a64710bb58f8a261f901493af89ffc6053c3209444561a`；私有运行包、10 文件适配及必要 PDF 依赖已独立保存在本机 [delivery 说明](/Volumes/Data/Downloads/uiux-art-20261122/delivery/README.md)。压缩归档 `ui-design-api02-v1.1-private-darwin-arm64-2880a0358be9.tar.gz` 为 369457110 字节，SHA256 `48df97f67850e96ad3aec51017b7a0b0a04df555bb96295a6e6d36d23f2412c4`，1532 文件流式逐项校验通过；完整摘要、清单、原证回执及重建脚本在同目录。原 ART／补丁／图片不入公开 Git；临时账号、环境、数据库和日志未纳入归档。本条是依赖与原证索引，不是功能或 Linux 私有 PDF 验收证明。
+<!-- /UIUX-ART-API02-MATERIALS-20261122 -->

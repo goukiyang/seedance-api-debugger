@@ -1,6 +1,6 @@
 # UIUX ART 下载与 SD2 API 接入评估
 
-日期：2026-11-22。状态：下载与源码评估完成；API02 支线实施计划已按本轮缺漏／风险／闭环审查补正至 v1.1，业务接入尚未实施。
+日期：2026-11-22。状态：API02 v1.1 的 W1–W6 已在独立支线实现；工程检查、Linux 构建与本机候选已完成，W7 尚待网络恢复后的 Git 推送；A01–A07 待用户手验。
 
 ## 目标与本轮边界
 
@@ -126,13 +126,13 @@
 
 实施顺序：W1 → W2 → W3 → W4 → W5 → W6 → W7。按每批结果提交，不强制并行、不自动创建审核对话。W1／W2 内部可先做同源受保护入口，入口仅在相应能力完整后向工具列表开放；不能将无后端的占位按钮作为交付。
 
-- [ ] W1 形成可校验的私有依赖包，完整接入 7 套结构及受保护读取。
-- [ ] W2 完成本站页面、身份、本人工作区保存和合法素材引用。
-- [ ] W3 用本站 API 完成原合同下的设计分析与规范校验。
-- [ ] W4 接通单屏报价、真实提交、原号恢复和结果映射。
-- [ ] W5 完成多屏、单屏精修、部分成功接续与自动回图。
-- [ ] W6 完成工具入口、历史／导出、恢复及手机／键盘交互。
-- [ ] W7 完成必要工程检查、可重建支线候选和用户手验交付。
+- [x] W1 形成可校验的私有依赖包，完整接入 7 套结构及受保护读取。
+- [x] W2 完成本站页面、身份、本人工作区保存和合法素材引用。
+- [x] W3 用本站 API 完成原合同下的设计分析与规范校验。
+- [x] W4 接通单屏报价、真实提交、原号恢复和结果映射。
+- [x] W5 完成多屏、单屏精修、部分成功接续与自动回图。
+- [x] W6 完成工具入口、历史／导出、恢复及手机／键盘交互。
+- [ ] W7 必要工程检查、可重建本机候选和用户手验入口已完成；当前 Git 上传因网络待接续。
 
 | 工作包 | 具体范围／主要修改点 | 完成标准 |
 | --- | --- | --- |
@@ -208,3 +208,133 @@
 用户手验 A01–A07 保持原范围，A02 补看需求导入／参考，A04／A06 补看安全结束、分页、归档和导出；不为补正自动追加收费样本。工程证据尚未执行，以上是明确的实施／检查要求，不是已经生效的保护。
 
 **复核结论与剩余风险。** 10 处方案缺口均已有明确修法、原工作包和通过标准，v1.1 可作为支线实施依据；公开／私有交付边界和普通消费者兼容要求均保留。当前 W1–W7 仍全部待实施，实际模型能力／画面质量、候选依赖运行和用户手验仍未证明。计划中的可恢复行为须由真实实现和隔离工程证据证明，不能把本节文字当作保护已上线。本轮无任务范围外发现，不另建待办或派工。
+
+## 8. API02 实施记录
+
+- 当前批次 W1/W2；独立工作树 `/Volumes/Data/HomeRelocated/gouki-youdoo/.codex/worktrees/uiux-art-api/video-api-debugger`，支线 `codex/uiux-art-api-assessment-20261122`，基线 `bfcc1f779`，开工业务干净。
+- 当前执行者直接完成，无原生 worker 入口，未创建侧栏任务或审核线程。
+- 已落文件：私有目录忽略规则；正在写入私有包导入器、运行白名单、账号鉴权和分行 CAS 存储。
+- 工程依赖和 Prisma 客户端保持本工作树独立；没有对共享 node_modules 安装或 generate。正式根只读。
+- 当前无业务决策阻点；W1–W7、统一工程验证与自查尚未完成。未收费生成、浏览器验收、push 或部署。
+
+### W1/W2 实际文件批次
+
+已落 importer、运行包载入校验、前端白名单 runtime 路由、store/access/types，以及 bootstrap/workspace/library/requirements/visual-reference 路由。私有包正在实际组装。前两次写入被范围登记目录非递归和 cwd 不匹配拦住；查明登记要求后改为实际工作树模块 `/**`，写入已成功，无跳过检查。仍未进入统一验证。
+
+### W3/W4 实施中
+
+私有包首轮实际摘要 `6425d175f65f407105042a0b68cffebe4bea28a274a31c6c8f5c72ce416a4246`（后续私有适配会改变最终摘要）；原库口径及 PDF 依赖已实际对账。已落 media 素材接缝、analysis 多轮转换/逐三屏分析、generation 逐屏报价与父批 CAS/原号状态、安全结束接口、同源页面。共享 tasks/billing helper 新增仅服务端 UI 来源；普通调用不传该来源。正在组装原工作台私有 adapter 及连续流程，尚未统一验证。依赖使用独立克隆副本，未改共享客户端。
+
+### 整合差量与工程准备
+
+- 已接原工作台 sd2 provider、本站模型/项目/规格、批次报价确认/停止/原号核对/安全结束、分页历史、归档和 HTML/ZIP 结果导出；适配均在忽略的私有 overlay。原始库与成品继续走鉴权引用。
+- 父会话指出上传结构重开后的 PNG 判定缺口：已给私有 `structure-images.js` 增加精确本站受保护 media URL 识别，服务端读图仍核属/核 use；正在补实际持久化→恢复→选屏/分析准备回归。
+- 本工作树从旧根独立克隆的依赖缺少当前支线所需包，首次 tsc 显示缺包及本次 3 处类型问题；类型问题已定向修正，正按当前 lockfile 在本工作树独立 npm ci，不改共享 node_modules。私有原包暂存目录排除宿主 tsc，私有规则/JS 单独校验。
+- 原私有包带 overlay 的第二轮实包摘要为 `17622042664a829bb226e088d6c02cad47931e3d276d5513bdda6a3583e04af8`，最终以完工重建摘要为准。仍未收费生成、浏览器验收、push 或部署。
+
+PDF 首失败保留：父会话只读导入私有 parser 发现 `Cannot find module '@napi-rs/canvas'`，最终 `DOMMatrix is not defined`。此前 manifest 的 5.6.205 仅表示已复制版本，不表示可运行。当前只补既有缓存内 canvas JS/当前平台 native/许可闭包，并补真实 PDF 文本提取工程证据。
+
+### W5/W6 收尾与 W7 定向检查准备
+
+素材选择已沿宿主 ResourceLibraryPicker 接入，shared use 保留原 Asset/owner，不能借本模块原图/导出获取他人原件；归档不删任务/账本。已落 `scripts/check-ui-design.mjs`：调用实际 serializer/store/结构模块做持久化恢复、实际分析输入转换、真实权限撤销/原件拒绝、CAS/分页/单次派发及安全封口、真实 PDF 提取。测试使用独立临时 SQLite 和可注入受理传输，不访问付费供应商。工程结果待实际执行，不能把脚本存在当通过。
+
+依赖安装停滞诊断：当前 package.json 与 lockfile 根依赖逐项一致；686 个 resolved 均为 registry.npmjs.org，公开 registry 连通。npm 60974 的 debug 仍停 idealTree，无已完成下载或错误；一次进程采样显示缓存解压/文件 IO，未证明网络或锁文件损坏。为避免无界等待，已终止本工作树这次安装，等待进程退出后才采取单一恢复路径，不并行第二个安装；共享依赖未改。
+
+依赖最短恢复：已确认首次 npm 进程退出（137），其残留仅在本工作树重命名保留；随后单独在空 node_modules 按原 lockfile 重建，禁用 audit/fund、优先缓存并开启进度日志。现已有逐包进度，不是并行第二安装。匹配当前应用的 gpt 工作树 package/lock 均完全相同，但没有现成 node_modules，因此未从它冒用依赖。私有 importer 改为仅解包已选源码/规范/结构资料，不再反复展开无关桌面 Node/客户端。
+
+### W7 当前实证与 Linux 接续（8/10）
+
+独立依赖已在系统临时目录按原package/lock完成 npm ci（609 packages，18s），工作树软链仅指向本任务独立依赖，Prisma5.22.0生成前核实际独立路径。tsc/lint/ui-account-boundaries exit0；原结构/规范/预算/选屏/结构图52项50PASS、2SKIP。上传结构真实保存引用→恢复→SI.isSource/targets→分析转换PASS；根因是save后内存个人库仍为原始dataUrl，重开attachLibrary覆盖受保护引用，已改为hydrate(personal)，不改断言。PDF复用主控合法PDF提取exit0（parser和依赖hash匹配），首失败仍保留。
+
+Mac标准build原门拒绝darwin!=linux，未绕过。既有代理502后同登记工程机直连成功：Linux、/data真实挂载、gouki UID/GID1004、Node20.20.2、现有build-work。已完整读bootstrap-root.sh，确认只准备工程fixture；源码冻结后在新ui-design-api02目录跑该入口及原npm run build。此记录时Linux构建和本机候选均未启动。禁止发布器、current切流、服务/timer及共享权限操作。Linux canvas native按0.1.100实际元数据需gnu/musl后缀，已修importer；Mac PDF证不冒Linux运行证明。
+
+主控已核/uploads/_next/image→upload-access现有鉴权链，未发现新私有泄漏，不扩改。私有最终有效runtime+overlay+构建输入给摘要清单，主控负责稳定Downloads归档；本会话未另建稳定归档。正在补真实共享helper快照及旧导入历史保护；不重复已匹配检查，无收费/浏览器/push/部署。
+
+Linux已实际启动：公开实现提交 `7bd4a4aa3e41d1e8e04064c0dcc1a5e4fa0a5a60`（未push），仅git archive公开追踪源码传入 `/data/video-api-debugger/build-work/ui-design-api02-20261122-7bd4a4aa3`。该目录新建，gouki1004独占，正在 `timeout 300 npm ci --no-audit --no-fund`，cache/client皆本目录；随后独立Prisma generate。安装/构建不接生产DB，不含私有ART。新增认证/实际helper快照、20000接受/20001拒绝、顺序/默认上下文、余额不变与任务0写入PASS，旧工作台显式导入个人库与历史原外部requestId保留PASS（`engineering-cDXM11/result.json`）。Linux标准build与本机候选启动结果仍待补。
+
+Linux安装/独立Prisma生成 exit0，真实标准 `npm run build` 已运行（prebuild仍在执行，日志在隔离候选 build.log，结束写build.exit）。实际root bootstrap只写新候选`.role-tests/pricing-prepared-<uuid>/pricing-legacy-fixture-runtime`工程标记，未触碰运行服务。源码为7bd4a4aa3。Mac用户候选已就绪：`http://127.0.0.1:3316/tools/ui-design`，`bash .private/ui-design/start-candidate.sh`；独立系统临时空SQLite、零余额工程账号、未拷业务账户/供应商配置，未起worker。GET /api/health HTTP200，私有runtime匿名HTTP401，curl均exit0；这只证明启动和入口保护，不冒功能通过。登录说明只在忽略的 `.private/ui-design/candidate-login.txt`，env/login/临时DB绝不归档/提交。原分析缺失/错schema、原结构图片/上一版标签及定向补漏6项离线检查exit0（analysis-original.log），无Codex或供应商实际调用。
+
+### W1–W6 实施与统一自查
+
+- [x] W1：`scripts/import-ui-design-source.mjs`、`runtime.ts`及runtime/library/requirements/visual-reference鉴权路由，私有10文件overlay和真实运行包组装；7/191/181/565对账。原ZIP+overlay+包内最小PDF依赖独立完整重建，与最终1519文件清单一致。最终runtime digest `db7bc360edb8a43f6388a7a3115e2bebd65fcce31b6e0854b2183263e332740b`；overlay digest `8087709c48d36c3845fb79e1fccd53e1363ed75c7dd962dfe173ebe53753f140`。
+- [x] W2：`access/store/media/types.ts`、workspace/bootstrap/media、同源`UiDesignFrame`；本人命名空间/CAS/鉴权/Asset/use-only，旧库显式导入与历史逐条新副本保原外部原号。`uploads`实际保护链复用主控证据。
+- [x] W3：`analysis.ts`和analyze路由，真实Codex text/image转换、原schema/补漏、多轮完整上下文、每组三屏同视觉方向、保部分与按原ID恢复；原LLM owner-only不变。
+- [x] W4：`task-source/generation.ts`、quote/submit/status及共享tasks/billing helper可选服务端来源，原号先存、原报价/素材顺序/上下文冻结、真实确认后CAS领取、未知只查与原耐久安全结束；不借characterLabPlanId。
+- [x] W5：私有sd2-adapter/provider/workflow完成多屏、已成功/未知/未受理分别处理、选中屏精修、原Asset直接交付、停止/重报价；export路由离线HTML/ZIP读取本人实际成品并报缺项；归档保任务/映射/账本。
+- [x] W6：navigation与原完整工作台整合，原结构/勾选/对话/历史/图库/预览/上传/导出保留；分页/冲突草稿/账号隔离、旧外部只读、本站素材选择与模型刷新。结果contain/操作归位，在线Figma与网站截图不可用时保离线/上传恢复。
+- [ ] W7：工程检查与本机候选已完成；应用提交99db202c3，等待网络恢复后推送并核对远端。
+
+最终定向脚本exit0，回执 `.private/ui-design/engineering-3jONpd/result.json` 对应最终runtime；覆盖认证、匿名/外部/换号/Origin、运行白名单、真实保存引用恢复/SI/选屏/分析顺序、个人库与旧历史导入、共享use/撤权/禁止原件、CAS/分页/归档、双窗口单次派发、未知/安全封口、实际共享helper UI隔离与普通默认、20000接受/20001拒绝、0任务/余额未变。原分析6项补漏/schema等离线用例PASS；PDF证据hash匹配复用，不重复同模块加载。
+
+统一自查R01–R10：逐项回到实际路由、shared helper及私有overlay，补正上传结构内存库覆写、导入丢历史/覆盖个人库、外部旧批次继续按钮、精修继承参考丢assetId/referenceImageId四处实际问题。没有新增全局权限/数据库/worker/发布流程；共享原默认调用未带UI来源保持，实际quoteOnly快照已证。CodeGraph实际工作树ensure成功：7bd4a4aa3、2187文件、hashMismatch/missing/parseError皆空；context精确查询命中resolveUiTaskSource→readUiDocument，关系回源码确认。未用旧根索引，未另派审核。
+
+私有交付完整说明见 `docs/ui-design-candidate.md`；待主控按 `.private/ui-design/delivery-inputs.json` 将最终runtime、10文件overlay、重建脚本和无账号回执归档到既备delivery目录。尚未由本执行者稳定归档，勿拷env/login/DB/日志/失败依赖或重复ZIP。私有包已冻结，后续如工程未要求实际变更不再改包。A01–A07仍全部用户手验，无收费/浏览器/部署证明。
+
+主控已按db7bc360/overlay8087709c开始稳定delivery归档；本会话冻结私有runtime/overlay，不作静默变更。Linux build继续原进程，已过usage-report-admission等内置检查；未结束前不报exit0。候选配置/数据隔离及私有登录入口已写交付说明，公开记录没有密码。
+
+### Linux首轮失败与原工程环境补齐
+
+首轮`npm run build` exit1，原pricing-policy门真实通过；失败清单为multiview-private-batch、multiview-flow、private-prompts。实际日志查明：Linux必须提供专用MULTIVIEW_PRIVATE_FIXTURE_ROOT；backup验证要求该目录在真实/data且0700；works-runtime夹具另外硬要求源码canonical为 `/data/video-api-debugger/managed-releases/<40位source>`，原build-work不符合。不是UI源码断言失败，未修改这些夹具/业务或跳门。
+
+已核source槽原先不存在，仅新建未激活独立候选 `/data/video-api-debugger/managed-releases/7bd4a4aa3e41d1e8e04064c0dcc1a5e4fa0a5a60`，由同一公开archive重组，从本任务首轮独立依赖复制为独立inode并在目标再generate。新建run/source绑定的 `/data/video-api-debugger-engineering/private-<run>-7bd4a4aa3e41d1e8e04064c0dcc1a5e4fa0a5a60` 0700/gouki，与pricing prepared run一致。此路径只是原夹具的工程源码位置，不调用发布器/服务/current链接/timer。第二轮继续原`npm run build`，其标准prebuild无逐项续接入口，因此必须由原入口重跑内置门，未手动重跑其它已匹配检查。首失败保留在原build-work日志/failure-report.json。
+
+私有runtime/overlay未变。主控已完成稳定delivery逐文件校验与归档，具体归档hash由主控回写，不在本会话重复打包。候选仅本地3316本人开发进程改为nohup启动，PID记在忽略目录candidate.pid，避免工具会话结束后预览消失。
+
+### 编译后实际运行差量（私有包不变）
+
+检查Next实际生成的route.js发现原动态createRequire(path.join(...))被Webpack转换为 `undefined(...)`，静态tsc和tsx工程脚本没有覆盖这一编译行为，会阻断私有解析器。`runtime.ts`改为`process.getBuiltinModule('node:module').createRequire`，仍先原白名单/realpath/hash校验。已在真实工程机Node20.20.2执行该createRequire类型检查，结果function；本机Node22.22.2匹配。私有runtime/overlay摘要完全不变，不重打包。
+
+补实际编译后工程请求时，同源Origin还暴露Next内部nextUrl.origin归一化与实际Host不一致的403；仅UI access沿已有multiview-settings-api同源语义改为Origin.host对实际Host并拒cross-site，非法/缺Origin仍拒。隔离脚本模拟不同内部URL与实际Host补证，不放宽身份/素材权限。
+
+使用已创建的独立零余额工程账号，经本站真实登录后的Next编译requirements路由读取TXT，HTTP200，正文严格为`Compiled private loader smoke`；`compiled-runtime-evidence.json`不存cookie或密码，无浏览器、供应商或PDF重复提取。这是新loader实际运行证，不拿普通静态导入冒通过。最终Linux产物必须包含本次公开宿主修正；7bd只作首轮私有importer及历史构建基线，后续新commit构建继续，不报旧源码为最终通过。父侧materials/index.md及push/归档状态由父负责，本会话不stage。
+
+最新公开宿主提交 `99db202c3177dbb1f2fa9b78acf784b1673af5dd` 已形成（未push），仅runtime/access和定向检查增量。tsc再次exit0；完整定向脚本exit0（engineering-lka4eS/result.json）；Next编译TXT实际HTTP200已证。新Linux候选已按7bd公开archive加 `git diff 7bd..99db --name-only` 精确三文件delta组装99db，未复制额外脏改；目标`managed-releases/99db...`、独立客户端已再generate、新prepared/private fixture按run/source绑定。为避免同时占用工程机重门资源，等待原7bd环境修复轮结束后自动执行99db标准build；该等待有180秒上限，不阻塞其它交付记录。最终以99db产物为准。
+
+99db已实际进入标准build/prebuild，不再处于180秒等待；旧7bd规范路径轮exit1，flow/backup/private-prompts和pricing均已通过，仅works-runtime夹具仍失败。没有继续盲试：在flock保护的独立probe直接打印原runtime异常完整stack，定位sourceBytes:87。实测新候选源码0664、nlink1、hash正确；root解开git archive保留group-writable，而原runtime要求mode&022=0。99db本轮同夹具JSON也已失败，故精确核cwd=99db的本任务gate PID和synthetic子进程后停止，不浪费等待其余已匹配检查。保部分失败JSON/log与停止exit；仅新候选追踪源码去group/other写位，未改bytes、父目录、共享权限、运行服务或timer。单独失败runtime确认后，用新run/root输入继续原标准build；不弱化源保护或改断言。
+
+源码权限定向修复后，原 `multiview-works-runtime-engineering.ts` exit0，真实once/heartbeat/heartbeat-failure/unlocked/symlink/permissions均PASS（99db候选runtime-after-seal.log及其evidence receipt）；无源码或断言变化。99db的runtime.ts/access.ts/check-ui-design三文件已逐hash与本机一致。原99db失败轮停止exit143（build-before-seal.log/exit），不能冒工程通过。
+
+现已使用新UUID的prepared/private fixture重新启动99db `npm run build`，当前实际stage为prebuild，build.exit尚未产生。依然仅一个重门进程。当前候选源mode644符合原护栏；原门和完整Next build均保持。稳定私有runtime/overlay不变，候选本机独立会话PID18683/PPID1仍存活。
+
+最终Linux build继续prebuild，未有最终exit；为Next构建读目录提供本候选专属`engineering.db`空库（已只读确认4096B、0表），仅对这份空工程库沿现有Prisma db push --skip-generate建当前schema，不拷账号/配置/业务数据，不generate共享客户端。原门各子夹具仍使用自身隔离库。
+
+最终源码99db的实际标准门目录为 `.role-tests/image-recovery-gate-LP9LVL`。该轮private batch JSON已completed=true、7项全通过，之前的源码组可写阻点已在原完整入口得到通过证据；当前build.log已进入works-engineering完成后继续其它内置门。build.exit仍未有，未标W7完成。99db CodeGraph最终ensure同工作树成功（2187文件、hashMismatch/missing/parseError空）。
+
+99db最终原prebuild已完整通过并由原验证器复核：`Image recovery build gate verified`。真实pricing receipt为 `.role-tests/pricing-policy-gate-C9BM7i/receipt.json`，完整门receipt为 `.role-tests/image-recovery-gate-LP9LVL/receipt.json`（均在99db隔离候选）。当前实际进入 `next build` → `Creating an optimized production build`，尚待整体exit与BUILD_ID；无切流。
+
+99db原prebuild回执统计：17 fixtures + 17 publicUsageFixtures全部完成，pricing也已通过；完整门receipt SHA256 `110baf38eb30f94e502cffce8edfabe7a14fa6a41bafe1e0ffaffb752c467fa3`，pricing receipt SHA256 `f11b2b74d2bf622f8aa54567d47fdf486f5be77bf2ea2f9a7e3aeb738b6367d2`。Next已结束优化编译进入lint/typecheck；仅见已有角色融合CSS autoprefixer等警告，没有新loader转换警告。整体exit/BUILD_ID仍待产生，未切流。
+
+### Next类型子进程内存失败（不冒绿）
+
+最新实际stage停在Next lint/typecheck，已核具体进程而非静止等待：Node20子进程892971的GC记录约2028MB后`FATAL ERROR: Ineffective mark-compacts near heap limit ... JavaScript heap out of memory`。外层npm返回0，但没有`.next/BUILD_ID`、没有最终页面构建清单，按失败保留，绝不把外层0当完整build通过。主机16GB、实测MemAvailable约10GB，未见第二个构建进程。
+
+依主控“复用已过证据/不重开整轮”，不重新跑已通过17+17/pricing门；保留原npm build.log/exit0（异常首证）。用原`check-image-recovery --verify <LP9LVL receipt> --since <原startedAt>`核源码/run/receipt仍相容后，只给同一99db的失败Next构建步骤设置`NODE_OPTIONS=--max-old-space-size=4096`，沿原build脚本的next build继续。无源码/平台/断言变化，无全局Node配置，不扩大生产内存或服务操作。最终仍必须取得Next exit0、BUILD_ID和完成清单；当前未达W7结束。
+
+原gate --verify再次实际返回`Image recovery build gate verified`（gate-reverify.log）；随后只续跑 `NODE_OPTIONS=--max-old-space-size=4096 npm exec -- next build`。当前Next类型worker PID900187实际R运行，过滤读取其NODE_OPTIONS确为4096，VmRSS约2.59GB，已越过原2GB失败点；不是静止等待，也未并行另一个构建。退出/BUILD_ID仍待实际产生。
+
+4GB Next续跑已越过类型检查，实际输出`Generating static pages (105/105)`完成，当前`Finalizing page optimization / Collecting build traces`。原2GB worker已退出，未有新错误；仍等最终exit和BUILD_ID。
+
+### 用户指定费用文案差量（解冻仅此一文件）
+
+主控新增明确修正：恢复/停止重报时，服务只派prepared，但旧确认标题/明细/费用用batch.jobs冻结快照全量，误含已受理/未知/拒绝项。仅私有overlay `sd2-adapter.js` 改为从/status实际 `initial.jobs[].job` 的当前state/quote筛prepared，显示本次张数及费用，明确其余不重发、已受理/未知仅查原号。服务器confirm仍原样传冻结batch.total/inputHash/revision，不改任何公开generation/账务/创建合同。此为已授权解冻，旧db7/808归档保留，manifest更新后在本节登记新摘要，不静默替换。
+
+实际adapter VM确认弹窗工程检查exit0（confirm-copy-evidence.json）：① 状态混合且batch.jobs故意保全prepared/999旧价，显示仅当前2项2.35点，不露其它屏/旧价/整批43.85；确认payload仍43.85/原hash/revision，实际仅派该2原号；② 0.1+0.2显示0.3而冻结confirm.total仍88；③ 无prepared时不弹确认、不派发，仅原号查询。无浏览器/供应商/DB调用。仅此私有显示变化，99db完整Linux证据继续复用，不重新跑应用build。
+
+99db最终Linux完整门17+17/pricing已通过；原门复核后4GB Next续跑exit0、BUILD_ID `GIUvF14tnqi2tbps1Z_a0`，105页、13个UI路由、生产bundle保原生loader。工程空库User/ImageStudioTask/Asset均0，未传私有ART，未切流。证据 `linux-build-evidence.json` 保留原npm外层0但worker OOM无产物的首失败，不用它冒绿。
+
+主控同因追加的取消消息已逐字改为「报价已保留，本次待提交项尚未确认费用，未新增提交；既有任务保留原号」。第四个实际adapter取消场景exit0：当前有accepted/unknown/prepared，取消后文字匹配、0新增confirm/submit；前三场景仍PASS。仅该私有adapter一文件最终冻结刷新，0af为中间候选不作最终归档，最终以随后新摘要为准。
+
+
+### 本轮实际交付与剩余缺口
+
+- **W1–W6 源码落地**：沿 `codex/uiux-art-api-assessment-20261122`，基础实现 `7bd4a4aa3e41d1e8e04064c0dcc1a5e4fa0a5a60`，宿主加载／实际 Host 修复 `99db202c3177dbb1f2fa9b78acf784b1673af5dd`。保留原 7 套结构库及选屏、需求／参考、分析、逐屏生成、精修、历史和导出流程；分析与生图使用本站现有 API、权限、模型、报价、原请求和 Asset 链。没有把原 ART／修改后的原文件／图片提交到公开 Git。
+- **W7 工程证据**：tsc、lint、账号边界检查 exit0；原结构／规范／预算等 50 PASS、2 SKIP，原分析 6 PASS；隔离真实实现验证保存恢复、共享 use／撤权、CAS、分页、归档、单次派发、未知／封口、20000／20001 和普通调用默认行为。实际登录后的 Next 编译需求解析 TXT 返回 HTTP200；PDF 原解析器／依赖摘要未变，复用真实提取原证。
+- **最终 Linux 构建**：同一宿主99db，原17组夹具＋17组公开用量夹具及 pricing 门通过；核对原门回执后，以单命令4GB堆接续失败的 Next 步骤，exit0，BUILD_ID `GIUvF14tnqi2tbps1Z_a0`，105页、13个UI入口，生产bundle保留原生私有加载。早前外层npm0但worker内存溢出且无产物的结果保留为失败，不能拿它冒通过。工程空库User／ImageStudioTask／Asset均0，未传私有ART或操作切流。
+- **续跑费用确认**：仅私有 `sd2-adapter.js` 更新，按 status 返回的当前 prepared 项展示本次张数／费用；服务器冻结 total／hash／revision、账务、派发和既有原号不变。实际 adapter 的混合状态、过期快照、浮点展示、无待提交项和取消四场景通过；取消不新增确认／提交，既有任务保留。
+- **最终私有包**：运行内容摘要 `2880a0358be963351ca3c600b4ea9fa511500297a47993d747a2662ca55456b9`，overlay摘要 `0fd5ace3f273c78cb450d1eb78b00a9c053d4441e18d109143582582edd6bf61`。稳定目录 `/Volumes/Data/Downloads/uiux-art-20261122/delivery` 已保runtime、10文件overlay、重建脚本和无账号原证；最终压缩包 `ui-design-api02-v1.1-private-darwin-arm64-2880a0358be9.tar.gz`，369457110B，SHA256 `48df97f67850e96ad3aec51017b7a0b0a04df555bb96295a6e6d36d23f2412c4`，1532文件流式逐项校验通过。db7旧备份保留，0af中间版未归档；不含环境、密码、会话、数据库或日志。详[稳定交付说明](/Volumes/Data/Downloads/uiux-art-20261122/delivery/README.md)和[候选说明](../../docs/ui-design-candidate.md)。
+- **本机手验入口**：[UI界面设计](http://127.0.0.1:3316/tools/ui-design)，独立空库／零余额工程账号／无真实供应商配置／无worker。登录说明仅在实际工作树 `.private/ui-design/candidate-login.txt`，启动为该工作树下 `bash .private/ui-design/start-candidate.sh`；nohup进程已与工具会话分离。此为可运行工程候选，不是正式数据或真实生图效果验收。
+- **上传阻点与接续**：普通 `git push origin 99db...:refs/heads/codex/uiux-art-api-assessment-20261122` 实际失败于 TLS；已有7897代理 CONNECT503、系统fake-IP、GitHub连接器传输失败、既有工程机SSH连接关闭。尚未取得远端成功证据，不能写已推送。已请求恢复正常联网或明确授权调整现有全局连接；继续完成本地聚焦提交和可验证Git bundle，恢复后只普通push并核远端HEAD，不强推，不扩大为跨项目网络程序修改。
+
+以上勾选仅指实施及相应工程事实。A01–A07 全部待用户手动验收，未自动收费分析／生成或浏览器功能验收；Linux只验证公开宿主，未验证Linux私有PDF包；网址截图无引擎时保留上传截图恢复。未合主线或部署。正式根原分支、index及非本任务脏改保持；当前仅同步本任务记录和索引。
+
+本轮新增环境线索：出站网络异常影响上传，根因待核，见统一[发现记录](../discoveries.md#uiux-art-api02-network-20261122)；未据此认定代理产品缺陷或另行派工。

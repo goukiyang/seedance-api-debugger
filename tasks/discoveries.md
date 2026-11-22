@@ -230,3 +230,10 @@ SEAMLESS01本次标准curl等待阶段1854条采样中有16次在8秒内没有HT
 2026-11-13追加：MV-ACTION-REF01 / v0.148.14 / run957b9930发布日志又记录一次15秒curl公网 `/api/release` 探测超时。源码ingressReady会沿原计划重试，最终8阶段complete，七服务、两域release/health及目标多视图JS SHA均正常；未记录具体命中的域名及DNS/TLS/连接阶段，根因仍待核，不能当成已证应用故障或全程零中断。原日志在服务器multiview-ai-reference-20261112/attempt03/release.log，最终回执同stage/public-deployed.json；本轮未顺带修改网络、WAF或生成链路。
 <!-- /MV-REF-PROBE-20261113 -->
 <!-- /D-20261112-SEAMLESS-WAIT-PROBES -->
+
+<!-- UIUX-ART-API02-NETWORK-20261122 -->
+<a id="uiux-art-api02-network-20261122"></a>
+## 2026-11-22 API02 上传网络异常（待核环境线索）
+
+本机Git TLS、现有代理CONNECT503、GitHub连接器及既有SSH通路失败，影响本次支线上传；尚未定位配置／上游原因，不认定为代理产品缺陷。原证与接续归[原工单](todo/2026-11-22-uiux-art-integration-assessment.md#8-api02-实施记录)。未改全局代理、系统安全策略或另派跨项目任务；当前应用代码及工程产物已保留。
+<!-- /UIUX-ART-API02-NETWORK-20261122 -->
