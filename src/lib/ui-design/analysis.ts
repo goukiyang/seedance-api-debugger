@@ -9,6 +9,19 @@ import { readUiDocument, saveUiDocument, uiId } from './store';
 import { registerUiImage, uiUseAsset } from './media';
 import type { JsonObject } from './types';
 export const uiHash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+export async function resolveUiAnalysisDirection(original: JsonObject, prepared: JsonObject, model: string, ask: (turn: JsonObject) => Promise<JsonObject>) {
+  const raw = await ask(prepared.request);
+  try { return await original.resolveAnalysisOutput(raw, prepared.input, model, ask); }
+  catch (error) {
+    const invalid = error as { code?: string; validationStage?: string; validationErrors?: string[] };
+    if (invalid.code !== 'ANALYSIS_INVALID_OUTPUT' || invalid.validationStage !== 'schema') throw error;
+    const corrected = await ask({
+      input: [{ type: 'text', text: `上一轮 JSON 未通过字段校验。仅修正以下字段、长度或枚举问题，保留有效视觉结论、原页面功能、文案语义和已确认的共用规范。不要增加 schema 以外的字段，不要将设计冲突改成通过，也不要截断需求来通过校验。返回符合相同 schema 的完整方案。\n${JSON.stringify(invalid.validationErrors)}` }],
+      outputSchema: prepared.request.outputSchema,
+    });
+    return original.resolveAnalysisOutput(corrected, prepared.input, model, ask);
+  }
+}
 export async function convertUiAnalysisTurn(turn: JsonObject, owner: string, signal?: AbortSignal) {
   const messages: MuskChatMessage[] = [];
   for (const item of turn.input) {
@@ -63,12 +76,23 @@ export async function analyzeUiDesign(user: SessionUser, data: JsonObject, outer
         history.push(...messages);
         const chars = JSON.stringify(history.map(message => ({ ...message, content: typeof message.content === 'string' ? message.content : message.content.filter(part => part.type === 'text') }))).length;
         if (chars > 300000) throw new AuthError('本轮及修正上下文超过分析容量；完整资料和已完成部分保留，请缩小单屏结构或需求后继续', 413);
-        const result = await createMuskChatCompletion({ settings, model, messages: history, jsonMode: true, timeoutMs: 120000, signal });
+        const turnRecord = await saveUiDocument(user.id, 'analysis-turn', randomUUID(), 0, {
+          analysisId, workspaceId, batchOffset: offset, model, state: 'requested', outputSchema: turn.outputSchema,
+          messages: history.map(message => ({ ...message, content: typeof message.content === 'string' ? message.content : message.content.filter(part => part.type === 'text') })),
+          images: Object.fromEntries(['samples', 'structures', 'baselines'].map(field => [field, batch[field].map((item: JsonObject) => ({ assetId: item.assetId, referenceImageId: item.referenceImageId, frameId: item.frameId, label: item.label }))])),
+        });
+        record = await saveUiDocument(user.id, 'analysis', analysisId, record.revision, { ...record.data, turns: [...(record.data.turns || []), turnRecord.id] });
+        let result;
+        try { result = await createMuskChatCompletion({ settings, model, messages: history, jsonMode: true, timeoutMs: 120000, signal }); }
+        catch (error) {
+          await saveUiDocument(user.id, 'analysis-turn', turnRecord.id, turnRecord.revision, { ...turnRecord.data, state: 'incomplete', error: error instanceof Error ? error.message : '模型答复未完成' });
+          throw error;
+        }
+        await saveUiDocument(user.id, 'analysis-turn', turnRecord.id, turnRecord.revision, { ...turnRecord.data, state: 'answered', response: result.content, usage: result.usage });
         history.push({ role: 'assistant', content: result.content });
         return JSON.parse(result.content);
       };
-      const raw = await ask(prepared.request);
-      const direction = await original.resolveAnalysisOutput(raw, prepared.input, model, ask);
+      const direction = await resolveUiAnalysisDirection(original, prepared, model, ask);
       if (shared && uiHash(shared) !== uiHash({ shared: direction.shared, artDirection: direction.artDirection, styleTransfer: direction.styleTransfer, visualSystem: direction.standardsReview.visualSystem })) throw new AuthError('后批分析与已确认整套视觉方向冲突，已完成分析保留；尚未提交生图', 422);
       parts.push(direction);
       record = await saveUiDocument(user.id, 'analysis', analysisId, record.revision, { ...record.data, parts, completedFrames: offset + frames.length });
@@ -88,6 +112,7 @@ export async function analyzeUiDesign(user: SessionUser, data: JsonObject, outer
     return { direction, analysisId, inputHash };
   } catch (error) {
     await saveUiDocument(user.id, 'analysis', analysisId, record.revision, { ...record.data, parts, state: signal.aborted ? 'interrupted' : 'incomplete', error: error instanceof Error ? error.message : '分析未完成' });
-    throw Object.assign(error as object, { analysisId, completedFrames: record.data.completedFrames || 0 });
+    throw Object.assign(error as object, { analysisId, completedFrames: record.data.completedFrames || 0,
+      ...((error as { code?: string }).code === 'ANALYSIS_INVALID_OUTPUT' ? { status: 422 } : {}) });
   }
 }
