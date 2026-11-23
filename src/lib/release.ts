@@ -1,10 +1,10 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: 'UI 界面设计工作台',
+  title: '作品广场图片一键参考',
   outline: [
-    '从结构库选界面，上传需求和风格参考',
-    '用本站 API 分析、出图，按屏预览和导出'
+    '从图片详情打开原生图工作区',
+    '带回本人原提示词、可用参考图和生成设置'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

@@ -56,7 +56,7 @@ export function workMediaUrl(id: string, version: string, variant: string) {
 }
 
 /** Page projection is bounded by the selected IDs, including state, counts and collection joins. */
-export async function projectWorkCards(user: SessionUser, keys: PageKey[], db: Prisma.TransactionClient = prisma): Promise<WorkCard[]> {
+export async function projectWorkCards(user: SessionUser, keys: PageKey[], db: Prisma.TransactionClient = prisma, includeImageReference = false): Promise<WorkCard[]> {
   if (!keys.length) return [];
   const ids = keys.map(key => key.id);
   const mediaIds = keys.map(key => key.media_id);
@@ -75,7 +75,7 @@ export async function projectWorkCards(user: SessionUser, keys: PageKey[], db: P
   const [authors, projects, provenance, jobs] = await Promise.all([
     db.user.findMany({ where: { id: { in: Array.from(new Set(works.map(work => work.author_id))) } }, select: { id: true, name: true, avatar_url: true } }),
     db.project.findMany({ where: { id: { in: Array.from(new Set(works.flatMap(work => work.project_id ? [work.project_id] : []))) } }, select: { id: true, name: true } }),
-    projectWorkProvenance(user, works, db, new Set(keys.filter(key => key.can_preview && key.native_preview).map(key => key.id))),
+    projectWorkProvenance(user, works, db, new Set(keys.filter(key => key.can_preview && key.native_preview).map(key => key.id)), includeImageReference),
     pending.length ? db.workRegistrationJob.findMany({ where: { source_kind: 'media_preview', source_id: { in: pending },
       status: { in: ['pending', 'running'] } }, select: { source_id: true } }) : [],
   ]);
@@ -234,6 +234,6 @@ export async function readWorkDetail(user: SessionUser, id: string, db: Prisma.T
     (${access.canReuse}) AS can_reuse, (${access.nativePreview}) AS native_preview, ${access.referenceId} AS reference_id,
     (${access.projectView(Prisma.sql`w.project_id`)}) AS project_visible FROM Work w ${access.joins}
     WHERE w.id = ${id} AND ((${access.canPreview}) OR ${access.owner}) LIMIT 1`);
-  const card = (await projectWorkCards(access.user, keys, db))[0] || null;
+  const card = (await projectWorkCards(access.user, keys, db, true))[0] || null;
   return card;
 }

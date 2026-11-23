@@ -36,6 +36,7 @@ function fixture() {
   const calls = [];
   const storage = new Map();
   const read = deferred();
+  const primaryRead = deferred();
   const globals = {
     JSON, Object, Array, Map, Set, Number, Boolean, encodeURIComponent,
     liveGenerationSignature: ref('original input'), latestSettingsDraft: ref('original definition'),
@@ -58,15 +59,20 @@ function fixture() {
     readResponse: async result => result, fetchReadWithRetry: () => read.promise,
     loadQuickPresets: () => read.promise, fetch: () => read.promise,
     readTaskDetail: () => read.promise, recoverPersonalPromptInput: () => read.promise,
+    readResultInputMain: () => primaryRead.promise, restoreDisabledReason: () => '',
+    IMAGE_STUDIO_NEW_REQUEST_MODELS: ['model'], imageStudioNewQualityOptions: () => ['quality'],
+    IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS: { model: ['resolution'] },
+    normalizeStudioRatio: value => value,
+    recoverStudioPersonalPrompt: () => ({ restored: true, prompt: 'original prompt' }),
     temporaryDraftPayload: () => ({ prompt: 'original input' }),
     moduleReferencePolicy: () => policy, parseStudioTaskSettings: () => null, parseStudioCurrentInputs: () => null,
     isEncryptedStudioPersonalPrompt: () => false,
-    restoreTask: value => { calls.push(['restoreTask', value]); return null; },
+    restoreTask: (value, mode, main) => { calls.push(['restoreTask', value, mode, main]); return null; },
     localStorage: { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
   };
   for (const name of new Set(declarations.match(/\bset[A-Z]\w*(?=\()/g))) globals[name] = value => calls.push([name, value]);
   const api = vm.runInNewContext(`${js}\n({${names.join(',')}})`, globals);
-  return { api, globals, calls, read };
+  return { api, globals, calls, read, primaryRead };
 }
 const setting = { id: 'setting', ownerId: 'owner', moduleId: 'module', name: 'Saved', images: [], styleGroups: [],
   values: { prompt: 'saved input', model: 'model', quality: 'quality', resolution: 'resolution', count: 1, aspectRatio: '1:1' } };
@@ -126,6 +132,21 @@ for (const privateEdit of [false, true]) {
   f.read.resolve({ id: 'history', snapshot: {} }); await running;
   assert.equal(f.calls.some(([name]) => name === 'restoreTask'), !privateEdit);
   checks.push(privateEdit ? 'history restore respects private edit before autosave receipt' : 'unchanged history restore applies normally');
+}
+for (const newerEdit of [false, true]) {
+  const f = fixture();
+  const running = f.api.restoreResultSettings({ id: 'history' }, 'historical', true);
+  f.read.resolve({ id: 'history', inputMainPreview: { state: 'ready' },
+    snapshot: { sourceAvailable: true, model: 'model', resolution: 'resolution', quality: 'quality', aspectRatio: '1:1', referenceImages: [] } });
+  await Promise.resolve();
+  if (newerEdit) f.globals.currentInputRevision.current++;
+  const images = [{ id: 'original-main' }];
+  f.primaryRead.resolve({ images });
+  await running;
+  const applied = f.calls.find(([name]) => name === 'restoreTask');
+  if (newerEdit) assert.equal(applied, undefined);
+  else { assert.equal(applied?.[2], 'historical'); assert.equal(applied?.[3], images); }
+  checks.push(newerEdit ? 'Works primary read preserves edits during lookup' : 'Works forwards verified original primary input in historical mode');
 }
 {
   const f = fixture(); const running = f.api.applyNamedSettings(setting);

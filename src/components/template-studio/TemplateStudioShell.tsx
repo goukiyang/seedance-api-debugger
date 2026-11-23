@@ -214,7 +214,7 @@ export default function TemplateStudioShell({
   function changeType(type: StudioType) {
     if (!allowedTypes.includes(type)) return;
     const next = new URLSearchParams(query);
-    for (const key of ['view', 'moduleId', 'draftId', 'runId', 'presetId', 'templateId', 'templateSource', 'status']) {
+    for (const key of ['view', 'moduleId', 'draftId', 'runId', 'presetId', 'templateId', 'templateSource', 'status', 'reuse_task_id', 'reuse_intent', 'return_to']) {
       next.delete(key);
     }
     next.set('type', type);

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
 import { taskReuseHref, taskReuseReturnTo, authorizeTaskReuseHref } from '../src/lib/navigation/task-reuse';
+import { authorizeImageReferenceHref, claimImageReferenceIntent } from '../src/lib/navigation/image-reference-intent';
 import {
   taskReuseAutoAction,
   taskReuseContextMatches,
@@ -120,6 +121,17 @@ try {
   assert.equal(claimTaskReuseNavigationIntent(url, 'fixture-owner', 'default'), true);
   assert.equal(claimTaskReuseNavigationIntent(url, 'fixture-owner', 'default'), false, 'a consumed URL is not replayable after refresh');
   assert.equal(authorizeTaskReuseHref('https://outside.invalid/generate?reuse_task_id=task', 'fixture-owner'), null);
+  const imageHref = '/template-studio?type=image&moduleId=fixture-module&reuse_task_id=fixture-image';
+  const imageUrl = () => new URL(imageHref, 'https://fixture.invalid');
+  const wrongType = imageUrl();
+  wrongType.searchParams.set('type', 'video');
+  assert.equal(authorizeImageReferenceHref(wrongType, 'fixture-owner'), null);
+  const changedModule = new URL(authorizeImageReferenceHref(imageUrl(), 'fixture-owner')!, 'https://fixture.invalid');
+  changedModule.searchParams.set('moduleId', 'different-module');
+  assert.equal(claimImageReferenceIntent(changedModule, 'fixture-owner'), false);
+  const image = new URL(authorizeImageReferenceHref(imageUrl(), 'fixture-owner')!, 'https://fixture.invalid');
+  assert.equal(claimImageReferenceIntent(image, 'fixture-owner'), true);
+  assert.equal(claimImageReferenceIntent(image, 'fixture-owner'), false);
 } finally {
   if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow); else Reflect.deleteProperty(globalThis, 'window');
   if (originalStorage) Object.defineProperty(globalThis, 'sessionStorage', originalStorage); else Reflect.deleteProperty(globalThis, 'sessionStorage');

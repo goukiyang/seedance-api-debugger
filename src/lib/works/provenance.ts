@@ -10,7 +10,8 @@ import { taskReuseHref } from '@/lib/navigation/task-reuse';
 import type { WorkProvenance } from './types';
 
 /** Already-authorized output IDs only. Batch metadata, never recipes or per-card context requests. */
-export async function projectWorkProvenance(user: SessionUser, works: Work[], db: Prisma.TransactionClient, nativeWorkIds?: ReadonlySet<string>) {
+export async function projectWorkProvenance(user: SessionUser, works: Work[], db: Prisma.TransactionClient,
+  nativeWorkIds?: ReadonlySet<string>, includeImageReference = false) {
   const result = new Map<string, WorkProvenance>();
   for (const work of works) result.set(work.id, { template: null, tool: work.source_kind === 'multiview_work'
     ? { label: '3D多视图', href: '/multiview' } : work.source_kind === 'upload_asset'
@@ -38,10 +39,12 @@ export async function projectWorkProvenance(user: SessionUser, works: Work[], db
     select: { work_id: true, media_version_id: true, template_module: true, template_id: true, template_version: true, template_token: true } });
   const current = new Map(works.map(work => [work.id, work.current_version_id]));
   const metadata = rows.filter(row => row.media_version_id === current.get(row.work_id));
-  if (!metadata.some(row => row.template_id)) return result;
+  const ownedImageWorks = works.filter(work => work.source_kind === 'image_task' && work.author_id === user.id);
+  const referenceWorks = includeImageReference ? ownedImageWorks.filter(work => nativeWorkIds?.has(work.id)) : [];
+  if (!metadata.some(row => row.template_id) && !referenceWorks.length) return result;
   const ids = (kind: string) => metadata.filter(row => row.template_module === kind && row.template_id).map(row => row.template_id!);
-  const ownImageSources = await db.imageStudioTask.findMany({ where: { id: { in: works.filter(work => work.source_kind === 'image_task').map(work => work.source_id) }, owner_id: user.id, deleted_at: null },
-    select: { id: true, module_id: true, source_preset_id: true } });
+  const ownImageSources = await db.imageStudioTask.findMany({ where: { id: { in: ownedImageWorks.map(work => work.source_id) }, owner_id: user.id, deleted_at: null },
+    select: { id: true, module_id: true, source_preset_id: true, tool_flow_run_id: true } });
   const ownSourceByWork = new Map(works.flatMap(work => {
     const task = work.source_kind === 'image_task' ? ownImageSources.find(task => task.id === work.source_id) : null;
     return task ? [[work.id, task] as const] : [];
@@ -60,6 +63,14 @@ export async function projectWorkProvenance(user: SessionUser, works: Work[], db
   const revoked = new Set(archived.map(row => row.key));
   const allowedPresets = new Map(presets.filter(row => canViewStudioPreset(user, row) && !revoked.has(archivedPresetKey(row.id))).map(row => [row.id, row]));
   const allowedModules = new Map(modules.filter(row => canViewStudioModule(user, row, row.source_preset_id ? allowedPresets.get(row.source_preset_id) || null : null)).map(row => [row.id, row]));
+  for (const work of referenceWorks) {
+    const task = ownSourceByWork.get(work.id);
+    // Tool outputs and records with no usable template workspace have no matching composer.
+    if (!task?.module_id || task.tool_flow_run_id || !allowedModules.has(task.module_id)) continue;
+    result.get(work.id)!.imageReferenceHref = '/template-studio?' + new URLSearchParams({
+      type: 'image', moduleId: task.module_id, reuse_task_id: task.id, return_to: `/works?work=${encodeURIComponent(work.id)}`,
+    });
+  }
   const allowedVideos = new Map(videos.filter(row => canReadTemplate(row, user)).map(row => [row.id, row]));
   const legacyById = new Map(legacy.map(row => [row.id, row]));
   for (const row of metadata) {

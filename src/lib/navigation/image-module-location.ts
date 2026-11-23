@@ -2,6 +2,10 @@ export function replaceImageModuleLocation(moduleId: string | null, covers = fal
   const url = new URL(window.location.href);
   if (!['/template-studio', '/image-studio'].includes(url.pathname) || url.searchParams.get('type') === 'video') return;
   if (url.pathname === '/template-studio') url.searchParams.set('type', 'image');
+  if (url.searchParams.get('moduleId') !== moduleId || covers) {
+    url.searchParams.delete('reuse_task_id');
+    url.searchParams.delete('reuse_intent');
+  }
   if (moduleId) url.searchParams.set('moduleId', moduleId);
   else url.searchParams.delete('moduleId');
   url.searchParams.delete('presetId');

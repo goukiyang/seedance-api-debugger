@@ -15,11 +15,13 @@ type SearchParams = {
   presetId?: string;
   templateId?: string;
   templateSource?: string;
+  reuse_task_id?: string;
+  return_to?: string;
 };
 
 function safeWorkbenchQuery(params: SearchParams) {
   const query = new URLSearchParams();
-  for (const key of ['type', 'view', 'runId', 'draftId', 'moduleId', 'presetId', 'templateId', 'templateSource'] as const) {
+  for (const key of ['type', 'view', 'runId', 'draftId', 'moduleId', 'presetId', 'templateId', 'templateSource', 'reuse_task_id', 'return_to'] as const) {
     const value = params[key];
     if (!value || value.length > 200 || /[\u0000-\u001f\u007f]/.test(value)) continue;
     query.set(key, value);

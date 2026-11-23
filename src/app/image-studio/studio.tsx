@@ -48,6 +48,9 @@ import { SessionPreviewImage } from '@/components/SessionPreviewImage';
 import { useRememberedScroll } from '@/lib/hooks/use-remembered-scroll';
 import { scrollToWorkbenchHeader } from '@/lib/navigation/scroll-to-workbench-header';
 import { replaceImageModuleLocation } from '@/lib/navigation/image-module-location';
+import { transitionTaskReuseQuery } from '@/lib/navigation/task-reuse-intent';
+import { claimImageReferenceIntent } from '@/lib/navigation/image-reference-intent';
+import { sanitizeOptionalReturnTo } from '@/lib/navigation/return-to';
 import { GeneratedImageResults, ResultImageContextMenuHint, type GeneratedImageResult } from '@/components/GeneratedImageResults';
 import { TaskNotice } from '@/components/TaskNotice';
 import type { ResultImageContextMenuItem } from '@/components/ResultImageContextMenu';
@@ -390,6 +393,8 @@ export default function ImageStudio(props: ImageStudioProps) {
 function ImageStudioWorkspace({ isAdmin, externalActor = false, userId, templateWorkbench = false, favoritesRequest = 0 }: ImageStudioProps) {
   const router = useRouter();
   const routeQuery = useSearchParams()?.toString() || '';
+  const requestedReturn = sanitizeOptionalReturnTo(new URLSearchParams(routeQuery).get('return_to'));
+  const worksReturn = requestedReturn && (requestedReturn === '/works' || requestedReturn.startsWith('/works?')) ? requestedReturn : null;
   const hiddenHistoryTarget = useRef<string | null>(new URLSearchParams(routeQuery).get('moduleId'));
   const routedContentHandled = useRef('');
   const sidebarInteraction = useRef(0);
@@ -1545,6 +1550,7 @@ function ImageStudioWorkspace({ isAdmin, externalActor = false, userId, template
     </dialog>}
     <div className={styles.content}>
     {!coverView && <header id="image-generation" className={`${styles.header} ${styles.generationHeader}`}><div><h1>图片生成</h1><p className={styles.muted}>{`当前分组：${selectedGroup || '未分组'}`}</p></div><div className={styles.counts}>
+      {worksReturn && <a href={worksReturn}>返回作品广场</a>}
       {deletionFeedback}<button type="button" onClick={() => void openPresetLibrary()}>模板库</button>
       {!externalActor && <button type="button" onClick={() => setGlobalSettingsOpen(true)}><Settings size={17} />通用设置</button>}
       {!externalActor && <button type="button" disabled={creating || !modules.length} onClick={() => void createModule()}><Plus size={17} />{creating ? '新建中' : '新建模块'}</button>}</div></header>}
@@ -3850,7 +3856,7 @@ function ImageStudioBlock({ isAdmin, externalActor, userId, module, hidden, onSh
     return '';
   }
 
-  function restoreTask(task: StudioTask, mode: StudioTaskSettings['mode'] = 'current'): string | null {
+  function restoreTask(task: StudioTask, mode: StudioTaskSettings['mode'] = 'current', originalMain?: UploadedAssetPayload[]): string | null {
     const reason = restoreDisabledReason(task);
     if (reason) return reason;
     const snapshot = task.snapshot!;
@@ -3891,7 +3897,9 @@ function ImageStudioBlock({ isAdmin, externalActor, userId, module, hidden, onSh
     setCount(nextCount); setAspectRatio(nextRatio); setResolution(nextResolution);
     const transient = snapshot.transientReferenceImages || snapshot.referenceImages;
     const primaryIds = snapshot.referencePolicy?.primaryIds || transient.flatMap(image => image.id ? [image.id] : []);
-    const nextAuxiliary = transient.filter(image => image && !primaryIds.includes(image.id || '') && !images.some(primary => primary.id === image.id));
+    const nextPrimary = originalMain ?? images;
+    const nextAuxiliary = transient.filter(image => image && !primaryIds.includes(image.id || '') && !nextPrimary.some(primary => primary.id === image.id));
+    if (originalMain) setImages(originalMain);
     setAuxiliaryImages(nextAuxiliary);
     if (sharedLive) {
       setRestoredTaskSettings({ sourceTaskId: task.id, snapshot }); setRestoredSettingsError('');
@@ -3912,7 +3920,7 @@ function ImageStudioBlock({ isAdmin, externalActor, userId, module, hidden, onSh
           Math.max(0, (snapshot.fixedReferenceCount ?? snapshot.fixedReferenceImages?.length ?? 0)
             - (snapshot.styleGroups || []).reduce((total, group) => total + group.referenceCount, 0))));
       }
-      setSaveStatus('已恢复本次设置，主图保留，共享模板不变'
+      setSaveStatus((originalMain ? '已恢复原提示词、参考图和生成设置' : '已恢复本次设置，主图保留，共享模板不变')
         + (personalRecovery.notice ? '；旧记录的个人描述无法确认，当前描述保留，可继续编辑' : ''));
       return null;
     }
@@ -3939,12 +3947,12 @@ function ImageStudioBlock({ isAdmin, externalActor, userId, module, hidden, onSh
     if (typeof snapshot.quality === 'string') setQuality(normalizeImageStudioQuality(snapshot.model || moduleModel, snapshot.quality));
     setReproduceSourceTaskId(snapshot.sourceAvailable ? task.id : null);
     // Bind to the expected post-restore inputs, not the render before the state batch applies.
-    const nextPolicy: StudioReferencePolicy = { primaryIds: images.flatMap(image => image.id ? [image.id] : []),
+    const nextPolicy: StudioReferencePolicy = { primaryIds: nextPrimary.flatMap(image => image.id ? [image.id] : []),
       primaryMin: snapshot.referencePolicy?.primaryMin ?? 0, primaryMax: snapshot.referencePolicy?.primaryMax ?? Math.max(1, transient.length),
       auxiliaryMax: snapshot.referencePolicy?.auxiliaryMax ?? MAX_REFERENCE_IMAGES, styleMax: snapshot.referencePolicy?.styleMax ?? MAX_REFERENCE_IMAGES,
       referenceMax: snapshot.referencePolicy?.referenceMax ?? MAX_REFERENCE_IMAGES, useFixedReferences: snapshot.referencePolicy?.useFixedReferences ?? true };
     setReproductionReferencePolicy(snapshot.sourceAvailable ? nextPolicy : null);
-    const nextImages = [...images, ...nextAuxiliary];
+    const nextImages = [...nextPrimary, ...nextAuxiliary];
     const signature = JSON.stringify({ inputs: { ...generationInputs, evolution: nextEvolution, prompt: personalRecovery.prompt, count: nextCount, referenceLimit: nextPolicy.primaryMax,
       aspectRatio: nextRatio, resolution: nextResolution, referenceIds: nextImages.map(image => image.id), model: nextModel, quality: nextQuality, referencePolicy: nextPolicy, context: nextContext,
       fixedReferences: fixedReferencePayload(nextFixed), skillIds: nextSkills.map(group => group.id),
@@ -3952,7 +3960,7 @@ function ImageStudioBlock({ isAdmin, externalActor, userId, module, hidden, onSh
       source: snapshot.sourceAvailable ? task.id : null, references: snapshot.fixedReferenceImages || [],
       fixedCount: snapshot.fixedReferenceCount ?? snapshot.fixedReferenceImages?.length ?? 0, styles: snapshot.styleGroups || [], skills: snapshot.skills || [], globalContext: nextGlobalContext });
     setAppliedSource({ taskId: task.id, label: `${module.name} · ${task.ordinal}`, signature, modified: false });
-    setSaveStatus('已恢复设置，当前主图保持不变');
+    setSaveStatus(originalMain ? '已恢复原提示词、参考图和生成设置' : '已恢复设置，当前主图保持不变');
     return null;
   }
 
@@ -4083,18 +4091,62 @@ function ImageStudioBlock({ isAdmin, externalActor, userId, module, hidden, onSh
     return Boolean(item.task && !item.viewOnly && !item.media?.previewOnly
       && (!item.task.owner || item.task.owner.id === userId));
   }
-  async function restoreResultSettings(task: StudioTask, mode: StudioTaskSettings['mode'] = 'current') {
+  async function restoreResultSettings(task: StudioTask | { id: string }, mode: StudioTaskSettings['mode'] = 'current', fromWorks = false) {
     const scope = taskReadScope, view = currentView.current.token, inputSnapshot = captureRestoreInputs();
     const sequence = ++detailReadSequence.current;
+    const current = () => taskReadScopeRef.current === scope && currentView.current.active
+      && currentView.current.token === view && restoreInputsUnchanged(inputSnapshot) && sequence === detailReadSequence.current;
     try {
       const detail = await readTaskDetail(task);
-      if (isClientSessionBlocked() || taskReadScopeRef.current !== scope || !currentView.current.active
-        || currentView.current.token !== view || !restoreInputsUnchanged(inputSnapshot) || sequence !== detailReadSequence.current) return;
-      const reason = restoreTask(detail, mode); if (reason) setError(reason);
+      if (!current()) return;
+      let originalMain: UploadedAssetPayload[] | undefined;
+      if (fromWorks) {
+        const reason = restoreDisabledReason(detail);
+        if (reason) throw new Error(reason);
+        const snapshot = detail.snapshot!;
+        if (!snapshot.sourceAvailable) throw new Error('原设置来源暂不可用，当前输入保留。');
+        const model = IMAGE_STUDIO_NEW_REQUEST_MODELS.find(value => value === snapshot.model);
+        if (!model || !imageStudioNewQualityOptions(model).some(value => value === snapshot.quality)
+          || !IMAGE_STUDIO_MODEL_RESOLUTION_OPTIONS[model].some(value => value === snapshot.resolution)
+          || normalizeStudioRatio(snapshot.aspectRatio) !== snapshot.aspectRatio) {
+          throw new Error('原型号或规格目前无法原样恢复，当前输入保留。');
+        }
+        const personal = recoverStudioPersonalPrompt(snapshot.personalPrompt, prompt, snapshot);
+        if (!personal.restored) throw new Error(personal.notice);
+        const transient = snapshot.transientReferenceImages || snapshot.referenceImages;
+        if (transient.some(image => !image.id || !image.originalUrl)) throw new Error('原参考图已失效或无权使用，当前输入保留。');
+        originalMain = detail.inputMainPreview?.state === 'none' ? [] : (await readResultInputMain(detail.id)).images;
+        if (!current()) return;
+      }
+      const reason = restoreTask(detail, mode, originalMain);
+      if (reason) setError(reason);
     } catch (cause) { if (taskReadScopeRef.current === scope && sequence === detailReadSequence.current && restoreInputsUnchanged(inputSnapshot)) setError(cause instanceof Error ? cause.message : '设置未能读取，当前输入保留'); }
   }
-  async function readTaskDetail(task: StudioTask): Promise<StudioTask> {
-    if (task.snapshot) return task;
+  const applyWorksReference = useRef(restoreResultSettings);
+  applyWorksReference.current = restoreResultSettings;
+  useEffect(() => {
+    if (externalActor || hidden || !active || !draftLoaded || draftRestoring || sessionChanged || sessionUser?.id !== userId
+      || submissionRecoveryScope !== pendingKey || !batch.recoveryKnown || isClientSessionBlocked()) return;
+    const url = new URL(window.location.href);
+    const taskId = url.searchParams.get('reuse_task_id');
+    if (!taskId || url.pathname !== '/template-studio' || url.searchParams.get('type') !== 'image'
+      || url.searchParams.get('moduleId') !== module.id) return;
+    const authorized = claimImageReferenceIntent(url, userId);
+    transitionTaskReuseQuery(url, taskId, 'consumed');
+    window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+    if (!authorized) {
+      setError('本次参考入口已失效，请回作品广场重新选择。');
+      return;
+    }
+    if (batch.pending) {
+      setError('上次批量提交尚未确认，请先核对原记录。当前输入保留。');
+      return;
+    }
+    void applyWorksReference.current({ id: taskId }, 'historical', true);
+  }, [externalActor, hidden, active, draftLoaded, draftRestoring, sessionChanged, sessionUser?.id, userId,
+    submissionRecoveryScope, pendingKey, batch.recoveryKnown, batch.pending, module.id]);
+  async function readTaskDetail(task: StudioTask | { id: string }): Promise<StudioTask> {
+    if ('snapshot' in task && task.snapshot) return task;
     const cached = taskDetailCache.current.get(task.id);
     if (cached) return cached;
     const scope = taskReadScope;
