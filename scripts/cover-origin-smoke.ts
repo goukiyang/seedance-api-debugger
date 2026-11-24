@@ -6,22 +6,34 @@ async function main() {
   const frozen = (ids: string[]) => ({ snapshot_json: JSON.stringify({
     referencePolicy: { primaryIds: ids }, primaryReferenceImages: ids.map(id => ({ id, referenceRole: 'primary' })),
   }), reference_ids: JSON.stringify(ids) });
+  const oldRecord = (refs: Array<{ id: string; referenceRole?: string }>, executedIds = refs.map(ref => ref.id), extra = {}) => ({
+    snapshot_json: JSON.stringify({ version: 1, referenceImages: refs, ...extra }), reference_ids: JSON.stringify(executedIds),
+  });
   const tasks: Record<string, { snapshot_json: string; reference_ids: string }> = {
     result1: frozen(['source1']), multiple: frozen(['source1', 'source2']), textonly: frozen([]),
     legacy: { snapshot_json: JSON.stringify({ primaryReferenceImages: [{ id: 'source1' }] }), reference_ids: '["source1"]' },
     wrongrole: { snapshot_json: JSON.stringify({ referencePolicy: { primaryIds: ['source1'] },
       primaryReferenceImages: [{ id: 'source1', referenceRole: 'auxiliary' }] }), reference_ids: '["source1"]' },
     mismatch: { ...frozen(['source1']), reference_ids: '["other"]' },
+    oldSingle: oldRecord([{ id: 'source1' }]),
+    oldMultiple: oldRecord([{ id: 'source1' }, { id: 'source2' }]),
+    oldMismatch: oldRecord([{ id: 'source1' }], ['other']),
+    oldSelf: oldRecord([{ id: 'oldSelf' }]),
+    oldInvalidId: oldRecord([{ id: '../source' }]),
+    partialRoles: oldRecord([{ id: 'source1' }], ['source1'], { referencePolicy: null }),
+    partialStyles: oldRecord([{ id: 'source1' }], ['source1'], { fixedReferenceImages: [] }),
+    taggedAuxiliary: oldRecord([{ id: 'source1', referenceRole: 'auxiliary' }]),
   };
   const fake = { imageStudioTask: { findFirst: async ({ where }: { where: { owner_id: string; asset_id: string; deleted_at: unknown } }) => {
     assert.equal(where.deleted_at, null, 'deleted task inputs remain protected');
     return where.owner_id === 'me' ? tasks[where.asset_id] || null : null;
   } } };
   assert.equal(await studioResultOriginAsset('me', 'result1', fake as never), 'source1');
+  assert.deepEqual(await studioResultOrigin('me', 'oldSingle', fake as never), { state: 'ready', assetId: 'source1' });
   assert.deepEqual(await studioResultOrigin('me', 'multiple', fake as never), { state: 'multiple' });
   assert.equal(await studioResultOriginAsset('me', 'multiple', fake as never), null, 'never guess the first of several inputs');
   assert.deepEqual(await studioResultOrigin('me', 'textonly', fake as never), { state: 'none' });
-  for (const id of ['legacy', 'wrongrole', 'mismatch']) {
+  for (const id of ['legacy', 'wrongrole', 'mismatch', 'oldMultiple', 'oldMismatch', 'oldSelf', 'oldInvalidId', 'partialRoles', 'partialStyles', 'taggedAuxiliary']) {
     assert.deepEqual(await studioResultOrigin('me', id, fake as never), { state: 'unknown' });
   }
   assert.equal(await studioResultOriginAsset('other', 'result1', fake as never), null, 'only own tasks');
