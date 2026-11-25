@@ -1,10 +1,10 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '修复模板封面的原图回填',
+  title: '待确认时可另开视频任务',
   outline: [
-    '旧生成图可回填已确认的输入原图',
-    '支持左右和上下对比封面'
+    '在新标签页继续制作独立视频',
+    '原任务保留，可继续核对'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

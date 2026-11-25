@@ -2799,8 +2799,14 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       const data = await readJsonResponse<{ task?: CreateTaskResponse | null; error?: string; message?: string }>(response);
       if (!isCurrent()) return;
       if (!response.ok) throw new Error(data.message || data.error || '原请求暂时无法确认');
-      if (!data.task?.id) { setUnconfirmedGenerationRequest(true); setGenerationNotice('提交结果待确认，请继续查询原请求；不会重新生成'); return; }
+      if (!data.task?.id) {
+        setSubmissionProgress(null);
+        setUnconfirmedGenerationRequest(true);
+        setGenerationNotice('提交结果待确认，请继续查询原请求；不会重新生成');
+        return;
+      }
       const unconfirmed = isVideoSubmissionUnconfirmed(data.task);
+      setSubmissionProgress(unconfirmed ? { scopeKey: captured.key, taskId: data.task.id } : null);
       await creation.acceptTask(pending.key, data.task.id);
       if (!isCurrent()) return;
       if (!unconfirmed) sessionStorage.removeItem(activeGenerationRequestStorageKey);
@@ -2851,6 +2857,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       await creation.acceptTask(key, task.id);
       if (!isCurrent()) return;
       const unconfirmed = isVideoSubmissionUnconfirmed(task);
+      setSubmissionProgress(unconfirmed && task.id ? { scopeKey: captured.key, taskId: task.id } : null);
       if (!unconfirmed) sessionStorage.removeItem(requestStorageKey);
       setUnconfirmedGenerationRequest(unconfirmed);
       unconfirmedGenerationParamsRef.current = unconfirmed ? params : null;
@@ -3335,6 +3342,13 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
       : '展开后可切换或创建视频卡';
   const showRecentTaskSurface = recentTasksLoadingInitial || recentTasks.length > 0 || Boolean(recentTasksError || unconfirmedGenerationRequest || submitting);
   const normalVideoRedesign = !studioHandoff && !imageResultHandoff;
+  const originalVideoTaskPending = (unconfirmedGenerationRequest && submissionProgress?.scopeKey === generationScopeKey)
+    || (reuseIntent && reuseIntent.accountId === currentUser?.id
+      && recentTasks.some(task => task.id === reuseIntent.taskId && isVideoSubmissionUnconfirmed(task)));
+  const newVideoTaskHref = surface === 'standard' && !studioRunId && imageResultRequested === false
+    && currentUser && !isExternalUser(currentUser) && selectedProjectId && originalVideoTaskPending && !submitting
+    ? '/generate?' + new URLSearchParams({ project_id: selectedProjectId })
+    : null;
   const creationAvailability = <CreationAvailability controller={creation} submitting={submitting} hideSummary={normalVideoRedesign} onBaselineChange={(id) => {
     setCreationBaselineId(id);
     if (creation.intent && creationDraftBodyRef.current) void creation.prepare({ ...creationDraftBodyRef.current, baseline_task_id: id }, creation.intent.request_id, creation.intent).catch(cause => setError(cause.message));
@@ -3641,7 +3655,13 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
 
       {!normalVideoRedesign && !hideExternalIpInternalControls && videoCardSettings}
 
-        {generationNotice && <p className="composer-prefill-notice" role="status">{generationNotice}</p>}
+        {(generationNotice || newVideoTaskHref) && (
+          <div className="composer-prefill-notice flex flex-wrap items-center gap-2">
+            {generationNotice && <span role="status">{generationNotice}</span>}
+            {newVideoTaskHref && <Link className="btn btn-secondary" href={newVideoTaskHref}
+              prefetch={false} target="_blank" rel="noopener noreferrer">另开视频任务</Link>}
+          </div>
+        )}
         {surfaceConfig.notice && (
           <div className="composer-prefill-notice">
             {surfaceConfig.notice}
