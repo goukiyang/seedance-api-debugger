@@ -84,12 +84,13 @@ async function main() {
       const key = 'original-request', storageKey = 'offline-request';
       const storage = new Map([[storageKey, JSON.stringify({ key })]]);
       const task = { id: 'original-task', ...fixture };
-      const observed = { unconfirmed: false, result: null as unknown, accepted: [] as string[], requests: [] as string[], notice: '' };
-      const scope = {};
+      const observed = { unconfirmed: false, result: null as unknown, accepted: [] as string[], requests: [] as string[], notice: '',
+        progress: null as { scopeKey: string; taskId: string } | null };
+      const scope = { key: 'original-scope' };
       const context = {
         module: { exports: undefined as unknown }, URLSearchParams,
         currentUser: { id: 'offline-owner' }, generationOperation: { current: null },
-        generationScope: { current: scope }, reuseMountedRef: { current: true },
+        generationScope: { current: scope }, captured: scope, reuseMountedRef: { current: true },
         activeGenerationRequestStorageKey: storageKey, requestStorageKey: storageKey,
         studioRunId: null, isIpSurface: false, params: { prompt: 'retain-input' }, unconfirmedGenerationParamsRef: { current: null },
         sessionStorage: { getItem: (k: string) => storage.get(k), removeItem: (k: string) => storage.delete(k) },
@@ -102,6 +103,7 @@ async function main() {
         creation: { acceptTask: async (request: string, id: string) => { observed.accepted.push(`${request}:${id}`); } },
         setSubmitting() {}, setError() {}, setErrorDebug() {}, setPolledResult() {}, setActivePollingTaskIds() {},
         setUnconfirmedGenerationRequest: (value: boolean) => { observed.unconfirmed = value; },
+        setSubmissionProgress: (value: typeof observed.progress) => { observed.progress = value; },
         setResult: (value: unknown) => { observed.result = value; },
         setGenerationNotice: (value: string) => { observed.notice = value; }, loadRecentTasksPage: async () => {},
       };
@@ -109,7 +111,11 @@ async function main() {
       const run = context.module.exports as (...args: unknown[]) => Promise<void>;
       await run(...(name === 'acceptRecoveredTask' ? [task, key] : []));
       assert.equal(observed.unconfirmed, fixture.expected);
-      if (fixture.expected) assert.match(observed.notice, /费用仍待核对/);
+      if (fixture.expected) {
+        assert.match(observed.notice, /费用仍待核对/);
+        assert.equal(observed.progress?.scopeKey, scope.key);
+        assert.equal(observed.progress?.taskId, task.id);
+      } else assert.equal(observed.progress, null);
       assert.equal(storage.has(storageKey), fixture.expected);
       assert.deepEqual(observed.accepted, [`${key}:original-task`]);
       assert.equal(observed.result === null, fixture.expected);
