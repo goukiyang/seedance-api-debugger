@@ -1,11 +1,38 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
+import { Check, X } from 'lucide-react';
 import { isResolvedCreationIntent } from '@/lib/hooks/use-creation-context';
 import type { CreationContextController } from '@/lib/hooks/use-creation-context';
 import { taskDetailHref } from '@/lib/navigation/return-to';
 import { RelativeTime } from '@/components/RelativeTime';
 import styles from './creation.module.css';
-export default function CreationAvailability({ controller, onBaselineChange, hideSummary = false, submitting = false }: { controller: CreationContextController; submitting?: boolean; onBaselineChange?: (id: string) => void; hideSummary?: boolean }) {
+function AcceptedCreationNotice({ busy, onQuery }: { busy: boolean; onQuery: () => void }) {
+  const [visible, setVisible] = useState(true);
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const queryButton = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!visible || hovered || focused || busy) return;
+    const timeout = window.setTimeout(() => setVisible(false), 8000);
+    return () => window.clearTimeout(timeout);
+  }, [visible, hovered, focused, busy]);
+
+  return <div className={styles.acceptedReceipt}
+    onPointerEnter={event => { if (event.pointerType === 'mouse') setHovered(true); }}
+    onPointerLeave={() => setHovered(false)}
+    onFocus={() => setFocused(true)}
+    onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false); }}>
+    {visible && <span className={styles.acceptedMessage} role="status"><Check aria-hidden size={15} />原请求已受理，当前输入保留。</span>}
+    <button ref={queryButton} className={styles.textAction} type="button" disabled={busy} onClick={onQuery}>核对原任务</button>
+    {visible && <button className={styles.dismissAccepted} type="button" aria-label="关闭受理提示" onClick={() => {
+      queryButton.current?.focus({ preventScroll: true });
+      setVisible(false);
+    }}><X aria-hidden size={16} /></button>}
+  </div>;
+}
+
+export default function CreationAvailability({ controller, onBaselineChange, hideSummary = false, submitting = false, transientAcceptedNotice = false }: { controller: CreationContextController; submitting?: boolean; onBaselineChange?: (id: string) => void; hideSummary?: boolean; transientAcceptedNotice?: boolean }) {
   const { context, intent, loading, error } = controller;
   const resolved = isResolvedCreationIntent(intent);
   const viewKey = JSON.stringify([controller.contextKey, context?.project.id]);
@@ -77,10 +104,12 @@ export default function CreationAvailability({ controller, onBaselineChange, hid
     finally { if (active()) setBusy(false); }
   };
   if (!loading && !error && !intent && !controller.unconfirmedRequestId && !message) return context && !hideSummary ? <p className={styles.summary}>保存到 {context.project.name} · {context.payer.label}{context.legacyCard ? ` · 原视频卡：${context.legacyCard.title}` : ''}</p> : null;
-  return <div className={styles.status} aria-live="polite">
+  const acceptedNotice = transientAcceptedNotice && resolved && intent && Boolean(intent.accepted_task_id || intent.batch_id);
+  const showStatus = !acceptedNotice || loading || error || originalTask || message;
+  const status = showStatus && <div className={styles.status} aria-live="polite">
     {loading && <p>正在确认保存位置</p>}
     {error && <p>{error} <button className="btn btn-secondary" type="button" onClick={controller.refresh}>重新读取</button><button className={styles.textAction} type="button" disabled={busy} onClick={() => void queryOriginal()}>核对原请求</button></p>}
-    {resolved && <p>原请求{intent?.accepted_task_id || intent?.batch_id ? '已受理' : '已结束'}，当前输入保留。<button className={styles.textAction} type="button" disabled={busy} onClick={() => void queryOriginal()}>核对原任务</button></p>}
+    {resolved && !acceptedNotice && <p>原请求{intent?.accepted_task_id || intent?.batch_id ? '已受理' : '已结束'}，当前输入保留。<button className={styles.textAction} type="button" disabled={busy} onClick={() => void queryOriginal()}>核对原任务</button></p>}
     {!resolved && intent?.availability?.reasons.map(item => <p key={`${item.code}:${item.field}`}><button className={styles.textAction} type="button" disabled={busy} onClick={() => {
       if (item.action === 'query_original') { void queryOriginal(); return; }
       if (item.action === 'retry_read') { controller.refresh(); return; }
@@ -98,4 +127,8 @@ export default function CreationAvailability({ controller, onBaselineChange, hid
     {!intent && controller.unconfirmedRequestId && <button className={styles.textAction} type="button" disabled={busy || loading || submitting} onClick={() => void closeUnconfirmed()}>核对并结束本次准备</button>}
     {message && <p role="status">{message}</p>}
   </div>;
+  return <>
+    {acceptedNotice && <AcceptedCreationNotice key={JSON.stringify([viewKey, intent.id])} busy={busy} onQuery={() => void queryOriginal()} />}
+    {status}
+  </>;
 }

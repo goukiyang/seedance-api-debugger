@@ -1,12 +1,17 @@
 .composer-page--video .composer-hero { display: flex; justify-content: space-between; align-items: center; padding: 24px 0 20px; text-align: left; }
 .composer-page--video .composer-hero-title { margin: 0; font-size: 25px; color: var(--text-primary); }
 .video-related-tools { position: relative; margin: 0; z-index: 45; }
-.video-related-tools > summary { display: flex; align-items: center; gap: 7px; cursor: pointer; padding: 8px; color: var(--text-secondary); font-size: 13px; list-style: none; }
-.video-related-tools[open] { padding: 8px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; }
-.video-related-tools .composer-hero-action { display: block; min-height: 32px; margin-top: 4px; border: 0; background: transparent; border-radius: 4px; padding: 8px 12px; text-align: left; }
+.video-related-tools > button { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; padding: 7px 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-secondary); color: var(--text-secondary); font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; }
+.video-related-tools > button:hover, .video-related-tools > button[aria-expanded="true"] { background: var(--bg-hover); color: var(--text-primary); }
+.video-related-tools > button[aria-expanded="true"] svg:last-child { transform: rotate(180deg); }
+.video-related-tools-links { position: absolute; top: calc(100% + 6px); right: 0; display: grid; gap: 2px; width: min(184px, calc(100vw - 24px)); padding: 5px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-panel); box-shadow: 0 8px 24px rgb(12 18 24 / 24%); }
+.video-related-tools-links .composer-hero-action { justify-content: flex-start; min-height: 36px; border: 0; border-radius: 5px; padding: 7px 10px; background: transparent; color: var(--text-secondary); font-size: 13px; font-weight: 500; }
+.video-related-tools-links .composer-hero-action:hover { transform: none; background: var(--bg-hover); color: var(--text-primary); }
 .composer-page--video .composer-project-row { min-height: 46px; padding: 6px 0; border: 0; background: transparent; }
-.composer-page--video .composer-project-controls { flex: 1; justify-content: flex-start; }
-.composer-page--video .composer-project-picker { width: min(460px, 100%); }
+.composer-page--video .composer-project-controls { flex: 1; min-width: 0; justify-content: flex-start; flex-wrap: wrap; gap: 6px 12px; }
+.composer-page--video .composer-project-picker { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; width: max-content; max-width: min(620px, 100%); }
+.composer-page--video .composer-project-picker > button { width: clamp(180px, 28vw, 320px); max-width: 100%; }
+.composer-page--video .composer-project-picker > span { min-width: 0; max-width: 260px; }
 .composer-page--video .composer-project-panel { position: relative; z-index: 40; }
 .composer-page--video .composer-project-copy { min-width: 110px; }
 .generation-composer--video { position: relative; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary); color: var(--text-primary); padding: 0; overflow: visible; }
@@ -50,9 +55,8 @@
 .generation-composer--video .composer-submit-btn { order: 2; width: auto; height: 40px; min-width: 104px; display: inline-flex; justify-content: center; align-items: center; gap: 8px; border-radius: 5px; background: var(--accent-color, oklch(52% .18 250)); padding: 0 18px; color: oklch(98% .005 240); }
 .generation-composer--video .composer-resolution-approval { margin: 6px 14px; font-size: 12px; }
 .generation-composer--video .composer-queue-notice { margin: 8px 14px; }
-.composer-page--video .composer-project-controls { flex-wrap: wrap; gap: 10px; }
 .composer-page--video .video-selected-card { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; white-space: normal; text-align: left; overflow-wrap: anywhere; }
-.video-payer { font-size: 12px; }
+.video-payer { display: inline-flex; align-items: center; min-height: 30px; padding: 4px 8px; border-radius: 5px; background: var(--bg-secondary); color: var(--text-secondary); font-size: 12px; }
 .video-settings-trigger { display: inline-flex; align-items: center; gap: 6px; }
 .generation-composer--video .video-composer-price { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; min-height: 36px; font-variant-numeric: tabular-nums; }
 .video-composer-validation, .video-composer-accepted { margin: 6px 14px; color: var(--text-secondary); font-size: 13px; overflow-wrap: anywhere; }
@@ -73,7 +77,10 @@
   .composer-page--video .composer-hero-title { font-size: 22px; }
   .composer-page--video .composer-project-row { flex-wrap: wrap; gap: 8px; }
   .composer-page--video .composer-project-copy { min-width: 0; }
-  .composer-page--video .composer-project-controls { min-width: 180px; }
+  .composer-page--video .composer-project-picker { grid-template-columns: minmax(0, 1fr); width: 100%; }
+  .composer-page--video .composer-project-picker > button { width: 100%; }
+  .composer-page--video .composer-project-picker > span { max-width: 100%; }
+  .video-related-tools > button, .video-related-tools-links .composer-hero-action { min-height: 40px; }
   .generation-composer--video .composer-action-bar { padding: 10px; gap: 10px; }
   .generation-composer--video .composer-chips { flex-basis: 100%; }
   .generation-composer--video .composer-action-right { width: 100%; gap: 10px; grid-template-columns: minmax(0, 1fr) 104px; }

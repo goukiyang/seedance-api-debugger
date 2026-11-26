@@ -8,7 +8,7 @@ import { isResolvedCreationIntent, useCreationContext } from '@/lib/hooks/use-cr
 import CreationAvailability from '@/components/creation/CreationAvailability';
 import { useProductDialog } from '@/components/useProductDialog';
 
-import { useState, useEffect, useCallback, useMemo, useRef, type FormEvent } from 'react';
+import { useState, useEffect, useCallback, useId, useMemo, useRef, type FormEvent, type ReactNode } from 'react';
 import Link from 'next/link';
 import { Archive, Check, ChevronDown, Folder, Plus, Trash2, RefreshCw, Wrench } from 'lucide-react';
 import { parseVideoPromptGroupRefs, type VideoPromptGroupRef } from '@/lib/video/prompt-groups';
@@ -540,6 +540,23 @@ function asVideoResolution(value?: string | null): VideoResolution | null {
 // ============================================================================
 // Component
 // ============================================================================
+
+function VideoRelatedTools({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  const trigger = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLElement>(null);
+  useDialogDismiss({ open, dialogRef: panel, branchRefs: [trigger], modal: false, onDismiss: () => setOpen(false) });
+
+  return <div className="video-related-tools">
+    <button ref={trigger} type="button" aria-expanded={open} aria-controls={open ? id : undefined} onClick={() => setOpen(value => !value)}>
+      <Wrench size={16} />相关工具<ChevronDown size={14} />
+    </button>
+    {open && <nav ref={panel} id={id} className="video-related-tools-links" aria-label="相关工具" onClick={() => setOpen(false)}>
+      {children}
+    </nav>}
+  </div>;
+}
 
 export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientProps) {
   const { isAvailable: modelAvailable, reason: modelAvailabilityReason } = usePricingModelAvailability();
@@ -3349,7 +3366,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
     && currentUser && !isExternalUser(currentUser) && selectedProjectId && originalVideoTaskPending && !submitting
     ? '/generate?' + new URLSearchParams({ project_id: selectedProjectId })
     : null;
-  const creationAvailability = <CreationAvailability controller={creation} submitting={submitting} hideSummary={normalVideoRedesign} onBaselineChange={(id) => {
+  const creationAvailability = <CreationAvailability controller={creation} submitting={submitting} hideSummary={normalVideoRedesign} transientAcceptedNotice={normalVideoRedesign} onBaselineChange={(id) => {
     setCreationBaselineId(id);
     if (creation.intent && creationDraftBodyRef.current) void creation.prepare({ ...creationDraftBodyRef.current, baseline_task_id: id }, creation.intent.request_id, creation.intent).catch(cause => setError(cause.message));
   }} />;
@@ -3563,10 +3580,7 @@ export function GeneratePageClient({ surface = 'standard' }: GeneratePageClientP
           </p>}
           {!hideExternalIpInternalControls && (
             !normalVideoRedesign ? <div className="composer-hero-actions">{relatedToolLinks}{isIpSurface && <span className="composer-hero-action composer-hero-action-muted">火山官方 API</span>}</div>
-            : <details className="composer-hero-actions video-related-tools">
-              <summary><Wrench size={16} />相关工具<ChevronDown size={14} /></summary>
-              {relatedToolLinks}
-            </details>
+            : relatedToolLinks.length > 0 && <VideoRelatedTools>{relatedToolLinks}</VideoRelatedTools>
           )}
         </div>
 
