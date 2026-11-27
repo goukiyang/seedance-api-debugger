@@ -5,9 +5,9 @@
 ## 接入
 
 - 地址由管理员提供，必须使用 HTTPS。所有 `/api/v1` 请求使用 `Authorization: Bearer <Key>`，不需要 Cookie，不支持 URL Key 或远程素材 URL 导入，不开放通配 CORS。
-- Key 明文只在发放时显示一次。不要写入源码、聊天、日志或共享脚本；示例从 `SD2_API_KEY` 环境变量读取。每个 Agent 用一把 Key。轮换沿用原 Agent 标识，先发新 Key，再吊销旧 Key。吊销不取消已受理任务或退款。
+- 每个客户账号只绑定一把 Key。补发前先吊销原 Key，过期的 Key 也可在后台吊销。吊销不取消已受理任务或退款。Key 明文只在发放时显示一次，示例从 `SD2_API_KEY` 环境变量读取。
 - 型号、时长、分辨率及素材上限以 `GET /api/v1/models` 为准。首版稳定型号名为 `seedance-2.5-ip`，不接受站内用户、项目、视频卡或供应商归属字段。
-- 价格由客户合同明确设置，报价单位为点。成功按冻结合同扣点，明确失败按原账本退款；提交未知不承诺免费。客户多 Key 共用预算、并发、余额、存储额度及该客户作用域内的访问权，需要独立权限和额度的 Agent 用独立客户账户。用量记录保留提交时的 Agent 标识和 Key 编号，可按 agent_id 筛选。
+- 价格由客户合同明确设置，报价单位为点。成功按冻结合同扣点，明确失败按原账本退款；提交未知不承诺免费。用量记录保留提交时的 Agent 标识和 Key 编号，可按 agent_id 筛选。
 - 当前上传硬上限：图片 30 MiB、视频 200 MiB、音频 15 MiB，同时受客户配置的更小上限约束。文件必须与申报 SHA-256、字节数及 MIME 一致，通过完整解码检查。不符合生成线路边长或像素限制的参考图在报价时拒绝，保留上传原件。
 - 媒体保留时间以管理员与客户约定为准。本实现不自动删除文件；存储额度不足时拒绝新增。单任务成品预留上限由管理员配置，最多 200 MiB，超过上限不会提供不完整下载。
 
@@ -26,7 +26,7 @@ python3 client.py --state ./request.json --file ./reference.png --mime image/png
 
 上传先保存自己的 `request_id`，再调用开始接口。取得上传票据后，仅 `prepared` 可带原 `Upload-Nonce` 传输；`receiving` / `writing` 不因超时重新发送。`recover` 只核对原票据，只有系统能证明旧写入已停止且未写入时才重新开放同一票据；否则等待人工核对。`complete` 查询原上传结果，不重复写文件。放弃未写入的预留可以调用 `POST /api/v1/assets/uploads/:id/release`，存在在途写入或素材时接口会保留原票据。
 
-生成提交前持久保存 `input`、`quote_id` 与 `Idempotency-Key`。同客户同号同一标准化输入返回原任务，不同内容返回 409。已受理任务使用原报价。不同 Key 可查询同客户原任务，不能借轮换 Key 重新扣款。报价有效期 10 分钟；报价后改输入、改售价或改客户规则须重新报价，已受理订单不重算。
+生成提交前持久保存 `input`、`quote_id` 与 `Idempotency-Key`。同客户同号同一标准化输入返回原任务，不同内容返回 409。已受理任务使用原报价。补发的 Key 可按授权查询同一客户的原任务和账单。报价有效期 10 分钟；报价后改输入、改售价或改客户规则须重新报价，已受理订单不重算。
 
 创建真实视频还须显式传入 `X-Paid-Generation-Intent: user_authorized_real_provider` 和 `X-Paid-Generation-Reason: customer_authorized_video_generation`。仅在客户已授权实际扣费时发送；未声明会返回 `PAID_GENERATION_AUTH_REQUIRED`。查询、上传和报价不收费，也无需此声明。
 
@@ -88,7 +88,7 @@ api "$SD2_API_BASE/api/v1/usage"
 
 停止新生成后，仍可补发仅查询、下载、查看用量的只读 Key，以找回同客户的已付款结果；`video:write` / `assets:write` 仍须通过完整开通条件。封禁读取时不能补发 Key。
 
-隔离联调用实际 API 路由、临时 SQLite 和 Linux 私有媒体，通过合成供应商响应验证两把 Key 竞争同一余额、原号接续、跨客户拒绝、Agent 用量归因和原成品恢复。复跑用仓库根的 `scripts/customer-api-http-engineering.cjs`，传入指向专用 Linux 数据卷的 `CUSTOMER_API_TEST_STORAGE_ROOT`，也可传入 `CUSTOMER_API_BASELINE_SCHEMA` 从旧库结构应用增量迁移。测试只使用临时账户和合成上游，无真实费用。
+隔离联调用实际 API 路由、临时 SQLite 和 Linux 私有媒体，验证单 Key 受理、重复发 Key 拒绝、原号接续、跨客户拒绝、Agent 用量归因和原成品恢复。复跑用仓库根的 `scripts/customer-api-http-engineering.cjs`，传入指向专用 Linux 数据卷的 `CUSTOMER_API_TEST_STORAGE_ROOT`，也可传入 `CUSTOMER_API_BASELINE_SCHEMA` 从旧库结构应用增量迁移。测试只使用临时账户和合成上游，无真实费用。
 
 生产手验沿原工单 A01–A10，包括实际代理的跨客户隔离和 Key 轮换、真实线路原号和费用回执、改价与预算边界、素材和下载、后台管理、站内入口兼容、发布及相容回退。
 

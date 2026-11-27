@@ -14,7 +14,7 @@ type KeyRow = { id: string; name: string; agent_id: string; prefix: string; acti
 type Rate = { resolution: string; cny_per_second: number | null; enabled: boolean };
 type Customer = { id: string; user_id: string; name: string; revision: number; create_enabled: boolean; read_enabled: boolean; license_confirmed: boolean;
   timezone: string; models_json: string; points_per_cny: number | null; max_task_points: number | null; daily_points: number | null; monthly_points: number | null;
-  concurrency_limit: number | null; storage_limit_bytes: string | null; upload_limit_bytes: string | null; retention_policy: string | null; rates: Rate[]; keys: KeyRow[]; keys_next_cursor: string | null };
+  concurrency_limit: number | null; storage_limit_bytes: string | null; upload_limit_bytes: string | null; retention_policy: string | null; rates: Rate[]; keys: KeyRow[]; has_bound_key: boolean; keys_next_cursor: string | null };
 type Usage = { balance_points: number; frozen_points: number; day_used_points: number; month_used_points: number; storage_bytes: string;
   records: Array<{ id: string; request_id: string; agent_id: string; key_id: string; review_required: boolean; status: string; reserved_points: number; charged_points: number; fee_status: string; created_at: string }>; next_cursor: string | null };
 type Snapshot = { actor_id: string; configuration: Configuration; customers?: Row[]; next_cursor?: string | null; customer?: Customer; usage?: Usage };
@@ -216,7 +216,7 @@ export default function ApiClientsClient({ actorId }: { actorId: string }) {
           <label className={styles.field}><span>媒体保留规则</span><textarea className="input" value={String(fields.retention_policy || '')} maxLength={1000} onChange={e => update('retention_policy', e.target.value)} /></label>
           <div className={styles.toolbar}><button className="btn btn-primary" type="submit"><Save size={16} />保存客户设置</button><button type="button" className="btn btn-secondary" onClick={() => void load(c.id)}>重新读取，保留输入</button></div>
         </form>
-        <section className={styles.section}><h3>Key</h3><details><summary>发放新 Key / 轮换</summary><form className={styles.keyForm} onSubmit={e => {
+        <section className={styles.section}><h3>Key</h3>{c.has_bound_key ? <p className={styles.muted}>此客户已绑定 Key。补发前请先吊销原 Key。</p> : <details><summary>发放 Key</summary><form className={styles.keyForm} onSubmit={e => {
           e.preventDefault(); const date = new Date(expires); if (!Number.isFinite(date.getTime())) { setNotice('请选择有效截止时间。'); return; }
           void write({ action: 'issue_key', customer_id: c.id, revision: c.revision, name: keyName, agent_id: agentId, expires_at: date.toISOString(), requests_per_minute: rpm, scopes, models: [model] });
         }}><div className={styles.grid}><label className={styles.field}><span>Key 名称</span><input className="input" required value={keyName} onChange={e => setKeyName(e.target.value)} /></label>
@@ -224,13 +224,13 @@ export default function ApiClientsClient({ actorId }: { actorId: string }) {
           <label className={styles.field}><span>有效期至</span><input className="input" type="datetime-local" required value={expires} onChange={e => setExpires(e.target.value)} /></label>
           <label className={styles.field}><span>每分钟请求数</span><input className="input" type="number" min={1} max={10000} step={1} required value={rpm} onChange={e => setRpm(e.target.value)} /></label></div>
           <div className={styles.options}>{Object.entries(scopeLabels).map(([scope, label]) => <label className={styles.check} key={scope}><input type="checkbox" checked={scopes.includes(scope)} onChange={e => setScopes(old => e.target.checked ? [...old, scope] : old.filter(v => v !== scope))} />{label}</label>)}</div>
-          <p className={styles.muted}>型号：Seedance 2.5 · IP。轮换时沿用 Agent 标识，切换成功后吊销旧 Key。</p><button className="btn btn-primary" type="submit"><KeyRound size={16} />发放 Key</button>
-        </form></details>
+          <p className={styles.muted}>型号：Seedance 2.5 · IP。</p><button className="btn btn-primary" type="submit"><KeyRound size={16} />发放 Key</button>
+        </form></details>}
           <div className={styles.tableWrap}><table className={styles.table}><thead><tr><th>名称 / 前缀</th><th>状态</th><th>有效期至</th><th>范围</th><th>最近使用</th><th /></tr></thead><tbody>{c.keys.map(key => <tr key={key.id}>
             <td>{key.name}<br /><code>{key.agent_id}</code><br /><code title={key.id}>{key.prefix}… · {key.id.slice(-8)}</code></td><td>{!key.active ? '已吊销' : new Date(key.expires_at).getTime() <= Date.now() ? '已过期' : '有效'}</td><td>{new Date(key.expires_at).toLocaleString()}</td>
             <td>{(JSON.parse(key.scopes_json) as string[]).map(s => scopeLabels[s] || s).join('、')}<br />{key.requests_per_minute} 次/分钟</td><td>{key.last_used_at ? <RelativeTime value={key.last_used_at} /> : '未使用'}</td>
             <td>{key.active && <button type="button" className="btn btn-icon" title="吊销 Key" aria-label={`吊销 ${key.name}`} onClick={async () => {
-              if (await confirm(`吊销「${key.name}」后，后续访问立即失效；已受理任务仍继续生成和计费，同客户其他有效 Key 可查询。`, { title: '吊销 Key', confirmLabel: '吊销', danger: true })) void write({ action: 'revoke_key', customer_id: c.id, revision: c.revision, key_id: key.id, confirm_revoke: true });
+              if (await confirm(`吊销「${key.name}」后，这把 Key 立即失效。已受理任务继续生成和计费，重新发放后可查询原任务。`, { title: '吊销 Key', confirmLabel: '吊销', danger: true })) void write({ action: 'revoke_key', customer_id: c.id, revision: c.revision, key_id: key.id, confirm_revoke: true });
             }}><ShieldOff size={17} /></button>}</td></tr>)}</tbody></table></div>
           {!c.keys.length && <p className={styles.empty}>尚未发放 Key。</p>}
           {c.keys_next_cursor && <button type="button" className="btn btn-secondary" onClick={() => void loadMoreKeys()}>加载更多 Key</button>}

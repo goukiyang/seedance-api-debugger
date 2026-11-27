@@ -72,7 +72,8 @@ async function main() {
   };
 
   prisma = require('../src/lib/prisma').prisma;
-  const { API_SCOPES, newApiKey } = require('../src/lib/customer-api/auth');
+  const { API_SCOPES } = require('../src/lib/customer-api/auth');
+  const { apiAdminSnapshot, mutateApiAdmin } = require('../src/lib/customer-api/admin');
   const { NextRequest } = require('next/server');
   const api = require('../src/app/api/v1/[...path]/route');
   const callback = require('../src/app/api/internal/customer-video/[id]/route');
@@ -116,12 +117,14 @@ async function main() {
       resolution: '720p', cny_per_second: 0.2, enabled: true } });
     return { user, customer };
   }
+  const admin = await prisma.user.create({ data: { name: 'Fixture administrator', username: 'fixture-admin',
+    email: 'admin@fixture.invalid', password_hash: 'synthetic', role: 'admin', account_type: 'internal', status: 'active' } });
   async function issue(customer, agent_id) {
-    const secret = newApiKey();
-    const entry = await prisma.apiKey.create({ data: { customer_id: customer.id, agent_id, name: agent_id,
-      digest: secret.digest, prefix: secret.prefix, expires_at: new Date(Date.now() + 600_000),
-      scopes_json: JSON.stringify(API_SCOPES), models_json: '["seedance-2.5-ip"]', requests_per_minute: 100 } });
-    return { token: secret.token, id: entry.id };
+    const key = await mutateApiAdmin(admin.id, { action: 'issue_key', operation_id: 'fixture-key-' + agent_id,
+      customer_id: customer.id, revision: customer.revision, name: agent_id, agent_id,
+      expires_at: new Date(Date.now() + 600_000).toISOString(), scopes: API_SCOPES,
+      models: ['seedance-2.5-ip'], requests_per_minute: 100 });
+    return { token: key.token, id: key.key_id };
   }
   async function call(method, route, key, body, id, additionalHeaders = {}) {
     const headers = { authorization: 'Bearer ' + key.token, ...additionalHeaders };
@@ -138,7 +141,8 @@ async function main() {
   const team = await provision('team-fixture', 1);
   const outside = await provision('outside-fixture', 1);
   const first = await issue(team.customer, 'first-agent');
-  const second = await issue(team.customer, 'second-agent');
+  await assert.rejects(() => issue(team.customer, 'duplicate-binding'), { code: 'KEY_ALREADY_BOUND', status: 409 });
+  assert.equal((await apiAdminSnapshot(team.customer.id)).customer.has_bound_key, true);
   const stranger = await issue(outside.customer, 'stranger');
   phase = 'private input upload';
   const image = await require('sharp')({ create: {
@@ -158,7 +162,7 @@ async function main() {
   assert.equal(transfer.code, 200, JSON.stringify(transfer));
   assert.equal(transfer.body.status, 'completed');
   assert.equal(transfer.body.asset.sha256, imageHash);
-  const completedUpload = await read(await call('POST', uploadPath + '/complete', second));
+  const completedUpload = await read(await call('POST', uploadPath + '/complete', first));
   assert.equal(completedUpload.body.asset.id, transfer.body.asset.id);
   assert.equal((await call('POST', uploadPath + '/release', first)).status, 409);
   const abandoned = await read(await call('POST', 'assets/uploads', first, { ...uploadInput, request_id: 'abandoned-upload' }));
@@ -179,17 +183,15 @@ async function main() {
     assert.equal(response.code, 200, JSON.stringify(response));
     return { quote_id: response.body.id, input: response.body.input };
   }
-  phase = 'quotes and concurrent admission';
+  phase = 'quote and single-key admission';
   const models = await read(await call('GET', 'models', first));
   assert.deepEqual(models.body.models[0].resolutions, ['720p']);
   assert.equal((await call('POST', 'video/quotes', stranger, { input, max_cost_points: 1 })).status, 404);
-  const attempts = [{ key: first, id: 'first-attempt', body: await quote(first) },
-    { key: second, id: 'second-attempt', body: await quote(second) }];
-  const results = await Promise.all(attempts.map(attempt =>
-    call('POST', 'video/tasks', attempt.key, attempt.body, attempt.id).then(read)));
-  const index = results.findIndex(item => item.code === 202);
-  assert.equal(results.filter(item => item.code === 202).length, 1, JSON.stringify(results));
-  const winner = attempts[index], other = attempts[1 - index], accepted = results[index].body;
+  const winner = { key: first, id: 'first-attempt', body: await quote(first) };
+  const other = { key: first, id: 'second-attempt', body: await quote(first) };
+  const submission = await read(await call('POST', 'video/tasks', winner.key, winner.body, winner.id));
+  assert.equal(submission.code, 202, JSON.stringify(submission));
+  const accepted = submission.body;
   assert.equal(creates, 1);
   assert.equal(await prisma.creditLedger.count({ where: { type: 'task_freeze' } }), 1);
   const receipt = await prisma.apiRequest.findUnique({ where: { id: accepted.id } });
@@ -261,7 +263,14 @@ async function main() {
   const credential = await prisma.apiProviderCredential.findFirst();
   assert(credential.configuration_json.startsWith('ppenc:v1:'));
   assert(!credential.configuration_json.includes('synthetic-upstream-key'));
-  console.log('PASS customer API handlers, SQLite reservations, original replay, tenant isolation, private upload and MP4, Agent usage, and signed recovery.');
+  await mutateApiAdmin(admin.id, { action: 'revoke_key', operation_id: 'fixture-revoke-original',
+    customer_id: team.customer.id, revision: team.customer.revision, key_id: first.id, confirm_revoke: true });
+  assert.equal((await apiAdminSnapshot(team.customer.id)).customer.has_bound_key, false);
+  assert.equal((await call('GET', 'models', first)).status, 401);
+  const replacement = await issue(team.customer, 'replacement-key');
+  assert.equal((await call('GET', 'video/tasks/' + accepted.id + '/content', replacement)).status, 200);
+  assert.equal(await prisma.apiKey.count({ where: { customer_id: team.customer.id, active: true } }), 1);
+  console.log('PASS single-Key binding and revocation, billing, original replay, isolation, private media and recovery.');
 }
 
 main().catch(error => {

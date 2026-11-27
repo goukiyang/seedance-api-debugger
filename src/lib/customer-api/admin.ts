@@ -18,10 +18,13 @@ export async function apiAdminSnapshot(id?: string, cursor?: string, keyCursor?:
   const configuration = await prisma.apiConfiguration.findUnique({ where: { id: 'global' } }) || {
     id: 'global', enabled: false, license_confirmed: false, concurrency_limit: null, storage_limit_bytes: null, max_output_bytes: null, revision: 0 };
   if (id) {
-    const customer = await prisma.apiCustomer.findUnique({ where: { id }, include: { rates: true, keys: {
-      where: keyCursor ? { id: { lt: keyCursor } } : {}, select: keySelect, orderBy: { id: 'desc' }, take: 51 } } });
+    const customer = await prisma.apiCustomer.findUnique({ where: { id }, include: {
+      rates: true, _count: { select: { keys: { where: { active: true } } } }, keys: {
+        where: keyCursor ? { id: { lt: keyCursor } } : {}, select: keySelect, orderBy: { id: 'desc' }, take: 51 },
+    } });
     if (!customer) throw new CustomerApiError('CUSTOMER_NOT_FOUND', '客户不存在。', 404);
-    return serializeApiAdmin({ configuration, customer: { ...customer, keys: customer.keys.slice(0, 50),
+    const { _count, ...settings } = customer;
+    return serializeApiAdmin({ configuration, customer: { ...settings, has_bound_key: _count.keys > 0, keys: customer.keys.slice(0, 50),
       keys_next_cursor: customer.keys.length > 50 ? customer.keys[49].id : null }, usage: await publicUsage({ customer, user: { id: customer.user_id } }, cursor) });
   }
   const customers = await prisma.apiCustomer.findMany({ where: cursor ? { id: { lt: cursor } } : {}, orderBy: { id: 'desc' }, take: 51,
@@ -138,6 +141,9 @@ export async function mutateApiAdmin(actorId: string, body: Record<string, unkno
         if (!changed.count) throw new CustomerApiError('VERSION_CONFLICT', '客户设置已更新。', 409);
         result = { customer_id: id, saved: true };
       } else if (body.action === 'issue_key') {
+        // The SQLite transaction holds the writer lock across the lookup and insert.
+        const bound = await tx.apiKey.findFirst({ where: { customer_id: id, active: true }, select: { id: true } });
+        if (bound) throw new CustomerApiError('KEY_ALREADY_BOUND', '此客户已绑定 Key，请先吊销原 Key。', 409);
         const scopes = list(body.scopes, API_SCOPES, 'Key 权限');
         const writable = scopes.includes('video:write') || scopes.includes('assets:write');
         if (!customer.read_enabled) throw new CustomerApiError('CUSTOMER_BLOCKED', '客户访问已封禁，不能发放 Key。', 409);
@@ -153,7 +159,6 @@ export async function mutateApiAdmin(actorId: string, body: Record<string, unkno
         if (!Number.isFinite(expires.getTime()) || expires <= new Date() || !scopes.length || !models.length) throw new CustomerApiError('INVALID_SETTING', '有效期、权限或型号范围无效。');
         const rate = positive(body.requests_per_minute, '每分钟请求数', 10000, 0);
         if (!rate) throw new CustomerApiError('INVALID_SETTING', '需要每分钟请求数。');
-        if (await tx.apiKey.count({ where: { customer_id: id, active: true } }) >= 100) throw new CustomerApiError('KEY_LIMIT', '请先吊销不再使用的 Key。', 409);
         const agentId = text(body.agent_id, 'Agent 标识', 64);
         if (!/^[a-z0-9][a-z0-9._-]*$/.test(agentId)) throw new CustomerApiError('INVALID_AGENT_ID', 'Agent 标识只能使用小写字母、数字、点、下划线和连字符。');
         const generated = newApiKey(); token = generated.token;
