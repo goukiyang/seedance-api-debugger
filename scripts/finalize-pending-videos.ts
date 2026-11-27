@@ -20,7 +20,10 @@ type PendingTask = PendingFinalizeCandidate & {
   result_video_url: string | null;
   created_at: Date;
   frozen_cost: number | null;
+  user_id: string | null;
 };
+
+const terminalApiStatuses = ['succeeded', 'failed', 'cancelled', 'canceled'];
 
 function numberArg(name: string, fallback: number) {
   const index = process.argv.indexOf(name);
@@ -75,9 +78,7 @@ async function failStaleSubmittedWithoutProvider(
       }
     }
 
-    return tx.videoTask.update({
-      where: { id: taskId },
-      data: {
+    const data = {
         local_status: 'failed',
         provider_status: 'failed',
         error_code: 'MISSING_PROVIDER_TASK_ID',
@@ -87,8 +88,15 @@ async function failStaleSubmittedWithoutProvider(
           finalized_by: 'finalize-pending-videos',
         }),
         completed_at: now,
-      },
-    });
+    };
+    if (freshTask.source_type === 'customer_api') {
+      const closed = await tx.videoTask.updateMany({
+        where: { id: taskId, local_status: 'submitted', provider_task_id: null, provider_client_request_id: null },
+        data,
+      });
+      return closed.count ? { ...freshTask, ...data } : null;
+    }
+    return tx.videoTask.update({ where: { id: taskId }, data });
   });
 
   if (!failedTask) {
@@ -119,7 +127,10 @@ async function main() {
 
   const select = {
     id: true,
+    user_id: true,
     provider_task_id: true,
+    provider_client_request_id: true,
+    source_type: true,
     error_code: true,
     provider: true,
     public_video_url: true,
@@ -141,12 +152,15 @@ async function main() {
       },
       select,
     });
-    tasks = task && isFinalizeCandidate(task) ? [task] : [];
+    tasks = task && (isFinalizeCandidate(task) || task.source_type === 'customer_api' &&
+      terminalApiStatuses.includes(task.local_status) && (task.frozen_cost ?? 0) > 0) ? [task] : [];
   } else {
     const statusRefreshTasks = await prisma.videoTask.findMany({
       where: {
-        provider_task_id: { not: null },
-        local_status: { in: ['submitted', 'running'] },
+        OR: [
+          { provider_task_id: { not: null }, local_status: { in: ['submitted', 'running'] } },
+          { source_type: 'customer_api', local_status: { in: terminalApiStatuses }, frozen_cost: { gt: 0 } },
+        ],
       },
       orderBy: [
         { updated_at: 'asc' },
@@ -162,6 +176,7 @@ async function main() {
           where: {
             provider_task_id: null,
             OR: [{ error_code: null }, { error_code: { not: 'IP_SUBMISSION_UNCONFIRMED' } }],
+            AND: [{ OR: [{ source_type: { not: 'customer_api' } }, { provider_client_request_id: null }] }],
             local_status: 'submitted',
             frozen_cost: { gt: 0 },
             created_at: { lte: new Date(Date.now() - orphanMinAgeMinutes * 60 * 1000) },
@@ -188,7 +203,8 @@ async function main() {
             ] }],
             OR: [
               { local_video_path: null },
-              { provider: 'volcengine_ark', public_video_url: null },
+              { provider: 'volcengine_ark', public_video_url: null,
+                source_type: { not: 'customer_api' } },
             ],
             result_video_url: { not: null },
             created_at: { gte: new Date(Date.now() - missingLocalMaxAgeDays * 24 * 60 * 60 * 1000) },
@@ -248,6 +264,15 @@ async function main() {
     }
 
     try {
+      if (task.source_type === 'customer_api' && terminalApiStatuses.includes(task.local_status)
+        && task.user_id && (task.frozen_cost ?? 0) > 0) {
+        await settleTask(task.id, task.user_id, task.frozen_cost!, task.local_status);
+        if (task.local_status !== 'succeeded') {
+          processed++;
+          terminal++;
+          continue;
+        }
+      }
       if (isStaleOrphan) {
         const result = await failStaleSubmittedWithoutProvider(prisma, settleTask, task.id, orphanMinAgeMinutes);
         processed += result.task ? 1 : 0;

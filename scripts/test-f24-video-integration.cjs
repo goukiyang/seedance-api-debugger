@@ -31,7 +31,7 @@ test('actual creation intent freezes an explicit notification choice; old inputs
   assert.equal(JSON.stringify(after), JSON.stringify(before));
 });
 test('both actual creation routes enqueue only after a new task write in the same original transaction', () => {
-  for (const file of ['src/app/api/tasks/create/route.ts', 'src/app/api/ip/tasks/create/route.ts']) {
+  for (const file of ['src/app/api/tasks/create/route.ts', 'src/lib/video/ip-create.ts']) {
     const ast = source(file), calls = find(ast, n => ts.isCallExpression(n) && n.expression.getText(ast) === 'enqueueVideoFeishuNotification');
     assert.equal(calls.length, 1, file + ' actual new-task enqueue missing');
     const call = calls[0];

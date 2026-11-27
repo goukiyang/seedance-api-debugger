@@ -1,6 +1,8 @@
 export type PendingFinalizeCandidate = {
   id: string;
   provider_task_id?: string | null;
+  provider_client_request_id?: string | null;
+  source_type?: string | null;
   error_code?: string | null;
   provider?: string | null;
   public_video_url?: string | null;
@@ -36,6 +38,7 @@ export function isStaleSubmittedWithoutProvider(
 ) {
   if (task.local_status !== 'submitted') return false;
   if (task.error_code === 'IP_SUBMISSION_UNCONFIRMED') return false;
+  if (task.source_type === 'customer_api' && task.provider_client_request_id !== null) return false;
   if (task.provider_task_id) return false;
   const minAgeMs = Math.max(1, minAgeMinutes) * 60 * 1000;
   return now.getTime() - timeValue(task.created_at) >= minAgeMs;
@@ -43,10 +46,11 @@ export function isStaleSubmittedWithoutProvider(
 
 export function isFinalizeCandidate(task: PendingFinalizeCandidate) {
   if (!task.provider_task_id && task.error_code === 'IP_SUBMISSION_UNCONFIRMED') return false;
+  if (!task.provider_task_id && task.source_type === 'customer_api' && task.provider_client_request_id !== null) return false;
   if (REFRESH_STATUSES.has(task.local_status)) return true;
   if (task.provider === 'volcengine_ark' && (task.delivery_attempts || 0) >= 6) return false;
   return task.local_status === 'succeeded'
-    && (!task.local_video_path || (task.provider === 'volcengine_ark' && !task.public_video_url))
+    && (!task.local_video_path || (task.provider === 'volcengine_ark' && task.source_type !== 'customer_api' && !task.public_video_url))
     && Boolean(task.result_video_url || task.local_video_path);
 }
 

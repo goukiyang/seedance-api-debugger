@@ -64,9 +64,9 @@ async function main() {
     return loaded.exports!;
   };
   const ordinaryPreparationCatch = await preparationCatch('src/app/api/tasks/create/route.ts');
-  const ipPreparationCatch = await preparationCatch('src/app/api/ip/tasks/create/route.ts');
+  const ipPreparationCatch = await preparationCatch('src/lib/video/ip-create.ts');
 
-  const ipSource = await fs.readFile(path.join(root, 'src/app/api/ip/tasks/create/route.ts'), 'utf8');
+  const ipSource = await fs.readFile(path.join(root, 'src/lib/video/ip-create.ts'), 'utf8');
   const ipAst = ts.createSourceFile('ip-create.ts', ipSource, ts.ScriptTarget.Latest, true);
   let ipSendStatements: readonly ts.Statement[] | undefined;
   const visitIp = (node: ts.Node) => {
@@ -315,7 +315,7 @@ async function main() {
     checks.push('actual_worker_outer_catch_retains_unknown_and_safe_reason');
 
     const sourceHashes = Object.fromEntries(await Promise.all(['src/lib/provider/reference-video-delivery.server.ts', 'src/lib/provider/reference-video-delivery-build-mode.ts',
-      'src/app/api/provider/reference-media/route.ts', 'src/app/api/tasks/create/route.ts', 'src/app/api/ip/tasks/create/route.ts', 'src/lib/generation-retry/video.ts', 'src/lib/provider/ip-reference-media-metadata.ts']
+      'src/app/api/provider/reference-media/route.ts', 'src/app/api/tasks/create/route.ts', 'src/lib/video/ip-create.ts', 'src/lib/generation-retry/video.ts', 'src/lib/provider/ip-reference-media-metadata.ts']
       .map(async file => [file, createHash('sha256').update(await fs.readFile(path.join(root, file))).digest('hex')])));
     await fs.writeFile(path.join(scratch, 'reference-video-delivery-receipt.json'), JSON.stringify({ checks, providerPosts, ipPosts,
       network: 'controlled fixture only; external blocked', sourceHashes }, null, 2));

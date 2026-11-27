@@ -378,7 +378,7 @@ async function checkCreationAndProjection({ refs, personal, compiled, body }) {
     secretFree(output); assert.equal(output.actual_cost, 5); assert.equal(output.usage.completion_tokens, 42);
   });
   await check('actual IP ledger payload and response spread expose immutable refs without compiled body', () => {
-    const file = 'src/app/api/ip/tasks/create/route.ts';
+    const file = 'src/lib/video/ip-create.ts';
     const requestPayload = expression(file, node => {
       if (!ts.isCallExpression(node) || node.expression.getText() !== 'createProviderApiRequest') return;
       const property = node.arguments[0]?.properties?.find(item => ts.isPropertyAssignment(item) && item.name.getText() === 'requestPayload'); return property?.initializer;
@@ -450,7 +450,7 @@ async function checkReaderOnly(refs, personal) {
   });
   await check('reader: actual IP create POST blocks a new group before provider/create writes', async () => {
     let creates = 0;
-    const post = functions('src/app/api/ip/tasks/create/route.ts', ['POST'], {
+    const post = functions('src/lib/video/ip-create.ts', ['createIpVideo'], {
       AuthError, VideoPromptGroupError: contract.VideoPromptGroupError, PrivatePromptError: crypto.PrivatePromptError,
       webRequestSource: () => ({ source_type: 'web', source_label: 'fixture' }), hasCodexApiAuthSignal: () => false, getSessionUser: async () => users.ordinary,
       videoPricingBusinessFingerprint: () => 'fixture-fingerprint', parseVideoPromptGroupRefs: contract.parseVideoPromptGroupRefs,
@@ -460,8 +460,8 @@ async function checkReaderOnly(refs, personal) {
       NextResponse: { json: (value, init) => new Response(JSON.stringify(value), init) }, errorJson: (error, status) => new Response(JSON.stringify({ error }), { status }),
       createVolcengineIpVideoTask: async () => { creates++; throw new Error('reader must never create'); },
       prisma: new Proxy({}, { get: () => { creates++; throw new Error('new reader create must stop before task writes'); } }),
-    }).POST;
-    const response = await post(new Request('https://app.fixture.invalid/api/ip/tasks/create', { method: 'POST', body: JSON.stringify(input) }));
+    }).createIpVideo;
+    const response = await post(new Request('https://app.fixture.invalid/api/ip/tasks/create', { method: 'POST' }), users.ordinary, { source_type: 'web', source_label: 'fixture' }, input);
     assert.equal(response.status, 426); assert.equal(creates, 0); secretFree(await response.json());
   });
   await check('reader: actual original-request/status/list GETs remain readable with no private body or provider send', async () => {

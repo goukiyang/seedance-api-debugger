@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import type { Prisma } from '@prisma/client';
 import { prisma, retrySqliteBusy } from '@/lib/prisma';
 import { uploadDigest, uploadRequestId, readVerifiedUploadReceipt, releaseVerifiedUpload, findVerifiedOwnUpload, registerVerifiedUpload, VerifiedUploadError } from './verified-upload';
 import { validateSiteUploadMetadata, sameOriginPublicUrlForLocalUpload, isLocalPublicUploadUrl } from './site-upload';
@@ -33,8 +34,8 @@ function parseState(value: string, identity: RawUploadIdentity): RawUploadState 
   if (!/^[a-f0-9]{48}$/.test(state.nonce) || !['prepared', 'receiving', 'writing', 'notAccepted', 'completed'].includes(state.phase)) throw unknown();
   return state;
 }
-async function stateRow(identity: RawUploadIdentity) {
-  const row = await prisma.platformSetting.findUnique({ where: { key: stateKey(identity) } });
+async function stateRow(identity: RawUploadIdentity, db: Pick<Prisma.TransactionClient, 'platformSetting'> = prisma) {
+  const row = await db.platformSetting.findUnique({ where: { key: stateKey(identity) } });
   return row ? { row, state: parseState(row.value_json, identity) } : null;
 }
 export async function readRawUploadState(identity: RawUploadIdentity) {
@@ -96,8 +97,8 @@ export function rawUploadProof(state: RawUploadState) {
   return { ownerId: state.ownerId, requestId: state.requestId, hash: state.hash, fileSize: state.fileSize,
     mimeType: state.mimeType, ...(state.purpose ? { purpose: state.purpose } : {}), phase: state.phase, nonce: state.nonce };
 }
-async function replaceState(identity: RawUploadIdentity, current: NonNullable<Awaited<ReturnType<typeof stateRow>>>, next: RawUploadState) {
-  const changed = await prisma.platformSetting.updateMany({ where: { key: stateKey(identity), value_json: current.row.value_json },
+async function replaceState(identity: RawUploadIdentity, current: NonNullable<Awaited<ReturnType<typeof stateRow>>>, next: RawUploadState, db: Pick<Prisma.TransactionClient, 'platformSetting'> = prisma) {
+  const changed = await db.platformSetting.updateMany({ where: { key: stateKey(identity), value_json: current.row.value_json },
     data: { value_json: JSON.stringify(next), updated_by: identity.ownerId } });
   if (changed.count !== 1) throw unknown();
   return next;
@@ -134,6 +135,14 @@ export async function transitionRawUpload(identity: RawUploadIdentity, nonce: st
   const current = await stateRow(identity);
   if (!current || current.state.nonce !== nonce || current.state.phase !== from) throw unknown();
   return replaceState(identity, current, { ...current.state, phase: to });
+}
+
+export async function retireUnwrittenRawUpload(identity: RawUploadIdentity, db: Prisma.TransactionClient) {
+  const current = await stateRow(identity, db);
+  if (!current) return true;
+  if (current.state.phase !== 'prepared' && current.state.phase !== 'notAccepted') return false;
+  await replaceState(identity, current, { ...current.state, nonce: newNonce(), phase: 'notAccepted' }, db);
+  return true;
 }
 // Legacy clients may acquire a brand-new identity only after their complete
 // bytes have been hashed in memory. Existing attempts are never reclaimed.

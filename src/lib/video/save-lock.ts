@@ -47,10 +47,10 @@ export async function updateVideoSaveSource(task: Source) {
 }
 
 /** Reserve the SQLite writer before publishing: a newer claim/source cannot pass this fence mid-publish. */
-export async function commitVideoSavePublication(task: Source, publicPath: string, publish?: () => Promise<void>) {
+export async function commitVideoSavePublication(task: Source, publicPath: string, publish?: (tx: Prisma.TransactionClient) => Promise<void>) {
   return commitVideoSaveTask(task, { local_video_path: publicPath }, publish);
 }
-export async function commitVideoSaveTask(task: Source, data: Prisma.VideoTaskUpdateManyMutationInput, publish?: () => Promise<void>) {
+export async function commitVideoSaveTask(task: Source, data: Prisma.VideoTaskUpdateManyMutationInput, publish?: (tx: Prisma.TransactionClient) => Promise<void>) {
   await assertVideoSaveOwnership(task);
   const held = context.getStore()!;
   await prisma.$transaction(async tx => {
@@ -64,7 +64,7 @@ export async function commitVideoSaveTask(task: Source, data: Prisma.VideoTaskUp
       result_video_url: task.result_video_url, local_status: 'succeeded' }, data });
     if (source.count !== 1) throw new Error('VIDEO_SAVE_SOURCE_CHANGED');
     if (held.signal.aborted) throw new Error('VIDEO_SAVE_LEASE_LOST');
-    await publish?.();
+    await publish?.(tx);
   });
 }
 

@@ -349,7 +349,7 @@ async function verifyBitmap(file: string, bytes: number) {
   if (frames.length === 0 || frames[frames.length - 1][1] !== '1' || !/^progress=end\s*$/m.test(decoded.stdout)) throw new Error('bmp_complete_frame');
   return { width, height };
 }
-async function inspectUpload(file: string, declared: string, hash: string, bytes: number): Promise<VerifiedUpload> {
+export async function inspectUpload(file: string, declared: string, hash: string, bytes: number): Promise<VerifiedUpload> {
   const mimeType = declared.split(';')[0].trim().toLowerCase(), type = uploadKind(mimeType);
   if (!bytes || bytes > limits[type]) throw new VerifiedUploadError('UPLOAD_SIZE_INVALID', '文件大小超出上传限制', 400);
   const version = await uploadFileVersion(file);
@@ -463,6 +463,14 @@ export async function preflightVerifiedOwnUpload(ownerId: string, hash: string, 
 export async function verifyExistingUpload(asset: Asset, ownerId: string) {
   const hash = await assertExistingUploadAccess(asset, ownerId);
   const local = siteUploadPathFromUrl(asset.original_url);
+  if (asset.original_url.startsWith('api-private://uploads/')) {
+    const { privateMediaPath } = await import('@/lib/customer-api/private-media');
+    const file = await privateMediaPath(asset.original_url, uploadDigest(ownerId));
+    if (!file || (await fs.stat(file)).size !== asset.file_size || await uploadFileHash(file) !== asset.hash) {
+      throw new VerifiedUploadError('UPLOAD_EXISTING_FILE_INVALID', '已有私有原件校验失败，未覆盖。');
+    }
+    return inspectUpload(file, asset.mime_type, asset.hash, asset.file_size);
+  }
   if (!local) {
     const remote = existingUploadObject(asset, ownerId);
     if (!remote) return null;
@@ -533,7 +541,8 @@ export async function readVerifiedUploadReceipt(ownerId: string, requestId: stri
   return { asset, proof, reused: receipt.disposition === 'reused' };
 }
 export async function registerVerifiedUpload(input: { ownerId: string; proof: VerifiedUpload; fileName: string; originalUrl: string;
-  thumbnailUrl: string | null; requestId?: string; fingerprint?: string; width?: number | null; height?: number | null; purpose?: 'feedback' }) {
+  thumbnailUrl: string | null; requestId?: string; fingerprint?: string; width?: number | null; height?: number | null; purpose?: 'feedback';
+  authorize?: (tx: Prisma.TransactionClient) => Promise<void> }) {
   await uploadIdentity(input.ownerId);
   const existing = await prisma.asset.findUnique({ where: { owner_id_hash: { owner_id: input.ownerId, hash: input.proof.hash } } });
   const existingProof = existing ? await verifyExistingUpload(existing, input.ownerId) : null;
@@ -542,7 +551,9 @@ export async function registerVerifiedUpload(input: { ownerId: string; proof: Ve
   const committed = (result: { asset: Asset; reused: boolean }) => {
     // All upload transports share this post-commit exit, including a verified
     // concurrent winner. HD failure cannot turn a saved upload into a failure.
-    if (result.asset.type === 'image') void registerCommittedAssetHd(result.asset.id, input.ownerId);
+    if (result.asset.type === 'image' && !result.asset.original_url.startsWith('api-private://')) {
+      void registerCommittedAssetHd(result.asset.id, input.ownerId);
+    }
     return result;
   };
   const key = input.requestId ? receiptKey(input.ownerId, input.requestId) : null;
@@ -554,6 +565,7 @@ export async function registerVerifiedUpload(input: { ownerId: string; proof: Ve
     return db.asset.update({ where: { id: asset.id }, data: { metadata_json: JSON.stringify(metadata) } });
   };
   const register = async (db: Prisma.TransactionClient) => {
+    await input.authorize?.(db);
     const currentUser = await db.user.findUnique({ where: { id: input.ownerId } });
     if (!currentUser || currentUser.status !== 'active') throw new VerifiedUploadError('UPLOAD_OWNER_UNAVAILABLE', '当前账号不可上传', 403);
     const fresh = await db.asset.findUnique({ where: { owner_id_hash: { owner_id: input.ownerId, hash: input.proof.hash } } });
@@ -588,6 +600,7 @@ export async function registerVerifiedUpload(input: { ownerId: string; proof: Ve
     const receipt = key ? await readVerifiedUploadReceipt(input.ownerId, input.requestId!, fingerprint) : null;
     if (receipt) { await releaseVerifiedUpload(receipt.proof); return committed({ asset: receipt.asset, reused: receipt.reused }); }
     if (key) await prisma.$transaction(async db => {
+      await input.authorize?.(db);
       const currentUser = await db.user.findUnique({ where: { id: input.ownerId } });
       const fresh = await db.asset.findUnique({ where: { id: winner.asset.id } });
       if (!currentUser || currentUser.status !== 'active' || !fresh || fresh.owner_id !== input.ownerId || fresh.status !== 'active'

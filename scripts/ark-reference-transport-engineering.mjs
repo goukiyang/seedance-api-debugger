@@ -154,7 +154,7 @@ async function main() {
     assert.deepEqual(await ark.volcengineIpLocalReferenceTransport({ ...input, reference_image_urls: [thumb] }, [{ url: thumb, asset: { ...first.asset, original_url: thumb } }]), {});
   });
 
-  const routeFile = 'src/app/api/ip/tasks/create/route.ts', route = source(routeFile);
+  const routeFile = 'src/lib/video/ip-create.ts', route = source(routeFile);
   const tree = ts.createSourceFile(routeFile, route, ts.ScriptTarget.Latest, true), calls = [], tries = [], declarations = [];
   function walk(node) { if (ts.isCallExpression(node)) calls.push(node); if (ts.isTryStatement(node)) tries.push(node); if (ts.isVariableDeclaration(node)) declarations.push(node); ts.forEachChild(node, walk); } walk(tree);
   const authorized = declaration(routeFile, 'isAuthorizedReferenceOriginal', { siteUploadPathFromUrl: site.siteUploadPathFromUrl });

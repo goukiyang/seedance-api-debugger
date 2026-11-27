@@ -5,12 +5,15 @@ import { getVideoTaskStatus } from './jimeng';
 import { VOLCENGINE_IP_VIDEO_PROVIDER, getVolcengineIpTaskStatus } from './volcengine-ip';
 import { isPrivateMultiviewTask } from '../video/multiview-task-privacy';
 import { hasVideoPromptGroups } from '../video/prompt-groups';
+import { apiProviderOptions } from '@/lib/customer-api/admission';
 
 export const VIDEO_TASK_PROVIDER_SEEDANCE = 'seedance';
 export const VIDEO_TASK_PROVIDER_VOLCENGINE_MEDIAKIT = 'volcengine_mediakit';
 export const VIDEO_TASK_PROVIDER_H3 = H3_VIDEO_PROVIDER;
 
 export type ProviderStatusTask = {
+  id?: string;
+  source_type?: string | null;
   provider?: string | null;
   model?: string | null;
   provider_task_id: string | null;
@@ -94,10 +97,12 @@ export async function getProviderTaskStatus(
   }
 
   const provider = normalizeProvider(task.provider);
+  const frozen = provider === VOLCENGINE_IP_VIDEO_PROVIDER && !options.fetchers ? await apiProviderOptions(task) : null;
   const fetchers = options.fetchers || defaultFetchers;
-  const protectGroupStatus = task.source_metadata_json === undefined || hasVideoPromptGroups(task);
+  const protectGroupStatus = Boolean(frozen) || task.source_metadata_json === undefined || hasVideoPromptGroups(task);
   let result: ProviderStatusResponse;
-  try { result = await (provider === VIDEO_TASK_PROVIDER_SEEDANCE
+  try { result = await (frozen ? getVolcengineIpTaskStatus(providerTaskId, { ...frozen, signal: options.signal })
+    : provider === VIDEO_TASK_PROVIDER_SEEDANCE
     ? fetchers.seedance(providerTaskId, { ...seedanceQueryContext(task), ...(options.signal ? { signal: options.signal } : {}) })
     : provider === H3_VIDEO_PROVIDER && options.signal && !options.fetchers ? getH3TaskStatus(providerTaskId, { signal: options.signal })
     : fetcherForProvider(provider, fetchers)(providerTaskId)); }

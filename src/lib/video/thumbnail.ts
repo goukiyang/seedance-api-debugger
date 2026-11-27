@@ -12,6 +12,7 @@ const THUMBNAIL_SEEK_SECONDS = ['2.5', '0.5'];
 
 export type ThumbnailSourceTask = {
   id: string;
+  source_type?: string | null;
   public_video_url?: string | null;
   local_video_path: string | null;
   result_video_url: string | null;
@@ -115,6 +116,9 @@ export async function ensureTaskThumbnail(
   task: ThumbnailSourceTask,
   options: { allowRemoteFallback?: boolean } = {},
 ): Promise<EnsureTaskThumbnailResult> {
+  if (task.source_type === 'customer_api' || task.local_video_path?.startsWith('api-private://')) {
+    return { success: false, error: 'PRIVATE_API_MEDIA', message: '客户 API 媒体不生成公开缩略图。' };
+  }
   if (!isSafeTaskId(task.id)) {
     return {
       success: false,

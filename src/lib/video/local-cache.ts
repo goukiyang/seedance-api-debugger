@@ -10,6 +10,7 @@ import { refreshProviderTaskResultUrl } from '@/lib/provider/video-task-status';
 import { downloadH3JobOutput, parseH3InternalOutputUrl } from '@/lib/provider/h3';
 import { assertVideoSaveOwnership, commitVideoSavePublication, commitVideoSaveTask, updateVideoSaveSource, videoSaveSignal, videoSaveSource, isVideoSaveProcess, withVideoSaveProcess,
   VIDEO_SAVE_HEADER_TIMEOUT_MS, VIDEO_SAVE_IDLE_TIMEOUT_MS, VIDEO_SAVE_TOTAL_TIMEOUT_MS, type VideoSaveOptions } from './save-lock';
+import { preparePrivateApiOutput, finishPrivateApiOutput } from '@/lib/customer-api/output';
 
 const DOWNLOAD_TIMEOUT_MS = VIDEO_SAVE_TOTAL_TIMEOUT_MS;
 const PUBLIC_VIDEO_DIR = path.join(process.cwd(), 'public', 'videos');
@@ -133,7 +134,7 @@ export async function writeResponseToFile(
   targetPath: string,
   expectedBytes: number,
   timeoutMs = DOWNLOAD_TIMEOUT_MS,
-  options: { idleTimeoutMs?: number; signal?: AbortSignal; beforePublish?: () => Promise<void>; validateMp4?: boolean;
+  options: { maxBytes?: number; idleTimeoutMs?: number; signal?: AbortSignal; beforePublish?: () => Promise<void>; validateMp4?: boolean;
     publish?: (temporary: string, target: string) => Promise<void>;
     resume?: { path: string; fetchRange: (offset: number, etag: string) => Promise<Response> } } = {},
 ) {
@@ -201,6 +202,7 @@ export async function writeResponseToFile(
       if (done) break;
       if (!value) continue;
       receivedBytes += value.length;
+      if (options.maxBytes && receivedBytes > options.maxBytes) throw new Error('API output exceeds storage reservation');
       if (!stream.write(Buffer.from(value))) {
         await read(once(stream, 'drain'));
         throwIfStreamErrored();
@@ -228,7 +230,7 @@ export async function writeResponseToFile(
     if (options.validateMp4) await validateLocalMp4(tempPath);
     await options.beforePublish?.();
     if (options.signal?.aborted) throw new Error('VIDEO_SAVE_LEASE_LOST');
-    await chmod(tempPath, 0o644);
+    if (!options.maxBytes) await chmod(tempPath, 0o644);
     // A content target is immutable. Never overwrite another save or an existing original.
     if (options.publish) await options.publish(tempPath, targetPath);
     else await link(tempPath, targetPath);
@@ -326,14 +328,16 @@ async function cacheTaskVideoToLocalInner(
   const startedAt = Date.now();
   const remaining = () => Math.max(1, timeoutMs - (Date.now() - startedAt));
   const refreshOnForbidden = options.refreshOnForbidden !== false;
+  const privateOutput = await preparePrivateApiOutput(task.id);
+  if (privateOutput?.existing) return { success: true, local_video_path: privateOutput.existing.url, file_size: privateOutput.existing.bytes, already_exists: true };
   // A new complete save gets its own immutable file; previous originals are retained.
   const generation = Date.now().toString(36) + '-' + process.pid;
   const publicPath = publicVideoPath(task.id).replace(/\.mp4$/, `-${generation}.mp4`);
-  const targetPath = localVideoPath(task.id).replace(/\.mp4$/, `-${generation}.mp4`);
+  const targetPath = privateOutput?.target || localVideoPath(task.id).replace(/\.mp4$/, `-${generation}.mp4`);
 
   const existingPath = task.local_video_path?.startsWith('/videos/') && !task.local_video_path.includes('..')
     ? path.join(process.cwd(), 'public', task.local_video_path.slice(1)) : localVideoPath(task.id);
-  const existingSize = await fileSizeIfExists(existingPath);
+  const existingSize = privateOutput ? 0 : await fileSizeIfExists(existingPath);
   if (existingSize) {
     let valid = true;
     try { await validateLocalMp4(existingPath); } catch { valid = false; }
@@ -373,7 +377,7 @@ async function cacheTaskVideoToLocalInner(
     };
   }
 
-  await mkdir(PUBLIC_VIDEO_DIR, { recursive: true });
+  if (!privateOutput) await mkdir(PUBLIC_VIDEO_DIR, { recursive: true });
 
   let sourceUrl = task.result_video_url;
   let lastFrameUrl = task.result_last_frame_url;
@@ -455,6 +459,10 @@ async function cacheTaskVideoToLocalInner(
 
   const contentLength = response.headers.get('content-length');
   const expectedBytes = contentLength ? Number.parseInt(contentLength, 10) : 0;
+  if (privateOutput && (response.status !== 200 || expectedBytes > privateOutput.maxBytes)) {
+    await response.body?.cancel();
+    throw new Error('API output response cannot be safely stored');
+  }
   const contentRange = response.headers.get('content-range');
   if (contentRange) {
     const range = /^bytes 0-(\d+)\/(\d+)$/.exec(contentRange);
@@ -471,16 +479,21 @@ async function cacheTaskVideoToLocalInner(
   if (!partialDirectory.isDirectory() || partialDirectory.isSymbolicLink() || await realpath(partialRoot) !== partialRoot
     || partialDirectory.mode & 0o077 || partialDirectory.uid !== process.getuid?.()) throw new Error('VIDEO_PARTIAL_DIRECTORY_INVALID');
   let fileSize: number;
+  let privatePath: string | undefined;
   try {
     fileSize = await writeResponseToFile(
       response,
       targetPath,
       Number.isFinite(expectedBytes) ? expectedBytes : 0,
       remaining(),
-      { idleTimeoutMs: VIDEO_SAVE_IDLE_TIMEOUT_MS, signal: videoSaveSignal(), validateMp4: true,
+      { idleTimeoutMs: VIDEO_SAVE_IDLE_TIMEOUT_MS, signal: videoSaveSignal(), validateMp4: true, maxBytes: privateOutput?.maxBytes,
         resume: { path: path.join(partialRoot, videoSaveSource(currentSource) + '.part'),
           fetchRange: (offset, etag) => fetchVideoWithTimeout(sourceUrl, Math.min(remaining(), VIDEO_SAVE_HEADER_TIMEOUT_MS), { offset, etag }) },
         beforePublish: () => assertVideoSaveOwnership(currentSource), publish: async (temporary, target) => {
+          if (privateOutput) {
+            privatePath = await finishPrivateApiOutput(currentSource, privateOutput.ownerId, temporary, (await stat(temporary)).size);
+            return;
+          }
           let linked = false;
           try { await commitVideoSavePublication(currentSource, publicPath, async () => {
             await link(temporary, target); linked = true;
@@ -500,13 +513,15 @@ async function cacheTaskVideoToLocalInner(
     throw error;
   }
 
-  // Only this task's pre-existing selected event may continue. Notification failure cannot undo the original.
-  try { await (await import('./feishu-notification')).wakeVideoFeishuAfterOriginalReady(task.id); }
-  catch { console.warn('[video-save] Original is ready; notification wake deferred to its existing consumer.'); }
+  if (!privateOutput) {
+    // Only this task's pre-existing selected event may continue. Notification failure cannot undo the original.
+    try { await (await import('./feishu-notification')).wakeVideoFeishuAfterOriginalReady(task.id); }
+    catch { console.warn('[video-save] Original is ready; notification wake deferred to its existing consumer.'); }
+  }
 
   return {
     success: true,
-    local_video_path: publicPath,
+    local_video_path: privatePath || publicPath,
     file_size: fileSize,
     refreshed_url: refreshedUrl,
     result_video_url: sourceUrl,

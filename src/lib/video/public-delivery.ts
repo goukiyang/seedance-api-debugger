@@ -1,4 +1,5 @@
 import { stat } from 'fs/promises';
+import { prisma } from '@/lib/prisma';
 import type { VideoTask } from '@prisma/client';
 import { uploadPublicVideoFile, type PublicUploadResult } from '@/lib/assets/public-storage';
 import { cacheTaskVideoToLocal, type CacheableVideoTask, type LocalVideoCacheResult } from './local-cache';
@@ -121,6 +122,8 @@ export async function ensurePublicVideoDelivery(
   task: PublicVideoDeliveryTask | VideoTask,
   options: VideoSaveOptions = {},
 ): Promise<PublicVideoDeliveryResult> {
+  const source = await prisma.videoTask.findUnique({ where: { id: task.id }, select: { source_type: true } });
+  if (source?.source_type === 'customer_api') return { success: false, skipped: true, error: 'PRIVATE_API_MEDIA', message: '客户 API 媒体仅通过授权下载。' };
   if (task.public_video_url) return { success: true, public_video_url: task.public_video_url,
     storage_provider: task.public_video_storage_provider, storage_key: task.public_video_storage_key,
     file_size: task.public_video_file_size, cached_at: task.public_video_cached_at, already_exists: true };
