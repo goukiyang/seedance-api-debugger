@@ -1,10 +1,11 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '待确认时可另开视频任务',
+  title: '视频生成页操作更清楚',
   outline: [
-    '在新标签页继续制作独立视频',
-    '原任务保留，可继续核对'
+    '相关工具在按钮下方展开',
+    '项目、成品范围和点数归属集中显示',
+    '受理提示自动收起，也可手动关闭'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,
