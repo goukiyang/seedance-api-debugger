@@ -1,4 +1,5 @@
 export type VideoDeliveryStageTask = {
+  source_type?: string | null;
   local_status: string | null;
   public_video_url?: string | null;
   local_video_path?: string | null;
@@ -21,6 +22,7 @@ function isInternalOnlyResultUrl(value: string | null | undefined) {
 }
 
 function hasPreview(task: VideoDeliveryStageTask) {
+  if (task.source_type === 'customer_api') return videoPlayableAvailableForTask(task);
   return Boolean(
     task.public_video_url
     || task.local_video_path
@@ -30,6 +32,9 @@ function hasPreview(task: VideoDeliveryStageTask) {
 }
 
 export function videoPlayableAvailableForTask(task: VideoDeliveryStageTask) {
+  if (task.source_type === 'customer_api') {
+    return task.local_status === 'succeeded' && Boolean(task.local_video_path?.startsWith('api-private://videos/'));
+  }
   return Boolean(
     task.public_video_url
     || task.local_video_path
@@ -56,11 +61,12 @@ export function videoDeliveryStageForTask(task: VideoDeliveryStageTask): VideoDe
     };
   }
 
-  if (task.public_video_url || task.delivery_status === 'succeeded') {
+  const apiVideo = task.source_type === 'customer_api';
+  if (apiVideo ? videoPlayableAvailableForTask(task) : task.public_video_url || task.delivery_status === 'succeeded') {
     return {
       key: 'ready',
       label: '稳定下载已就绪',
-      stableDownloadReady: Boolean(task.public_video_url),
+      stableDownloadReady: apiVideo || Boolean(task.public_video_url),
       previewAvailable: true,
     };
   }

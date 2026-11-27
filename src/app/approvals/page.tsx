@@ -55,6 +55,7 @@ function isApprovalTypeValue(value: string | null): value is typeof APPROVAL_TYP
 }
 
 function typeLabel(type: string) {
+  if (type === 'member_api_access') return 'API 使用权限';
   if (type === 'video_creation_1080p') return '本次高清创作';
   if (type === 'video_delivery_reopen') return '交付重开';
   return APPROVAL_TYPE_OPTIONS.find(([value]) => value === type)?.[1] || type;
@@ -128,7 +129,9 @@ export default function ApprovalsPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/approvals', { cache: 'no-store' });
+      const memberRequests = new URLSearchParams(window.location.search).get('api') === 'pending';
+      const endpoint = memberRequests ? '/api/approvals?type=member_api_access&status=pending' : '/api/approvals';
+      const res = await fetch(endpoint, { cache: 'no-store' });
       if (res.status === 401) {
         window.location.href = '/login';
         return;
@@ -242,7 +245,7 @@ export default function ApprovalsPage() {
       if (!owner || decisionActor.current !== owner || isClientSessionBlocked()) throw new Error('账号已变化，请返回原账号核对审批。');
       const res = await fetch(`/api/approvals/${approval.id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-app-session-user': owner },
         body: JSON.stringify({ action, reason: decisionReason }),
       });
       const data = await res.json();
@@ -259,7 +262,7 @@ export default function ApprovalsPage() {
       <PageBanner
         eyebrow="审批中心"
         title="成本与规格审批"
-        description="集中处理 1080p、预算、比例变更和视频卡重开。"
+        description="集中处理生成规格、预算、视频卡和 API 使用权限。"
         actions={<Link className="btn btn-secondary" href="/generate">返回生成页</Link>}
       />
 
@@ -357,7 +360,10 @@ export default function ApprovalsPage() {
             <h2 className="section-title mb-0">审批记录</h2>
             <p className="text-gray text-sm mt-2">待审批、我发起的、已通过和已拒绝记录集中在这里。</p>
           </div>
-          <button className="btn btn-secondary" type="button" onClick={load}>刷新</button>
+          <div className="flex" style={{ gap: 8 }}>
+            {session.user?.role === 'admin' && <a className="btn btn-secondary" href="/approvals?api=pending">待审批的 API 申请</a>}
+            <button className="btn btn-secondary" type="button" onClick={load}>刷新</button>
+          </div>
         </div>
 
         {loading ? (
@@ -400,6 +406,9 @@ export default function ApprovalsPage() {
                   <td>
                     {approval.status === 'pending' && approval.can_manage ? (
                       <div className="approval-actions">
+                        {approval.type === 'member_api_access' && approval.scope_json && (
+                          <Link className="btn btn-secondary" href={`/admin/api-clients?customer=${encodeURIComponent(JSON.parse(approval.scope_json).customer_id)}`}>配置 API</Link>
+                        )}
                         <button className="btn btn-secondary" type="button" onClick={() => decide(approval, 'approve')}>通过</button>
                         <button className="btn btn-secondary" type="button" onClick={() => decide(approval, 'reject')}>拒绝</button>
                       </div>

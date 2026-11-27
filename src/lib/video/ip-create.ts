@@ -1,5 +1,6 @@
 import { authorizeLocalReferenceVideos, planReferenceVideoDelivery, prepareReferenceVideoDelivery, type AuthorizedLocalReferenceVideo, type ReferenceVideoDelivery } from '@/lib/provider/reference-video-delivery.server';
 import { randomUUID } from 'node:crypto';
+import { CUSTOMER_API_REQUEST_PREFIX } from '@/lib/customer-api/auth';
 import { assertVideoPromptGroupSurface, VideoPromptGroupError } from '@/lib/video/prompt-groups';
 import { resolveVideoPromptGroups } from '@/lib/video/prompt-groups.server';
 import { protectVideoPromptGroupTask } from '@/lib/video/prompt-group-execution.server';
@@ -447,6 +448,10 @@ export async function createIpVideo(request: NextRequest, user: SessionUser,
   }
 
   if (!receivedBody || typeof receivedBody !== 'object' || Array.isArray(receivedBody)) return errorJson('视频输入无效', 400);
+  if (!apiAdmission && typeof receivedBody.idempotency_key === 'string'
+    && receivedBody.idempotency_key.trim().startsWith(CUSTOMER_API_REQUEST_PREFIX)) {
+    return errorJson('此请求号由客户 API 使用。', 400);
+  }
   const characterRequestFingerprint = videoPricingBusinessFingerprint(receivedBody);
   try { parseVideoPromptGroupRefs(receivedBody.video_prompt_groups); }
   catch { return NextResponse.json({ error: '提示词组选择无效，未提交本次生成' }, { status: 400 }); }

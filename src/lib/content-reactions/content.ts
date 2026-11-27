@@ -155,7 +155,7 @@ export async function resolveContent(user: SessionUser, input: ContentKey, conte
     if (type === 'video_task') {
       const task = projection ? projection.tasks.get(id) : await prisma.videoTask.findUnique({ where: { id } });
       if (!task || task.local_status !== 'succeeded' || isTaskHiddenFromRegularUsers(task)) return null;
-      if (projection && task.project_id) {
+      if (projection && task.project_id && task.source_type !== 'customer_api') {
         let access = projection.taskAccess.get(task.project_id);
         if (!access) { access = assertCanViewTask(user, task); projection.taskAccess.set(task.project_id, access); }
         await access;

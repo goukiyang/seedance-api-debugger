@@ -403,6 +403,7 @@ export async function getProjectDeletionBlockers(
 
 export async function assertCanViewTask(user: SessionUser, task: {
   id: string;
+  source_type?: string | null;
   project_id: string | null;
   owner_user_id?: string | null;
   user_id?: string | null;
@@ -412,6 +413,10 @@ export async function assertCanViewTask(user: SessionUser, task: {
 
   if (isTaskHiddenFromRegularUsers(task)) {
     throw new AuthError('任务不存在或已删除', 404);
+  }
+  if (task.source_type === 'customer_api') {
+    if (task.user_id === user.id) return;
+    throw new AuthError('任务不存在或无权查看', 404);
   }
 
   if (task.project_id) {

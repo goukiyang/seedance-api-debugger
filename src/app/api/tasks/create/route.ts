@@ -2,6 +2,7 @@ import { authorizeLocalReferenceVideos, authorizedReferenceVideoFile, planRefere
 import { siteUploadPathFromUrl } from '@/lib/assets/site-url';
 import { videoReferenceImageInputs } from '@/lib/character-assets/video-reference.server';
 import { NextRequest, NextResponse } from 'next/server';
+import { CUSTOMER_API_REQUEST_PREFIX } from '@/lib/customer-api/auth';
 import { freezeWorkMethodUse } from '@/lib/works/method-reference';
 import { freezeVideoRetry, dispatchFrozenVideoRetry, SafeVideoPending, SafeVideoPreparationFailed, retainVideoPendingDiagnostic } from '@/lib/generation-retry/video';
 import { readRetry, finishRetry } from '@/lib/generation-retry/store';
@@ -740,6 +741,9 @@ export async function POST(request: NextRequest) {
   } | null = null;
   let receivedBody = await request.json();
   if (!receivedBody || typeof receivedBody !== 'object' || Array.isArray(receivedBody)) return errorJson('视频输入无效', 400);
+  if (typeof receivedBody.idempotency_key === 'string' && receivedBody.idempotency_key.trim().startsWith(CUSTOMER_API_REQUEST_PREFIX)) {
+    return errorJson('此请求号由客户 API 使用。', 400);
+  }
   try { videoReferenceImageInputs({ ...receivedBody, provider: 'seedance', entry: 'ordinary' }); }
   catch (error) { if (error instanceof AuthError) return errorJson(error.message, error.status); throw error; }
   if (typeof receivedBody.idempotency_key === 'string' && receivedBody.idempotency_key) {

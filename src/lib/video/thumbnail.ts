@@ -1,7 +1,7 @@
 import { execFile } from 'child_process';
 import path from 'path';
 import { promisify } from 'util';
-import { mkdir, rename, stat, unlink } from 'fs/promises';
+import { readFile, mkdir, rename, stat, unlink } from 'fs/promises';
 import { isPublicHttpUrl } from '@/lib/media/public-url';
 
 const execFileAsync = promisify(execFile);
@@ -110,6 +110,12 @@ async function generateThumbnail(source: string, outputPath: string) {
     }
   }
   throw lastError;
+}
+
+export async function readPrivateVideoThumbnail(source: string) {
+  const thumbnail = `${source}.jpg`;
+  if (!await fileExists(thumbnail)) await generateThumbnail(source, thumbnail);
+  return readFile(thumbnail);
 }
 
 export async function ensureTaskThumbnail(

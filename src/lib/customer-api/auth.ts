@@ -1,12 +1,30 @@
 import { createHash, randomBytes } from 'crypto';
 import { NextResponse } from 'next/server';
-import type { Prisma } from '@prisma/client';
+import type { Prisma, User } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import type { SessionUser } from '@/lib/auth/session';
 
 export const API_SCOPES = ['models:read', 'assets:write', 'video:write', 'video:read', 'content:read', 'usage:read'] as const;
 export type ApiScope = typeof API_SCOPES[number];
 export type ApiTx = Prisma.TransactionClient;
+export const MEMBER_API_APPROVAL = 'member_api_access';
+export const CUSTOMER_API_REQUEST_PREFIX = 'customer-api:';
+
+export function memberApiApproval(tx: ApiTx, userId: string) {
+  return tx.approvalRecord.findFirst({
+    where: { requester_user_id: userId, type: MEMBER_API_APPROVAL },
+    orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
+    select: { id: true, status: true, effect_status: true, decision_reason: true },
+  });
+}
+
+export async function apiOwnerCanRead(tx: ApiTx, owner: Pick<User, 'id' | 'status' | 'role' | 'account_type' | 'expires_at'>) {
+  if (owner.status !== 'active' || owner.role !== 'user' || (owner.expires_at && owner.expires_at <= new Date())) return false;
+  if (owner.account_type === 'external') return true;
+  if (owner.account_type !== 'internal') return false;
+  const approval = await memberApiApproval(tx, owner.id);
+  return approval?.status === 'approved' && approval.effect_status === 'applied';
+}
 
 export class CustomerApiError extends Error {
   constructor(public code: string, message: string, public status = 400) { super(message); }
@@ -27,6 +45,18 @@ export function apiJson(value: unknown, status = 200) {
   return NextResponse.json(value, { status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
 }
 
+export function isMemberApiSessionWrite(request: Request, actorId: string) {
+  const origin = request.headers.get('origin');
+  if (!origin || request.headers.get('x-app-session-user') !== actorId
+    || request.headers.get('sec-fetch-site') === 'cross-site') return false;
+  try {
+    const parsed = new URL(origin);
+    return (parsed.protocol === 'https:' || parsed.protocol === 'http:') && parsed.host === request.headers.get('host');
+  } catch {
+    return false;
+  }
+}
+
 export function stringList(value: string): string[] {
   try { const parsed: unknown = JSON.parse(value); return Array.isArray(parsed) && parsed.every(v => typeof v === 'string') ? parsed : []; }
   catch { return []; }
@@ -45,8 +75,7 @@ async function loadContext(tx: ApiTx, keyId: string, scope: ApiScope) {
   if (!stringList(key.scopes_json).includes(scope)) throw new CustomerApiError('SCOPE_DENIED', 'Key 没有此操作权限。', 403);
   const customer = key.customer;
   const owner = customer.user;
-  if (!customer.read_enabled || owner.status !== 'active' || owner.role !== 'user' || owner.account_type !== 'external'
-    || (owner.expires_at && owner.expires_at.getTime() <= Date.now())) {
+  if (!customer.read_enabled || !await apiOwnerCanRead(tx, owner)) {
     throw new CustomerApiError('CUSTOMER_BLOCKED', '客户访问已停用。', 403);
   }
   const project = await tx.project.findUnique({ where: { id: customer.project_id } });
@@ -56,7 +85,8 @@ async function loadContext(tx: ApiTx, keyId: string, scope: ApiScope) {
     throw new CustomerApiError('CUSTOMER_CONFIGURATION', '客户归属配置不可用。', 503);
   }
   const user: SessionUser = {
-    id: owner.id, name: owner.name, username: owner.username, email: owner.email, role: 'user', account_type: 'external',
+    id: owner.id, name: owner.name, username: owner.username, email: owner.email, role: 'user',
+    account_type: owner.account_type === 'external' ? 'external' : 'internal',
     user_profile: owner.user_profile, feature_profile_id: owner.feature_profile_id, status: 'active', expires_at: owner.expires_at,
   };
   return { key, customer, user };

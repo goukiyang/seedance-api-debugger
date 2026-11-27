@@ -6,6 +6,7 @@ import { isSyntheticFeishuEmail } from '@/lib/users/display';
 import PageBanner from '@/components/PageBanner';
 import UserIdentityBadge from '@/components/UserIdentityBadge';
 import { readCreditSummary } from '@/lib/credits/policy';
+import MemberApiAccess from './MemberApiAccess';
 
 function formatDate(value: Date | null) {
   if (!value) return '无';
@@ -116,6 +117,7 @@ export default async function AccountPage() {
             <tbody>{summary.buckets.map(bucket => <tr key={bucket.id}><td>{bucket.name}{bucket.expired ? '（已到期，等待任务结算）' : ''}</td>
               <td>{bucket.total}</td><td>{bucket.remaining}</td><td>{bucket.frozen}</td><td>{formatDate(bucket.expires_at)}</td></tr>)}</tbody></table></div>}
       </div>
+      {user.account_type === 'internal' && user.role === 'user' && <MemberApiAccess key={user.id} actorId={user.id} />}
     </div>
   );
 }

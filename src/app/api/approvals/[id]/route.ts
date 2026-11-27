@@ -5,6 +5,7 @@ import { AuthError } from '@/lib/auth/session';
 import { assertCanManageProject, logProjectAction } from '@/lib/projects/permissions';
 import { decideApproval } from '@/lib/approvals';
 import { projectSelectedMultiviewTask } from '@/lib/video/multiview-task-privacy';
+import { CustomerApiError, isMemberApiSessionWrite, MEMBER_API_APPROVAL } from '@/lib/customer-api/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,6 +41,12 @@ export async function PATCH(
       include: { project: true },
     });
     if (!approval) return NextResponse.json({ error: '审批记录不存在' }, { status: 404 });
+    if (approval.type === MEMBER_API_APPROVAL) {
+      if (user.role !== 'admin') return NextResponse.json({ error: '只有管理员可以审批 API 使用权限。' }, { status: 403 });
+      if (!isMemberApiSessionWrite(request, user.id)) {
+        return NextResponse.json({ error: '请在原账号下打开审批。' }, { status: 403 });
+      }
+    }
 
     if (user.role !== 'admin') {
       if (!approval.project_id) return NextResponse.json({ error: '无权处理此审批' }, { status: 403 });
@@ -74,7 +81,7 @@ export async function PATCH(
       task: serializable.task ? projectSelectedMultiviewTask(serializable.task) : null,
     } : null }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
-    if (error instanceof AuthError) {
+    if (error instanceof AuthError || error instanceof CustomerApiError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     if (error instanceof Error) {

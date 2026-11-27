@@ -43,15 +43,20 @@ let phase = 'isolated database and media';
 let creates = 0;
 let loseSubmissionResponse = false;
 let acceptedInput;
+let providerStatus = 'succeeded';
 let storageFixture;
 async function main() {
   const baseline = process.env.CUSTOMER_API_BASELINE_SCHEMA;
   const sqlite = path.join(fixture, 'fixture.db');
   const schemaSql = execFileSync(process.execPath, [require.resolve('prisma/build/index.js'), 'migrate', 'diff',
     '--from-empty', '--to-schema-datamodel', baseline || path.join(root, 'prisma/schema.prisma'), '--script'], { cwd: fixture });
-  const migration = baseline ? fs.readFileSync(path.join(root, 'prisma/migrations/20261127200000_customer_api/migration.sql')) : Buffer.alloc(0);
-  execFileSync('python3', ['-c', 'import sqlite3,sys; sqlite3.connect(sys.argv[1]).executescript(sys.stdin.read())', sqlite],
-    { input: Buffer.concat([schemaSql, migration]) });
+  const migration = baseline ? path.join(root, 'prisma/migrations/20261127200000_customer_api/migration.sql') : '';
+  execFileSync('python3', ['-c', [
+    'import sqlite3, sys, pathlib',
+    'db = sqlite3.connect(sys.argv[1])',
+    'db.executescript("BEGIN;\\n" + sys.stdin.read() + "\\nCOMMIT;")',
+    'if sys.argv[2]: db.executescript(pathlib.Path(sys.argv[2]).read_text())',
+  ].join('\n'), sqlite, migration], { input: schemaSql });
   const mp4Path = path.join(fixture, 'original.mp4');
   execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=black:s=64x64:d=1', '-pix_fmt', 'yuv420p', mp4Path]);
   const mp4 = fs.readFileSync(mp4Path);
@@ -68,12 +73,17 @@ async function main() {
       return Response.json({ id: 'fixture-provider-' + creates });
     }
     return Response.json({ id: url.pathname.split('/').pop(), client_request_id: acceptedInput.client_request_id,
-      status: 'succeeded', content: { video_url: 'https://media.fixture.invalid/original.mp4' } });
+      status: providerStatus, content: { video_url: 'https://media.fixture.invalid/original.mp4' },
+      ...(providerStatus === 'failed' ? { error: { code: 'fixture_failure', message: 'Synthetic rejection' } } : {}),
+    });
   };
 
   prisma = require('../src/lib/prisma').prisma;
   const { API_SCOPES } = require('../src/lib/customer-api/auth');
   const { apiAdminSnapshot, mutateApiAdmin } = require('../src/lib/customer-api/admin');
+  const { requestMemberApi, claimMemberApiKey, revokeMemberApiKey } = require('../src/lib/customer-api/members');
+  const { decideApproval } = require('../src/lib/approvals');
+  const { allocateTaskCredits } = require('../src/lib/credits/policy');
   const { NextRequest } = require('next/server');
   const api = require('../src/app/api/v1/[...path]/route');
   const callback = require('../src/app/api/internal/customer-video/[id]/route');
@@ -138,10 +148,37 @@ async function main() {
   const read = async response => ({ code: response.status, body: await response.json() });
   await prisma.apiConfiguration.create({ data: { id: 'global', enabled: true, license_confirmed: true,
     concurrency_limit: 8, storage_limit_bytes: 40_000_000n, max_output_bytes: 2_000_000n } });
-  const team = await provision('team-fixture', 1);
+  phase = 'existing member application and Key';
+  const member = await prisma.user.create({ data: { name: 'Existing member', username: 'fixture-member',
+    email: 'existing@fixture.invalid', password_hash: 'synthetic', role: 'user', account_type: 'internal', status: 'active' } });
+  await prisma.creditAccount.create({ data: { user_id: member.id, balance: 1 } });
+  const originalUserCount = await prisma.user.count();
+  await Promise.all([requestMemberApi(member.id), requestMemberApi(member.id)]);
+  assert.equal(await prisma.user.count(), originalUserCount);
+  const applications = await prisma.approvalRecord.findMany({ where: { requester_user_id: member.id } });
+  assert.equal(applications.length, 1);
+  const approval = applications[0];
+  const before = await prisma.apiCustomer.findUniqueOrThrow({ where: { user_id: member.id } });
+  await assert.rejects(() => claimMemberApiKey(member.id), { code: 'APPROVAL_REQUIRED' });
+  const approve = approverUserId => prisma.$transaction(tx => decideApproval(tx, { approvalId: approval.id, approverUserId, action: 'approve' }));
+  await assert.rejects(() => approve(admin.id), { code: 'CONFIGURATION_REQUIRED' });
+  await mutateApiAdmin(admin.id, {
+    action: 'save', operation_id: 'fixture-member-configuration', customer_id: before.id, revision: before.revision,
+    name: member.name, models: ['seedance-2.5-ip'], create_enabled: true, read_enabled: true, license_confirmed: true,
+    points_per_cny: 1, max_task_points: 50, daily_points: 50, monthly_points: 50, concurrency_limit: 5,
+    storage_limit_bytes: 20_000_000, upload_limit_bytes: 5_000_000, retention_policy: 'fixture', confirm_enable: true,
+    rates: ['480p', '720p', '1080p'].map(resolution => ({
+      resolution, cny_per_second: resolution === '720p' ? 0.2 : null, enabled: resolution === '720p',
+    })),
+  });
+  await assert.rejects(() => approve(member.id), { code: 'ADMIN_REQUIRED' });
+  await approve(admin.id);
+  const team = { user: member, customer: await prisma.apiCustomer.findUniqueOrThrow({ where: { id: before.id } }) };
   const outside = await provision('outside-fixture', 1);
-  const first = await issue(team.customer, 'first-agent');
-  await assert.rejects(() => issue(team.customer, 'duplicate-binding'), { code: 'KEY_ALREADY_BOUND', status: 409 });
+  const own = await claimMemberApiKey(member.id);
+  const first = { token: own.token, id: own.key.id };
+  await assert.rejects(() => claimMemberApiKey(member.id), { code: 'KEY_ALREADY_BOUND', status: 409 });
+  await assert.rejects(() => issue(team.customer, 'admin-cannot-claim'), { code: 'MEMBER_KEY_SELF_SERVICE', status: 403 });
   assert.equal((await apiAdminSnapshot(team.customer.id)).customer.has_bound_key, true);
   const stranger = await issue(outside.customer, 'stranger');
   phase = 'private input upload';
@@ -196,6 +233,11 @@ async function main() {
   assert.equal(await prisma.creditLedger.count({ where: { type: 'task_freeze' } }), 1);
   const receipt = await prisma.apiRequest.findUnique({ where: { id: accepted.id } });
   assert.equal(receipt.key_id, winner.key.id);
+  const task = await prisma.videoTask.findUniqueOrThrow({ where: { id: receipt.task_id } });
+  assert.equal(task.user_id, member.id);
+  assert.equal(task.owner_user_id, member.id);
+  assert.equal(task.billing_account_id, member.id);
+  await assert.rejects(() => prisma.$transaction(tx => allocateTaskCredits(tx, member, 1, 'fixture-internal-web-freeze')));
   assert.equal((await call('GET', 'video/tasks/' + accepted.id, stranger)).status, 404);
   const signed = new URL(acceptedInput.content.find(entry => entry.type === 'image_url').image_url.url);
   assert.equal(signed.pathname, '/api/internal/customer-media/' + assetId);
@@ -244,8 +286,13 @@ async function main() {
   await prisma.apiConfiguration.update({ where: { id: 'global' }, data: { enabled: true } });
 
   phase = 'durable rejection and lost submission recovery';
+  const daily = await prisma.creditBucket.create({ data: {
+    user_id: member.id, source_type: 'daily_quota', amount_total: 1, amount_remaining: 1,
+    expires_at: new Date(Date.now() + 3600000),
+  } });
   const rejected = await read(await call('POST', 'video/tasks', other.key, other.body, other.id));
   assert.equal(rejected.code, 402, JSON.stringify(rejected));
+  assert.equal((await prisma.creditBucket.findUniqueOrThrow({ where: { id: daily.id } })).amount_remaining, 1);
   const rejectedLookup = await read(await call('GET', 'video/requests/' + other.id, other.key));
   assert.equal(rejectedLookup.body.retry, 'same_request');
   await prisma.creditAccount.update({ where: { user_id: team.user.id }, data: { balance: { increment: 1 } } });
@@ -254,23 +301,36 @@ async function main() {
   assert.equal(unknown.body.status, 'submission_unconfirmed', JSON.stringify(unknown));
   assert.equal(unknown.body.fee_status, 'reserved');
   assert.equal(creates, 2);
+  providerStatus = 'failed';
   const callbackRequest = new Request(acceptedInput.callback_url, { method: 'POST',
     headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'fixture-provider-2' }) });
   const attached = await callback.POST(callbackRequest, { params: { id: acceptedInput.client_request_id } });
   assert.equal(attached.status, 204, await attached.text());
   const known = await read(await call('GET', 'video/requests/' + other.id, other.key));
   assert.notEqual(known.body.status, 'submission_unconfirmed');
+  const otherReceipt = await prisma.apiRequest.findUniqueOrThrow({ where: { id: known.body.id } });
+  await finalizeVideoTaskStatus(otherReceipt.task_id, { cacheOnSuccess: true, generateThumbnail: false });
+  assert.equal(await prisma.creditLedger.count({ where: { user_id: member.id, type: 'task_failed_refund' } }), 1);
+  assert.equal(await prisma.creditLedger.count({ where: { user_id: member.id, type: 'task_success_deduct' } }), 1);
   const credential = await prisma.apiProviderCredential.findFirst();
   assert(credential.configuration_json.startsWith('ppenc:v1:'));
   assert(!credential.configuration_json.includes('synthetic-upstream-key'));
-  await mutateApiAdmin(admin.id, { action: 'revoke_key', operation_id: 'fixture-revoke-original',
-    customer_id: team.customer.id, revision: team.customer.revision, key_id: first.id, confirm_revoke: true });
+  await revokeMemberApiKey(member.id, first.id);
   assert.equal((await apiAdminSnapshot(team.customer.id)).customer.has_bound_key, false);
   assert.equal((await call('GET', 'models', first)).status, 401);
-  const replacement = await issue(team.customer, 'replacement-key');
+  const replacement = await claimMemberApiKey(member.id);
   assert.equal((await call('GET', 'video/tasks/' + accepted.id + '/content', replacement)).status, 200);
   assert.equal(await prisma.apiKey.count({ where: { customer_id: team.customer.id, active: true } }), 1);
-  console.log('PASS single-Key binding and revocation, billing, original replay, isolation, private media and recovery.');
+
+  phase = 'concurrent page and API credit allocation';
+  await prisma.creditBucket.update({ where: { id: daily.id }, data: { status: 'expired', expires_at: new Date(Date.now() - 1000) } });
+  const allocations = await Promise.allSettled([
+    prisma.$transaction(tx => allocateTaskCredits(tx, member, 1, 'fixture-page-reservation')),
+    prisma.$transaction(tx => allocateTaskCredits(tx, member, 1, 'fixture-api-reservation', { balanceOnly: true })),
+  ]);
+  assert.equal(allocations.filter(result => result.status === 'fulfilled').length, 1);
+  assert.equal((await prisma.creditAccount.findUniqueOrThrow({ where: { user_id: member.id } })).frozen_credits, 1);
+  console.log('PASS member approval and single Key, original account billing, replay, isolation, private media and recovery.');
 }
 
 main().catch(error => {

@@ -7,7 +7,9 @@ import {
   ensureTaskThumbnail,
   isSafeTaskId,
   thumbnailFilePath,
+  readPrivateVideoThumbnail,
 } from '@/lib/video/thumbnail';
+import { apiOutputFile } from '@/lib/customer-api/output';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -62,6 +64,13 @@ export async function GET(
 
     await assertCanViewTask(user, task);
 
+    if (task.source_type === 'customer_api') {
+      const original = await apiOutputFile(task.id);
+      if (!original) return NextResponse.json({ error: '原视频文件暂不可用' }, { status: 404 });
+      return new NextResponse(await readPrivateVideoThumbnail(original.file), {
+        headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, no-store', Vary: 'Cookie' },
+      });
+    }
     const thumbnailResult = await ensureTaskThumbnail(task, { allowRemoteFallback: true });
     if (!thumbnailResult.success) {
       return NextResponse.json({ error: thumbnailResult.message || '视频截图不可用' }, { status: 404 });

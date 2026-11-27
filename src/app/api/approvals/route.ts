@@ -6,6 +6,7 @@ import { assertCanViewProject, getProjectAccess, logProjectAction } from '@/lib/
 import { assertCanViewVideoCard } from '@/lib/video-cards/permissions';
 import { createApprovalRequest, normalizeApprovalType, validateApprovalPayload } from '@/lib/approvals';
 import { projectSelectedMultiviewTask } from '@/lib/video/multiview-task-privacy';
+import { MEMBER_API_APPROVAL } from '@/lib/customer-api/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,7 +52,7 @@ export async function GET(request: NextRequest) {
     const items = [];
     for (const approval of approvals) {
       const access = approval.project_id ? await getProjectAccess(user, approval.project_id) : null;
-      const canManage = user.role === 'admin' || access?.canManageProject === true;
+      const canManage = user.role === 'admin' || (approval.type !== MEMBER_API_APPROVAL && access?.canManageProject === true);
       items.push({ ...approval, can_manage: canManage, task: approval.task ? projectSelectedMultiviewTask(approval.task) : null });
     }
     return NextResponse.json({ actor_id: user.id, approvals: items }, { headers: { 'Cache-Control': 'private, no-store', Vary: 'Cookie' } });
@@ -72,6 +73,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const type = normalizeApprovalType(body.type);
     if (!type) return NextResponse.json({ error: '审批类型无效' }, { status: 400 });
+    if (type === MEMBER_API_APPROVAL) return NextResponse.json({ error: '请到个人页申请 API 使用权限。' }, { status: 400 });
     if (type === 'video_creation_1080p' || type === 'video_delivery_reopen') {
       return NextResponse.json({ error: '请从原创作请求或交付对象申请，不能手填新的批准范围', code: 'creation_approval_source_required' }, { status: 400 });
     }

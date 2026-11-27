@@ -14,6 +14,9 @@ import { localPublicVideoPath } from '@/lib/video/thumbnail';
 import { VIDEO_SAVE_TOTAL_TIMEOUT_MS } from '@/lib/video/save-lock';
 import { observeVideoTaskDownload, recordVideoTaskTake } from '@/lib/works/recommendation-events';
 import { workVideoSourceRevision } from '@/lib/works/source-revision';
+import { apiOutputFile, webApiVideoResponse } from '@/lib/customer-api/output';
+import { queueApiDeliveryRecovery } from '@/lib/customer-api/tasks';
+import { apiError, CustomerApiError } from '@/lib/customer-api/auth';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -103,6 +106,7 @@ export async function GET(
       );
     }
 
+    if (task.source_type === 'customer_api') return webApiVideoResponse(request, task.id, downloadFileName(task.id));
     const source = task.local_video_path || task.public_video_url, stamp = task.public_video_cached_at || task.delivery_completed_at;
     const revision = source && stamp ? workVideoSourceRevision(source, stamp, task.public_video_file_size) : null;
     if (task.public_video_url) {
@@ -159,7 +163,7 @@ export async function POST(
   const taskId = params.id;
 
   try {
-    const { error, task } = await loadAuthorizedTask(taskId);
+    const { error, task, user } = await loadAuthorizedTask(taskId);
     if (error) return error;
     if (!task) {
       return NextResponse.json(
@@ -168,6 +172,25 @@ export async function POST(
       );
     }
 
+    if (task.source_type === 'customer_api' && user) {
+      try {
+        if (await apiOutputFile(task.id)) return NextResponse.json({ success: true, stable_download_ready: true });
+        if (task.local_status !== 'succeeded' || ['pending', 'running'].includes(task.delivery_status || '')) {
+          return NextResponse.json({ success: true, message: '原视频文件正在准备。' }, { status: 202 });
+        }
+        const receipt = await prisma.apiRequest.findUnique({ where: { task_id: task.id } });
+        if (receipt && await queueApiDeliveryRecovery(receipt, async tx => {
+          const current = await tx.videoTask.findUniqueOrThrow({ where: { id: task.id } });
+          await assertCanViewTask(user, current, tx);
+        })) {
+          startTaskLocalization(task.id);
+          return NextResponse.json({ success: true, message: '已安排恢复原视频文件。' }, { status: 202 });
+        }
+        throw new CustomerApiError('DELIVERY_RECOVERY_UNAVAILABLE', '请联系管理员核对原视频文件。', 409);
+      } catch (error) {
+        return apiError(error);
+      }
+    }
     if (task.public_video_url) {
       return NextResponse.json({
         success: true,

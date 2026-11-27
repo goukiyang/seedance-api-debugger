@@ -19,12 +19,12 @@ export async function apiAdminSnapshot(id?: string, cursor?: string, keyCursor?:
     id: 'global', enabled: false, license_confirmed: false, concurrency_limit: null, storage_limit_bytes: null, max_output_bytes: null, revision: 0 };
   if (id) {
     const customer = await prisma.apiCustomer.findUnique({ where: { id }, include: {
-      rates: true, _count: { select: { keys: { where: { active: true } } } }, keys: {
+      rates: true, user: { select: { account_type: true } }, _count: { select: { keys: { where: { active: true } } } }, keys: {
         where: keyCursor ? { id: { lt: keyCursor } } : {}, select: keySelect, orderBy: { id: 'desc' }, take: 51 },
     } });
     if (!customer) throw new CustomerApiError('CUSTOMER_NOT_FOUND', '客户不存在。', 404);
-    const { _count, ...settings } = customer;
-    return serializeApiAdmin({ configuration, customer: { ...settings, has_bound_key: _count.keys > 0, keys: customer.keys.slice(0, 50),
+    const { _count, user, ...settings } = customer;
+    return serializeApiAdmin({ configuration, customer: { ...settings, member_owned: user.account_type === 'internal', has_bound_key: _count.keys > 0, keys: customer.keys.slice(0, 50),
       keys_next_cursor: customer.keys.length > 50 ? customer.keys[49].id : null }, usage: await publicUsage({ customer, user: { id: customer.user_id } }, cursor) });
   }
   const customers = await prisma.apiCustomer.findMany({ where: cursor ? { id: { lt: cursor } } : {}, orderBy: { id: 'desc' }, take: 51,
@@ -52,7 +52,7 @@ function list(value: unknown, permitted: readonly string[], field: string) {
   if (!Array.isArray(value) || value.some(v => typeof v !== 'string' || !permitted.includes(v)) || new Set(value).size !== value.length) throw new CustomerApiError('INVALID_SETTING', `${field}无效。`);
   return value as string[];
 }
-function customerReady(c: ApiCustomer) {
+export function customerReady(c: ApiCustomer) {
   if (!c.license_confirmed || !c.read_enabled || !c.retention_policy?.trim() || !stringList(c.models_json).length
     || ![c.points_per_cny, c.max_task_points, c.daily_points, c.monthly_points, c.concurrency_limit, c.storage_limit_bytes, c.upload_limit_bytes].every(v => v != null && v > 0)) throw new CustomerApiError('CONFIGURATION_REQUIRED', '开通前需完成许可、售价、额度及媒体保留规则。', 409);
 }
@@ -141,6 +141,10 @@ export async function mutateApiAdmin(actorId: string, body: Record<string, unkno
         if (!changed.count) throw new CustomerApiError('VERSION_CONFLICT', '客户设置已更新。', 409);
         result = { customer_id: id, saved: true };
       } else if (body.action === 'issue_key') {
+        const owner = await tx.user.findUnique({ where: { id: customer.user_id }, select: { account_type: true } });
+        if (owner?.account_type !== 'external') {
+          throw new CustomerApiError('MEMBER_KEY_SELF_SERVICE', '站内成员在个人页领取本人 Key。', 403);
+        }
         // The SQLite transaction holds the writer lock across the lookup and insert.
         const bound = await tx.apiKey.findFirst({ where: { customer_id: id, active: true }, select: { id: true } });
         if (bound) throw new CustomerApiError('KEY_ALREADY_BOUND', '此客户已绑定 Key，请先吊销原 Key。', 409);

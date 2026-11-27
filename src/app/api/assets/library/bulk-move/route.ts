@@ -131,6 +131,11 @@ export async function POST(request: NextRequest) {
       }
 
       try {
+        if (task.source_type === 'customer_api'
+          && ((user.role !== 'admin' && task.user_id !== user.id) || targetProject.type !== 'personal'
+            || targetProject.visibility !== 'private' || targetProject.owner_user_id !== task.user_id)) {
+          throw new AuthError('API 视频只能移动到原成员的私有个人项目。', 403);
+        }
         await assertCanMoveTaskProject(user, task, targetProjectId);
         if (task.project_id === targetProjectId && task.video_card_id === targetVideoCardId) {
           results.push({ task_id: task.id, ok: true, unchanged: true });

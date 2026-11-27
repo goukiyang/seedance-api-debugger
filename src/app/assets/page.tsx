@@ -128,6 +128,7 @@ type ReferenceAlbumItem = {
 };
 
 type AssetLibraryItem = {
+  viaApi?: boolean;
   multiviewGroup?: { workId: string; revision: number; children: AssetLibraryItem[]; roles: string[]; frameCount: number; missing: number; syncing: boolean };
   generationOrigin?: { kind?: 'template-image' | 'random-person' | 'other-generated' | 'video-generated' | 'multiview-output' | 'unknown'; label: string; templateName?: string };
   id: AssetLibraryItemId;
@@ -1679,7 +1680,7 @@ function AssetsPageContent() {
       if (!response.ok || data.success === false) {
         throw new Error(data.message || data.error || '稳定下载准备失败');
       }
-      if (data.public_video_url) {
+      if (data.public_video_url || data.stable_download_ready) {
         setMessage('稳定下载已就绪，可以下载视频。');
         void reloadItems();
         return;
@@ -1960,7 +1961,8 @@ function AssetsPageContent() {
     <div className="asset-detail-actions">
       {withReaction && activeContentKey && (activeItem.status === 'succeeded' || activeItem.source !== 'video_task') && <ContentReactions contentKey={activeContentKey} />}
       {activeItem.taskId && <ExperienceActions label="继续使用资产"><Link href={taskDetailHref(activeItem.taskId, currentAssetReturnTo())}>打开任务详情</Link></ExperienceActions>}
-      {activeItem.taskId && activeItem.kind === 'video' && isFastPathAssetVideo(activeItem) && !activeItem.stableDownloadReady && activeItem.previewAvailable && (
+      {activeItem.taskId && activeItem.kind === 'video' && isFastPathAssetVideo(activeItem) && !activeItem.stableDownloadReady &&
+        (activeItem.previewAvailable || (activeItem.viaApi && activeItem.deliveryStage?.key === 'failed')) && (
         <button type="button" onClick={() => void prepareStableDownload(activeItem.taskId as string)} disabled={preparingDownloadTaskId === activeItem.taskId}>
           {preparingDownloadTaskId === activeItem.taskId ? '提交中...' : activeItem.deliveryStage?.key === 'failed' ? '重试稳定下载' : '准备稳定下载'}
         </button>
@@ -2413,6 +2415,7 @@ function AssetsPageContent() {
                       {item.generationOrigin && <small>{item.generationOrigin.label}{item.generationOrigin.templateName ? ` · ${item.generationOrigin.templateName}` : ''}</small>}
                       <div className="asset-card-title-row">
                         <strong>{shortText(item.title, '未命名资产', 34)}</strong>
+                        {item.viaApi && <span className="badge" title="通过 API 生成">API</span>}
                         {item.canEnhanceVideo && item.taskId && (
                           <div
                             className="asset-card-enhance-shell"

@@ -50,7 +50,7 @@ async function handle(request: NextRequest, { params }: { params: { path: string
         if (original) return apiJson(await projectApiTask(context, original), 202);
         const internal = await response.json().catch(() => ({}));
         if (internal.error === 'PAID_GENERATION_AUTH_REQUIRED') throw new CustomerApiError('PAID_GENERATION_AUTH_REQUIRED', '请按接入协议显式声明本次为已获授权的真实扣费生成。', 403);
-        if (internal.code === 'INSUFFICIENT_CREDITS' || internal.error === 'INSUFFICIENT_CREDITS') throw new CustomerApiError('INSUFFICIENT_BALANCE', '客户预付余额不足。', 402);
+        if (internal.code === 'INSUFFICIENT_CREDITS' || internal.error === 'INSUFFICIENT_CREDITS') throw new CustomerApiError('INSUFFICIENT_BALANCE', 'API 可用长期余额不足。', 402);
         throw new CustomerApiError('REQUEST_NOT_ACCEPTED', '本次尚未受理，请核对参数、素材与客户配置。', response.status >= 400 && response.status < 500 ? response.status : 503);
       } catch (error) {
         const original = await originalApiRequest(context, id, fingerprint);

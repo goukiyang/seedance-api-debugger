@@ -55,6 +55,7 @@ type LibraryProject = {
 };
 
 type LibraryItem = {
+  viaApi?: boolean;
   referenceQuote?: AccountingCost | null;
   multiviewGroup?: { workId: string; revision: number; children: LibraryItem[]; roles: string[]; frameCount: number; missing: number; syncing: boolean };
   id: string;
@@ -196,6 +197,8 @@ function isDownloadableTask(task: {
 
 async function serializeTask(task: {
   id: string;
+  source_type: string | null;
+  api_request: { output_bytes: bigint | null; output_version: string | null } | null;
   provider: string;
   generation_mode: string;
   prompt: string;
@@ -234,9 +237,12 @@ async function serializeTask(task: {
   owner: LibraryUser | null;
   user: LibraryUser | null;
 }, viewer: SessionUser, normalRates: ReadonlyMap<string, number>, referenceBasis?: CurrentRateBasis): Promise<LibraryItem> {
-  const hasVideo = Boolean(task.public_video_url || task.local_video_path || task.result_video_url || task.result_last_frame_url);
-  const videoUrl = task.public_video_url || (hasVideo ? `/api/video/play/${task.id}` : null);
-  const deliveryStage = videoDeliveryStageForTask(task);
+  const viaApi = task.source_type === 'customer_api';
+  const deliveryStage = videoDeliveryStageForTask(viaApi && (!task.api_request?.output_bytes || !task.api_request.output_version)
+    ? { ...task, local_video_path: null } : task);
+  const hasVideo = viaApi ? deliveryStage.previewAvailable
+    : Boolean(task.public_video_url || task.local_video_path || task.result_video_url || task.result_last_frame_url);
+  const videoUrl = (viaApi ? null : task.public_video_url) || (hasVideo ? `/api/video/play/${task.id}` : null);
   const owner = userSummary(task.owner || task.user);
   const isEnhanceTask = task.generation_mode === 'enhance_video' || task.provider === 'volcengine_mediakit';
   let priceMetadata: { toolVersion?: string; fps?: number } = {};
@@ -255,13 +261,13 @@ async function serializeTask(task: {
     resultLastFrameUrl: task.result_last_frame_url,
   });
   const hasExistingThumbnail = hasThumbnailSource ? false : await fileExists(thumbnailFilePath(task.id));
-  const thumbnailUrl = shouldExposeTaskThumbnailUrl({
+  const thumbnailUrl = (viaApi ? hasVideo : shouldExposeTaskThumbnailUrl({
     hasExistingThumbnail,
     publicVideoUrl: task.public_video_url,
     localVideoPath: task.local_video_path,
     resultVideoUrl: task.result_video_url,
     resultLastFrameUrl: task.result_last_frame_url,
-  }) ? `/api/video/thumbnail/${task.id}` : null;
+  })) ? `/api/video/thumbnail/${task.id}` : null;
   let enhanceSourceTaskId: string | null = null;
   if (isEnhanceTask && task.params_json) {
     try {
@@ -275,6 +281,7 @@ async function serializeTask(task: {
   }
   return {
     id: `video_task:${task.id}`,
+    ...(viaApi ? { viaApi: true } : {}),
     referenceQuote: referenceBasis && (viewer.role === 'admin' || task.user?.id === viewer.id || task.owner?.id === viewer.id)
       ? calculateRateCost({ sourceKind: 'video_task', kind: 'video', model: task.model, status: task.local_status,
         outputCount: task.local_status === 'succeeded' ? 1 : 0 }, { provider: task.provider, duration: task.duration,
@@ -290,7 +297,7 @@ async function serializeTask(task: {
     prompt: task.prompt,
     thumbnailUrl,
     previewUrl: videoUrl,
-    downloadUrl: videoUrl,
+    downloadUrl: viaApi ? (hasVideo ? `/api/video/download/${task.id}` : null) : videoUrl,
     width: null,
     height: null,
     fileSize: null,
@@ -327,7 +334,7 @@ async function serializeTask(task: {
     deliveryCompletedAt: (task.delivery_completed_at || task.public_video_cached_at)?.toISOString() || null,
     project: task.project,
     owner,
-    downloadable: isDownloadableTask(task),
+    downloadable: viaApi ? deliveryStage.stableDownloadReady : isDownloadableTask(task),
     movable: true,
   };
 }
@@ -537,6 +544,9 @@ async function loadVideoItems(options: {
     includeDeleted,
   });
   const filters: Prisma.VideoTaskWhereInput[] = [ordinaryVideoTaskWhere()];
+  if (user.role !== 'admin') filters.push({ OR: [
+    { source_type: { not: 'customer_api' } }, { user_id: user.id },
+  ] });
   if (options.removedIds.length) filters.push({ NOT: {
     id: { in: options.removedIds },
     OR: [{ owner_user_id: user.id }, { owner_user_id: null, user_id: user.id }],
@@ -611,6 +621,8 @@ async function loadVideoItems(options: {
       take,
       select: {
         id: true,
+        source_type: true,
+        api_request: { select: { output_bytes: true, output_version: true } },
         provider: true,
         generation_mode: true,
         prompt: true,

@@ -77,6 +77,8 @@ export async function readLibraryDirectory(db: Prisma.TransactionClient, session
         AND (${q.projectId ? Prisma.sql`v."project_id" = ${q.projectId}` : Prisma.sql`1 = 1`})
         AND (${q.status === 'hidden' ? user.role === 'admin' ? Prisma.sql`v."retention_status" IN ('user_deleted', 'admin_hidden')` : Prisma.sql`0 = 1` : Prisma.sql`v."retention_status" IN ('active', 'retained')`})
         AND (v."source_metadata_json" IS NULL OR instr(v."source_metadata_json", '"protected_module"') = 0)
+        AND (${user.role === 'admin' ? Prisma.sql`1 = 1`
+          : Prisma.sql`v."source_type" IS NULL OR v."source_type" <> 'customer_api' OR v."user_id" = ${user.id}`})
         AND (${q.status !== 'all' && q.status !== 'hidden' ? Prisma.sql`v."local_status" = ${q.status}` : Prisma.sql`1 = 1`})
         AND (${q.scope === 'user' && q.ownerUserId ? Prisma.sql`v."owner_user_id" = ${q.ownerUserId} OR v."user_id" = ${q.ownerUserId}` : Prisma.sql`1 = 1`})
         AND (${q.enhance === 'all' ? Prisma.sql`v."generation_mode" = 'enhance_video' OR v."provider" = 'volcengine_mediakit'

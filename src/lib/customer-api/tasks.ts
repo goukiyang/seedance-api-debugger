@@ -1,6 +1,6 @@
 import type { ApiRequest } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { CustomerApiError, recheckApiContext, type ApiContext } from './auth';
+import { CustomerApiError, recheckApiContext, type ApiContext, type ApiTx } from './auth';
 import { apiOutputFile } from './output';
 
 export async function ownApiTask(context: ApiContext, id: string) {
@@ -39,18 +39,23 @@ export async function recoverApiDelivery(context: ApiContext, receipt: ApiReques
   const task = await projectApiTask(context, receipt);
   if (task.delivery_status === 'ready' || task.delivery_status === 'pending') return task;
   if (!task.delivery_retryable) throw new CustomerApiError('DELIVERY_RECOVERY_UNAVAILABLE', '保存需要管理员核对原任务。', 409);
-  await prisma.$transaction(async tx => {
+  await queueApiDeliveryRecovery(receipt, tx => recheckApiContext(tx, context, 'content:read'));
+  return projectApiTask(context, { ...receipt, delivery_recovery_used: true });
+}
+
+export async function queueApiDeliveryRecovery(receipt: Pick<ApiRequest, 'id' | 'task_id' | 'customer_id'>, authorize: (tx: ApiTx) => Promise<unknown>) {
+  return prisma.$transaction(async tx => {
+    await authorize(tx);
     const claimed = await tx.apiRequest.updateMany({
-      where: { id: receipt.id, customer_id: context.customer.id, delivery_recovery_used: false },
+      where: { id: receipt.id, customer_id: receipt.customer_id, delivery_recovery_used: false },
       data: { delivery_recovery_used: true },
     });
-    if (!claimed.count) return;
-    await recheckApiContext(tx, context, 'content:read');
+    if (!claimed.count) return false;
     const queued = await tx.videoTask.updateMany({ where: { id: receipt.task_id, source_type: 'customer_api',
       local_status: 'succeeded', result_video_url: { not: null }, OR: [
         { delivery_status: 'succeeded' }, { delivery_status: 'failed', delivery_attempts: { gte: 6 } },
       ] }, data: { delivery_attempts: 0, delivery_status: 'pending', delivery_started_at: null, delivery_error: null, local_video_path: null } });
     if (!queued.count) throw new CustomerApiError('DELIVERY_CHANGED', '原任务保存状态已变化，请重新查询。', 409);
+    return true;
   });
-  return projectApiTask(context, { ...receipt, delivery_recovery_used: true });
 }

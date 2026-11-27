@@ -13,6 +13,7 @@ import { cacheTaskVideoToLocal, type CacheableVideoTask } from '@/lib/video/loca
 import { localPublicVideoPath } from '@/lib/video/thumbnail';
 import { isPrivateMultiviewTask, MULTIVIEW_PUBLIC_TASK_TITLE, privateMultiviewFailure } from '@/lib/video/multiview-task-privacy';
 import { hasVideoPromptGroups } from '@/lib/video/prompt-groups';
+import { apiOutputFile } from '@/lib/customer-api/output';
 
 export const BULK_VIDEO_DOWNLOAD_LIMIT = 20;
 
@@ -22,6 +23,7 @@ type BulkDownloadScope = {
 };
 
 type BulkVideoTask = CacheableVideoTask & {
+  source_type: string | null;
   source_metadata_json: string | null;
   prompt: string;
   resolution: string | null;
@@ -80,6 +82,7 @@ export type BulkVideoDownloadResult = BulkVideoDownloadJsonResult | BulkVideoDow
 
 const taskSelect = {
   id: true,
+  source_type: true,
   source_metadata_json: true,
   provider: true,
   prompt: true,
@@ -325,6 +328,14 @@ async function fileSizeIfReady(absolutePath: string | null) {
 
 async function prepareDownloadItem(task: BulkVideoTask, index: number): Promise<BulkDownloadItem> {
   const fileName = buildVideoFileName(task, index);
+  if (task.source_type === 'customer_api') {
+    const output = await apiOutputFile(task.id).catch(() => null);
+    return {
+      task, taskId: task.id, fileName, status: output ? 'success' : 'failed',
+      localVideoPath: null, publicVideoUrl: null, absolutePath: output?.file || null,
+      fileSize: output?.bytes || null, errorMessage: output ? null : '原视频文件暂不可用',
+    };
+  }
   if (task.public_video_url) {
     return {
       task,

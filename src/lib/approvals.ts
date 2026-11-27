@@ -1,6 +1,8 @@
 import type { ApprovalRecord, Prisma } from '@prisma/client';
 import { createInAppNotification, notifyProjectOwner } from '@/lib/notifications';
 import { adjustProjectBudget, ensureProjectBudgetAccount } from '@/lib/projects/budget';
+import { MEMBER_API_APPROVAL } from '@/lib/customer-api/auth';
+import { assertMemberApiApprovalReady } from '@/lib/customer-api/members';
 
 type ApprovalClient = Prisma.TransactionClient;
 
@@ -12,6 +14,7 @@ export const APPROVAL_TYPES = [
   'video_card_reopen',
   'video_creation_1080p',
   'video_delivery_reopen',
+  MEMBER_API_APPROVAL,
 ] as const;
 
 export type ApprovalType = typeof APPROVAL_TYPES[number];
@@ -503,6 +506,14 @@ export async function decideApproval(
   if (approval.status !== 'pending') throw new Error('只能处理待审批记录');
 
   const approved = input.action === 'approve';
+  if (approved && approval.type === MEMBER_API_APPROVAL) {
+    await assertMemberApiApprovalReady(tx, input.approverUserId, approval.requester_user_id);
+    await createInAppNotification(tx, {
+      targetUserId: approval.requester_user_id, actorUserId: input.approverUserId,
+      type: 'approval_member_api_access_approved', title: 'API 使用权限已通过',
+      body: '请到个人页领取你的 API Key。', approvalId: approval.id,
+    });
+  }
   let effectProjectId: string | null = null;
   if (approved && approval.type === 'project_create') {
     effectProjectId = await applyProjectCreateApproval(tx, approval, input.approverUserId);
@@ -571,7 +582,7 @@ export async function decideApproval(
       decision_reason: input.reason || null,
       approved_at: approved ? new Date() : null,
       rejected_at: approved ? null : new Date(),
-      expires_at: approved
+      expires_at: approval.type === MEMBER_API_APPROVAL ? null : approved
         ? (input.expiresAt === undefined ? approval.expires_at || defaultExpiresAt() : input.expiresAt)
         : approval.expires_at,
     },

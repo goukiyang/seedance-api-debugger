@@ -14,7 +14,7 @@ type KeyRow = { id: string; name: string; agent_id: string; prefix: string; acti
 type Rate = { resolution: string; cny_per_second: number | null; enabled: boolean };
 type Customer = { id: string; user_id: string; name: string; revision: number; create_enabled: boolean; read_enabled: boolean; license_confirmed: boolean;
   timezone: string; models_json: string; points_per_cny: number | null; max_task_points: number | null; daily_points: number | null; monthly_points: number | null;
-  concurrency_limit: number | null; storage_limit_bytes: string | null; upload_limit_bytes: string | null; retention_policy: string | null; rates: Rate[]; keys: KeyRow[]; has_bound_key: boolean; keys_next_cursor: string | null };
+  concurrency_limit: number | null; storage_limit_bytes: string | null; upload_limit_bytes: string | null; retention_policy: string | null; rates: Rate[]; keys: KeyRow[]; has_bound_key: boolean; member_owned?: boolean; keys_next_cursor: string | null };
 type Usage = { balance_points: number; frozen_points: number; day_used_points: number; month_used_points: number; storage_bytes: string;
   records: Array<{ id: string; request_id: string; agent_id: string; key_id: string; review_required: boolean; status: string; reserved_points: number; charged_points: number; fee_status: string; created_at: string }>; next_cursor: string | null };
 type Snapshot = { actor_id: string; configuration: Configuration; customers?: Row[]; next_cursor?: string | null; customer?: Customer; usage?: Usage };
@@ -167,7 +167,10 @@ export default function ApiClientsClient({ actorId }: { actorId: string }) {
   const c = snapshot?.customer, usage = snapshot?.usage;
   return <div className={styles.page}>
     {productDialog}
-    <PageBanner eyebrow="外部接入" title="客户 API" actions={<Link className="btn btn-secondary" href="/admin/integrations"><ArrowLeft size={16} />API 设置</Link>} />
+    <PageBanner eyebrow="外部接入" title="客户 API" actions={<>
+      <Link className="btn btn-secondary" href="/admin/integrations"><ArrowLeft size={16} />API 设置</Link>
+      <Link className="btn btn-secondary" href="/approvals?api=pending">成员申请</Link>
+    </>} />
     {notice && <p className={styles.notice} role="status">{notice}</p>}
     {pending && <div className={styles.notice}><span>原操作结果待确认</span><button className="btn btn-secondary" disabled={busy || denied} onClick={() => void write(pending, true)}><RefreshCw size={16} />核对原操作</button></div>}
     {token && <section className={styles.secret} aria-label="新 Key"><div className={styles.toolbar}><strong>新 Key，仅展示这一次</strong><button type="button" className="btn btn-icon" aria-label="关闭 Key" title="关闭 Key" onClick={() => setToken('')}><X size={18} /></button></div>
@@ -216,7 +219,7 @@ export default function ApiClientsClient({ actorId }: { actorId: string }) {
           <label className={styles.field}><span>媒体保留规则</span><textarea className="input" value={String(fields.retention_policy || '')} maxLength={1000} onChange={e => update('retention_policy', e.target.value)} /></label>
           <div className={styles.toolbar}><button className="btn btn-primary" type="submit"><Save size={16} />保存客户设置</button><button type="button" className="btn btn-secondary" onClick={() => void load(c.id)}>重新读取，保留输入</button></div>
         </form>
-        <section className={styles.section}><h3>Key</h3>{c.has_bound_key ? <p className={styles.muted}>此客户已绑定 Key。补发前请先吊销原 Key。</p> : <details><summary>发放 Key</summary><form className={styles.keyForm} onSubmit={e => {
+        <section className={styles.section}><h3>Key</h3>{c.member_owned ? <p className={styles.muted}>审批通过后，成员在个人页领取本人 Key。</p> : c.has_bound_key ? <p className={styles.muted}>此客户已绑定 Key。补发前请先吊销原 Key。</p> : <details><summary>发放 Key</summary><form className={styles.keyForm} onSubmit={e => {
           e.preventDefault(); const date = new Date(expires); if (!Number.isFinite(date.getTime())) { setNotice('请选择有效截止时间。'); return; }
           void write({ action: 'issue_key', customer_id: c.id, revision: c.revision, name: keyName, agent_id: agentId, expires_at: date.toISOString(), requests_per_minute: rpm, scopes, models: [model] });
         }}><div className={styles.grid}><label className={styles.field}><span>Key 名称</span><input className="input" required value={keyName} onChange={e => setKeyName(e.target.value)} /></label>

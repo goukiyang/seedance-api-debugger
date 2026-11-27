@@ -4,7 +4,7 @@ import { fixedPricingCredits } from '@/lib/pricing/math';
 import { creditCents } from '@/lib/credits/precision';
 import { videoPricingIdentity, type VideoPricingQuote } from '@/lib/pricing/video';
 import { getVolcengineIpApiSettings, isVolcengineIpApiReady, type VolcengineIpApiSettings } from '@/lib/integrations/volcengine-ip';
-import { apiJson, assertModel, assertNewAdmission, CustomerApiError, digest, recheckApiContext, type ApiContext, type ApiTx } from './auth';
+import { apiJson, assertModel, assertNewAdmission, CUSTOMER_API_REQUEST_PREFIX, CustomerApiError, digest, recheckApiContext, type ApiContext, type ApiTx } from './auth';
 import { budgetPeriod, inputHash, INTERNAL_IP_MODEL, normalizeVideoInput, publicModels, type ApiVideoInput } from './contracts';
 import { reservationUsage, storageUsage } from './usage';
 import { resolveApiInputAssets, materializeApiInput, type ApiInputAssets } from './input-assets';
@@ -147,7 +147,7 @@ export async function prepareApiAdmission(context: ApiContext, requestId: string
     } };
   return { original: null, fingerprint, admission, body: { ...materialized.body, model: INTERNAL_IP_MODEL,
     project_id: context.customer.project_id, video_card_id: context.customer.video_card_id,
-    idempotency_key: `customer-api:${requestId}`, max_estimated_cost: quote.max_cost_points, pricing_revision: priceQuote.revision } };
+    idempotency_key: CUSTOMER_API_REQUEST_PREFIX + requestId, max_estimated_cost: quote.max_cost_points, pricing_revision: priceQuote.revision } };
 }
 
 async function validateQuote(tx: ApiTx | typeof prisma, context: ApiContext, quote: ApiQuote, input: ApiVideoInput): Promise<ApiInputAssets> {

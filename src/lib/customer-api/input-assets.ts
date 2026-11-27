@@ -7,7 +7,7 @@ import { uploadFileVersion } from '@/lib/assets/verified-upload';
 import { PROVIDER_REFERENCE_IMAGE_MAX_PIXELS } from '@/lib/provider/reference-image-safety';
 import { validateSeedanceReferenceMediaPreflight } from '@/lib/provider/reference-media-policy';
 import { canReadStudioAsset } from '@/lib/image-studio/protected-assets';
-import { CustomerApiError, digest, type ApiContext, type ApiTx } from './auth';
+import { apiOwnerCanRead, CustomerApiError, digest, type ApiContext, type ApiTx } from './auth';
 import { privateMediaPath } from './private-media';
 import { INTERNAL_IP_MODEL, type ApiVideoInput } from './contracts';
 
@@ -68,11 +68,11 @@ export async function resolveProviderMedia(request: Request, id: string) {
   const url = new URL(request.url), raw = url.searchParams.get('signature') || '', expires = Number(url.searchParams.get('expires'));
   if (!/^[a-f0-9]{64}$/.test(raw) || !Number.isSafeInteger(expires) || expires < Date.now() / 1000 || expires > Date.now() / 1000 + 3600) throw new CustomerApiError('NOT_FOUND', '资源不存在。', 404);
   const row = await prisma.apiAsset.findUnique({ where: { id }, include: { customer: { include: { user: true } } } });
-  if (!row || !row.active || !row.customer.read_enabled || row.customer.user.status !== 'active'
-    || row.customer.user.account_type !== 'external' || row.customer.user.role !== 'user'
-    || row.customer.user.expires_at && row.customer.user.expires_at.getTime() <= Date.now()) throw new CustomerApiError('NOT_FOUND', '资源不存在。', 404);
+  if (!row || !row.active || !row.customer.read_enabled) throw new CustomerApiError('NOT_FOUND', '资源不存在。', 404);
   const expected = signature(id, row.source_version, expires);
-  if (!timingSafeEqual(Buffer.from(expected), Buffer.from(raw))) throw new CustomerApiError('NOT_FOUND', '资源不存在。', 404);
+  if (!timingSafeEqual(Buffer.from(expected), Buffer.from(raw)) || !await apiOwnerCanRead(prisma, row.customer.user)) {
+    throw new CustomerApiError('NOT_FOUND', '资源不存在。', 404);
+  }
   const source = await prisma.asset.findUnique({ where: { id: row.asset_id } });
   if (!source || source.owner_id !== row.customer.user_id || source.status !== 'active' || source.hash !== row.sha256
     || !await canReadStudioAsset(row.customer.user, source)) throw new CustomerApiError('NOT_FOUND', '资源不存在。', 404);

@@ -5,6 +5,7 @@ import { AuthError, getSession } from '@/lib/auth/session';
 import { assertCanViewTask } from '@/lib/projects/permissions';
 import { isSafeTaskId, localPublicVideoPath } from '@/lib/video/thumbnail';
 import { mediaPreviewResponse } from '@/lib/media/preview-response';
+import { webApiVideoResponse } from '@/lib/customer-api/output';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -33,6 +34,7 @@ export async function GET(
     where: { id: taskId },
     select: {
       id: true,
+      source_type: true,
       public_video_url: true,
       local_video_path: true,
       result_video_url: true,
@@ -55,6 +57,7 @@ export async function GET(
     throw error;
   }
 
+  if (task.source_type === 'customer_api') return webApiVideoResponse(request, task.id);
   const absolutePath = localPublicVideoPath(task.local_video_path);
   if (absolutePath) {
     let info;

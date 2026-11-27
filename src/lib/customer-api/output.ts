@@ -4,8 +4,19 @@ import { randomUUID } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
 import { inspectUpload, uploadFileHash, uploadFileVersion } from '@/lib/assets/verified-upload';
 import { apiMediaRoot, privateMediaPath, publishPrivateMedia } from './private-media';
-import { digest } from './auth';
+import { apiError, CustomerApiError, digest } from './auth';
 import { commitVideoSaveTask } from '@/lib/video/save-lock';
+import { privateFileResponse } from './file-response';
+
+export async function webApiVideoResponse(request: Request, taskId: string, filename?: string) {
+  try {
+    const output = await apiOutputFile(taskId);
+    if (!output) throw new CustomerApiError('CONTENT_UNAVAILABLE', '原视频文件暂不可用。', 409);
+    return await privateFileResponse(request, output.file, output.bytes, 'video/mp4', filename, 'Cookie');
+  } catch (error) {
+    return apiError(error);
+  }
+}
 
 export async function apiOutputFile(taskId: string) {
   const receipt = await prisma.apiRequest.findUnique({ where: { task_id: taskId } });
