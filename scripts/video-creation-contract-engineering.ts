@@ -76,6 +76,8 @@ async function main() {
   await assert.rejects(() => consume({ pricingRevision: 'changed' }), /范围/);
   failCas = true; await assert.rejects(() => consume(), /余量/); assert.equal(writes, 2);
   checks.push('approval_actual_helper_expiry_revoke_scope_cost_cas_and_same_task_once');
+  const ipRoute = 'src/app/api/ip/tasks/create/route.ts';
+  assert.match(readFileSync(path.join(root, ipRoute), 'utf8'), /return createIpVideo\(/);
   const acceptanceSources = ['src/app/api/tasks/create/route.ts', 'src/lib/video/ip-create.ts',
     'src/app/api/tasks/enhance-video/create/route.ts', 'src/lib/tasks/seedance-draft-upgrade.ts'];
   for (const file of acceptanceSources) {
@@ -108,7 +110,7 @@ async function main() {
     'src/lib/creation/contract.ts','src/lib/creation/context.ts','src/lib/creation/intents.ts','src/lib/creation/approval.ts','src/lib/creation/availability.ts','src/lib/creation/lineage.ts',
     'src/lib/navigation/task-reuse-intent.ts','src/lib/navigation/task-reuse-client.ts','src/lib/navigation/task-reuse-operation.server.ts',
     'src/lib/hooks/useWorkspace.ts','src/components/ResourceLibraryPicker.tsx','src/components/useResultPages.ts',
-    ...acceptanceSources,
+    ipRoute, ...acceptanceSources,
   ];
   const hash = (file: string) => createHash('sha256').update(readFileSync(path.join(root, file))).digest('hex');
   const receipt = { schema: 'video-creation-contract-engineering.v1', synthetic: true, runId: process.env.IMAGE_RECOVERY_GATE_RUN_ID,
