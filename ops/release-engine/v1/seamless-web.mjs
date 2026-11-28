@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import bridges from './seamless-bridges.mjs';
-import { DEFAULT_DELIVERY, SEAMLESS_CONTROL, SEAMLESS_STATIC, digest, assertSeamlessCompatible,
+import { CUSTOMER_API_MIGRATION, DEFAULT_DELIVERY, SEAMLESS_CONTROL, SEAMLESS_STATIC, digest, assertSeamlessCompatible,
   referenceMediaChecksFor, verifyReferenceMediaEngineering } from './seamless-policy.mjs';
 import { verifyFixedProgramEntry, PRICING_START_GUARD_SHA256 } from './pricing-start-pair.mjs';
 import { parseAllOwnerSynchronousRows } from './cutover-safety.mjs';
@@ -289,6 +289,18 @@ function mainEntryFromCapsule(file) {
   return entry;
 }
 
+function requirePreparedCustomerApiSchema(admission, main, database) {
+  if (!admission.customerApiMigration) return;
+  const script = 'ops/sd2-customer-api-original.py';
+  const scriptBytes = fs.readFileSync(main.root + '/' + script);
+  const migration = main.root + '/' + CUSTOMER_API_MIGRATION;
+  assert.equal(digest(scriptBytes), main.sourceFiles[script]);
+  assert.equal(digest(fs.readFileSync(migration)), main.sourceFiles[CUSTOMER_API_MIGRATION]);
+  const result = JSON.parse(nativeCall('/usr/bin/python3', ['-I', '-', 'check-schema',
+    '--database', database, '--migration', migration], { input: scriptBytes }));
+  assert.equal(result.schemaReady, true, 'Additive customer API schema must be prepared before seamless delivery');
+}
+
 export function prepareSeamlessPlan(capsuleFile) {
   assert.equal(process.platform, 'linux'); assert.equal(process.getuid(), 0);
   const main = mainEntryFromCapsule(capsuleFile), pricingFile = PROJECT + '/controls/pricing-writer-v1/allowed.json';
@@ -318,6 +330,7 @@ export function prepareSeamlessPlan(capsuleFile) {
   const controls = Object.fromEntries(CONTROLS.map(name => [name, rootBytes(PROJECT + '/controls/' + name + '/allowed.json').toString('base64')]));
   const privateFiles = Object.fromEntries(['policy-active.json', 'consumers-active.json', 'backup-proof.json'].map(n => [PRIVATE + '/' + n, privateDataBytes(PRIVATE + '/' + n, previous.serviceUid).toString('base64')]));
   const db = PROJECT + '/var-lib/dev.db', s = fs.lstatSync(db); assert.ok(s.isFile()); assert.equal(fs.realpathSync(db), db);
+  requirePreparedCustomerApiSchema(admission, main, db);
   const nginxUids = [...new Set(nginxWorkers().map(worker => fs.statSync('/proc/' + worker.pid).uid))];
   assert.equal(nginxUids.length, 1); assert.ok(nginxUids[0] > 0);
   const runId = randomUUID(), stage = PROJECT + '/release-staging/' + runId; mkdir(stage);
@@ -483,6 +496,7 @@ export function createNativeSeamlessDriver(planFile) {
       assert.ok(Date.now() - p.createdAt < 30 * 60 * 1000, 'Prepare a fresh delivery plan');
       assert.equal(digest(rootBytes(p.capsuleFile)), p.capsuleSha256); mainEntryFromCapsule(p.capsuleFile);
       verifyFixedProgramEntry(p.guard);
+      requirePreparedCustomerApiSchema(p.admission, p.main, p.database.file);
       assert.equal(digest(rootBytes(PROJECT + '/controls/pricing-writer-v1/allowed.json')), p.pricingSha256);
       assert.equal(properties('sd2-gray.service').WorkingDirectory, p.previous.releases[0].root);
       const legacy = JSON.parse(nativeCall('/usr/sbin/runuser', ['-u', 'gouki', '--', '/usr/bin/node',

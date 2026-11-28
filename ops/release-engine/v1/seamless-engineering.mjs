@@ -10,7 +10,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { runSeamlessDelivery, SEAMLESS_STEPS } from './seamless-release.mjs';
 import { classifySynchronousRows, renderRoute, renderShadowUnit, renderRetainedStaticLocation, readCurrentBuildEvidence, RUNTIME_ROWS_READER, findOldRootProcesses, processIdentity } from './seamless-web.mjs';
 import { privateDataBytes, verifyShadowStart } from './seamless-shadow-start.mjs';
-import { assertSeamlessCompatible, digest } from './seamless-policy.mjs';
+import { assertSeamlessCompatible, CUSTOMER_API_MIGRATION, digest } from './seamless-policy.mjs';
 import bridges from './seamless-bridges.mjs';
 const checks = [], check = (name, fn) => { fn(); checks.push(name); };
 check('private policy data retains app ownership and mode0600; group-readable copies and foreign owners are refused', () => {
@@ -167,6 +167,18 @@ check('malformed admission refuses drain', () => assert.throws(() => classifySyn
     assert.throws(() => assertSeamlessCompatible(previous, added, guard, read, { ...reviewed, [file]: { previous: null, current: 'wrong-route' } }));
   });
   check('schema and persisted contract mismatch retain current site', () => assert.throws(() => assertSeamlessCompatible(previous, { ...next, sourceFiles: { ...next.sourceFiles, 'prisma/schema.prisma': 'new' } }, guard, read, bridges)));
+  check('staged customer API schema requires exact reviewed bytes and a matching new guard', () => {
+    const schemaFile = 'prisma/schema.prisma';
+    const main = { ...next, sourceFiles: { ...next.sourceFiles, [schemaFile]: 'expanded', [CUSTOMER_API_MIGRATION]: 'additive' } };
+    const compatible = { ...guard, source: 'fresh-guard', sourceFiles: main.sourceFiles };
+    const reviewed = { ...bridges, [schemaFile]: { previous: 'x', current: 'expanded' },
+      [CUSTOMER_API_MIGRATION]: { previous: null, current: 'additive' } };
+    assert.throws(() => assertSeamlessCompatible(previous, main, guard, read, reviewed), /fresh compatible recovery/);
+    assert.throws(() => assertSeamlessCompatible(previous, main, compatible, read, bridges, compatible));
+    const outdated = { ...compatible, sourceFiles: old.sourceFiles };
+    assert.throws(() => assertSeamlessCompatible(previous, main, outdated, read, reviewed, outdated), /retain the main persisted schema/);
+    assert.equal(assertSeamlessCompatible(previous, main, compatible, read, reviewed, compatible).sameSchema, false);
+  });
   check('changed recovery artifact is refused', () => assert.throws(() => assertSeamlessCompatible(previous, next, { ...guard, source: 'other' }, read, bridges)));
 }
 {

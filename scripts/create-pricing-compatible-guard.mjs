@@ -62,6 +62,13 @@ try {
     assert.ok(bytes.includes(before), 'Character fusion recovery source must be the full writable main');
     changes[fusionModePath] = bytes.replace(before, 'export const CHARACTER_FUSION_WRITES_ENABLED: boolean = false;') + '\n';
   }
+  const referenceModePath = 'src/lib/provider/reference-video-delivery-build-mode.ts';
+  if (git(['ls-tree', '--name-only', source, '--', referenceModePath]) === referenceModePath) {
+    const bytes = read(referenceModePath);
+    const before = 'export const PROVIDER_REFERENCE_MEDIA_ISSUANCE_ENABLED = true;';
+    assert.ok(bytes.includes(before), 'Reference media recovery source must allow main issuance');
+    changes[referenceModePath] = bytes.replace(before, 'export const PROVIDER_REFERENCE_MEDIA_ISSUANCE_ENABLED = false;') + '\n';
+  }
   for (const [file, bytes] of Object.entries(changes)) {
     const blob = git(['hash-object', '-w', '--stdin'], { input: bytes });
     git(['update-index', '--add', '--cacheinfo', `100644,${blob},${file}`], { env });

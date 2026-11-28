@@ -1,11 +1,10 @@
 import packageInfo from '../../package.json';
 // Update notice: one title and 2–4 short outline points in user language, never a detailed change list (2026-10-25).
 const notice = {
-  title: '视频生成页操作更清楚',
+  title: 'API 视频可在资产页查看',
   outline: [
-    '相关工具在按钮下方展开',
-    '项目、成品范围和点数归属集中显示',
-    '受理提示自动收起，也可手动关闭'
+    '个人页可申请 API 使用权限',
+    '资产页显示 API 标签和实际扣点，并支持播放和下载'
   ]
 };
 export const release = { version: packageInfo.version, channel: 'production', title: notice.title, outline: notice.outline,

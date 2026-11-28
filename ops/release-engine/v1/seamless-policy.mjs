@@ -58,15 +58,30 @@ export const DEFAULT_DELIVERY = Object.freeze({
 export const SEAMLESS_CONTROL = '/data/video-api-debugger/controls/seamless-web-v1';
 export const SEAMLESS_STATIC = '/data/video-api-debugger/seamless-static';
 export const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+export const CUSTOMER_API_MIGRATION = 'prisma/migrations/20261127200000_customer_api/migration.sql';
+
+function persistedSchema(entry) {
+  return Object.fromEntries(Object.entries(entry.sourceFiles).filter(([name]) =>
+    name === 'prisma/schema.prisma' || name.startsWith('prisma/migrations/')));
+}
 
 // Admission precedes any service/configuration effect. A failure keeps the old site.
 export function assertSeamlessCompatible(previous, main, guard, read, bridges, verifiedGuard = previous.releases[1]) {
   assert.deepEqual(guard, verifiedGuard, 'Recovery artifact must match the retained or fully verified compatible guard');
-  if (guard.source !== previous.releases[1].source) {
-    const schema = entry => Object.fromEntries(Object.entries(entry.sourceFiles).filter(([name]) => name === 'prisma/schema.prisma' || name.startsWith('prisma/migrations/')));
-    assert.deepEqual(schema(guard), schema(main), 'New compatible guard must retain the main persisted schema');
-  } else assert.deepEqual(guard, previous.releases[1], 'Retain the exact existing compatible recovery artifact');
   const old = previous.releases[0]; assert.notEqual(main.source, old.source);
+  const beforeSchema = persistedSchema(old), nextSchema = persistedSchema(main);
+  const schemaChanges = [...new Set([...Object.keys(beforeSchema), ...Object.keys(nextSchema)])]
+    .filter(file => beforeSchema[file] !== nextSchema[file]).sort();
+  const customerApiMigration = schemaChanges.includes(CUSTOMER_API_MIGRATION);
+  if (customerApiMigration) {
+    assert.deepEqual(schemaChanges, [CUSTOMER_API_MIGRATION, 'prisma/schema.prisma'].sort(),
+      'Only the reviewed customer API additive migration can be staged ahead of seamless delivery');
+    assert.equal(beforeSchema[CUSTOMER_API_MIGRATION], undefined);
+    assert.notEqual(guard.source, previous.releases[1].source, 'Schema migration needs a fresh compatible recovery build');
+  }
+  if (guard.source !== previous.releases[1].source) {
+    assert.deepEqual(persistedSchema(guard), nextSchema, 'New compatible guard must retain the main persisted schema');
+  } else assert.deepEqual(guard, previous.releases[1], 'Retain the exact existing compatible recovery artifact');
   const contract = file => file === 'prisma/schema.prisma' || file.startsWith('prisma/migrations/')
     || file.startsWith('src/app/api/') || file.startsWith('src/lib/')
     || /^scripts\/(?:process-|finalize-|server-runtime|canvas-role)/.test(file);
@@ -90,5 +105,6 @@ export function assertSeamlessCompatible(previous, main, guard, read, bridges, v
     assert.deepEqual(normalize(read(main.root + '/' + file)), normalize(read(old.root + '/' + file)), 'Runtime dependency change needs rolling compatibility');
   }
   return { schema: 'sd2-seamless-admission.v1', previousSource: old.source, mainSource: main.source,
-    guardSource: guard.source, sameSchema: true, unchangedPersistedContracts: true, sqlExecuted: false, coldFallbackAllowed: false };
+    guardSource: guard.source, sameSchema: schemaChanges.length === 0, unchangedPersistedContracts: true,
+    sqlExecuted: false, coldFallbackAllowed: false, ...(customerApiMigration ? { customerApiMigration: true } : {}) };
 }
