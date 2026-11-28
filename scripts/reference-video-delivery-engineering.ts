@@ -73,15 +73,22 @@ async function main() {
     if (ts.isBlock(node)) {
       const index = node.statements.findIndex(statement => ts.isVariableStatement(statement)
         && statement.declarationList.declarations.some(declaration => declaration.name.getText(ipAst) === 'deliveredVideoUrls'));
-      if (index >= 0) ipSendStatements = node.statements.slice(index, index + 5);
+      if (index >= 0) {
+        const last = node.statements.findIndex((statement, position) => position > index
+          && ts.isExpressionStatement(statement) && ts.isBinaryExpression(statement.expression)
+          && statement.expression.operatorToken.kind === ts.SyntaxKind.EqualsToken
+          && statement.expression.left.getText(ipAst) === 'providerTaskId');
+        assert.ok(last > index, 'IP send fixture must cover the accepted provider task ID');
+        ipSendStatements = node.statements.slice(index, last + 1);
+      }
     }
     ts.forEachChild(node, visitIp);
   };
-  visitIp(ipAst); assert.ok(ipSendStatements && ipSendStatements.length === 5);
+  visitIp(ipAst); assert.ok(ipSendStatements);
   const ip = require('../src/lib/provider/volcengine-ip') as typeof import('../src/lib/provider/volcengine-ip');
   let ipPosts = 0, ipPayload: any;
   const ipFixture: { exports?: (...args: any[]) => Promise<any> } = {};
-  runInNewContext(ts.transpileModule(`async function fixture(taskId,user,providerInput,referenceVideoDelivery,ipReferenceTransport,selectedModel,videoGroups) { let submissionStarted=false,providerResult=null,providerTaskId=null; ${ipSendStatements.map(statement => statement.getText(ipAst)).join('\n')} return {submissionStarted,providerResult,providerTaskId}; } module.exports=fixture;`,
+  runInNewContext(ts.transpileModule(`async function fixture(taskId,user,providerInput,referenceVideoDelivery,ipReferenceTransport,selectedModel,videoGroups,apiAdmission) { let submissionStarted=false,providerResult=null,providerTaskId=null; ${ipSendStatements.map(statement => statement.getText(ipAst)).join('\n')} return {submissionStarted,providerResult,providerTaskId}; } module.exports=fixture;`,
     { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText,
     { module: ipFixture, Date, prepareReferenceVideoDelivery: delivery.prepareReferenceVideoDelivery,
       createVolcengineIpVideoTask: (input: any, options: any) => ip.createVolcengineIpVideoTask(input, { ...options,
